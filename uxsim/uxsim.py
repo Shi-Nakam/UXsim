@@ -870,8 +870,10 @@ class Link:
 class Vehicle:
     """
     Vehicle or platoon in a network.
+
+    Optional research attributes for order-exchange studies: vot_true, vot_declared, payment_paid, payment_received, order_exchange_log.
     """
-    def __init__(s, W: "World", orig: Node|str, dest: Node|str, departure_time:int|float, name: str|None=None, route_pref: dict=None, route_choice_principle=None, mode: str="single_trip", links_prefer: list=[], links_avoid: list=[], trip_abort: int=1, departure_time_is_time_step: int=0, attribute=None, user_attribute=None, user_function=None, auto_rename=False):
+    def __init__(s, W: "World", orig: Node|str, dest: Node|str, departure_time:int|float, name: str|None=None, route_pref: dict=None, route_choice_principle=None, mode: str="single_trip", links_prefer: list=[], links_avoid: list=[], trip_abort: int=1, departure_time_is_time_step: int=0, attribute=None, user_attribute=None, user_function=None, auto_rename=False, vot_true=None, vot_declared=None, payment_paid=0, payment_received=0, order_exchange_log=None):
         """
         Create a vehicle (more precisely, platoon).
 
@@ -917,6 +919,16 @@ class Vehicle:
 
         auto_rename : bool, optional
             Whether to automatically rename the vehicle if the name is already used. Default is False.
+        vot_true : float, optional
+            True value of time (VOT) for research use. Default is None.
+        vot_declared : float, optional
+            VOT declared to an intersection control system for research use. Default is None.
+        payment_paid : float, optional
+            Cumulative payment made by the vehicle for research use. Default is 0.
+        payment_received : float, optional
+            Cumulative payment received by the vehicle for research use. Default is 0.
+        order_exchange_log : list, optional
+            Log of order-exchange events involving this vehicle for research use. Default is None (initialized to an empty list).
         """
 
         s.W = W
@@ -1006,6 +1018,12 @@ class Vehicle:
         s.attribute = attribute
         s.user_attribute = user_attribute
         s.user_function = user_function
+
+        s.vot_true = vot_true
+        s.vot_declared = vot_declared
+        s.payment_paid = payment_paid
+        s.payment_received = payment_received
+        s.order_exchange_log = [] if order_exchange_log is None else order_exchange_log
 
         s.id = len(s.W.VEHICLES)
         if name != None:
