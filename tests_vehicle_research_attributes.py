@@ -31,6 +31,7 @@ W.addVehicle(
     payment_paid=1.5,
     payment_received=0.25,
     order_exchange_log=[{"event": "test"}],
+    participates_in_order_exchange=True,
 )
 
 veh = W.VEHICLES["veh_attr_test"]
@@ -39,10 +40,12 @@ assert veh.vot_declared == 8.0
 assert veh.payment_paid == 1.5
 assert veh.payment_received == 0.25
 assert veh.order_exchange_log == [{"event": "test"}]
+assert veh.participates_in_order_exchange is True
 
 W.addVehicle("orig", "dest", 10, name="veh_default_log")
 
 veh_default = W.VEHICLES["veh_default_log"]
 assert veh_default.order_exchange_log == []
+assert veh_default.participates_in_order_exchange is False
 
 print("Vehicle research attributes test passed.")
