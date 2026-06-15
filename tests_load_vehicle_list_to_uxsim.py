@@ -5,6 +5,7 @@
 #
 # Requires uxsim to be importable (e.g. pip install -e .).
 
+import csv
 import tempfile
 from pathlib import Path
 
@@ -32,18 +33,39 @@ W.addLink("link3", "merge", "dest", length=500, free_flow_speed=16.67, number_of
 with tempfile.TemporaryDirectory() as tmpdir:
     csv_path = Path(tmpdir) / "vehicle_list_seed0.csv"
     generate_vehicle_list(seed=0, output_csv=str(csv_path))
+
+    with open(csv_path, newline="") as f:
+        rows = list(csv.DictReader(f))
+
+    rows[0]["participates_in_order_exchange"] = "False"
+    rows[0]["vot_declared"] = ""
+
+    with open(csv_path, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=rows[0].keys())
+        writer.writeheader()
+        writer.writerows(rows)
+
     rows = load_vehicle_list_to_world(W, csv_path)
 
 assert len(rows) == len(W.VEHICLES)
 
-first = rows[0]
-veh = W.VEHICLES[first["vehicle_id"]]
-assert veh.name == first["vehicle_id"]
-assert veh.vot_true == float(first["vot_true"])
+non_participating = rows[0]
+veh_np = W.VEHICLES[non_participating["vehicle_id"]]
+assert veh_np.participates_in_order_exchange is False
+assert veh_np.vot_declared is None
+assert veh_np.vot_true == float(non_participating["vot_true"])
+assert veh_np.payment_paid == 0
+assert veh_np.payment_received == 0
+assert veh_np.order_exchange_log == []
+
+participating = rows[1]
+veh = W.VEHICLES[participating["vehicle_id"]]
+assert veh.name == participating["vehicle_id"]
+assert veh.vot_true == float(participating["vot_true"])
 assert veh.vot_declared == (
-    float(first["vot_declared"]) if first["vot_declared"] != "" else None
+    float(participating["vot_declared"]) if participating["vot_declared"] != "" else None
 )
-assert veh.participates_in_order_exchange == (first["participates_in_order_exchange"] == "True")
+assert veh.participates_in_order_exchange == (participating["participates_in_order_exchange"] == "True")
 assert veh.payment_paid == 0
 assert veh.payment_received == 0
 assert veh.order_exchange_log == []
