@@ -157,6 +157,49 @@ def generate_vehicle_list(
     return vehicles
 
 
+def load_vehicle_list_to_world(W, csv_path):
+    """
+    Load vehicles from a CSV file into a UXsim World.
+
+    Parameters
+    ----------
+    W : World
+        UXsim World object.
+    csv_path : str | Path
+        Path to the vehicle list CSV file.
+
+    Returns
+    -------
+    list[dict]
+        CSV rows read by csv.DictReader.
+    """
+    rows = []
+    with open(csv_path, newline="") as f:
+        for row in csv.DictReader(f):
+            vehicle_id = row["vehicle_id"]
+            orig = row["orig"]
+            dest = row["dest"]
+            departure_time = float(row["departure_time"])
+            vot_true = float(row["vot_true"])
+            vot_declared = float(row["vot_declared"]) if row["vot_declared"] != "" else None
+            participates_in_order_exchange = row["participates_in_order_exchange"] == "True"
+
+            W.addVehicle(
+                orig,
+                dest,
+                departure_time,
+                name=vehicle_id,
+                vot_true=vot_true,
+                vot_declared=vot_declared,
+                participates_in_order_exchange=participates_in_order_exchange,
+                payment_paid=0,
+                payment_received=0,
+            )
+            rows.append(row)
+
+    return rows
+
+
 if __name__ == "__main__":
     vehicles = generate_vehicle_list(
         seed=0,
