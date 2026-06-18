@@ -21,8 +21,10 @@ from .scenario_reader_writer import *
 class Node:
     """
     Node in a network.
+
+    Optional research attributes for intersection order control: order_control_type, batch_size, transaction_case.
     """
-    def __init__(s, W: "World", name: str, x: float, y: float, signal: list[float]=[0], signal_offset: float=0, signal_offset_old: float|None=None, flow_capacity: float|None=None, number_of_lanes: int|None=None, auto_rename=False, attribute=None, user_attribute=None, user_function=None):
+    def __init__(s, W: "World", name: str, x: float, y: float, signal: list[float]=[0], signal_offset: float=0, signal_offset_old: float|None=None, flow_capacity: float|None=None, number_of_lanes: int|None=None, auto_rename=False, attribute=None, user_attribute=None, user_function=None, order_control_type="none", batch_size=1, transaction_case=None):
         """
         Create a node.
 
@@ -63,6 +65,12 @@ class Node:
             >>> W.addNode("node", 0, 0, user_function=user_function)
             >>> ... #define your scenario
             >>> W.exec_simulation()
+        order_control_type : str, optional
+            Intersection order control mode for research use: "none", "fcfs", "batch", or "time_value". Default is "none".
+        batch_size : int, optional
+            Batch size for batch order control (research use). Default is 1.
+        transaction_case : str or None, optional
+            Transaction case for time-value order control (research use): "I", "II", "III", or None. Default is None.
 
         Attributes
         ----------
@@ -71,6 +79,19 @@ class Node:
         signal_t : float
             The elapsed time since the current signal phase started. When it is larger than `Link.signal[Link.signal_phase]`, the phase changes to the next one.
         """
+
+        allowed_order_control_types = {"none", "fcfs", "batch", "time_value"}
+        if order_control_type not in allowed_order_control_types:
+            raise ValueError(
+                f"order_control_type must be one of {sorted(allowed_order_control_types)}."
+            )
+
+        if not isinstance(batch_size, int) or isinstance(batch_size, bool) or batch_size < 1:
+            raise ValueError("batch_size must be an integer greater than or equal to 1.")
+
+        allowed_transaction_cases = {None, "I", "II", "III"}
+        if transaction_case not in allowed_transaction_cases:
+            raise ValueError('transaction_case must be None, "I", "II", or "III".')
 
         s.W = W
         #node position (for visualization)
@@ -81,6 +102,9 @@ class Node:
         s.attribute = attribute
         s.user_attribute = user_attribute
         s.user_function = user_function
+        s.order_control_type = order_control_type
+        s.batch_size = batch_size
+        s.transaction_case = transaction_case
         
         #incoming/outgoing links
         s.inlinks: dict[str,Link] = dict()
@@ -1711,7 +1735,7 @@ class World:
         W.user_attribute = user_attribute
         W.user_function = user_function
 
-    def addNode(W, name: str, x: float, y: float, signal: list[float]=[0], signal_offset: float=0, signal_offset_old: float|None=None, flow_capacity: float|None=None, number_of_lanes: int=None, auto_rename=False, attribute=None, user_attribute=None, user_function=None) -> Node:
+    def addNode(W, name: str, x: float, y: float, signal: list[float]=[0], signal_offset: float=0, signal_offset_old: float|None=None, flow_capacity: float|None=None, number_of_lanes: int=None, auto_rename=False, attribute=None, user_attribute=None, user_function=None, order_control_type="none", batch_size=1, transaction_case=None) -> Node:
         """
         Add a node to world.
 
@@ -1750,6 +1774,12 @@ class World:
             >>> W.addNode("node", 0, 0, user_function=user_function)
             >>> ... #define your scenario
             >>> W.exec_simulation()
+        order_control_type : str, optional
+            Intersection order control mode for research use: "none", "fcfs", "batch", or "time_value". Default is "none".
+        batch_size : int, optional
+            Batch size for batch order control (research use). Default is 1.
+        transaction_case : str or None, optional
+            Transaction case for time-value order control (research use): "I", "II", "III", or None. Default is None.
 
         Attributes
         ----------
@@ -1758,7 +1788,7 @@ class World:
         signal_t : float
             The elapsed time since the current signal phase started. When it is larger than `Link.signal[Link.signal_phase]`, the phase changes to the next one.
         """
-        return Node(W, name, x, y, signal=signal, signal_offset=signal_offset, signal_offset_old=signal_offset_old, flow_capacity=flow_capacity, number_of_lanes=number_of_lanes, auto_rename=auto_rename, attribute=attribute, user_attribute=user_attribute, user_function=user_function)
+        return Node(W, name, x, y, signal=signal, signal_offset=signal_offset, signal_offset_old=signal_offset_old, flow_capacity=flow_capacity, number_of_lanes=number_of_lanes, auto_rename=auto_rename, attribute=attribute, user_attribute=user_attribute, user_function=user_function, order_control_type=order_control_type, batch_size=batch_size, transaction_case=transaction_case)
 
     def addLink(W, name: str, start_node: Node|str, end_node: Node|str, length: float, free_flow_speed: float=20, jam_density: float=0.2, jam_density_per_lane: float|None=None, number_of_lanes: int=1, merge_priority: float=1, signal_group: list[int]=[0], capacity_out: float|None=None, capacity_in: float|None=None, eular_dx=None, attribute=None, user_attribute=None, user_function=None, auto_rename=False) -> Link:
         """
