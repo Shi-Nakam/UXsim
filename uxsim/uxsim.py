@@ -1854,7 +1854,9 @@ class World:
         """
         Infer and set order_control_eligible for all nodes based on network topology.
 
-        A node is eligible when it has both incoming and outgoing links.
+        A node is eligible when it has at least two incoming links and at least one
+        outgoing link, where order-control methods such as FCFS, Batch Processing, and
+        Time-value Transaction are meaningful for comparison.
         Intended to be called after the network is built.
 
         Returns
@@ -1864,7 +1866,7 @@ class World:
         """
         eligible_nodes = []
         for node in W.NODES:
-            if len(node.inlinks) > 0 and len(node.outlinks) > 0:
+            if len(node.inlinks) >= 2 and len(node.outlinks) >= 1:
                 node.order_control_eligible = True
                 eligible_nodes.append(node)
             else:

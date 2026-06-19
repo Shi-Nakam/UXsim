@@ -65,4 +65,24 @@ assert merge.order_control_type == "none"
 assert merge.batch_size == 1
 assert merge.transaction_case is None
 
+W_single = World(
+    name="order_control_eligibility_single",
+    deltan=1,
+    tmax=100,
+    print_mode=0,
+    save_mode=0,
+    show_mode=0,
+    random_seed=0,
+)
+
+W_single.addNode("orig_single", 0, 0)
+mid_single = W_single.addNode("mid_single", 1, 0)
+W_single.addNode("dest_single", 2, 0)
+W_single.addLink("link_single1", "orig_single", "mid_single", length=500, free_flow_speed=16.67, number_of_lanes=1)
+W_single.addLink("link_single2", "mid_single", "dest_single", length=500, free_flow_speed=16.67, number_of_lanes=1)
+
+eligible_nodes_single = W_single.infer_order_control_eligible_nodes()
+assert mid_single.order_control_eligible is False
+assert eligible_nodes_single == []
+
 print("Order control eligibility test passed.")
