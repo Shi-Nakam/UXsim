@@ -328,6 +328,83 @@ set_order_control_for_nodes(...) の安全化：
 - 1fe035e Add automatic and manual setting of order control eligibility
 - ec89308 Refine order control eligibility inference criteria
 
+### フェーズ3-5：order_control_eligible=True のNode集合からのランダム選択機能追加
+
+完了済み。
+
+実施内容：
+
+- World に order_control_eligibility_prepared フラグを追加
+- infer_order_control_eligible_nodes(...) 実行後に order_control_eligibility_prepared=True になるようにした
+- World.set_order_control_for_randomly_selected_eligible_nodes(...) を追加
+- order_control_eligible=True のNode集合から、fraction に基づいてランダムに一部Nodeを選択できるようにした
+- 選ばれたNodeに order_control_type, batch_size, transaction_case を設定できるようにした
+- 設定処理は既存の set_order_control_for_nodes(...) に委譲する設計にした
+
+追加した関数：
+
+- set_order_control_for_randomly_selected_eligible_nodes(
+    fraction,
+    order_control_type="none",
+    batch_size=1,
+    transaction_case=None,
+    random_seed=None,
+  )
+
+主な仕様：
+
+- infer_order_control_eligible_nodes(...) を実行していない状態で呼ぶと ValueError を出す
+- order_control_eligible=True のNodeだけをランダム選択候補とする
+- order_control_eligible=True の候補Nodeが0個の場合は ValueError を出す
+- fraction は 0以上1以下の数値のみ許可する
+- bool や文字列など、不正な fraction では ValueError を出す
+- fraction=0 の場合は空リストを返す
+- fraction から選択個数 n_select を以下で計算する
+  - n_select = int(math.floor(n_candidates * fraction + 0.5))
+- これは fraction から得られる値を四捨五入相当にして整数化するため
+- ランダム選択は、各Nodeを独立確率で選ぶ方式ではない
+- 候補Node集合から n_select 個を重複なしでランダム抽出する
+- random_seed により、同じ条件なら同じNode集合を再現できる
+- exclude_node_names のような一時除外引数は採用しない
+- 補助Nodeなどを除外したい場合は、事前に set_order_control_eligible_flag_for_nodes(..., False) で order_control_eligible 自体を False にする方針
+
+設計上の整理：
+
+- ランダム選択関数は、単独で使うものではない
+- 基本的な利用手順は以下：
+  1. NodeとLinkでネットワークを構築する
+  2. infer_order_control_eligible_nodes(...) を実行する
+  3. 必要に応じて set_order_control_eligible_flag_for_nodes(...) で補助Nodeなどを手動補正する
+  4. set_order_control_for_randomly_selected_eligible_nodes(...) を実行する
+- 補助Node除外などの手動補正が済んでいるかどうかは、コードでは自動判定しない
+- そのため、docstringには、必要な手動補正を済ませてから呼ぶことを明記した
+
+追加テスト：
+
+- tests_random_eligible_order_control.py
+
+確認済み事項：
+
+- infer_order_control_eligible_nodes(...) 未実行時にランダム選択関数を呼ぶと ValueError が出る
+- infer 実行後、order_control_eligible=True のNode集合から fraction に基づいてランダム選択できる
+- fraction=0.5 かつ order_control_eligible=True の候補Nodeが4個の場合、2個が選ばれることを確認
+- 選ばれたNodeには order_control_type="batch", batch_size=10 が設定される
+- 選ばれなかった order_control_eligible=True のNode は order_control_type="none" のままである
+- 同じ random_seed を使うと、同じNode集合が選ばれることを確認
+- fraction=0 の場合は空リストを返す
+- 不正な fraction で ValueError が出る
+- order_control_eligible=True の候補Nodeが0個の場合に ValueError が出る
+- tests_random_eligible_order_control.py が正常実行
+- tests_order_control_eligibility.py が正常実行
+- tests_world_order_control_setters.py が正常実行
+- tests_node_order_control_attributes.py が正常実行
+- tests_order_exchange_baseline.py が正常実行
+- demos_and_examples/example_00en_simple.py が正常実行
+
+関連コミット：
+
+- 6bdeefa Add random selection from order-control eligible nodes
+
 ## 現在までに追加した主なファイル
 
 - tests_order_exchange_baseline.py
@@ -337,6 +414,7 @@ set_order_control_for_nodes(...) の安全化：
 - tests_node_order_control_attributes.py
 - tests_world_order_control_setters.py
 - tests_order_control_eligibility.py
+- tests_random_eligible_order_control.py
 
 ## uxsim/uxsim.py の主な変更
 
@@ -356,11 +434,16 @@ set_order_control_for_nodes(...) の安全化：
 - transaction_case
 - order_control_eligible
 
+### Worldへの追加属性
+
+- order_control_eligibility_prepared
+
 ### Worldへの追加メソッド
 
 - set_order_control_for_nodes(...)
 - infer_order_control_eligible_nodes(...)
 - set_order_control_eligible_flag_for_nodes(...)
+- set_order_control_for_randomly_selected_eligible_nodes(...)
 
 ## 現在の重要な設計方針
 
@@ -411,18 +494,23 @@ set_order_control_for_nodes(...) の安全化：
 - order_control_eligible=True のNodeだけが fcfs / batch / time_value の設定対象になれる
 - order_control_type="none" は制御解除なので order_control_eligible=False のNodeにも適用できる
 
+### ランダム選択は order_control_eligible=True のNode集合を対象にする
+
+- ランダム選択は、infer_order_control_eligible_nodes(...) 実行後に行う
+- 必要な補助Node除外などは、set_order_control_eligible_flag_for_nodes(...) によって事前に行う
+- ランダム選択関数は、補助Nodeを自動検出して除外しない
+- fraction は導入割合を表す
+- fraction から選択数 n_select を四捨五入相当により決める
+- 候補Node集合から n_select 個を重複なしでランダム抽出する
+- random_seed により再現可能にする
+
 ## 次に進む予定
 
-order_control_eligible=True のNode集合を対象に、ランダム選択による order control 設定方法を検討する。
+フェーズ3の次の候補：
 
-重要な方針：
-
-- 全Nodeを無条件に対象とする一括設定関数は採用しない
-- 理由は、origin node、destination node、補助Nodeなどを誤って含める危険があるため
-- order_control_eligible=True のNodeすべてに同じ order control 設定を適用する関数は、便利関数としては可能
-- ただし、それは既存の infer_order_control_eligible_nodes(...) と set_order_control_for_nodes(...) の組み合わせで代替可能であり、現時点での優先度は低い
-- 研究上より重要なのは、order_control_eligible=True のNode集合から、ランダムに一定割合または一定数を選んで order control 設定を適用する機能である
-- その後、centrality等に基づく条件選択を検討する
+- order_control_eligible=True のNode集合から、centrality等のネットワーク特徴量に基づいて選択する方法を検討する
+- または、ここまでのNode選択・設定機能を使って、最小シナリオ内で対象Nodeに order_control_type を設定し、シミュレーション挙動が壊れないことを確認する
+- ただし、FCFS、Batch Processing、Time-value Transaction の実制御ロジックはまだ実装していないため、次に進む前に、どこまで設定系の整備を続けるか、どこから制御ロジック本体に入るかを検討する
 
 ## 新しいチャットで再開する場合
 
@@ -430,7 +518,7 @@ order_control_eligible=True のNode集合を対象に、ランダム選択によ
 
 - このファイル ORDER_EXCHANGE_PROGRESS.md を読んでください
 - 現在のブランチは feature/intersection-order-control です
-- フェーズ3-4まで完了済みです
+- フェーズ3-5まで完了済みです
 - order_control_eligible の自動判定条件は、len(node.inlinks) >= 2 かつ len(node.outlinks) >= 1 に修正済みです
 - git log --oneline -12 と git status の結果を貼ります
-- 次は、order_control_eligible=True のNode集合を対象に、ランダム選択による order control 設定方法を検討する予定です
+- 次は、centrality等に基づくNode選択へ進むか、または既存のNode選択・設定機能を使った最小シナリオ確認へ進むかを検討する予定です
