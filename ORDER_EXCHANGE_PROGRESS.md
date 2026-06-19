@@ -226,6 +226,93 @@ order_control_type が取り得る値：
 
 - fbd8321 Add function to set order control collectively for selected nodes
 
+### フェーズ3-4：order_control_eligible による制御対象Node管理の追加
+
+完了済み。
+
+実施内容：
+
+- Nodeに order_control_eligible 属性を追加
+- World.addNode(...) から order_control_eligible を指定可能にした
+- World.infer_order_control_eligible_nodes(...) を追加
+- World.set_order_control_eligible_flag_for_nodes(...) を追加
+- World.set_order_control_for_nodes(...) を安全化
+
+order_control_eligible の意味：
+
+- order_control_eligible=True
+  - このNodeは交差点進入順序制御の対象候補として扱える
+
+- order_control_eligible=False
+  - このNodeは原則として交差点進入順序制御の対象にしない
+
+デフォルト：
+
+- order_control_eligible=False
+
+理由：
+既存UXsimサンプルや標準挙動を壊さないため、何も指定しない限り、Nodeは制御対象候補にならないようにした。
+
+追加した自動設定関数：
+
+- infer_order_control_eligible_nodes(...)
+
+機能：
+
+- ネットワーク構築後に、各Nodeの inlinks と outlinks を見て order_control_eligible を自動設定する
+- len(node.inlinks) > 0 かつ len(node.outlinks) > 0 のNodeを True にする
+- それ以外のNodeを False にする
+
+注意：
+
+- この自動判定は、origin node や destination node を除外するのに有効
+- ただし、補助Nodeを完全には除外できない
+- そのため、手動補正関数と組み合わせて使う前提
+
+追加した手動設定関数：
+
+- set_order_control_eligible_flag_for_nodes(node_names, is_eligible)
+
+機能：
+
+- 指定したNode名リストに対して、order_control_eligible を True または False に手動設定する
+- 自動判定で True になってしまった補助Nodeを False に除外できる
+- 例外的に制御対象候補にしたいNodeを True に設定できる
+
+set_order_control_for_nodes(...) の安全化：
+
+- order_control_type が "fcfs", "batch", "time_value" の場合、
+  指定されたNodeは order_control_eligible=True でなければならない
+- order_control_eligible=False のNodeが含まれている場合は ValueError を出す
+- order_control_type="none" の場合は、制御解除・標準挙動を表すため、order_control_eligible=False のNodeにも適用できる
+
+追加・更新したテスト：
+
+- tests_node_order_control_attributes.py
+- tests_world_order_control_setters.py
+- tests_order_control_eligibility.py
+
+確認済み事項：
+
+- デフォルトNodeでは order_control_eligible is False
+- W.addNode(..., order_control_eligible=True) で True にできる
+- infer_order_control_eligible_nodes(...) により、inlinks と outlinks の両方を持つNodeだけを True にできる
+- origin node と destination node は False になる
+- set_order_control_eligible_flag_for_nodes(...) により、手動で True / False を上書きできる
+- is_eligible に bool 以外を渡すと ValueError が出る
+- order_control_eligible=False のNodeに batch などを設定しようとすると ValueError が出る
+- order_control_eligible=True に戻せば batch 設定できる
+- order_control_type="none" は order_control_eligible=False のNodeにも適用できる
+- tests_order_control_eligibility.py が正常実行
+- tests_node_order_control_attributes.py が正常実行
+- tests_world_order_control_setters.py が正常実行
+- tests_order_exchange_baseline.py が正常実行
+- demos_and_examples/example_00en_simple.py が正常実行
+
+関連コミット：
+
+- 1fe035e Add automatic and manual setting of order control eligibility
+
 ## 現在までに追加した主なファイル
 
 - tests_order_exchange_baseline.py
@@ -234,6 +321,7 @@ order_control_type が取り得る値：
 - tests_load_vehicle_list_to_uxsim.py
 - tests_node_order_control_attributes.py
 - tests_world_order_control_setters.py
+- tests_order_control_eligibility.py
 
 ## uxsim/uxsim.py の主な変更
 
@@ -251,10 +339,13 @@ order_control_type が取り得る値：
 - order_control_type
 - batch_size
 - transaction_case
+- order_control_eligible
 
 ### Worldへの追加メソッド
 
 - set_order_control_for_nodes(...)
+- infer_order_control_eligible_nodes(...)
+- set_order_control_eligible_flag_for_nodes(...)
 
 ## 現在の重要な設計方針
 
@@ -295,16 +386,32 @@ order_control_type が取り得る値：
 - centrality等のネットワーク特徴量に基づく選択
 - 流入リンク数・交通量・ボトルネック性等に基づく選択
 
+### 制御対象Nodeは order_control_eligible フラグで管理する
+
+- Nodeごとに order_control_eligible を持たせる
+- まず inlinks / outlinks に基づいて自動判定する
+- 補助Nodeなどは手動で False に上書きする
+- 例外的に制御対象候補にしたいNodeは手動で True に上書きできる
+- order_control_eligible=True のNodeだけが fcfs / batch / time_value の設定対象になれる
+- order_control_type="none" は制御解除なので order_control_eligible=False のNodeにも適用できる
+
 ## 次に進む予定
 
-フェーズ3の続き：
+フェーズ3-5相当の作業として、
+order_control_eligible=True のNode集合に対して、
+order_control_type, batch_size, transaction_case を一括設定する補助関数を検討する。
 
-次は、全Nodeに一括で order_control_type, batch_size, transaction_case を設定する補助関数を作る。
+重要な方針：
+
+- 全Nodeを無条件に対象とする一括設定関数は採用しない
+- 理由は、origin node、destination node、補助Nodeなどを誤って含める危険があるため
+- 代わりに、infer_order_control_eligible_nodes(...) と set_order_control_eligible_flag_for_nodes(...) によって order_control_eligible フラグを整えたうえで、order_control_eligible=True のNodeだけに制御方式を設定する方針とする
+- その後、order_control_eligible=True のNode集合を対象に、ランダム選択やcentralityベース選択を検討する
 
 具体的には、次に以下を検討する。
 
-- 全Nodeに同じ order control 設定を一括適用する関数
-- その後、ランダムに一定割合のNodeを選んで設定する関数
+- order_control_eligible=True のNodeすべてに同じ order control 設定を一括適用する関数
+- その後、order_control_eligible=True のNodeからランダムに一定割合を選んで設定する関数
 - centrality等に基づく条件選択は後続フェーズで扱う
 
 ## 新しいチャットで再開する場合
@@ -313,6 +420,6 @@ order_control_type が取り得る値：
 
 - このファイル ORDER_EXCHANGE_PROGRESS.md を読んでください
 - 現在のブランチは feature/intersection-order-control です
-- フェーズ3-3まで完了済みです
+- フェーズ3-4まで完了済みです
 - git log --oneline -12 と git status の結果を貼ります
-- 次は、全Nodeに一括で order_control_type 等を設定する補助関数の実装から進める予定です
+- 次は、order_control_eligible=True のNode集合を対象に、一括設定・ランダム選択・条件選択による order control 設定方法を検討する予定です
