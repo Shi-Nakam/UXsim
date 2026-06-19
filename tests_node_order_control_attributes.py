@@ -21,6 +21,10 @@ node_default = W.addNode("node_default", 0, 0)
 assert node_default.order_control_type == "none"
 assert node_default.batch_size == 1
 assert node_default.transaction_case is None
+assert node_default.order_control_eligible is False
+
+node_eligible = W.addNode("node_eligible", 4, 0, order_control_eligible=True)
+assert node_eligible.order_control_eligible is True
 
 node_fcfs = W.addNode("node_fcfs", 1, 0, order_control_type="fcfs")
 assert node_fcfs.order_control_type == "fcfs"

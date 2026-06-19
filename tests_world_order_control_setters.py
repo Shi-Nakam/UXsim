@@ -17,10 +17,11 @@ W = World(
     random_seed=0,
 )
 
-node_a = W.addNode("node_a", 0, 0)
-node_b = W.addNode("node_b", 1, 0)
-node_c = W.addNode("node_c", 2, 0)
-node_d = W.addNode("node_d", 3, 0)
+node_a = W.addNode("node_a", 0, 0, order_control_eligible=True)
+node_b = W.addNode("node_b", 1, 0, order_control_eligible=True)
+node_c = W.addNode("node_c", 2, 0, order_control_eligible=True)
+node_d = W.addNode("node_d", 3, 0, order_control_eligible=True)
+node_ineligible = W.addNode("node_ineligible", 4, 0)
 
 for node in (node_a, node_b, node_c, node_d):
     assert node.order_control_type == "none"
@@ -65,5 +66,23 @@ for kwargs in (
         pass
     else:
         raise AssertionError(f"Expected ValueError for {kwargs}")
+
+for order_control_type in ("batch", "time_value", "fcfs"):
+    try:
+        W.set_order_control_for_nodes(
+            ["node_ineligible"],
+            order_control_type=order_control_type,
+            batch_size=10,
+            transaction_case="I",
+        )
+    except ValueError:
+        pass
+    else:
+        raise AssertionError(
+            f"Expected ValueError for ineligible node with order_control_type={order_control_type!r}"
+        )
+
+W.set_order_control_for_nodes(["node_ineligible"], order_control_type="none")
+assert node_ineligible.order_control_type == "none"
 
 print("World order control setters test passed.")
