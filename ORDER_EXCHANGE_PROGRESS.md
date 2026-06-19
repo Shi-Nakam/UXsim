@@ -187,6 +187,45 @@ order_control_type が取り得る値：
 
 - ad32622 Add Node order control configuration attributes
 
+### フェーズ3-3：選択した複数Nodeへの制御方式一括設定関数の追加
+
+完了済み。
+
+実施内容：
+
+- World クラスに set_order_control_for_nodes(...) を追加
+- Node名リストで指定した複数Nodeに対して、以下の設定をまとめて適用できるようにした
+  - order_control_type
+  - batch_size
+  - transaction_case
+- 関数は、設定を変更したNodeオブジェクトのリストを返す
+- 入力値チェックを追加
+  - order_control_type は "none", "fcfs", "batch", "time_value" のみ許可
+  - batch_size は1以上の整数のみ許可
+  - transaction_case は None, "I", "II", "III" のみ許可
+- Node.transfer() などの交通挙動は変更していない
+- FCFS, Batch Processing, Time-value Transaction の実制御ロジックはまだ実装していない
+
+追加テスト：
+
+- tests_world_order_control_setters.py
+
+確認済み事項：
+
+- 複数Nodeに batch 設定をまとめて適用できる
+- 指定されていないNodeはデフォルト状態のままである
+- time_value 設定をNodeに適用できる
+- fcfs 設定をNodeに適用できる
+- 不正値で ValueError が出る
+- tests_world_order_control_setters.py が正常実行
+- tests_node_order_control_attributes.py が正常実行
+- tests_order_exchange_baseline.py が正常実行
+- demos_and_examples/example_00en_simple.py が正常実行
+
+関連コミット：
+
+- fbd8321 Add function to set order control collectively for selected nodes
+
 ## 現在までに追加した主なファイル
 
 - tests_order_exchange_baseline.py
@@ -194,6 +233,7 @@ order_control_type が取り得る値：
 - generate_vehicle_list_for_order_exchange.py
 - tests_load_vehicle_list_to_uxsim.py
 - tests_node_order_control_attributes.py
+- tests_world_order_control_setters.py
 
 ## uxsim/uxsim.py の主な変更
 
@@ -211,6 +251,10 @@ order_control_type が取り得る値：
 - order_control_type
 - batch_size
 - transaction_case
+
+### Worldへの追加メソッド
+
+- set_order_control_for_nodes(...)
 
 ## 現在の重要な設計方針
 
@@ -255,16 +299,13 @@ order_control_type が取り得る値：
 
 フェーズ3の続き：
 
-複数Nodeにまとめて order_control_type, batch_size, transaction_case を設定する補助関数を作る。
+次は、全Nodeに一括で order_control_type, batch_size, transaction_case を設定する補助関数を作る。
 
-具体的には、まず以下を検討する。
+具体的には、次に以下を検討する。
 
-- Node名リストで指定した複数Nodeに設定する関数
-- 全Nodeに一括設定する関数
-- ランダムに一定割合のNodeを選んで設定する関数
+- 全Nodeに同じ order control 設定を一括適用する関数
+- その後、ランダムに一定割合のNodeを選んで設定する関数
 - centrality等に基づく条件選択は後続フェーズで扱う
-
-初期実装としては、まず Node名リストによる指定関数を作るのがよい。
 
 ## 新しいチャットで再開する場合
 
@@ -272,5 +313,6 @@ order_control_type が取り得る値：
 
 - このファイル ORDER_EXCHANGE_PROGRESS.md を読んでください
 - 現在のブランチは feature/intersection-order-control です
+- フェーズ3-3まで完了済みです
 - git log --oneline -12 と git status の結果を貼ります
-- 次は、複数Nodeにまとめて order_control_type 等を設定する補助関数の実装から進める予定です
+- 次は、全Nodeに一括で order_control_type 等を設定する補助関数の実装から進める予定です
