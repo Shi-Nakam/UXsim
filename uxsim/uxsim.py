@@ -1738,6 +1738,8 @@ class World:
         W.user_attribute = user_attribute
         W.user_function = user_function
 
+        W.order_control_eligibility_prepared = False
+
     def addNode(W, name: str, x: float, y: float, signal: list[float]=[0], signal_offset: float=0, signal_offset_old: float|None=None, flow_capacity: float|None=None, number_of_lanes: int=None, auto_rename=False, attribute=None, user_attribute=None, user_function=None, order_control_type="none", batch_size=1, transaction_case=None, order_control_eligible=False) -> Node:
         """
         Add a node to world.
@@ -1871,6 +1873,7 @@ class World:
                 eligible_nodes.append(node)
             else:
                 node.order_control_eligible = False
+        W.order_control_eligibility_prepared = True
         return eligible_nodes
 
     def set_order_control_eligible_flag_for_nodes(W, node_names, is_eligible):
@@ -1898,6 +1901,78 @@ class World:
             node.order_control_eligible = is_eligible
             configured_nodes.append(node)
         return configured_nodes
+
+    def set_order_control_for_randomly_selected_eligible_nodes(
+        W,
+        fraction,
+        order_control_type="none",
+        batch_size=1,
+        transaction_case=None,
+        random_seed=None,
+    ):
+        """
+        Randomly select a fraction of order_control_eligible nodes and apply order control settings.
+
+        Intended to be called after infer_order_control_eligible_nodes(). If auxiliary nodes
+        should be excluded from random selection, call set_order_control_eligible_flag_for_nodes(...)
+        beforehand to set node.order_control_eligible=False. This function does not auto-detect
+        auxiliary nodes and does not support temporary exclusion arguments such as
+        exclude_node_names.
+
+        Only nodes with order_control_eligible=True at call time are used as the candidate pool.
+        The number of selected nodes is n_select = int(floor(n_candidates * fraction + 0.5)),
+        and n_select nodes are chosen without replacement from the candidate pool.
+
+        Parameters
+        ----------
+        fraction : float
+            Fraction of eligible nodes to select, between 0 and 1 inclusive.
+        order_control_type : str, optional
+            Intersection order control mode: "none", "fcfs", "batch", or "time_value". Default is "none".
+        batch_size : int, optional
+            Batch size for batch order control. Default is 1.
+        transaction_case : str or None, optional
+            Transaction case for time-value order control: "I", "II", "III", or None. Default is None.
+        random_seed : int or None, optional
+            Random seed for node selection. Default is None.
+
+        Returns
+        -------
+        list of Node
+            Nodes whose settings were updated.
+        """
+        if not W.order_control_eligibility_prepared:
+            raise ValueError(
+                "infer_order_control_eligible_nodes() must be called before random eligible-node selection."
+            )
+
+        candidate_nodes = [node for node in W.NODES if node.order_control_eligible is True]
+        n_candidates = len(candidate_nodes)
+        if n_candidates == 0:
+            raise ValueError(
+                "No order_control_eligible=True nodes are available. "
+                "Check the network, run infer_order_control_eligible_nodes(), or manually set eligibility if appropriate."
+            )
+
+        if isinstance(fraction, bool) or not isinstance(fraction, (int, float)):
+            raise ValueError("fraction must be a number between 0 and 1.")
+        if fraction < 0 or fraction > 1:
+            raise ValueError("fraction must be between 0 and 1.")
+
+        n_select = int(math.floor(n_candidates * fraction + 0.5))
+        if n_select == 0:
+            return []
+
+        rng = np.random.default_rng(random_seed)
+        selected_indices = rng.choice(n_candidates, size=n_select, replace=False)
+        selected_node_names = [candidate_nodes[i].name for i in selected_indices]
+
+        return W.set_order_control_for_nodes(
+            selected_node_names,
+            order_control_type=order_control_type,
+            batch_size=batch_size,
+            transaction_case=transaction_case,
+        )
 
     def addLink(W, name: str, start_node: Node|str, end_node: Node|str, length: float, free_flow_speed: float=20, jam_density: float=0.2, jam_density_per_lane: float|None=None, number_of_lanes: int=1, merge_priority: float=1, signal_group: list[int]=[0], capacity_out: float|None=None, capacity_in: float|None=None, eular_dx=None, attribute=None, user_attribute=None, user_function=None, auto_rename=False) -> Link:
         """
