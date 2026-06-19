@@ -1790,6 +1790,49 @@ class World:
         """
         return Node(W, name, x, y, signal=signal, signal_offset=signal_offset, signal_offset_old=signal_offset_old, flow_capacity=flow_capacity, number_of_lanes=number_of_lanes, auto_rename=auto_rename, attribute=attribute, user_attribute=user_attribute, user_function=user_function, order_control_type=order_control_type, batch_size=batch_size, transaction_case=transaction_case)
 
+    def set_order_control_for_nodes(W, node_names, order_control_type="none", batch_size=1, transaction_case=None):
+        """
+        Apply intersection order control settings to multiple nodes for research use.
+
+        Parameters
+        ----------
+        node_names : list of str
+            Names of nodes to configure.
+        order_control_type : str, optional
+            Intersection order control mode: "none", "fcfs", "batch", or "time_value". Default is "none".
+        batch_size : int, optional
+            Batch size for batch order control. Default is 1.
+        transaction_case : str or None, optional
+            Transaction case for time-value order control: "I", "II", "III", or None. Default is None.
+
+        Returns
+        -------
+        list of Node
+            Nodes whose settings were updated.
+        """
+        allowed_order_control_types = {"none", "fcfs", "batch", "time_value"}
+        if order_control_type not in allowed_order_control_types:
+            raise ValueError(
+                f"order_control_type must be one of {sorted(allowed_order_control_types)}."
+            )
+
+        if not isinstance(batch_size, int) or isinstance(batch_size, bool) or batch_size < 1:
+            raise ValueError("batch_size must be an integer greater than or equal to 1.")
+
+        allowed_transaction_cases = {None, "I", "II", "III"}
+        if transaction_case not in allowed_transaction_cases:
+            raise ValueError('transaction_case must be None, "I", "II", or "III".')
+
+        configured_nodes = []
+        for node_name in node_names:
+            node = W.get_node(node_name)
+            node.order_control_type = order_control_type
+            node.batch_size = batch_size
+            node.transaction_case = transaction_case
+            configured_nodes.append(node)
+
+        return configured_nodes
+
     def addLink(W, name: str, start_node: Node|str, end_node: Node|str, length: float, free_flow_speed: float=20, jam_density: float=0.2, jam_density_per_lane: float|None=None, number_of_lanes: int=1, merge_priority: float=1, signal_group: list[int]=[0], capacity_out: float|None=None, capacity_in: float|None=None, eular_dx=None, attribute=None, user_attribute=None, user_function=None, auto_rename=False) -> Link:
         """
         Create a link.
