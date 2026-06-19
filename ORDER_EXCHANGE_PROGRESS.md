@@ -260,8 +260,20 @@ order_control_eligible の意味：
 機能：
 
 - ネットワーク構築後に、各Nodeの inlinks と outlinks を見て order_control_eligible を自動設定する
-- len(node.inlinks) > 0 かつ len(node.outlinks) > 0 のNodeを True にする
+- len(node.inlinks) >= 2 かつ len(node.outlinks) >= 1 のNodeを True にする
 - それ以外のNodeを False にする
+
+#### 判定条件の精緻化
+
+- 当初は len(node.inlinks) > 0 and len(node.outlinks) > 0 を条件としていた
+- その後、inlinks=1, outlinks=1 の単純通過Nodeは順序交換方式の比較対象として意味が薄いと判断した
+  - 複数流入がないため、交差点進入順序の交換相手が基本的に存在しない
+  - FCFS自体はそのようなNodeでも自然に成立し得る
+  - しかし研究上は、FCFS / Batch Processing / Time-value Transaction を同じ制御対象Node集合で比較したい
+  - Batch Processing と Time-value Transaction が意味を持つのは、少なくとも複数流入を持つNodeである
+- 現在は len(node.inlinks) >= 2 and len(node.outlinks) >= 1 を自動判定条件としている
+- inlinks=1, outlinks=1 の単純な中間Nodeは order_control_eligible=False になる
+- tests_order_control_eligibility.py に、その確認を追加済み
 
 注意：
 
@@ -296,8 +308,10 @@ set_order_control_for_nodes(...) の安全化：
 
 - デフォルトNodeでは order_control_eligible is False
 - W.addNode(..., order_control_eligible=True) で True にできる
-- infer_order_control_eligible_nodes(...) により、inlinks と outlinks の両方を持つNodeだけを True にできる
+- infer_order_control_eligible_nodes(...) により、len(node.inlinks) >= 2 かつ len(node.outlinks) >= 1 のNodeだけを True にできる
 - origin node と destination node は False になる
+- inlinks=1, outlinks=1 の単純な中間Nodeは order_control_eligible=False になることを確認
+- tests_order_control_eligibility.py にその確認を追加済み
 - set_order_control_eligible_flag_for_nodes(...) により、手動で True / False を上書きできる
 - is_eligible に bool 以外を渡すと ValueError が出る
 - order_control_eligible=False のNodeに batch などを設定しようとすると ValueError が出る
@@ -312,6 +326,7 @@ set_order_control_for_nodes(...) の安全化：
 関連コミット：
 
 - 1fe035e Add automatic and manual setting of order control eligibility
+- ec89308 Refine order control eligibility inference criteria
 
 ## 現在までに追加した主なファイル
 
@@ -389,30 +404,25 @@ set_order_control_for_nodes(...) の安全化：
 ### 制御対象Nodeは order_control_eligible フラグで管理する
 
 - Nodeごとに order_control_eligible を持たせる
-- まず inlinks / outlinks に基づいて自動判定する
-- 補助Nodeなどは手動で False に上書きする
+- まず len(node.inlinks) >= 2 かつ len(node.outlinks) >= 1 に基づいて自動判定する
+- inlinks=1, outlinks=1 の単純な通過Nodeは、原則として order_control_eligible=False とする
+- 補助Nodeなどは、自動判定後に必要に応じて手動で False に上書きする
 - 例外的に制御対象候補にしたいNodeは手動で True に上書きできる
 - order_control_eligible=True のNodeだけが fcfs / batch / time_value の設定対象になれる
 - order_control_type="none" は制御解除なので order_control_eligible=False のNodeにも適用できる
 
 ## 次に進む予定
 
-フェーズ3-5相当の作業として、
-order_control_eligible=True のNode集合に対して、
-order_control_type, batch_size, transaction_case を一括設定する補助関数を検討する。
+order_control_eligible=True のNode集合を対象に、ランダム選択による order control 設定方法を検討する。
 
 重要な方針：
 
 - 全Nodeを無条件に対象とする一括設定関数は採用しない
 - 理由は、origin node、destination node、補助Nodeなどを誤って含める危険があるため
-- 代わりに、infer_order_control_eligible_nodes(...) と set_order_control_eligible_flag_for_nodes(...) によって order_control_eligible フラグを整えたうえで、order_control_eligible=True のNodeだけに制御方式を設定する方針とする
-- その後、order_control_eligible=True のNode集合を対象に、ランダム選択やcentralityベース選択を検討する
-
-具体的には、次に以下を検討する。
-
-- order_control_eligible=True のNodeすべてに同じ order control 設定を一括適用する関数
-- その後、order_control_eligible=True のNodeからランダムに一定割合を選んで設定する関数
-- centrality等に基づく条件選択は後続フェーズで扱う
+- order_control_eligible=True のNodeすべてに同じ order control 設定を適用する関数は、便利関数としては可能
+- ただし、それは既存の infer_order_control_eligible_nodes(...) と set_order_control_for_nodes(...) の組み合わせで代替可能であり、現時点での優先度は低い
+- 研究上より重要なのは、order_control_eligible=True のNode集合から、ランダムに一定割合または一定数を選んで order control 設定を適用する機能である
+- その後、centrality等に基づく条件選択を検討する
 
 ## 新しいチャットで再開する場合
 
@@ -421,5 +431,6 @@ order_control_type, batch_size, transaction_case を一括設定する補助関�
 - このファイル ORDER_EXCHANGE_PROGRESS.md を読んでください
 - 現在のブランチは feature/intersection-order-control です
 - フェーズ3-4まで完了済みです
+- order_control_eligible の自動判定条件は、len(node.inlinks) >= 2 かつ len(node.outlinks) >= 1 に修正済みです
 - git log --oneline -12 と git status の結果を貼ります
-- 次は、order_control_eligible=True のNode集合を対象に、一括設定・ランダム選択・条件選択による order control 設定方法を検討する予定です
+- 次は、order_control_eligible=True のNode集合を対象に、ランダム選択による order control 設定方法を検討する予定です
