@@ -348,8 +348,15 @@ order control対象Nodeでは、信号を使わない代わりに、交差点内
 新しいチャットでは以下を伝える。
 
 - ORDER_EXCHANGE_PROGRESS.md を読んでください
-- ORDER_EXCHANGE_PHASE4_DESIGN_NOTES.md も読んでください
+- ORDER_EXCHANGE_PHASE4_DESIGN_NOTES.md を読んでください
+- ORDER_EXCHANGE_PHASE4_DESIGN_NOTES.md には、Node.transfer()依存関係調査、FCFSの定義、方向切替制約、制御用状態と分析ログの分離方針をまとめています
+- ORDER_EXCHANGE_RESEARCH_CONTEXT.md を読んでください
+- 可能であれば、研究論文・研究構想資料、Excel VBAモデル関連ファイル、UXsim改変ロードマップ資料も添付します
 - 現在のブランチは feature/intersection-order-control です
 - フェーズ3-5まで実装・コミット済みです
-- フェーズ4に入る前の設計議論として、このファイルにNode.transfer()依存関係調査、FCFSの定義、方向切替制約、制御用状態と分析ログの分離方針をまとめています
 - 次は、A. 交差点進入制約の設計をさらに詰めるか、B. Vehicleに order_control_node_arrival_times を追加する小フェーズから始める候補があります
+
+### ORDER_EXCHANGE_RESEARCH_CONTEXT.md の役割
+
+- 研究背景、添付資料の役割、新チャットでの再開方法を整理した読み方ガイド
+- 論文、Excel VBAモデル、UXsim改変ロードマップ資料を新チャットに渡す際の案内メモ
