@@ -405,6 +405,51 @@ set_order_control_for_nodes(...) の安全化：
 
 - 6bdeefa Add random selection from order-control eligible nodes
 
+### フェーズ4-1：Vehicleに order_control_node_arrival_times を追加
+
+完了済み。
+
+実施内容：
+
+- Vehicleに order_control_node_arrival_times 属性を追加
+- 初期値は空辞書 {}
+- この辞書は、order-control対象Nodeへの初回到着時刻を将来記録するための器である
+- 現時点では、実際に到着時刻を記録する処理はまだ実装していない
+- 現時点では node.name をキーにする想定
+- 値は将来的に W.T * W.DELTAT による秒単位の時刻を入れる想定
+- 主にFCFS順序決定で使う想定
+- 将来的には Batch Processing や Time-value Transaction でも再利用する可能性がある
+- これは事後分析用ログではなく、制御ロジックが参照する制御用状態である
+
+今回あえて実装していないこと：
+
+- Vehicle.update() 内で到着時刻を記録する処理
+- Node.transfer() の変更
+- FCFS用の車両選択ロジック
+- order_control_node_arrival_orders
+- Node側 arrival_order_counter
+- order_control_node_passage_log
+- 通過時刻ログ
+- 方向切替・クリアランス制約
+- Batch Processing の実制御ロジック
+- Time-value Transaction の実制御ロジック
+
+追加・更新したテスト：
+
+- tests_vehicle_research_attributes.py
+
+確認済み事項：
+
+- 研究用属性を明示的に指定したVehicleでも order_control_node_arrival_times == {}
+- デフォルト設定で作成したVehicleでも order_control_node_arrival_times == {}
+- tests_vehicle_research_attributes.py が正常実行
+- tests_order_exchange_baseline.py が正常実行
+- demos_and_examples/example_00en_simple.py が正常実行
+
+関連コミット：
+
+- b293c58 Add vehicle dict for first arrival times at order-control nodes
+
 ## 現在までに追加した主なファイル
 
 - tests_order_exchange_baseline.py
@@ -426,6 +471,7 @@ set_order_control_for_nodes(...) の安全化：
 - payment_received
 - order_exchange_log
 - participates_in_order_exchange
+- order_control_node_arrival_times
 
 ### Nodeへの追加属性
 
@@ -504,21 +550,34 @@ set_order_control_for_nodes(...) の安全化：
 - 候補Node集合から n_select 個を重複なしでランダム抽出する
 - random_seed により再現可能にする
 
+### 制御用状態と分析ログを分ける
+
+- order_control_node_arrival_times は、事後分析用ログではなく、FCFSなどの制御ロジックが参照する制御用状態である
+- 実際に到着時刻を記録する処理は後続フェーズで実装する
+- 現時点では node.name をキーにする
+- 同一Vehicleが同一Nodeを複数回通る場合はキー設計の拡張が必要
+
 ## 次に進む予定
 
-フェーズ3の次の候補：
+次に進む候補：
 
-- order_control_eligible=True のNode集合から、centrality等のネットワーク特徴量に基づいて選択する方法を検討する
-- または、ここまでのNode選択・設定機能を使って、最小シナリオ内で対象Nodeに order_control_type を設定し、シミュレーション挙動が壊れないことを確認する
-- ただし、FCFS、Batch Processing、Time-value Transaction の実制御ロジックはまだ実装していないため、次に進む前に、どこまで設定系の整備を続けるか、どこから制御ロジック本体に入るかを検討する
+- VehicleがFCFS対象Node、またはより一般にorder-control対象Nodeの incoming_vehicles に初めて入った時刻を、order_control_node_arrival_times に記録する処理を設計・実装する
+- ただし、記録条件は慎重に設計する必要がある
+  - order_control_type=="fcfs" のNodeだけを対象にするか
+  - order_control_type!="none" のNode全般を対象にするか
+  - order_control_eligible=True も条件に含めるか
+- 到着時刻は初回のみ記録し、通過できずに次ステップ以降も incoming_vehicles に入り直しても上書きしない
+- Node.transfer() のFCFS分岐や方向切替・クリアランス制約は、まだ後続フェーズで扱う
 
 ## 新しいチャットで再開する場合
 
 新しいチャットでは、以下を伝える。
 
-- このファイル ORDER_EXCHANGE_PROGRESS.md を読んでください
+- ORDER_EXCHANGE_PROGRESS.md を読んでください
+- ORDER_EXCHANGE_PHASE4_DESIGN_NOTES.md を読んでください
+- ORDER_EXCHANGE_RESEARCH_CONTEXT.md を読んでください
 - 現在のブランチは feature/intersection-order-control です
-- フェーズ3-5まで完了済みです
+- フェーズ4-1まで完了済みです
 - order_control_eligible の自動判定条件は、len(node.inlinks) >= 2 かつ len(node.outlinks) >= 1 に修正済みです
-- git log --oneline -12 と git status の結果を貼ります
-- 次は、centrality等に基づくNode選択へ進むか、または既存のNode選択・設定機能を使った最小シナリオ確認へ進むかを検討する予定です
+- git log --oneline -20 と git status の結果を貼ります
+- 次は、order_control_node_arrival_times への到着時刻記録処理の設計・実装を検討する予定です
