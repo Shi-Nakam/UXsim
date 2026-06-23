@@ -450,6 +450,67 @@ set_order_control_for_nodes(...) の安全化：
 
 - b293c58 Add vehicle dict for first arrival times at order-control nodes
 
+### フェーズ3-4/3-5補修：Node作成時の order_control_type 設定にも eligibility 制約を適用
+
+完了済み。
+
+実施内容：
+
+- Node.__init__(...) に order_control_eligible の型チェックを追加
+- order_control_eligible は bool のみ許可するようにした
+- order_control_eligible="yes" のような文字列を ValueError にする
+- order_control_eligible=1 のような int も ValueError にする
+- Node作成時に order_control_type!="none" を指定する場合、order_control_eligible=True を必須にした
+- これにより、W.addNode(..., order_control_type="fcfs", order_control_eligible=False) のような不整合を ValueError にする
+- order_control_type="none" は、従来どおり order_control_eligible=False でも許可する
+- World.set_order_control_for_nodes(...) 側の既存安全チェックは変更していない
+- Node.__init__(...) のdocstringに、推奨ワークフローを具体例つきで追記
+- World.addNode(...) のdocstringにも、直接 order_control_type を指定する場合の注意を追記
+
+設計上の意味：
+
+- これまでは set_order_control_for_nodes(...) を使う場合には安全だった
+- しかし、W.addNode(...) 時点で直接 order_control_type="fcfs" などを指定した場合、order_control_eligible=False のまま制御方式を設定できる抜け道があった
+- 今回の修正により、Node作成時でも set_order_control_for_nodes(...) 使用時でも、eligibility 制約が一貫して適用されるようになった
+
+推奨ワークフロー：
+
+- 基本的には、Node作成時には order_control_type="none" のままにする
+- NodeとLinkを構築する
+- World.infer_order_control_eligible_nodes(...) を実行する
+- 必要に応じて World.set_order_control_eligible_flag_for_nodes(...) で手動補正する
+- 最後に World.set_order_control_for_nodes(...) で order_control_type を設定する
+
+直接指定する場合：
+
+- W.addNode(..., order_control_type="fcfs") のような指定は、order_control_eligible=False がデフォルトなので ValueError になる
+- W.addNode(..., order_control_eligible=True, order_control_type="fcfs") のように、order_control_eligible=True を明示した場合は許可される
+- batch, time_value も同様
+
+追加・更新したテスト：
+
+- tests_node_order_control_attributes.py
+
+確認済み事項：
+
+- order_control_eligible=False のまま order_control_type="fcfs" を指定すると ValueError
+- order_control_eligible=False のまま order_control_type="batch" を指定すると ValueError
+- order_control_eligible=False のまま order_control_type="time_value" を指定すると ValueError
+- order_control_type="none" かつ order_control_eligible=False は許可される
+- order_control_eligible=True を明示すれば、addNode時点で order_control_type="fcfs" を指定できる
+- order_control_eligible="yes" で ValueError
+- order_control_eligible=1 で ValueError
+- tests_node_order_control_attributes.py が正常実行
+- tests_world_order_control_setters.py が正常実行
+- tests_order_control_eligibility.py が正常実行
+- tests_order_exchange_baseline.py が正常実行
+- demos_and_examples/example_00en_simple.py が正常実行
+- tests_vehicle_research_attributes.py が正常実行
+
+関連コミット：
+
+- 6ac9bc5 Enforce eligibility when setting order_control_type at node creation
+
 ## 現在までに追加した主なファイル
 
 - tests_order_exchange_baseline.py
@@ -479,6 +540,12 @@ set_order_control_for_nodes(...) の安全化：
 - batch_size
 - transaction_case
 - order_control_eligible
+
+Node.__init__(...) での追加チェック：
+
+- order_control_eligible は bool のみ許可
+- order_control_type!="none" の場合、order_control_eligible=True が必要
+- order_control_type="none" は order_control_eligible=False でも許可
 
 ### Worldへの追加属性
 
@@ -538,7 +605,9 @@ set_order_control_for_nodes(...) の安全化：
 - 補助Nodeなどは、自動判定後に必要に応じて手動で False に上書きする
 - 例外的に制御対象候補にしたいNodeは手動で True に上書きできる
 - order_control_eligible=True のNodeだけが fcfs / batch / time_value の設定対象になれる
-- order_control_type="none" は制御解除なので order_control_eligible=False のNodeにも適用できる
+- order_control_eligible=False のNodeには、fcfs / batch / time_value を設定できない
+- この制約は set_order_control_for_nodes(...) 経由だけでなく、Node作成時の直接指定にも適用される
+- order_control_type="none" は制御解除・標準挙動なので order_control_eligible=False でも許可する
 
 ### ランダム選択は order_control_eligible=True のNode集合を対象にする
 
