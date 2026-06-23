@@ -8,7 +8,8 @@
 
 - ORDER_EXCHANGE_PROGRESS.md
 
-には、フェーズ3-5までの完了済み実装が記録されています。
+には、実装済みフェーズの進捗が随時記録されています。
+本ファイル作成時点では、フェーズ3-5までが完了済みでした。
 
 本ファイルでは、まだ実装していないが、今後のフェーズ4以降で重要になる設計判断・未決論点を記録します。
 
@@ -491,7 +492,8 @@ order control対象Nodeでは、信号を使わない代わりに、交差点内
 - ORDER_EXCHANGE_RESEARCH_CONTEXT.md を読んでください
 - 可能であれば、研究論文・研究構想資料、Excel VBAモデル関連ファイル、UXsim改変ロードマップ資料も添付します
 - 現在のブランチは feature/intersection-order-control です
-- フェーズ3-5まで実装・コミット済みです
+- 最新の実装済みフェーズは ORDER_EXCHANGE_PROGRESS.md で確認してください。
+  本ファイル作成時点では、フェーズ3-5までが実装・コミット済みでした。
 - 次は、A. 交差点進入制約の設計をさらに詰めるか、B. Vehicleに order_control_node_arrival_times を追加する小フェーズから始める候補があります
 
 ### ORDER_EXCHANGE_RESEARCH_CONTEXT.md の役割
