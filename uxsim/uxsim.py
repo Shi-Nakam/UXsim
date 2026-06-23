@@ -898,7 +898,7 @@ class Vehicle:
     """
     Vehicle or platoon in a network.
 
-    Optional research attributes for order-exchange studies: vot_true, vot_declared, payment_paid, payment_received, order_exchange_log, participates_in_order_exchange.
+    Optional research attributes for order-exchange studies: vot_true, vot_declared, payment_paid, payment_received, order_exchange_log, participates_in_order_exchange, order_control_node_arrival_times.
     """
     def __init__(s, W: "World", orig: Node|str, dest: Node|str, departure_time:int|float, name: str|None=None, route_pref: dict=None, route_choice_principle=None, mode: str="single_trip", links_prefer: list=[], links_avoid: list=[], trip_abort: int=1, departure_time_is_time_step: int=0, attribute=None, user_attribute=None, user_function=None, auto_rename=False, vot_true=None, vot_declared=None, payment_paid=0, payment_received=0, order_exchange_log=None, participates_in_order_exchange=False):
         """
@@ -958,6 +958,14 @@ class Vehicle:
             Log of order-exchange events involving this vehicle for research use. Default is None (initialized to an empty list).
         participates_in_order_exchange : bool, optional
             Whether this vehicle participates in order-exchange control for research use. Default is False.
+
+        Attributes
+        ----------
+        order_control_node_arrival_times : dict
+            Control state holding the first arrival time (in seconds) at each order-control node for this vehicle.
+            Intended primarily for FCFS ordering; may be reused for Batch Processing or Time-value Transaction later.
+            Keys are node names (``node.name``) for now; if the same vehicle visits the same node more than once,
+            the key design may need to be extended. Initialized to an empty dict.
         """
 
         s.W = W
@@ -1054,6 +1062,7 @@ class Vehicle:
         s.payment_received = payment_received
         s.order_exchange_log = [] if order_exchange_log is None else order_exchange_log
         s.participates_in_order_exchange = participates_in_order_exchange
+        s.order_control_node_arrival_times = {}
 
         s.id = len(s.W.VEHICLES)
         if name != None:
