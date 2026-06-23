@@ -74,6 +74,63 @@ class Node:
         order_control_eligible : bool, optional
             Whether this node is eligible for intersection order control (research use). Default is False.
 
+        Notes
+        -----
+        Nodes are not order-control eligible by default. The recommended workflow is:
+
+        1. Create nodes with the default order_control_type="none".
+        2. Create links.
+        3. Call World.infer_order_control_eligible_nodes() after the network is built.
+        4. Optionally adjust eligibility with World.set_order_control_eligible_flag_for_nodes(...).
+        5. Set order_control_type with World.set_order_control_for_nodes(...).
+
+        Example::
+
+            W.addNode("orig1", 0, 1)
+            W.addNode("orig2", 0, -1)
+            W.addNode("merge", 1, 0)
+            W.addNode("dest", 2, 0)
+
+            W.addLink("link1", "orig1", "merge", ...)
+            W.addLink("link2", "orig2", "merge", ...)
+            W.addLink("link3", "merge", "dest", ...)
+
+            W.infer_order_control_eligible_nodes()
+
+            # In this example, "merge" has two incoming links and one outgoing link,
+            # so infer_order_control_eligible_nodes() sets
+            # merge.order_control_eligible = True.
+
+            W.set_order_control_for_nodes(
+                ["merge"],
+                order_control_type="fcfs",
+            )
+
+        If order_control_type is specified directly at node creation,
+        order_control_eligible must be True unless order_control_type is "none".
+
+        Valid direct specification example::
+
+            W.addNode(
+                "merge",
+                0,
+                0,
+                order_control_eligible=True,
+                order_control_type="fcfs",
+            )
+
+        Invalid direct specification example::
+
+            W.addNode(
+                "merge",
+                0,
+                0,
+                order_control_eligible=False,
+                order_control_type="fcfs",
+            )
+
+        The invalid example raises ValueError because a node cannot use fcfs, batch, or time_value order control unless it is marked as order_control_eligible=True.
+
         Attributes
         ----------
         signal_phase : int
@@ -94,6 +151,14 @@ class Node:
         allowed_transaction_cases = {None, "I", "II", "III"}
         if transaction_case not in allowed_transaction_cases:
             raise ValueError('transaction_case must be None, "I", "II", or "III".')
+
+        if not isinstance(order_control_eligible, bool):
+            raise ValueError("order_control_eligible must be a bool.")
+
+        if order_control_type != "none" and not order_control_eligible:
+            raise ValueError(
+                'A node must be order_control_eligible=True before using fcfs, batch, or time_value order control.'
+            )
 
         s.W = W
         #node position (for visualization)
@@ -1796,6 +1861,14 @@ class World:
             Transaction case for time-value order control (research use): "I", "II", "III", or None. Default is None.
         order_control_eligible : bool, optional
             Whether this node is eligible for intersection order control (research use). Default is False.
+
+        Notes
+        -----
+        If order_control_type is set directly at node creation, order_control_eligible must be True
+        unless order_control_type is "none". The recommended workflow is to create nodes and links first,
+        call World.infer_order_control_eligible_nodes(), optionally adjust eligibility with
+        World.set_order_control_eligible_flag_for_nodes(...), and then set order_control_type with
+        World.set_order_control_for_nodes(...).
 
         Attributes
         ----------
