@@ -1199,7 +1199,9 @@ class Vehicle:
                             s.dest_list = []
                         s.route_pref_update(weight=1)
                         s.route_next_link_choice()
-                        s.link.end_node.incoming_vehicles.append(s)
+                        node = s.link.end_node
+                        node.incoming_vehicles.append(s)
+                        s.record_order_control_node_first_arrival(node)
 
                 elif len(s.link.end_node.outlinks.values()) == 0 and s.trip_abort == 1:
                     #prepare for trip abort due to dead end
@@ -1212,7 +1214,9 @@ class Vehicle:
                 else:
                     #request link transfer
                     s.route_next_link_choice()
-                    s.link.end_node.incoming_vehicles.append(s)
+                    node = s.link.end_node
+                    node.incoming_vehicles.append(s)
+                    s.record_order_control_node_first_arrival(node)
         
         if s.state in ["end", "abort"] :
             #ended the trip
@@ -1325,6 +1329,28 @@ class Vehicle:
                 weight = 1
             for l in s.route_pref.keys():
                 s.route_pref[l] = (1-weight)*s.route_pref[l] + weight*route_pref_new[l]
+
+    def record_order_control_node_first_arrival(s, node):
+        """
+        Record the first arrival time at an order-control node.
+
+        Notes
+        -----
+        Helper that records when this vehicle first enters a node's ``incoming_vehicles`` list.
+        The arrival time is the simulation time in seconds at that timestep, ``W.T * W.DELTAT``.
+
+        Only nodes with ``order_control_eligible=True`` and ``order_control_type != "none"`` are
+        recorded. If an arrival time for ``node.name`` is already stored, it is not overwritten.
+        Keys are node names for now; if the same vehicle visits the same node more than once,
+        the key design may need to be extended in the future.
+        """
+        if not node.order_control_eligible:
+            return
+        if node.order_control_type == "none":
+            return
+        if node.name in s.order_control_node_arrival_times:
+            return
+        s.order_control_node_arrival_times[node.name] = s.W.T * s.W.DELTAT
 
     def route_next_link_choice(s):
         """
