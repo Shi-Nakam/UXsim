@@ -511,6 +511,73 @@ set_order_control_for_nodes(...) の安全化：
 
 - 6ac9bc5 Enforce eligibility when setting order_control_type at node creation
 
+### フェーズ4-2：order-control対象Nodeへの初回到着時刻を記録
+
+完了済み。
+
+実施内容：
+
+- Vehicle クラスに record_order_control_node_first_arrival(node) を追加
+- Vehicle が order-control対象Node に初めて到着した時刻を、order_control_node_arrival_times に記録できるようにした
+- 到着時刻は、Vehicle が node.incoming_vehicles に入ったタイムステップの時刻と定義した
+- Vehicle.update() 内で incoming_vehicles.append(s) が行われる箇所を修正し、append の直後に record_order_control_node_first_arrival(node) を呼ぶようにした
+- incoming_vehicles.append(s) が複数箇所にあるため、同じ方針ですべての該当箇所を修正した
+- 記録値は W.T * W.DELTAT による秒単位の時刻である
+- 現時点では node.name をキーとして order_control_node_arrival_times に保存する
+- 同一Vehicleが同一Nodeを複数回通る場合は、将来的にキー設計の拡張が必要である
+
+記録条件：
+
+- node.order_control_eligible is True
+- node.order_control_type != "none"
+- node.name が vehicle.order_control_node_arrival_times にまだ存在しない
+
+つまり、order-control対象候補であり、かつ実際に fcfs / batch / time_value のいずれかが設定されているNodeのみ記録する。
+また、同じVehicle・同じNodeについて既に記録済みの場合は上書きしない。
+
+設計上の意味：
+
+- order_control_node_arrival_times は、事後分析用ログではなく、FCFSなどの制御ロジックが参照する制御用状態である
+- FCFSでは、最初にNode通過待ち状態になった時刻を保持し続ける必要がある
+- VehicleがNodeに到着しても、outlinkが満杯などで通過できない場合、通常、そのVehicleは現在Linkの下流端に残り、次ステップ以降も再び incoming_vehicles に入る
+- その場合でも、初回到着時刻は上書きされない
+- これにより、将来のFCFS制御で、通過できずに待たされたVehicleの到着順が後ろにずれることを防ぐ
+
+今回あえて実装していないこと：
+
+- Node.transfer() のFCFS分岐
+- FCFS用の車両選択ロジック
+- Batch Processing の実制御ロジック
+- Time-value Transaction の実制御ロジック
+- 方向切替・クリアランス制約
+- order_control_node_arrival_orders
+- Node側 arrival_order_counter
+- order_control_node_passage_log
+- 通過時刻ログ
+
+追加したテスト：
+
+- tests_order_control_node_arrival_times.py
+
+確認済み事項：
+
+- 2流入1流出の merge node を作成し、infer_order_control_eligible_nodes() により merge.order_control_eligible=True になることを確認
+- merge に order_control_type="fcfs" を設定した場合、Vehicleが merge に初めて到着すると order_control_node_arrival_times["merge"] が記録されることを確認
+- merge -> dest の outlink に capacity_in=0 を設定し、Vehicleが merge を通過できない状況を作成
+- Vehicleが次ステップ以降も merge の incoming_vehicles に入り直しても、order_control_node_arrival_times["merge"] が初回値のまま上書きされないことを確認
+- order_control_type="none" のNodeでは、order_control_eligible=True であっても到着時刻が記録されないことを確認
+- tests_order_control_node_arrival_times.py が正常実行
+- tests_vehicle_research_attributes.py が正常実行
+- tests_node_order_control_attributes.py が正常実行
+- tests_world_order_control_setters.py が正常実行
+- tests_order_control_eligibility.py が正常実行
+- tests_order_exchange_baseline.py が正常実行
+- demos_and_examples/example_00en_simple.py が正常実行
+
+関連コミット：
+
+- 481ea84 Record first arrival times at order-control nodes
+
 ## 現在までに追加した主なファイル
 
 - tests_order_exchange_baseline.py
@@ -521,6 +588,7 @@ set_order_control_for_nodes(...) の安全化：
 - tests_world_order_control_setters.py
 - tests_order_control_eligibility.py
 - tests_random_eligible_order_control.py
+- tests_order_control_node_arrival_times.py
 
 ## uxsim/uxsim.py の主な変更
 
@@ -533,6 +601,12 @@ set_order_control_for_nodes(...) の安全化：
 - order_exchange_log
 - participates_in_order_exchange
 - order_control_node_arrival_times
+
+Vehicleへの追加メソッド・処理：
+
+- record_order_control_node_first_arrival(node) を追加
+- order_control_node_arrival_times に、order-control対象Nodeへの初回到着時刻を記録する処理を追加
+- Vehicle.update() 内で incoming_vehicles.append(s) の直後に初回到着時刻記録処理を呼ぶようにした
 
 ### Nodeへの追加属性
 
@@ -622,7 +696,9 @@ Node.__init__(...) での追加チェック：
 ### 制御用状態と分析ログを分ける
 
 - order_control_node_arrival_times は、事後分析用ログではなく、FCFSなどの制御ロジックが参照する制御用状態である
-- 実際に到着時刻を記録する処理は後続フェーズで実装する
+- order_control_node_arrival_times への記録は、node.incoming_vehicles に入った時刻を到着時刻と定義する
+- 記録対象は order_control_eligible=True かつ order_control_type!="none" のNodeである
+- 同じVehicle・同じNodeについて既に記録済みの場合は上書きしない
 - 現時点では node.name をキーにする
 - 同一Vehicleが同一Nodeを複数回通る場合はキー設計の拡張が必要
 
@@ -630,13 +706,12 @@ Node.__init__(...) での追加チェック：
 
 次に進む候補：
 
-- VehicleがFCFS対象Node、またはより一般にorder-control対象Nodeの incoming_vehicles に初めて入った時刻を、order_control_node_arrival_times に記録する処理を設計・実装する
-- ただし、記録条件は慎重に設計する必要がある
-  - order_control_type=="fcfs" のNodeだけを対象にするか
-  - order_control_type!="none" のNode全般を対象にするか
-  - order_control_eligible=True も条件に含めるか
-- 到着時刻は初回のみ記録し、通過できずに次ステップ以降も incoming_vehicles に入り直しても上書きしない
-- Node.transfer() のFCFS分岐や方向切替・クリアランス制約は、まだ後続フェーズで扱う
+- 次は、FCFS用の Node.transfer() 分岐の設計に進む候補がある
+- ただし、その前に、方向切替・クリアランス制約をどこまで先に実装するか検討する必要がある
+- FCFSでは、order_control_node_arrival_times に記録された初回到着時刻を使って、通過可能候補の中から到着順に車両を選ぶ方向で検討する
+- 同時到着時の扱いは、現時点ではランダム順序を基本候補としているが、実装前に再確認する
+- Node.transfer() 内の実際のリンク間移動処理は、既存UXsim処理をできるだけ共通化・再利用する方針を維持する
+- Batch Processing と Time-value Transaction の実制御ロジックはまだ後続フェーズで扱う
 
 ## 新しいチャットで再開する場合
 
@@ -646,7 +721,7 @@ Node.__init__(...) での追加チェック：
 - ORDER_EXCHANGE_PHASE4_DESIGN_NOTES.md を読んでください
 - ORDER_EXCHANGE_RESEARCH_CONTEXT.md を読んでください
 - 現在のブランチは feature/intersection-order-control です
-- フェーズ4-1まで完了済みです
+- フェーズ4-2まで完了済みです
 - order_control_eligible の自動判定条件は、len(node.inlinks) >= 2 かつ len(node.outlinks) >= 1 に修正済みです
 - git log --oneline -20 と git status の結果を貼ります
-- 次は、order_control_node_arrival_times への到着時刻記録処理の設計・実装を検討する予定です
+- 次は、FCFS用の Node.transfer() 分岐や方向切替・クリアランス制約の設計・実装を検討する予定です
