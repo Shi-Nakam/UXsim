@@ -578,6 +578,36 @@ set_order_control_for_nodes(...) の安全化：
 
 - 481ea84 Record first arrival times at order-control nodes
 
+### フェーズ4-2完了後：FCFS transfer 詳細設計メモの作成
+
+完了済み。
+
+フェーズ4-2完了後の追加設計メモとして、`ORDER_EXCHANGE_FCFS_TRANSFER_DESIGN_NOTES.md` を新規作成した。
+
+#### 位置づけ
+
+| ファイル | 位置づけ |
+|----------|----------|
+| ORDER_EXCHANGE_PHASE4_DESIGN_NOTES.md | フェーズ3-5完了後、フェーズ4の制御ロジック本体に入る前の大枠設計メモ |
+| ORDER_EXCHANGE_FCFS_TRANSFER_DESIGN_NOTES.md | FCFS用 Node.transfer() 分岐の実装に入る直前の詳細設計メモ |
+
+新しいメモは、フェーズ4-2完了後、特にFCFS transfer実装に向けた具体的な設計論点を整理したものである。
+
+#### メモに整理した主な内容
+
+- 標準 Node.transfer() は outlink起点の処理であること
+- FCFSは Vehicle到着順起点の処理として設計すること
+- まず案A、つまりクリアランスなしFCFSを実装する方針であること
+- 案Aでは、到着順、容量制約、先頭Vehicle制約、outlink受入制約のみを扱い、方向切替・クリアランス制約はまだ入れないこと
+- 将来の案B、つまりクリアランスありFCFSでは、クリアランス待ちと容量制約による通過不能を区別する必要があること
+- 同時到着時の順序固定については、到着時刻そのものを書き換えず、将来的に tiebreaker を別管理する案を整理したこと
+- 実際のリンク間移動処理は副作用が多いため、将来的には共通ヘルパー化を検討するが、初回実装では慎重に進める必要があること
+- 次の実装フェーズでは、FCFS用 Node.transfer() 分岐の最小実装に進む予定であること
+
+関連コミット：
+
+- 4d317e3 Add FCFS transfer design notes
+
 ## 現在までに追加した主なファイル
 
 - tests_order_exchange_baseline.py
@@ -589,6 +619,7 @@ set_order_control_for_nodes(...) の安全化：
 - tests_order_control_eligibility.py
 - tests_random_eligible_order_control.py
 - tests_order_control_node_arrival_times.py
+- ORDER_EXCHANGE_FCFS_TRANSFER_DESIGN_NOTES.md
 
 ## uxsim/uxsim.py の主な変更
 
@@ -702,16 +733,25 @@ Node.__init__(...) での追加チェック：
 - 現時点では node.name をキーにする
 - 同一Vehicleが同一Nodeを複数回通る場合はキー設計の拡張が必要
 
+### FCFS transfer 実装方針（ORDER_EXCHANGE_FCFS_TRANSFER_DESIGN_NOTES.md 参照）
+
+- 標準 Node.transfer() は outlink起点、FCFSは Vehicle到着順起点として設計する
+- 初回実装は案A（クリアランスなしFCFS）とする
+- 方向切替・クリアランス制約、同時到着時 tiebreaker は後続フェーズで扱う
+- リンク間移動処理の共通化は将来検討するが、初回実装では慎重に進める
+
 ## 次に進む予定
+
+現在の進捗：
+
+- フェーズ4-2完了後、FCFS transfer設計メモ（ORDER_EXCHANGE_FCFS_TRANSFER_DESIGN_NOTES.md）の作成まで完了済み
 
 次に進む候補：
 
-- 次は、FCFS用の Node.transfer() 分岐の設計に進む候補がある
-- ただし、その前に、方向切替・クリアランス制約をどこまで先に実装するか検討する必要がある
-- FCFSでは、order_control_node_arrival_times に記録された初回到着時刻を使って、通過可能候補の中から到着順に車両を選ぶ方向で検討する
-- 同時到着時の扱いは、現時点ではランダム順序を基本候補としているが、実装前に再確認する
+- 案A：クリアランスなしFCFSとして、FCFS用 Node.transfer() 分岐の最小実装を検討・実装する
+- FCFSでは、order_control_node_arrival_times に記録された初回到着時刻を使って、通過可能候補の中から到着順に車両を選ぶ
 - Node.transfer() 内の実際のリンク間移動処理は、既存UXsim処理をできるだけ共通化・再利用する方針を維持する
-- Batch Processing と Time-value Transaction の実制御ロジックはまだ後続フェーズで扱う
+- 方向切替・クリアランス制約、同時到着時 tiebreaker、Batch Processing、Time-value Transaction は後続フェーズで扱う
 
 ## 新しいチャットで再開する場合
 
@@ -720,8 +760,9 @@ Node.__init__(...) での追加チェック：
 - ORDER_EXCHANGE_PROGRESS.md を読んでください
 - ORDER_EXCHANGE_PHASE4_DESIGN_NOTES.md を読んでください
 - ORDER_EXCHANGE_RESEARCH_CONTEXT.md を読んでください
+- ORDER_EXCHANGE_FCFS_TRANSFER_DESIGN_NOTES.md を読んでください
 - 現在のブランチは feature/intersection-order-control です
-- フェーズ4-2まで完了済みです
+- フェーズ4-2まで完了済みです（FCFS transfer 詳細設計メモの作成も完了）
 - order_control_eligible の自動判定条件は、len(node.inlinks) >= 2 かつ len(node.outlinks) >= 1 に修正済みです
 - git log --oneline -20 と git status の結果を貼ります
-- 次は、FCFS用の Node.transfer() 分岐や方向切替・クリアランス制約の設計・実装を検討する予定です
+- 次は、案A：クリアランスなしFCFSとして、FCFS用 Node.transfer() 分岐の最小実装を検討・実装する予定です
