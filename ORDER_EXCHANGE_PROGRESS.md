@@ -608,6 +608,105 @@ set_order_control_for_nodes(...) の安全化：
 
 - 4d317e3 Add FCFS transfer design notes
 
+### フェーズ4-3：初期版クリアランスなしFCFS transfer の実装
+
+完了済み。
+
+#### 実施内容
+
+- 案Aとして、クリアランスなしFCFS transfer の初期実装を行った
+- `Node.transfer()` の冒頭に、`order_control_eligible=True` かつ `order_control_type=="fcfs"` の場合だけ FCFS処理へ分岐する処理を追加した
+- FCFS対象Nodeでは、`Node.transfer()` から `transfer_fcfs()` を呼び、`return` により標準transfer処理との二重実行を避ける
+- `order_control_type="none"` のNodeでは、標準UXsimの `Node.transfer()` 処理を維持する
+- 標準 `Node.transfer()` の既存本体は、冒頭分岐追加以外変更していない
+- 標準 `Node.transfer()` の既存処理との共通ヘルパー化・関数分割は行っていない
+- Nodeクラスに `transfer_fcfs()` を追加した
+- `transfer_fcfs()` では、`incoming_vehicles` の中から `route_next_link` を持ち、対象Nodeへの初回到着時刻が記録されているVehicleを候補にする
+- 候補Vehicleを `order_control_node_arrival_times[node.name]` の早い順に安定ソートする
+- 各Vehicleについて、その時点の最新状態で通過可能性を判定する
+- 通過可能なVehicleは、標準 `Node.transfer()` と同等のリンク間移動処理により次Linkへ移す
+- 通過不能なVehicleは、その時点ではスキップし、次の到着順Vehicleを検討する
+- 1台通すたびに `capacity_in_remain`, `capacity_out_remain`, `flow_capacity_remain` などが更新されるため、後続Vehicleは更新後の条件で評価される
+- FCFS分岐では、標準UXsimの `signal_phase` / `signal_group` による信号条件は使わない
+- `transfer_fcfs()` の最後で、標準 `Node.transfer()` と同様に trip end待ちVehicleの処理を行い、最後に `incoming_vehicles` をクリアする
+
+#### 今回あえて実装していないこと
+
+- 方向切替・クリアランス制約はまだ未実装
+- 同時到着時の固定 tiebreaker はまだ未実装
+- Batch Processing はまだ未実装
+- Time-value Transaction はまだ未実装
+- 支払い・受け取り処理はまだ未実装
+- 通過ログ・順序ログはまだ未実装
+- 標準 `Node.transfer()` との共通ヘルパー化は行っていない
+- FCFS, Batch, Time-value のorder-control系共通ヘルパー化は、将来必要性が明確になった段階で検討する
+
+#### 追加・変更したファイル
+
+変更ファイル：
+
+- `uxsim/uxsim.py`
+  - `Node.transfer()` にFCFS分岐を追加
+  - `Node.transfer_fcfs()` を追加
+
+追加ファイル：
+
+- `tests_fcfs_order_control_transfer.py`
+  - FCFS transfer 初期実装用のスモークテストを追加
+
+#### tests_fcfs_order_control_transfer.py の内容
+
+- 2流入1流出の merge node を持つ最小ネットワークを作成
+- `W.infer_order_control_eligible_nodes()` により merge が `order_control_eligible=True` になることを確認
+- `W.set_order_control_for_nodes(["merge"], order_control_type="fcfs")` により merge をFCFS対象Nodeに設定
+- FCFSケースで、すべてのVehicleがtrip完了することを確認
+- FCFSケースで、すべてのVehicleについて merge への初回到着時刻が記録されることを確認
+- `order_control_type="none"` の標準ケースでもすべてのVehicleがtrip完了することを確認
+- `order_control_type="none"` の標準ケースでは、merge へのorder-control用到着時刻が記録されないことを確認
+
+#### 実行・確認したテスト
+
+新規テスト：
+
+- `python tests_fcfs_order_control_transfer.py` — 成功
+
+既存テスト：
+
+- `python tests_order_control_node_arrival_times.py` — 成功
+- `python tests_order_exchange_baseline.py` — 成功
+- `python tests_node_order_control_attributes.py` — 成功
+- `python tests_world_order_control_setters.py` — 成功
+- `python tests_order_control_eligibility.py` — 成功
+- `python tests_random_eligible_order_control.py` — 成功
+- `python tests_vehicle_research_attributes.py` — 成功
+- `python demos_and_examples/example_00en_simple.py` — 成功
+
+#### 標準挙動維持の確認
+
+`tests_order_exchange_baseline.py` について、FCFS実装前後で以下の主要交通結果が一致した。
+
+- number of completed trips: 48 / 48
+- total travel time: 2928.0 s
+- average travel time of trips: 61.0 s
+- average delay of trips: 1.0 s
+- delay ratio: 0.017
+- total distance traveled: 48000.0 m
+
+`demos_and_examples/example_00en_simple.py` について、FCFS実装前後で以下の主要交通結果が一致した。
+
+- number of completed trips: 735 / 810
+- total travel time: 119475.0 s
+- average travel time of trips: 162.6 s
+- average delay of trips: 62.6 s
+- delay ratio: 0.385
+- total distance traveled: 1632250.0 m
+
+setup time や computation time は実行環境により揺れるため、交通結果の一致確認対象からは除外した。
+
+関連コミット：
+
+- 984bda9 Add phase 4-3 initial clearance-free FCFS transfer
+
 ## 現在までに追加した主なファイル
 
 - tests_order_exchange_baseline.py
@@ -620,6 +719,7 @@ set_order_control_for_nodes(...) の安全化：
 - tests_random_eligible_order_control.py
 - tests_order_control_node_arrival_times.py
 - ORDER_EXCHANGE_FCFS_TRANSFER_DESIGN_NOTES.md
+- tests_fcfs_order_control_transfer.py
 
 ## uxsim/uxsim.py の主な変更
 
@@ -651,6 +751,12 @@ Node.__init__(...) での追加チェック：
 - order_control_eligible は bool のみ許可
 - order_control_type!="none" の場合、order_control_eligible=True が必要
 - order_control_type="none" は order_control_eligible=False でも許可
+
+Nodeへの追加メソッド・処理：
+
+- `transfer_fcfs()` を追加
+- `Node.transfer()` の冒頭に、`order_control_eligible=True` かつ `order_control_type=="fcfs"` の場合だけ `transfer_fcfs()` に分岐する処理を追加
+- `order_control_type="none"` のNodeでは標準 `Node.transfer()` の既存処理を維持
 
 ### Worldへの追加属性
 
@@ -736,22 +842,22 @@ Node.__init__(...) での追加チェック：
 ### FCFS transfer 実装方針（ORDER_EXCHANGE_FCFS_TRANSFER_DESIGN_NOTES.md 参照）
 
 - 標準 Node.transfer() は outlink起点、FCFSは Vehicle到着順起点として設計する
-- 初回実装は案A（クリアランスなしFCFS）とする
+- フェーズ4-3で案A（クリアランスなしFCFS）の初期実装を完了した
 - 方向切替・クリアランス制約、同時到着時 tiebreaker は後続フェーズで扱う
-- リンク間移動処理の共通化は将来検討するが、初回実装では慎重に進める
+- 標準 Node.transfer() との共通ヘルパー化は行っていない。order-control系共通ヘルパー化は将来必要性が明確になった段階で検討する
 
 ## 次に進む予定
 
 現在の進捗：
 
-- フェーズ4-2完了後、FCFS transfer設計メモ（ORDER_EXCHANGE_FCFS_TRANSFER_DESIGN_NOTES.md）の作成まで完了済み
+- フェーズ4-3として、案A：クリアランスなしFCFS transfer の初期実装まで完了済み
 
 次に進む候補：
 
-- 案A：クリアランスなしFCFSとして、FCFS用 Node.transfer() 分岐の最小実装を検討・実装する
-- FCFSでは、order_control_node_arrival_times に記録された初回到着時刻を使って、通過可能候補の中から到着順に車両を選ぶ
-- Node.transfer() 内の実際のリンク間移動処理は、既存UXsim処理をできるだけ共通化・再利用する方針を維持する
-- 方向切替・クリアランス制約、同時到着時 tiebreaker、Batch Processing、Time-value Transaction は後続フェーズで扱う
+- 今回実装したFCFS transferの挙動をより詳細に検証する追加テスト
+- または案B：クリアランスありFCFSに進む前の設計検討
+- 方向切替・クリアランス制約、同時到着時 tiebreaker、Batch Processing、Time-value Transaction、支払い処理は後続フェーズで扱う
+- 標準UXsim挙動を壊さない方針は引き続き最重要である
 
 ## 新しいチャットで再開する場合
 
@@ -762,7 +868,8 @@ Node.__init__(...) での追加チェック：
 - ORDER_EXCHANGE_RESEARCH_CONTEXT.md を読んでください
 - ORDER_EXCHANGE_FCFS_TRANSFER_DESIGN_NOTES.md を読んでください
 - 現在のブランチは feature/intersection-order-control です
-- フェーズ4-2まで完了済みです（FCFS transfer 詳細設計メモの作成も完了）
+- フェーズ4-3まで完了済みです
+- 984bda9 Add phase 4-3 initial clearance-free FCFS transfer までコミット済みです
 - order_control_eligible の自動判定条件は、len(node.inlinks) >= 2 かつ len(node.outlinks) >= 1 に修正済みです
 - git log --oneline -20 と git status の結果を貼ります
-- 次は、案A：クリアランスなしFCFSとして、FCFS用 Node.transfer() 分岐の最小実装を検討・実装する予定です
+- 次は、FCFS transferの詳細検証、または案B：クリアランスありFCFSに進む前の設計検討を行う段階です
