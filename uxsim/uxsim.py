@@ -336,6 +336,100 @@ class Node:
                 else:
                     break
 
+    def transfer_fcfs(s):
+        """
+        FCFS vehicle transfer at an order-control node (clearance-free initial implementation).
+        """
+        candidates = [
+            veh for veh in s.incoming_vehicles
+            if veh.route_next_link != None and s.name in veh.order_control_node_arrival_times
+        ]
+        candidates.sort(key=lambda veh: veh.order_control_node_arrival_times[s.name])
+
+        for veh in candidates:
+            if veh not in s.incoming_vehicles:
+                continue
+            outlink = veh.route_next_link
+            inlink = veh.link
+
+            if (
+                outlink != None
+                and len(inlink.vehicles) > 0
+                and veh == inlink.vehicles[0]
+                and (
+                    len(outlink.vehicles) < outlink.number_of_lanes
+                    or outlink.vehicles[-outlink.number_of_lanes].x > outlink.delta_per_lane*s.W.DELTAN
+                )
+                and outlink.capacity_in_remain >= s.W.DELTAN
+                and inlink.capacity_out_remain >= s.W.DELTAN
+                and s.flow_capacity_remain >= s.W.DELTAN
+            ):
+                #累積台数関連更新
+                inlink.cum_departure[-1] += s.W.DELTAN
+                outlink.cum_arrival[-1] += s.W.DELTAN
+                inlink.traveltime_actual[int(veh.link_arrival_time/s.W.DELTAT):] = s.W.T*s.W.DELTAT - veh.link_arrival_time
+
+                veh.link_arrival_time = s.W.T*s.W.DELTAT
+
+                inlink.capacity_out_remain -= s.W.DELTAN
+                outlink.capacity_in_remain -= s.W.DELTAN
+                if s.flow_capacity != None:
+                    s.flow_capacity_remain -= s.W.DELTAN
+
+                #リンク間遷移実行
+                inlink.vehicles.popleft()
+                outlink.vehicles_enter_log[s.W.T*s.W.DELTAT] = veh
+                veh.link = outlink
+                veh.x = 0
+
+                if veh.follower != None:
+                    veh.follower.leader = None
+                    veh.follower = None
+
+                if len(outlink.vehicles) > 0:
+                    veh.lane = (outlink.vehicles[-1].lane + 1)%outlink.number_of_lanes
+                else:
+                    veh.lane = 0
+
+                veh.leader = None
+                if len(outlink.vehicles) >= outlink.number_of_lanes:
+                    veh.leader = outlink.vehicles[-outlink.number_of_lanes]
+                    veh.leader.follower = veh
+                    assert veh.leader.lane == veh.lane
+
+                #走り残し処理
+                x_next = veh.move_remain*outlink.u/inlink.u
+                if veh.leader != None:
+                    x_cong = veh.leader.x_old - veh.link.delta_per_lane*veh.W.DELTAN
+                    if x_cong < veh.x:
+                        x_cong = veh.x
+                    if x_next > x_cong:
+                        x_next = x_cong
+
+                if x_next >= outlink.length:
+                    x_next = outlink.length
+
+                veh.x = x_next
+                veh.v += veh.x/s.W.DELTAT
+                veh.move_remain = 0
+
+                #今移動した車両の後続車両がトリップ終了待ちの場合，トリップ終了させる
+                if len(inlink.vehicles) and inlink.vehicles[0].flag_waiting_for_trip_end:
+                    inlink.vehicles[0].end_trip()
+
+                outlink.vehicles.append(veh)
+                s.incoming_vehicles.remove(veh)
+
+        #各リンクの先頭のトリップ終了待ち車両をトリップ終了させる
+        for link in s.inlinks.values():
+            for lane in range(link.number_of_lanes):
+                if len(link.vehicles) and link.vehicles[0].flag_waiting_for_trip_end:
+                    link.vehicles[0].end_trip()
+                else:
+                    break
+
+        s.incoming_vehicles = []
+
     def transfer(s):
         """
         Transfers vehicles between links at the node.
@@ -350,6 +444,10 @@ class Node:
         - The current link has enough capacity to allow the vehicle to exit.
         - The node capacity is not exceeded.
         """
+        if s.order_control_eligible and s.order_control_type == "fcfs":
+            s.transfer_fcfs()
+            return
+
         outlinks = []
         outlink_candidates = {veh.route_next_link:0 for veh in s.incoming_vehicles if veh.route_next_link != None}
         for outlink in outlink_candidates.keys():
