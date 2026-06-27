@@ -344,7 +344,13 @@ class Node:
             veh for veh in s.incoming_vehicles
             if veh.route_next_link != None and s.name in veh.order_control_node_arrival_times
         ]
-        candidates.sort(key=lambda veh: veh.order_control_node_arrival_times[s.name])
+        candidates.sort(
+            key=lambda veh: (
+                veh.order_control_node_arrival_times[s.name],
+                veh.order_control_node_arrival_tiebreakers[s.name],
+                veh.id,
+            )
+        )
 
         for veh in candidates:
             if veh not in s.incoming_vehicles:
@@ -1061,7 +1067,7 @@ class Vehicle:
     """
     Vehicle or platoon in a network.
 
-    Optional research attributes for order-exchange studies: vot_true, vot_declared, payment_paid, payment_received, order_exchange_log, participates_in_order_exchange, order_control_node_arrival_times.
+    Optional research attributes for order-exchange studies: vot_true, vot_declared, payment_paid, payment_received, order_exchange_log, participates_in_order_exchange, order_control_node_arrival_times, order_control_node_arrival_tiebreakers.
     """
     def __init__(s, W: "World", orig: Node|str, dest: Node|str, departure_time:int|float, name: str|None=None, route_pref: dict=None, route_choice_principle=None, mode: str="single_trip", links_prefer: list=[], links_avoid: list=[], trip_abort: int=1, departure_time_is_time_step: int=0, attribute=None, user_attribute=None, user_function=None, auto_rename=False, vot_true=None, vot_declared=None, payment_paid=0, payment_received=0, order_exchange_log=None, participates_in_order_exchange=False):
         """
@@ -1129,6 +1135,10 @@ class Vehicle:
             Intended primarily for FCFS ordering; may be reused for Batch Processing or Time-value Transaction later.
             Keys are node names (``node.name``) for now; if the same vehicle visits the same node more than once,
             the key design may need to be extended. Initialized to an empty dict.
+        order_control_node_arrival_tiebreakers : dict
+            Control state holding a fixed tiebreaker value for each order-control node at first arrival.
+            Used as the second sort key when multiple vehicles share the same first arrival time at a node.
+            Keys are node names (``node.name``). Initialized to an empty dict.
         """
 
         s.W = W
@@ -1226,6 +1236,7 @@ class Vehicle:
         s.order_exchange_log = [] if order_exchange_log is None else order_exchange_log
         s.participates_in_order_exchange = participates_in_order_exchange
         s.order_control_node_arrival_times = {}
+        s.order_control_node_arrival_tiebreakers = {}
 
         s.id = len(s.W.VEHICLES)
         if name != None:
@@ -1439,6 +1450,8 @@ class Vehicle:
 
         Only nodes with ``order_control_eligible=True`` and ``order_control_type != "none"`` are
         recorded. If an arrival time for ``node.name`` is already stored, it is not overwritten.
+        A fixed tiebreaker value is stored in ``order_control_node_arrival_tiebreakers`` at the
+        same first-arrival event and is not overwritten either.
         Keys are node names for now; if the same vehicle visits the same node more than once,
         the key design may need to be extended in the future.
         """
@@ -1449,6 +1462,7 @@ class Vehicle:
         if node.name in s.order_control_node_arrival_times:
             return
         s.order_control_node_arrival_times[node.name] = s.W.T * s.W.DELTAT
+        s.order_control_node_arrival_tiebreakers[node.name] = s.W.rng.random()
 
     def route_next_link_choice(s):
         """
