@@ -707,6 +707,170 @@ setup time や computation time は実行環境により揺れるため、交通
 
 - 984bda9 Add phase 4-3 initial clearance-free FCFS transfer
 
+### フェーズ4-3追加検証：FCFS arrival order と blocked-outlink skip のテスト追加
+
+完了済み。
+
+#### 位置づけ
+
+- これは新しいFCFS制御実装ではなく、フェーズ4-3で実装した初期版クリアランスなしFCFS transfer の詳細挙動を検証するためのテスト追加である
+- 案B：クリアランスありFCFSの実装ではない
+- tiebreaker、Batch Processing、Time-value Transaction、支払い処理は扱っていない
+
+#### 追加したファイル
+
+- `tests_fcfs_order_control_behavior.py`
+  - フェーズ4-3で実装した clearance-free FCFS transfer の詳細挙動を検証するテスト
+
+#### tests_fcfs_order_control_behavior.py の内容
+
+テスト1：`test_fcfs_arrival_order_matches_passing_order()`
+
+目的：
+
+- FCFS対象Nodeにおいて、先にmergeへ到着したVehicleが、後に到着したVehicleより先にmergeを通過することを確認する
+
+ネットワーク：
+
+- orig1 -> link1 -> merge -> out -> dest
+- orig2 -> link2 -> merge -> out -> dest
+- link1 = 200m
+- link2 = 600m
+- out = 500m
+- 全Linkは number_of_lanes=1
+- free_flow_speed=20
+- deltan=1
+- merge は order_control_type="fcfs"
+
+Vehicle：
+
+- veh_early: orig1 -> dest
+- veh_late: orig2 -> dest
+- 両方とも departure_time=0
+- link1を短くすることで veh_early が先にmergeへ到着する
+
+確認内容：
+
+- merge が order_control_eligible=True であること
+- merge が order_control_type="fcfs" であること
+- veh_early と veh_late の両方に order_control_node_arrival_times["merge"] が記録されること
+- veh_early のmerge到着時刻 < veh_late のmerge到着時刻であること
+- out.vehicles_enter_log に基づき、通過順が veh_early -> veh_late であること
+- veh_early と veh_late がtrip完了すること
+
+テスト2：`test_fcfs_skips_blocked_first_arrival_and_serves_next_feasible_vehicle()`
+
+目的：
+
+- 先にmergeへ到着したVehicleが、進みたいoutlinkの受入制約により通れない場合、後に到着したVehicleが別outlinkへ通れるなら、先着Vehicleをスキップして後続Vehicleを通すことを確認する
+
+ネットワーク：
+
+- orig1 -> link1 -> merge -> out1 -> dest1
+- orig2 -> link2 -> merge -> out2 -> dest2
+- link1 = 200m
+- link2 = 600m
+- out1 = 500m, capacity_in=0
+- out2 = 500m
+- 全Linkは number_of_lanes=1
+- free_flow_speed=20
+- deltan=1
+- merge は order_control_type="fcfs"
+
+Vehicle：
+
+- veh_early_blocked: orig1 -> dest1
+- veh_late_feasible: orig2 -> dest2
+- 両方とも departure_time=0
+- link1を短くすることで veh_early_blocked が先にmergeへ到着する
+- out1.capacity_in=0 により veh_early_blocked はmergeからout1へ入れない
+- out2は通常どおり受入可能で、veh_late_feasible はmergeからout2へ進める
+
+確認内容：
+
+- merge が order_control_eligible=True であること
+- merge が order_control_type="fcfs" であること
+- veh_early_blocked と veh_late_feasible の両方に order_control_node_arrival_times["merge"] が記録されること
+- veh_early_blocked のmerge到着時刻 < veh_late_feasible のmerge到着時刻であること
+- out1.vehicles_enter_log に veh_early_blocked が含まれないこと
+- out2.vehicles_enter_log に veh_late_feasible が含まれること
+- veh_late_feasible がtrip完了すること
+- veh_early_blocked はout1に入れないため、trip未完了でも許容すること
+
+#### 実行結果
+
+実行コマンド：
+
+```
+python tests_fcfs_order_control_behavior.py
+```
+
+結果：
+
+- FCFS arrival-order behavior test passed.
+- FCFS blocked-first-vehicle skip behavior test passed.
+- FCFS order control behavior tests all passed.
+
+つまり、両テストとも成功した。
+
+#### 今回のテスト追加によって確認できたこと
+
+- フェーズ4-3で実装した transfer_fcfs() が、order_control_node_arrival_times に基づき、到着順評価を行えていること
+- 到着順がそのまま通過順になる基本ケースが成立していること
+- 先着Vehicleがoutlink受入制約により通れない場合、そのVehicleをスキップし、後続の通過可能Vehicleを通せること
+- これは、将来の案B：クリアランスありFCFSに進む前に、案A：クリアランスなしFCFSの基本挙動を確認するための重要な回帰テストであること
+
+#### 今回のテストでまだ扱っていないこと
+
+- 先着Vehicleがinlink先頭車でないため通れないケースはまだ未検証
+- 同時到着時の挙動はまだ未検証
+- tiebreakerはまだ未実装・未検証
+- 方向切替・クリアランス制約はまだ未実装・未検証
+- Batch Processing と Time-value Transaction はまだ未実装・未検証
+- 支払い処理はまだ未実装・未検証
+
+#### 関連コミット
+
+- 09a0f3a Add tests for phase 4-3 FCFS arrival order and blocked-outlink skip
+
+このコミットは origin/feature/intersection-order-control に push 済みである。
+
+#### GitHubへの初回push
+
+今回、これまでローカルGitのみで管理していた feature/intersection-order-control ブランチを、初めて GitHub 上の origin に push した。
+
+実施内容：
+
+- origin が https://github.com/Shi-Nakam/UXsim.git を指していることを確認した
+- upstream が https://github.com/toruseo/UXsim.git を指していることを確認した
+- feature/intersection-order-control ブランチを origin に初回pushした
+- 初回pushのコマンドは `git push -u origin feature/intersection-order-control`
+- これにより、GitHub上に origin/feature/intersection-order-control ブランチが作成された
+- 以後、このローカルブランチは origin/feature/intersection-order-control をtrackingする状態になった
+- その後、09a0f3a も git push により GitHubへ反映済みである
+
+確認結果：
+
+- git status で `Your branch is up to date with 'origin/feature/intersection-order-control'.` を確認した
+- git branch -vv で feature/intersection-order-control が `[origin/feature/intersection-order-control]` をtrackingしていることを確認した
+- git log --oneline -5 で HEAD と origin/feature/intersection-order-control が 09a0f3a を指していることを確認した
+
+位置づけ：
+
+- これにより、フェーズ4-3までの実装、設計メモ、進捗メモ、詳細検証テストを含む作業履歴が、ローカルPCだけでなくGitHubにも保存された
+- 今後は、ローカルで git commit した後、区切りごとに git push によりGitHubへ退避する運用に移行する
+- これにより、PC故障・紛失・誤削除に対する安全性が向上した
+
+GitHub認証に関する補足：
+
+- 現時点では HTTPS + Personal Access Token (PAT) により GitHub push 認証を行っている
+- 今回作成したPATは 90 days の有効期限で作成した
+- その後の git push では、macOSの osxkeychain により認証情報が保存された可能性があり、PAT再入力なしで push に成功した
+- ただし、PATは期限切れになる可能性がある
+- 長期研究開発でGitHub運用に慣れてきた段階では、HTTPS + PAT から SSH 接続へ移行することを検討する
+- SSH接続に移行すれば、PAT更新やHTTPS認証まわりの手間を減らせる可能性がある
+- SSH移行は必須ではないが、長期運用では推奨される候補として記録しておく
+
 ## 現在までに追加した主なファイル
 
 - tests_order_exchange_baseline.py
@@ -720,6 +884,7 @@ setup time や computation time は実行環境により揺れるため、交通
 - tests_order_control_node_arrival_times.py
 - ORDER_EXCHANGE_FCFS_TRANSFER_DESIGN_NOTES.md
 - tests_fcfs_order_control_transfer.py
+- tests_fcfs_order_control_behavior.py
 
 ## uxsim/uxsim.py の主な変更
 
@@ -843,21 +1008,35 @@ Nodeへの追加メソッド・処理：
 
 - 標準 Node.transfer() は outlink起点、FCFSは Vehicle到着順起点として設計する
 - フェーズ4-3で案A（クリアランスなしFCFS）の初期実装を完了した
+- フェーズ4-3追加検証として、arrival-order behavior と blocked-outlink skip behavior の詳細検証テストまで追加済み
 - 方向切替・クリアランス制約、同時到着時 tiebreaker は後続フェーズで扱う
 - 標準 Node.transfer() との共通ヘルパー化は行っていない。order-control系共通ヘルパー化は将来必要性が明確になった段階で検討する
+
+### テスト追加方針
+
+- 新しい挙動テストを追加する際も、まずはテストのみを追加し、uxsim/uxsim.py を勝手に変更しない方針を維持する
+
+### GitHub運用
+
+- feature/intersection-order-control ブランチは origin/feature/intersection-order-control とtracking済み
+- 重要な区切りごとに git push して GitHub へ退避する
+- 現時点では HTTPS + PAT による認証。長期運用では SSH 移行を検討する余地がある
 
 ## 次に進む予定
 
 現在の進捗：
 
-- フェーズ4-3として、案A：クリアランスなしFCFS transfer の初期実装まで完了済み
+- フェーズ4-3の初期版クリアランスなしFCFS transfer について、arrival-order behavior と blocked-outlink skip behavior の詳細検証テストまで追加済み
 
 次に進む候補：
 
-- 今回実装したFCFS transferの挙動をより詳細に検証する追加テスト
-- または案B：クリアランスありFCFSに進む前の設計検討
+- 先着Vehicleがinlink先頭車でないため通れないケースの検証
+- 同時到着時の現状挙動の検証
+- 案B：クリアランスありFCFSに進む前の設計検討
 - 方向切替・クリアランス制約、同時到着時 tiebreaker、Batch Processing、Time-value Transaction、支払い処理は後続フェーズで扱う
 - 標準UXsim挙動を壊さない方針は引き続き最重要である
+- 新しい挙動テストを追加する際も、まずはテストのみを追加し、uxsim/uxsim.py を勝手に変更しない方針を維持する
+- 今後は、重要な区切りごとに git push して GitHub へ退避する
 
 ## 新しいチャットで再開する場合
 
@@ -868,8 +1047,11 @@ Nodeへの追加メソッド・処理：
 - ORDER_EXCHANGE_RESEARCH_CONTEXT.md を読んでください
 - ORDER_EXCHANGE_FCFS_TRANSFER_DESIGN_NOTES.md を読んでください
 - 現在のブランチは feature/intersection-order-control です
+- feature/intersection-order-control ブランチは origin/feature/intersection-order-control とtracking済みで、GitHubへpush済みです
 - フェーズ4-3まで完了済みです
-- 984bda9 Add phase 4-3 initial clearance-free FCFS transfer までコミット済みです
+- 09a0f3a Add tests for phase 4-3 FCFS arrival order and blocked-outlink skip まで完了・push済みです
+- フェーズ4-3実装に対する詳細検証として、arrival-order behavior と blocked-outlink skip behavior は確認済みです
 - order_control_eligible の自動判定条件は、len(node.inlinks) >= 2 かつ len(node.outlinks) >= 1 に修正済みです
 - git log --oneline -20 と git status の結果を貼ります
-- 次は、FCFS transferの詳細検証、または案B：クリアランスありFCFSに進む前の設計検討を行う段階です
+- 次は、inlink先頭車制約ケース、同時到着ケース、または案B：クリアランスありFCFSの設計検討に進む段階です
+- GitHub運用は現在 HTTPS + PAT。将来的にSSH移行を検討する余地があります
