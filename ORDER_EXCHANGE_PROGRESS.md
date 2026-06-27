@@ -871,6 +871,161 @@ GitHub認証に関する補足：
 - SSH接続に移行すれば、PAT更新やHTTPS認証まわりの手間を減らせる可能性がある
 - SSH移行は必須ではないが、長期運用では推奨される候補として記録しておく
 
+### フェーズ4-4：FCFS同時到着時の固定tiebreaker実装と検証テスト追加
+
+完了済み。
+
+#### 位置づけ
+
+- フェーズ4-4では、フェーズ4-3で実装した初期版クリアランスなしFCFS transferに対して、同時到着時の順位を固定するためのtiebreakerを追加した
+- これは案B：クリアランスありFCFSに進む前の前提整備である
+- クリアランス制約そのものはまだ実装していない
+- Batch Processing、Time-value Transaction、支払い処理もまだ実装していない
+
+#### uxsim/uxsim.py の変更内容
+
+Vehicleへの追加属性：
+
+- Vehicleに `order_control_node_arrival_tiebreakers = {}` を追加した
+- この属性は、order-control対象Nodeごとに、同時到着時の固定補助順位を保存する辞書である
+- キーは `node.name`
+- 値は初回到着時に生成された固定tiebreaker値である
+- `order_control_node_arrival_times` と対になる制御用属性である
+
+`record_order_control_node_first_arrival(node)` の変更：
+
+- order-control対象Nodeへの初回到着時に、arrival_time と tiebreaker を同時に記録するようにした
+- arrival_time は `order_control_node_arrival_times[node.name]` に記録する
+- tiebreaker は `order_control_node_arrival_tiebreakers[node.name]` に記録する
+- tiebreaker は `s.W.rng.random()` により生成する
+- Python標準の `random.random()` は使っていない
+- 同一Vehicle・同一Nodeについて、arrival_time も tiebreaker も初回のみ記録し、以後上書きしない
+- arrival_time そのものは補正・変更していない
+- tiebreaker は同時到着Vehicleに限らず、order-control対象Nodeへ初回到着したすべてのVehicleに記録する。ただし、ソートでは arrival_time が第1キーなので、arrival_time が異なるVehicle同士では tiebreaker は実質的に順位に影響しない
+
+`transfer_fcfs()` の変更：
+
+- FCFS候補Vehicleのソートキーを、従来の arrival_time のみから、以下の3要素に変更した
+  1. `order_control_node_arrival_times[node.name]`
+  2. `order_control_node_arrival_tiebreakers[node.name]`
+  3. `veh.id`
+- つまり、実装上は概念的に以下のソートキーになっている
+
+  `(arrival_time, tiebreaker, veh.id)`
+
+- 第1キーは実際の初回到着時刻
+- 第2キーは同時到着時の固定tiebreaker
+- 第3キーの `veh.id` は、万一 tiebreaker まで同値だった場合の決定的な最終タイブレークである
+- `transfer_fcfs()` 内では新しい乱数を引かず、記録済みのtiebreakerと既存の `veh.id` を読むだけである
+- 通過可否判定や blocked-outlink skip の処理本体は変更していない
+- 方向切替・クリアランス制約はまだ入れていない
+
+blocked-outlink skip の意味：
+
+- ここでいう blocked-outlink skip とは、先に到着したVehicleが、進みたいoutlinkの受入制約により通過できない場合に、そのVehicleをその時点ではスキップし、到着順で後順位のVehicleが別outlinkへ通過可能であれば通す、という現在の案A：クリアランスなしFCFSの挙動を指す
+- 今回のtiebreaker実装では、評価順を `(arrival_time, tiebreaker, veh.id)` に変更したが、その評価順が決まった後の blocked-outlink skip の処理本体は変更していない
+
+#### 追加したテストファイル
+
+- `tests_fcfs_order_control_tiebreaker.py`
+  - FCFS同時到着時の固定tiebreakerが正しく機能することを確認するテスト
+
+#### tests_fcfs_order_control_tiebreaker.py の内容
+
+テスト：`test_fcfs_tiebreaker_orders_simultaneous_arrivals()`
+
+目的：
+
+- 同じタイムステップに merge へ同時到着した2台のVehicleについて、arrival_time が同じ場合に、固定tiebreaker順に merge を通過することを確認する
+
+ネットワーク：
+
+- orig1 -> link1 -> merge -> out -> dest
+- orig2 -> link2 -> merge -> out -> dest
+- link1 = 400m
+- link2 = 400m
+- out = 500m
+- 全Linkは number_of_lanes=1
+- free_flow_speed=20
+- deltan=1
+- random_seed=0
+- merge は order_control_type="fcfs"
+
+Vehicle：
+
+- veh_tie_1: orig1 -> dest
+- veh_tie_2: orig2 -> dest
+- 両方とも departure_time=0
+- link1 と link2 を同じ長さ・同じ速度にすることで、veh_tie_1 と veh_tie_2 が merge に同時到着するようにしている
+
+確認内容：
+
+- merge が order_control_eligible=True であること
+- merge が order_control_type="fcfs" であること
+- veh_tie_1 と veh_tie_2 の両方に order_control_node_arrival_times["merge"] が記録されること
+- veh_tie_1 と veh_tie_2 の両方に order_control_node_arrival_tiebreakers["merge"] が記録されること
+- veh_tie_1 と veh_tie_2 の arrival_time が等しいこと
+- 同時到着しなかった場合は、「同時到着せず」として arrival_time を含むassertメッセージを出すこと
+- tiebreaker が数値として取得できること
+- veh.id が両車で異なること
+- expected_order を transfer_fcfs() と同じソートキー、つまり `(arrival_time, tiebreaker, veh.id)` で作ること
+- out.vehicles_enter_log から actual_order を取得すること
+- actual_order == expected_order であること
+- tiebreaker順に通過しなかった場合は、「tiebreaker順に通過せず」として expected_order, actual_order, arrival_time, tiebreaker, veh.id を含むassertメッセージを出すこと
+- veh_tie_1 と veh_tie_2 がtrip完了すること
+
+#### 実行結果
+
+実行コマンド：
+
+```
+python tests_fcfs_order_control_tiebreaker.py
+```
+
+結果：
+
+- FCFS simultaneous-arrival tiebreaker test passed.
+
+既存FCFS挙動が壊れていないことを確認するため、以下も実行済みである。
+
+実行コマンド：
+
+```
+python tests_fcfs_order_control_behavior.py
+```
+
+結果：
+
+- FCFS arrival-order behavior test passed.
+- FCFS blocked-first-vehicle skip behavior test passed.
+- FCFS order control behavior tests all passed.
+
+#### 今回確認できたこと
+
+- 同時到着時に arrival_time が同じ値として記録されること
+- tiebreaker のために arrival_time そのものを補正していないこと
+- tiebreaker が order-control対象Nodeへの初回到着時に固定値として記録されること
+- transfer_fcfs() が `(arrival_time, tiebreaker, veh.id)` に基づいて候補Vehicleを評価できること
+- 同時到着Vehicleについて、固定tiebreaker順に通過順が決まること
+- 既存の arrival-order behavior と blocked-outlink skip behavior が維持されていること
+- 今回のtiebreaker実装は、将来の案B：クリアランスありFCFSにおいて、同時到着時の優先順位を固定するための前提整備であること
+
+#### 今回まだ扱っていないこと
+
+- 方向切替・クリアランス制約はまだ未実装
+- クリアランス待ちと容量制約による通過不能の区別はまだ未実装
+- 先順位Vehicleがクリアランス待ちの場合に、後順位Vehicleが先順位Vehicleを追い越せないようにするルールはまだ未実装
+- Batch Processing はまだ未実装
+- Time-value Transaction はまだ未実装
+- 支払い処理はまだ未実装
+- tiebreaker まで同値になった場合に veh.id が第3キーとして機能することの人工的な専用テストは、今回は追加していない。ただし expected_order には実装と同じく veh.id を含めている
+
+#### 関連コミット
+
+- d3f3c4d phase 4-4: add FCFS arrival tiebreakers and tests
+
+このコミットは origin/feature/intersection-order-control に push 済みである。
+
 ## 現在までに追加した主なファイル
 
 - tests_order_exchange_baseline.py
@@ -885,6 +1040,7 @@ GitHub認証に関する補足：
 - ORDER_EXCHANGE_FCFS_TRANSFER_DESIGN_NOTES.md
 - tests_fcfs_order_control_transfer.py
 - tests_fcfs_order_control_behavior.py
+- tests_fcfs_order_control_tiebreaker.py
 
 ## uxsim/uxsim.py の主な変更
 
@@ -897,12 +1053,21 @@ GitHub認証に関する補足：
 - order_exchange_log
 - participates_in_order_exchange
 - order_control_node_arrival_times
+- order_control_node_arrival_tiebreakers
 
 Vehicleへの追加メソッド・処理：
 
 - record_order_control_node_first_arrival(node) を追加
 - order_control_node_arrival_times に、order-control対象Nodeへの初回到着時刻を記録する処理を追加
+- order_control_node_arrival_tiebreakers に、初回到着時の固定tiebreaker値を記録する処理を追加
 - Vehicle.update() 内で incoming_vehicles.append(s) の直後に初回到着時刻記録処理を呼ぶようにした
+
+Vehicleの初回order-control Node到着記録：
+
+- record_order_control_node_first_arrival(node) で、arrival_time と tiebreaker を初回のみ同時記録
+- arrival_time は補正しない
+- tiebreaker は s.W.rng.random() により生成
+- 同一Vehicle・同一Nodeについて、arrival_time も tiebreaker も上書きしない
 
 ### Nodeへの追加属性
 
@@ -922,6 +1087,13 @@ Nodeへの追加メソッド・処理：
 - `transfer_fcfs()` を追加
 - `Node.transfer()` の冒頭に、`order_control_eligible=True` かつ `order_control_type=="fcfs"` の場合だけ `transfer_fcfs()` に分岐する処理を追加
 - `order_control_type="none"` のNodeでは標準 `Node.transfer()` の既存処理を維持
+
+Node.transfer_fcfs()：
+
+- FCFS候補Vehicleのソートキーを `(arrival_time, tiebreaker, veh.id)` に変更
+- tiebreakerは同時到着時の固定補助順位
+- veh.id は tiebreaker同値時の決定的な最終タイブレーク
+- FCFSの通過可否判定や blocked-outlink skip 本体は変更していない
 
 ### Worldへの追加属性
 
@@ -998,9 +1170,12 @@ Nodeへの追加メソッド・処理：
 ### 制御用状態と分析ログを分ける
 
 - order_control_node_arrival_times は、事後分析用ログではなく、FCFSなどの制御ロジックが参照する制御用状態である
+- order_control_node_arrival_tiebreakers は、同時到着時の固定補助順位を保持する制御用状態である
 - order_control_node_arrival_times への記録は、node.incoming_vehicles に入った時刻を到着時刻と定義する
+- order_control_node_arrival_tiebreakers への記録は、初回到着時に s.W.rng.random() で生成した固定値とする
 - 記録対象は order_control_eligible=True かつ order_control_type!="none" のNodeである
 - 同じVehicle・同じNodeについて既に記録済みの場合は上書きしない
+- arrival_time そのものは tiebreaker のために補正しない
 - 現時点では node.name をキーにする
 - 同一Vehicleが同一Nodeを複数回通る場合はキー設計の拡張が必要
 
@@ -1009,7 +1184,9 @@ Nodeへの追加メソッド・処理：
 - 標準 Node.transfer() は outlink起点、FCFSは Vehicle到着順起点として設計する
 - フェーズ4-3で案A（クリアランスなしFCFS）の初期実装を完了した
 - フェーズ4-3追加検証として、arrival-order behavior と blocked-outlink skip behavior の詳細検証テストまで追加済み
-- 方向切替・クリアランス制約、同時到着時 tiebreaker は後続フェーズで扱う
+- フェーズ4-4で同時到着時の固定tiebreaker実装と検証テストまで追加済み
+- FCFS候補Vehicleのソートキーは `(arrival_time, tiebreaker, veh.id)` である
+- 方向切替・クリアランス制約は後続フェーズで扱う
 - 標準 Node.transfer() との共通ヘルパー化は行っていない。order-control系共通ヘルパー化は将来必要性が明確になった段階で検討する
 
 ### テスト追加方針
@@ -1026,17 +1203,18 @@ Nodeへの追加メソッド・処理：
 
 現在の進捗：
 
-- フェーズ4-3の初期版クリアランスなしFCFS transfer について、arrival-order behavior と blocked-outlink skip behavior の詳細検証テストまで追加済み
+- フェーズ4-4として、FCFS同時到着時の固定tiebreaker実装とテスト追加まで完了済み
 
 次に進む候補：
 
-- 先着Vehicleがinlink先頭車でないため通れないケースの検証
-- 同時到着時の現状挙動の検証
 - 案B：クリアランスありFCFSに進む前の設計検討
-- 方向切替・クリアランス制約、同時到着時 tiebreaker、Batch Processing、Time-value Transaction、支払い処理は後続フェーズで扱う
+- 案Bでは、inlinkが異なる場合を異方向切替とみなし、クリアランス制約をどう導入するかを検討する必要がある
+- クリアランスありFCFSでは、クリアランス待ちによる通過不能と容量・物理制約による通過不能を区別する必要がある
+- 先順位Vehicleがクリアランス待ちの場合に、後順位Vehicleが先順位Vehicleを追い越せないようにするルールをどう実装するかが重要論点である
+- Batch Processing、Time-value Transaction、支払い処理は後続フェーズで扱う
 - 標準UXsim挙動を壊さない方針は引き続き最重要である
 - 新しい挙動テストを追加する際も、まずはテストのみを追加し、uxsim/uxsim.py を勝手に変更しない方針を維持する
-- 今後は、重要な区切りごとに git push して GitHub へ退避する
+- 重要な区切りごとに git push して GitHub へ退避する運用を継続する
 
 ## 新しいチャットで再開する場合
 
@@ -1048,10 +1226,12 @@ Nodeへの追加メソッド・処理：
 - ORDER_EXCHANGE_FCFS_TRANSFER_DESIGN_NOTES.md を読んでください
 - 現在のブランチは feature/intersection-order-control です
 - feature/intersection-order-control ブランチは origin/feature/intersection-order-control とtracking済みで、GitHubへpush済みです
-- フェーズ4-3まで完了済みです
-- 09a0f3a Add tests for phase 4-3 FCFS arrival order and blocked-outlink skip まで完了・push済みです
+- フェーズ4-4まで完了済みです
+- d3f3c4d phase 4-4: add FCFS arrival tiebreakers and tests まで完了・push済みです
+- フェーズ4-4として、FCFS同時到着時の固定tiebreaker実装と検証テストが完了しています
 - フェーズ4-3実装に対する詳細検証として、arrival-order behavior と blocked-outlink skip behavior は確認済みです
 - order_control_eligible の自動判定条件は、len(node.inlinks) >= 2 かつ len(node.outlinks) >= 1 に修正済みです
 - git log --oneline -20 と git status の結果を貼ります
-- 次は、inlink先頭車制約ケース、同時到着ケース、または案B：クリアランスありFCFSの設計検討に進む段階です
+- 次は、案B：クリアランスありFCFSに進む前の設計検討を行う段階です
+- 案Bでは、inlinkが異なる場合を異方向切替とみなし、クリアランス制約、クリアランス待ち時の優先権保持、容量制約との区別を検討する必要があります
 - GitHub運用は現在 HTTPS + PAT。将来的にSSH移行を検討する余地があります
