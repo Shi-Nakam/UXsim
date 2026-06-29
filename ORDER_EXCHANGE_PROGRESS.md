@@ -1026,6 +1026,103 @@ python tests_fcfs_order_control_behavior.py
 
 このコミットは origin/feature/intersection-order-control に push 済みである。
 
+### フェーズ4-5設計：クリアランスありFCFS正式設計メモの追加
+
+完了済み。
+
+#### 位置づけ
+
+- phase 4-5として、案B：クリアランスありFCFSの正式設計メモを追加した
+- 今回は設計メモ作成のみであり、コード実装はまだ行っていない
+- クリアランスありFCFSは、本研究で評価対象とする本来のFCFSモデルとして位置づける
+- クリアランスなしFCFSは、実装検証用・デバッグ用・退避用として残す方針である
+- Batch Processing、Time-value Transaction、支払い処理はまだ実装していない
+
+#### 追加したファイル
+
+- `ORDER_EXCHANGE_PHASE4-5_CLEARANCE_FCFS_DESIGN_NOTES.md`
+  - phase 4-5：案BクリアランスありFCFSの正式設計メモ
+
+#### 設計メモに含めた主な内容
+
+- 案A：クリアランスなしFCFSと、案B：クリアランスありFCFSの位置づけ
+- 既存 `transfer_fcfs()` を `transfer_fcfs_no_clearance()` に改名して、回帰確認・デバッグ用として残す方針
+- 案B用に `transfer_fcfs_clearance()` を新設する方針
+- 最終的に `order_control_type="fcfs"` は `transfer_fcfs_clearance()` を呼ぶ想定であること
+- `transfer_fcfs_clearance()` が、既存FCFS処理から何を踏襲し、何を変更し、何を追加するか
+- inlink が異なれば異方向切替とみなすこと
+- `clearance_timesteps` の意味
+- `clearance_timesteps = 0` の意味
+- `clearance_timesteps` はFCFSだけでなく、将来のBatch Processing、Time-value Transactionにも共通に適用する想定であること
+- World共通clearance設定と setter 方針
+- Nodeに必要な状態
+  - `order_control_clearance_timesteps`
+  - `last_order_control_inlink`
+  - `last_order_control_entry_timestep`
+- 通過後に `last_order_control_inlink` と `last_order_control_entry_timestep` を更新する方針
+- 同一タイムステップ内の複数通過ルール
+- X/Y/Z問題
+- 修正版の判定順
+- シナリオ1〜3との整合確認
+- 通過不能理由の扱い
+- phase 4-5 実装順序案
+- phase 4-5 テスト方針
+- 未解決・注意事項
+
+#### X/Y/Z問題
+
+- 方向A：車X、先着順位1
+- 方向B：車Y、先着順位2
+- 方向A：車Z、先着順位3
+
+単純に、
+
+- 容量・物理制約NGなら continue
+- クリアランスNGなら break
+
+とすると、Xが容量制約で通れず、Yも容量制約で通れない場合に、Zが検討されてしまい、方向Bの先順位Vehicle Yを方向Aの後順位Vehicle Zが追い越す可能性がある。
+
+このため、単純な continue / break 設計では不十分である。
+
+#### 修正版の判定順
+
+候補Vehicleは、既存のFCFS順序に従い、
+
+```
+(arrival_time, tiebreaker, veh.id)
+```
+
+の順で評価する。
+
+各候補Vehicleについて、以下の順で判定する。
+
+1. 候補Vehicleの inlink を取得する。
+2. 直近通過 inlink と比較する。
+3. 異方向で、かつクリアランス未充足なら、容量・物理制約を見る前に break する。
+4. クリアランス不要またはクリアランス充足の場合に限り、容量・物理制約を見る。
+5. 容量・物理制約NGなら continue する。
+6. 容量・物理制約OKなら通過させる。
+7. 通過後、`last_order_control_inlink` と `last_order_control_entry_timestep` を更新する。
+
+この修正版判定順により、少なくとも設計メモで検討したシナリオ1〜3には整合的に対応できる見通しが立った。
+
+#### 今回まだ実装していないこと
+
+- `transfer_fcfs()` の `transfer_fcfs_no_clearance()` への改名はまだ未実装
+- `transfer_fcfs_clearance()` はまだ未実装
+- Nodeへの clearance用状態追加はまだ未実装
+- World共通clearance設定はまだ未実装
+- World共通clearance設定用setterはまだ未実装
+- `Node.transfer()` の fcfs 分岐切替はまだ未実装
+- phase 4-5用のクリアランスありFCFSテストはまだ未実装
+- Batch Processing、Time-value Transaction、支払い処理はまだ未実装
+
+#### 関連コミット
+
+- c060dce phase 4-5: add clearance FCFS design notes
+
+このコミットは origin/feature/intersection-order-control に push 済みである。
+
 ## 現在までに追加した主なファイル
 
 - tests_order_exchange_baseline.py
@@ -1041,6 +1138,7 @@ python tests_fcfs_order_control_behavior.py
 - tests_fcfs_order_control_transfer.py
 - tests_fcfs_order_control_behavior.py
 - tests_fcfs_order_control_tiebreaker.py
+- ORDER_EXCHANGE_PHASE4-5_CLEARANCE_FCFS_DESIGN_NOTES.md
 
 ## uxsim/uxsim.py の主な変更
 
@@ -1185,9 +1283,20 @@ Node.transfer_fcfs()：
 - フェーズ4-3で案A（クリアランスなしFCFS）の初期実装を完了した
 - フェーズ4-3追加検証として、arrival-order behavior と blocked-outlink skip behavior の詳細検証テストまで追加済み
 - フェーズ4-4で同時到着時の固定tiebreaker実装と検証テストまで追加済み
+- フェーズ4-5設計として、案B（クリアランスありFCFS）の正式設計メモを追加済み（実装は未着手）
 - FCFS候補Vehicleのソートキーは `(arrival_time, tiebreaker, veh.id)` である
-- 方向切替・クリアランス制約は後続フェーズで扱う
 - 標準 Node.transfer() との共通ヘルパー化は行っていない。order-control系共通ヘルパー化は将来必要性が明確になった段階で検討する
+
+### クリアランスありFCFS設計方針（ORDER_EXCHANGE_PHASE4-5_CLEARANCE_FCFS_DESIGN_NOTES.md 参照）
+
+- phase 4-5では、クリアランスありFCFSを実装する
+- 研究上のFCFSモデルは、原則としてクリアランスありFCFSである
+- クリアランスなしFCFSは、検証用・デバッグ用・退避用として残す
+- inlinkを方向代理変数とし、inlinkが異なれば異方向切替とみなす
+- 異方向切替時には `clearance_timesteps` に基づく制約を課す
+- 異方向かつクリアランス未充足のVehicleは、容量・物理制約を見る前に break する
+- クリアランス不要またはクリアランス充足後に容量・物理制約で通れないVehicleは continue できる
+- 標準UXsim挙動を壊さない方針は引き続き最重要である
 
 ### テスト追加方針
 
@@ -1203,14 +1312,18 @@ Node.transfer_fcfs()：
 
 現在の進捗：
 
-- フェーズ4-4として、FCFS同時到着時の固定tiebreaker実装とテスト追加まで完了済み
+- phase 4-5：クリアランスありFCFSの正式設計メモ作成まで完了済み
 
 次に進む候補：
 
-- 案B：クリアランスありFCFSに進む前の設計検討
-- 案Bでは、inlinkが異なる場合を異方向切替とみなし、クリアランス制約をどう導入するかを検討する必要がある
-- クリアランスありFCFSでは、クリアランス待ちによる通過不能と容量・物理制約による通過不能を区別する必要がある
-- 先順位Vehicleがクリアランス待ちの場合に、後順位Vehicleが先順位Vehicleを追い越せないようにするルールをどう実装するかが重要論点である
+- 設計メモに基づいて phase 4-5 の実装計画、または実装プロンプトの作成に進む
+- 実装では、まず以下を慎重に扱う必要がある
+  - `transfer_fcfs()` を `transfer_fcfs_no_clearance()` に改名すること
+  - `transfer_fcfs_clearance()` を新設すること
+  - clearance用Node状態を追加すること
+  - World共通clearance設定を追加すること
+  - 修正版判定順を実装すること
+  - X/Y/Z問題をテストで確認すること
 - Batch Processing、Time-value Transaction、支払い処理は後続フェーズで扱う
 - 標準UXsim挙動を壊さない方針は引き続き最重要である
 - 新しい挙動テストを追加する際も、まずはテストのみを追加し、uxsim/uxsim.py を勝手に変更しない方針を維持する
@@ -1224,14 +1337,17 @@ Node.transfer_fcfs()：
 - ORDER_EXCHANGE_PHASE4_DESIGN_NOTES.md を読んでください
 - ORDER_EXCHANGE_RESEARCH_CONTEXT.md を読んでください
 - ORDER_EXCHANGE_FCFS_TRANSFER_DESIGN_NOTES.md を読んでください
+- ORDER_EXCHANGE_PHASE4-5_CLEARANCE_FCFS_DESIGN_NOTES.md を読んでください
 - 現在のブランチは feature/intersection-order-control です
 - feature/intersection-order-control ブランチは origin/feature/intersection-order-control とtracking済みで、GitHubへpush済みです
-- フェーズ4-4まで完了済みです
-- d3f3c4d phase 4-4: add FCFS arrival tiebreakers and tests まで完了・push済みです
+- フェーズ4-5設計まで完了済みです（コード実装は未着手）
+- c060dce phase 4-5: add clearance FCFS design notes まで完了・push済みです
+- phase 4-5として、クリアランスありFCFSの正式設計メモは作成済みです
+- まだコード実装はしていません
 - フェーズ4-4として、FCFS同時到着時の固定tiebreaker実装と検証テストが完了しています
 - フェーズ4-3実装に対する詳細検証として、arrival-order behavior と blocked-outlink skip behavior は確認済みです
 - order_control_eligible の自動判定条件は、len(node.inlinks) >= 2 かつ len(node.outlinks) >= 1 に修正済みです
 - git log --oneline -20 と git status の結果を貼ります
-- 次は、案B：クリアランスありFCFSに進む前の設計検討を行う段階です
-- 案Bでは、inlinkが異なる場合を異方向切替とみなし、クリアランス制約、クリアランス待ち時の優先権保持、容量制約との区別を検討する必要があります
+- 次は、設計メモに基づいて phase 4-5 の実装計画または実装プロンプト作成に進む段階です
+- X/Y/Z問題と修正版判定順を必ず確認してください
 - GitHub運用は現在 HTTPS + PAT。将来的にSSH移行を検討する余地があります
