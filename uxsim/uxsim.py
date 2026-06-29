@@ -173,6 +173,11 @@ class Node:
         s.batch_size = batch_size
         s.transaction_case = transaction_case
         s.order_control_eligible = order_control_eligible
+        # order-control用の方向切替・クリアランス状態。
+        # 標準UXsimのtransfer処理では直接参照しない。
+        s.order_control_clearance_timesteps = W.order_control_clearance_timesteps
+        s.last_order_control_inlink = None
+        s.last_order_control_entry_timestep = None
         
         #incoming/outgoing links
         s.inlinks: dict[str,Link] = dict()
@@ -1956,6 +1961,7 @@ class World:
         W.user_function = user_function
 
         W.order_control_eligibility_prepared = False
+        W.order_control_clearance_timesteps = 1
 
     def addNode(W, name: str, x: float, y: float, signal: list[float]=[0], signal_offset: float=0, signal_offset_old: float|None=None, flow_capacity: float|None=None, number_of_lanes: int=None, auto_rename=False, attribute=None, user_attribute=None, user_function=None, order_control_type="none", batch_size=1, transaction_case=None, order_control_eligible=False) -> Node:
         """
@@ -2076,6 +2082,32 @@ class World:
             configured_nodes.append(node)
 
         return configured_nodes
+
+    def set_order_control_clearance_timesteps(W, clearance_timesteps):
+        """
+        Set the world-wide direction-change clearance interval for order-control nodes.
+
+        Parameters
+        ----------
+        clearance_timesteps : int
+            Number of timesteps required before a vehicle from a different inlink may enter
+            after the most recent entry at an order-control node. Must be a non-negative
+            integer. Shared across FCFS, Batch Processing, and Time-value Transaction.
+
+        Notes
+        -----
+        Updates W.order_control_clearance_timesteps and assigns the same value to every
+        existing node. New nodes created via addNode(...) inherit the current world value
+        at creation time. This setter only updates clearance configuration values.
+        """
+        if not isinstance(clearance_timesteps, int) or isinstance(clearance_timesteps, bool):
+            raise ValueError("order_control_clearance_timesteps must be a non-negative integer.")
+        if clearance_timesteps < 0:
+            raise ValueError("order_control_clearance_timesteps must be a non-negative integer.")
+
+        W.order_control_clearance_timesteps = clearance_timesteps
+        for node in W.NODES:
+            node.order_control_clearance_timesteps = clearance_timesteps
 
     def infer_order_control_eligible_nodes(W):
         """
