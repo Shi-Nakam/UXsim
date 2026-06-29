@@ -173,8 +173,9 @@ class Node:
         s.batch_size = batch_size
         s.transaction_case = transaction_case
         s.order_control_eligible = order_control_eligible
-        # order-control用の方向切替・クリアランス状態。
-        # 標準UXsimのtransfer処理では直接参照しない。
+        # World共通のorder-control clearance設定を、Nodeごとの参照値として保持する。
+        # last_order_control_* は、clearance-awareなorder-control transferで、
+        # 直近にこのNodeへ進入したVehicleのinlinkと進入タイムステップを記録するための初期値。
         s.order_control_clearance_timesteps = W.order_control_clearance_timesteps
         s.last_order_control_inlink = None
         s.last_order_control_entry_timestep = None
