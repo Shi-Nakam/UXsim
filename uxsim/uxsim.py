@@ -336,9 +336,14 @@ class Node:
                 else:
                     break
 
-    def transfer_fcfs(s):
+    # クリアランスなしFCFS。回帰確認・デバッグ用に残す。
+    # 本研究で評価対象とする最終的なFCFSモデルとしては使用しない。
+    def transfer_fcfs_no_clearance(s):
         """
-        FCFS vehicle transfer at an order-control node (clearance-free initial implementation).
+        FCFS vehicle transfer at an order-control node (clearance-free).
+
+        Retained for regression checks and debugging. Not the final FCFS model used for
+        research evaluation.
         """
         candidates = [
             veh for veh in s.incoming_vehicles
@@ -451,7 +456,7 @@ class Node:
         - The node capacity is not exceeded.
         """
         if s.order_control_eligible and s.order_control_type == "fcfs":
-            s.transfer_fcfs()
+            s.transfer_fcfs_no_clearance()
             return
 
         outlinks = []
