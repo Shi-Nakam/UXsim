@@ -1,7 +1,7 @@
-# Verify basic clearance-aware FCFS behavior with clearance_timesteps=0.
+# Verify clearance-aware FCFS behavior with clearance_timesteps=0.
 #
 # Run from the repository root:
-#   python tests_fcfs_order_control_clearance_basic.py
+#   python tests_fcfs_order_control_clearance_0.py
 #
 # Requires uxsim to be importable (e.g. pip install -e .).
 
@@ -155,7 +155,7 @@ def test_clearance_zero_blocks_same_timestep_direction_change():
     assert veh_clr_1.state == "end", msg
     assert veh_clr_2.state == "end", msg
 
-    print("FCFS clearance=0 basic test passed.")
+    print("FCFS clearance=0 test passed.")
 
 
 if __name__ == "__main__":
