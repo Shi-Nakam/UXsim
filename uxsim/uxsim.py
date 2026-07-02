@@ -591,7 +591,7 @@ class Node:
         - The node capacity is not exceeded.
         """
         if s.order_control_eligible and s.order_control_type == "fcfs":
-            s.transfer_fcfs_no_clearance()
+            s.transfer_fcfs_clearance()
             return
 
         outlinks = []
