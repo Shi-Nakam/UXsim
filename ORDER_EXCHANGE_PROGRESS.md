@@ -1469,23 +1469,25 @@ baseline主要交通結果：
 
 これらは origin/feature/intersection-order-control に push 済みである。
 
-### フェーズ4-5追加検証：UXsim標準挙動とFCFS(clearance=0)のsanity check比較
+### フェーズ4-5追加検証：UXsim標準挙動とFCFS(clearance=0/1)のsanity check比較
 
 完了済み。
 
 #### 全体概要
 
-- phase 4-5のFCFS(clearance=0)実装について、小規模単体テスト・X/Y/Z問題テストに加えて、中規模・grid型ネットワークでのsanity check比較を実施した。
-- 比較対象は以下の4種類（Step 4Dで高需要 signalized grid を追加）。
-  - corridor型ネットワークにおけるunsignalized UXsim標準transfer vs FCFS(clearance=0)
-  - grid型ネットワークにおけるunsignalized UXsim標準transfer vs FCFS(clearance=0)
+- phase 4-5のFCFS実装について、小規模単体テスト・X/Y/Z問題テストに加えて、中規模・grid型ネットワークでのsanity check比較を実施した。
+- Step 4A〜4Dは FCFS(clearance=0)、Step 4Eは FCFS(clearance=1) を対象とする。
+- 比較対象は以下の5種類。
+  - corridor型ネットワークにおけるunsignalized UXsim標準transfer vs FCFS(clearance=0)（Step 4A）
+  - grid型ネットワークにおけるunsignalized UXsim標準transfer vs FCFS(clearance=0)（Step 4B）
   - grid型ネットワークにおけるsignalized UXsim標準transfer vs FCFS(clearance=0)（Step 4C：1000台）
   - grid型ネットワークにおけるsignalized UXsim標準transfer vs FCFS(clearance=0)（Step 4D：高需要5000台・10000台）
+  - grid型ネットワークにおけるsignalized all-red UXsim標準transfer vs FCFS(clearance=1)（Step 4E：高需要5000台・10000台）
 - 目的は研究上の性能評価ではなく、FCFS実装が中規模・複数経路ネットワークで極端に破綻しないことを確認する sanity check である。
 - FCFSがUXsim標準より常に良い、または常に悪いと主張するものではない。
 - ケースによってFCFSが良い場合も悪い場合もあり得る。
 - 重要なのは、完了台数・平均旅行時間・総旅行時間・総走行距離などが極端に乖離しないかを確認すること。
-- Step 4A〜4Dはいずれも `uxsim/uxsim.py` を変更せず、新規テストファイルのみ追加した。
+- Step 4A〜4Eはいずれも `uxsim/uxsim.py` を変更せず、新規テストファイルのみ追加した。
 
 #### Step 4A：corridor型ネットワークでのunsignalized UXsim標準 vs FCFS(clearance=0)
 
@@ -1943,33 +1945,215 @@ Step 4C / Step 4D の比較（平均旅行時間 ratio、FCFS / signalized）：
 - ただし、今回の範囲では依然としてFCFS(clearance=0)の方が短い旅行時間だった。
 - この結果から、FCFSが常に信号制御より優れるとは結論しない。
 - あくまで同一ネットワーク・同一需要生成条件・固定2相信号 `[60,60]` におけるsanity check結果である。
-- 本格的には、さらに高需要、`clearance_timesteps=1`、信号offset、サイクル長、需要分布、ネットワークサイズなどを変えた体系的検証が必要。
+- 本格的には、さらに高需要、信号offset、サイクル長、需要分布、ネットワークサイズなどを変えた体系的検証が必要。
+
+#### Step 4E：高需要grid型 signalized all-red UXsim標準 vs clearance-one FCFS
+
+実施コミット：
+
+- af11393 phase 4-5: add high-demand grid clearance-one FCFS vs signalized all-red UXsim sanity test
+
+新規追加ファイル：
+
+- `tests_order_control_fcfs_clearance_one_vs_signalized_uxsim_all_red_grid_high_demand.py`
+
+概要：
+
+- Step 4Eでは、Step 4Dと同じ6×6 grid / mesh型ネットワークを用いた。
+- Step 4Dは FCFS(clearance=0) と signalized UXsim standard の高需要比較だった。
+- Step 4Eでは、FCFS側を `clearance_timesteps=1` に設定した。
+- signalized UXsim standard側にも、方向切替時のクリアランスに相当する全赤フェーズを追加した。
+- signalized側の信号設定は `signal=[60, W.DELTAT, 60, W.DELTAT]`。
+- 今回の実行では `W.DELTAT=1` だったため、実際の signal setting は `[60, 1, 60, 1]`。
+- phase 0：東西方向青。
+- phase 1：全赤。
+- phase 2：南北方向青。
+- phase 3：全赤。
+- signal_group=1 および signal_group=3 のリンク数は0。
+- これにより、phase 1 / phase 3 は全赤として機能する想定。
+- signal_offset は内部gridノードごとに異なる値を設定した。
+- signal_offset strategy は `((row + column) % 4) * (cycle_length / 4)`。
+- signal offset unique values は `[0.0, 30.5, 61.0, 91.5]`。
+- これは全内部gridノードが同時に同じphaseへ切り替わる完全同期信号を避けるための簡易・再現可能なオフセットであり、最適化されたオフセットではない。
+- 外周ODノード24個には信号を設定していない。
+- FCFSケースでは、内部gridノード・外周ODノードとも信号なし。
+- FCFSケースでは `clearance_timesteps=1`。
+- eligible node 36個すべてをFCFS対象にした。
+- 全Linkで `number_of_lanes=1`。
+- 全Linkで `merge_priority=1`。
+- `merge_priority` は両ケースで同じLink属性として設定しているが、FCFSの通過順序は `merge_priority` ではなく `(arrival_time, tiebreaker, veh.id)` に基づく想定である。
+- 目的は、FCFSの高頻度方向切替に伴うクリアランスロスが入った場合に、高需要gridで signalized all-red とどう比較されるかを確認することである。
+- これは研究上の性能評価ではなく、sanity checkである。
+
+high_demand_cases：
+
+- Case 1：5000台、departure 0〜500、tmax 30000、vehicles per timestep 10.0
+- Case 2：10000台、departure 0〜500、tmax 50000、vehicles per timestep 20.0
+
+補足：
+
+- Step 4Dと同じ高需要ケース。
+- Step 4Dでは FCFS(clearance=0) を用いた。
+- Step 4Eでは FCFS(clearance=1) を用いた。
+- Step 4Eのsignalized側は、全赤フェーズ付き4相信号である。
+
+ネットワーク・制御設定：
+
+- 6×6内部grid。内部gridノード36個、外周ODノード24個、合計60ノード、168リンク。
+- 全Linkで `number_of_lanes=1`、`merge_priority=1`。
+- `origin_grid_coord` / `destination_grid_coord` はOD距離判定用メタデータ。
+
+signalized UXsim all-red：
+
+- 内部gridノード36個すべてに `signal=[60, W.DELTAT, 60, W.DELTAT]`。
+- 実行時の `W.DELTAT=1` により、実際の signal setting は `[60, 1, 60, 1]`。
+- signal cycle length：122。
+- phase 0：東西方向青。phase 1：全赤。phase 2：南北方向青。phase 3：全赤。
+- signal_group 0：東西リンク、水平内部リンク、left/right接続。
+- signal_group 1：未使用。リンク数0。
+- signal_group 2：南北リンク、垂直内部リンク、top/bottom接続。
+- signal_group 3：未使用。リンク数0。
+- 外周ODノードには信号を設定しない。signalized OD node count：0。
+- signal_offset strategy：`((row + column) % 4) * (cycle_length / 4)`。
+- signal offset unique values：`[0.0, 30.5, 61.0, 91.5]`。
+
+FCFS(clearance=1)：
+
+- 内部gridノード・外周ODノードとも信号なし。
+- `W.infer_order_control_eligible_nodes()` によりeligible nodeを取得（36個）。
+- 全内部gridノード `g_0_0`〜`g_5_5` がFCFS対象。
+- `W.set_order_control_clearance_timesteps(1)`。
+- `W.set_order_control_for_nodes(..., order_control_type="fcfs")`。
+- FCFS clearance_timesteps は1であることをassert済み。
+
+Case 1：5000台の結果
+
+- OD Manhattan distance：min 5、average 約6.7296、max 10。
+
+Signalized UXsim standard with all-red clearance：
+
+- completed trips：5000 / 5000、completed ratio：1.000
+- unfinished vehicles：0、unfinished ratio：0.000
+- total travel time：5510114.0 s、average travel time：1102.0 s
+- average delay：約937.4 s、delay ratio：0.851
+- total distance：20188000.0 m
+- last completed trip time：2724.0 s、max completed travel time：2531.0 s
+- last completed trip time / tmax：0.091
+
+FCFS(clearance=1)：
+
+- completed trips：5000 / 5000、completed ratio：1.000
+- unfinished vehicles：0、unfinished ratio：0.000
+- total travel time：7638201.0 s、average travel time：1527.6 s
+- average delay：約1363.0 s、delay ratio：0.892
+- total distance：19796000.0 m
+- last completed trip time：3263.0 s、max completed travel time：3055.0 s
+- last completed trip time / tmax：0.109
+
+Comparison ratios（FCFS / signalized all-red）：
+
+- completed ratio difference：0.000
+- average travel time ratio：1.386
+- total travel time ratio：1.386
+- total distance traveled ratio：0.981
+
+解釈：
+
+- 5000台ケースでは、FCFS(clearance=1)の平均旅行時間はsignalized all-redの約1.386倍。
+- signalized all-red の方が短い旅行時間だった。
+- 両ケースとも全車完了、未完了車両0、tmaxに十分余裕。
+- FCFS(clearance=1)では、随時方向切替に伴うクリアランスロスが効いた可能性がある。
+
+Case 2：10000台の結果
+
+- OD Manhattan distance：min 5、average 約6.7448、max 10。
+
+Signalized UXsim standard with all-red clearance：
+
+- completed trips：10000 / 10000、completed ratio：1.000
+- unfinished vehicles：0、unfinished ratio：0.000
+- total travel time：26989929.0 s、average travel time：2699.0 s
+- average delay：約2534.1 s、delay ratio：0.939
+- total distance：50367200.0 m
+- last completed trip time：5703.0 s、max completed travel time：5415.0 s
+- last completed trip time / tmax：0.114
+
+FCFS(clearance=1)：
+
+- completed trips：10000 / 10000、completed ratio：1.000
+- unfinished vehicles：0、unfinished ratio：0.000
+- total travel time：30822256.0 s、average travel time：3082.2 s
+- average delay：約2917.3 s、delay ratio：0.947
+- total distance：38087200.0 m
+- last completed trip time：5915.0 s、max completed travel time：5619.0 s
+- last completed trip time / tmax：0.118
+
+Comparison ratios（FCFS / signalized all-red）：
+
+- completed ratio difference：0.000
+- average travel time ratio：1.142
+- total travel time ratio：1.142
+- total distance traveled ratio：0.756
+
+解釈：
+
+- 10000台ケースでは、FCFS(clearance=1)の平均旅行時間はsignalized all-redの約1.142倍。
+- signalized all-red の方が短い旅行時間だった。
+- 両ケースとも全車完了、未完了車両0、tmaxに十分余裕。
+- 5000台ケースよりも差は縮小したが、今回の範囲ではsignalized all-redの方が短い旅行時間だった。
+
+Step 4D / Step 4E の対比：
+
+Step 4D：
+
+- FCFS(clearance=0)、signalized UXsim standard（固定2相 `[60,60]`）
+- 5000台：FCFS / signalized average travel time ratio 約0.581
+- 10000台：FCFS / signalized average travel time ratio 約0.665
+- clearance=0 ではFCFSの方が短い旅行時間だった。
+
+Step 4E：
+
+- FCFS(clearance=1)、signalized UXsim all-red（4相 `[60,1,60,1]`、staggered offset）
+- 5000台：FCFS / signalized all-red average travel time ratio 約1.386
+- 10000台：FCFS / signalized all-red average travel time ratio 約1.142
+- clearance=1 ではsignalized all-redの方が短い旅行時間だった。
+
+解釈：
+
+- clearance=0 ではFCFSが有利に見えた。
+- clearance=1 にすると、FCFSの高頻度方向切替コストが効き、signalized all-redが有利になるケースが確認された。
+- これは、FCFSの性能がclearance設定に強く依存する可能性を示す重要なsanity check結果である。
+- ただし、これは特定のgrid network、需要生成、信号設定、オフセット戦略における観察であり、一般結論ではない。
+- 今後は clearance_timesteps、signal cycle、signal offset、需要密度、ネットワークサイズを体系的に変える必要がある。
 
 #### 比較結果の解釈
 
-- Step 4A〜4Dにより、FCFS(clearance=0)は中規模corridor型、grid unsignalized型、grid signalized型（中需要・高需要）のいずれでも、完了台数・総走行距離・旅行時間指標において極端な破綻を示さなかった。
-- corridor型ではFCFSが約4.3%遅かった。
-- unsignalized grid型ではFCFSが約1.1%遅かった。
-- signalized grid型（Step 4C：1000台）ではFCFSが約50%の平均旅行時間となり、固定2相信号よりかなり短かった。
-- signalized grid型（Step 4D：5000台・10000台）では、高需要化に伴いFCFS/signalized ratioが0.500→0.581→0.665と縮小したが、依然としてFCFSの方が短い旅行時間だった。
+- Step 4A〜4Eにより、FCFS(clearance=0/1)は中規模corridor型、grid unsignalized型、grid signalized型（中需要・高需要）のいずれでも、完了台数・総走行距離・旅行時間指標において極端な破綻を示さなかった。
+- corridor型（Step 4A、clearance=0）ではFCFSが約4.3%遅かった。
+- unsignalized grid型（Step 4B、clearance=0）ではFCFSが約1.1%遅かった。
+- signalized grid型（Step 4C：1000台、clearance=0）ではFCFSが約50%の平均旅行時間となり、固定2相信号よりかなり短かった。
+- signalized grid型（Step 4D：5000台・10000台、clearance=0）では、高需要化に伴いFCFS/signalized ratioが0.500→0.581→0.665と縮小したが、依然としてFCFSの方が短い旅行時間だった。
+- signalized all-red grid型（Step 4E：5000台・10000台、clearance=1）では、FCFS/signalized all-red ratioが約1.386→1.142となり、signalized all-redの方が短い旅行時間だった。
 - unsignalized grid型でほぼ同等だったことは、信号がないUXsim標準transferとFCFS(clearance=0)が大きく乖離しないことの確認になる。
-- signalized grid型でFCFSが大幅に短い旅行時間となったことは、固定2相信号の信号待ちが強く効いたためと解釈できる。Step 4Dでは高需要によりこの差は縮小した。
+- signalized grid型（clearance=0）でFCFSが大幅に短い旅行時間となったことは、固定2相信号の信号待ちが強く効いたためと解釈できる。Step 4Dでは高需要によりこの差は縮小した。
+- clearance=0 と clearance=1 で相対関係が逆転し得ることは、FCFS性能がclearance設定に強く依存する可能性を示す。
 - ただし、これは研究上の性能評価ではなく、まだ sanity check の段階である。
-- 特に、`signal=[60,60]` は固定2相信号であり、渋滞時には有効に働く可能性がある一方、低〜中需要時には信号待ちが過剰になる可能性がある。
 - 本格的な性能比較には、需要条件、信号設定、オフセット、信号最適化、クリアランス値、ネットワーク構造などを体系的に変えた実験設計が必要。
 
 #### 現在の理解
 
-- FCFS(clearance=0)の単体・X/Y/Z問題テストに加え、corridor型・grid unsignalized型・grid signalized型（中需要・高需要）のsanity checkでも極端な破綻は見られなかった。
-- unsignalized UXsim standard transfer との比較では、FCFSはおおむね同等〜やや遅い程度だった。
-- signalized UXsim standard（固定2相 `[60,60]`）との比較では、Step 4Cの需要条件下ではFCFSの方が旅行時間が短かった。Step 4Dでは高需要化に伴いratioが0.500→0.581→0.665と縮小したが、5000台・10000台でもFCFSの方が短い旅行時間だった。これは信号待ちの影響が大きいためであり、性能優位の一般結論ではない。
-- Step 4Dは clearance-zero FCFS の高需要比較であり、clearance-one FCFS の高需要比較はまだ未実施。
-- Step 4A〜4Dはすべて新規テストファイルのみの追加であり、`uxsim/uxsim.py` は変更していない。
+- FCFS(clearance=0/1)の単体・X/Y/Z問題テストに加え、corridor型・grid unsignalized型・grid signalized型（中需要・高需要）のsanity checkでも極端な破綻は見られなかった。
+- unsignalized UXsim standard transfer との比較（clearance=0）では、FCFSはおおむね同等〜やや遅い程度だった。
+- signalized UXsim standard（固定2相 `[60,60]`、clearance=0）との比較では、Step 4C/4DでFCFSの方が短い旅行時間だった。これは信号待ちの影響が大きいためであり、性能優位の一般結論ではない。
+- signalized all-red UXsim standard（4相 `[60,1,60,1]`、staggered offset）と FCFS(clearance=1) の高需要比較（Step 4E）では、signalized all-redの方が短い旅行時間だった。
+- clearance=0 ではFCFS有利、clearance=1 ではsignalized all-red有利という対比が確認され、FCFS性能はclearance設定に強く依存する可能性がある。
+- Step 4A〜4Eはすべて新規テストファイルのみの追加であり、`uxsim/uxsim.py` は変更していない。
 
 #### 実行済みテスト
 
 以下を実行済みで、すべて成功した。
 
+- `python tests_order_control_fcfs_clearance_one_vs_signalized_uxsim_all_red_grid_high_demand.py`
 - `python tests_order_control_fcfs_vs_signalized_uxsim_standard_grid_high_demand.py`
 - `python tests_order_control_fcfs_vs_signalized_uxsim_standard_grid_network.py`
 - `python tests_order_control_fcfs_vs_uxsim_standard_grid_network.py`
@@ -2008,17 +2192,18 @@ baseline主要交通結果：
 - 492f33e phase 4-5: add grid FCFS vs unsignalized UXsim standard sanity test
 - c810e2b phase 4-5: add grid FCFS vs signalized UXsim standard sanity test
 - 1ef9f9a phase 4-5: add high-demand grid clearance-zero FCFS vs signalized UXsim sanity test
+- af11393 phase 4-5: add high-demand grid clearance-one FCFS vs signalized all-red UXsim sanity test
 
 これらは origin/feature/intersection-order-control に push 済みである。
 
 #### 後続事項
 
-- Step 4Dの結果を踏まえた簡易分析メモの作成。
-- `clearance_timesteps=1` の高需要 signalized grid 比較。
-- signal offset や signal cycle を変えた比較。
-- さらに高需要条件、または異なるネットワークサイズでの比較。
+- Step 4D/4Eの結果を踏まえた簡易分析メモの作成。
+- clearance_timesteps=0/1比較の整理。
+- signal offset戦略を変えた比較。
+- signal cycleや全赤時間を変えた比較。
+- demand densityやnetwork sizeを変えた比較。
 - signalized UXsim standard と FCFS の比較条件をより体系化した実験設計。
-- signal offset、signal cycle、需要条件、network size、`clearance_timesteps` を変えた実験計画。
 - Batch Processing、Time-value Transaction、支払い処理は引き続き未実装。
 
 ## 現在までに追加した主なファイル
@@ -2051,6 +2236,11 @@ baseline主要交通結果：
   - high-demand grid型 signalized UXsim standard vs clearance-zero FCFS sanity check。
   - 5000台・10000台を0〜500 timestepに投入。
   - `clearance_timesteps=0` のFCFSを比較対象とする。
+- tests_order_control_fcfs_clearance_one_vs_signalized_uxsim_all_red_grid_high_demand.py
+  - high-demand grid型 signalized UXsim all-red vs clearance-one FCFS sanity check。
+  - 5000台・10000台を0〜500 timestepに投入。
+  - signalized側は `[60, W.DELTAT, 60, W.DELTAT]` の全赤付き4相信号。
+  - FCFS側は `clearance_timesteps=1`。
 
 ## uxsim/uxsim.py の主な変更
 
@@ -2225,7 +2415,7 @@ Nodeへの追加属性（phase 4-5）：
 - 異方向かつクリアランス未充足のVehicleは、既存FCFSの通過可否判定を見る前に break する
 - クリアランス不要またはクリアランス充足後に、既存FCFSの通過可否判定で通れないVehicleは continue できる
 - `clearance_timesteps=0/1` の基本テストおよび X/Y/Z問題6テストで挙動を確認済み
-- corridor型・grid unsignalized型・grid signalized型のsanity check（Step 4A〜4C）および高需要grid sanity check（Step 4D）でも極端な破綻は確認されなかった
+- corridor型・grid unsignalized型・grid signalized型のsanity check（Step 4A〜4C）および高需要grid sanity check（Step 4D clearance=0、Step 4E clearance=1）でも極端な破綻は確認されなかった
 - 標準UXsim挙動を壊さない方針は引き続き最重要である
 
 ### テスト追加方針
@@ -2243,19 +2433,20 @@ Nodeへの追加属性（phase 4-5）：
 現在の進捗：
 
 - phase 4-5では、クリアランスありFCFSの実装・接続・基本検証・X/Y/Z問題検証まで完了済み。
-- Step 4A〜4Cとして、corridor/gridのsanity check比較を追加済み。
-- Step 4Dとして、高需要grid型 signalized UXsim standard vs clearance-zero FCFS sanity checkを追加済み。
-- phase 4-5 の実装・テスト側の最新コミットは 1ef9f9a phase 4-5: add high-demand grid clearance-zero FCFS vs signalized UXsim sanity test。
+- Step 4A〜4Dとして、clearance-zero FCFS を中心とする corridor/grid sanity check 比較を追加済み。
+- Step 4Eとして、clearance-one FCFS と signalized all-red UXsim の高需要grid比較を追加済み。
+- phase 4-5 の実装・テスト側の最新コミットは af11393 phase 4-5: add high-demand grid clearance-one FCFS vs signalized all-red UXsim sanity test。
 - この progress memo 更新コミットが後に続くため、作業再開時の最新コミットは git log で確認すること。
 - feature/intersection-order-control は origin/feature/intersection-order-control と同期済み。
-- 1ef9f9a 時点では作業ツリーはcleanであった。この progress memo 更新後は、コミット・push後に `git status` で作業ツリーがcleanであることを確認する。
+- af11393 時点では作業ツリーはcleanであった。この progress memo 更新後は、コミット・push後に `git status` で作業ツリーがcleanであることを確認する。
 
 次に進む候補：
 
-- Step 4Dの結果を踏まえた簡易分析メモの作成。
-- `clearance_timesteps=1` の高需要 signalized grid 比較。
-- signal offset や signal cycle を変えた比較。
-- さらに高需要条件、または異なるネットワークサイズでの比較。
+- Step 4D/4Eの結果を踏まえた簡易分析メモの作成。
+- clearance_timesteps=0/1比較の整理。
+- signal offset戦略を変えた比較。
+- signal cycleや全赤時間を変えた比較。
+- demand densityやnetwork sizeを変えた比較。
 - Batch Processing の設計・実装検討。
 - Time-value Transaction の設計・実装検討。
 - 支払い処理の設計・実装検討。
@@ -2273,16 +2464,18 @@ Nodeへの追加属性（phase 4-5）：
 - tests_order_control_fcfs_vs_uxsim_standard_grid_network.py を読んでください
 - tests_order_control_fcfs_vs_signalized_uxsim_standard_grid_network.py を読んでください
 - tests_order_control_fcfs_vs_signalized_uxsim_standard_grid_high_demand.py を読んでください
+- tests_order_control_fcfs_clearance_one_vs_signalized_uxsim_all_red_grid_high_demand.py を読んでください
 - 現在のブランチは feature/intersection-order-control です
 - feature/intersection-order-control ブランチは origin/feature/intersection-order-control とtracking済みで、GitHubへpush済みです
 - 現在の通常fcfs経路は `transfer_fcfs_clearance()` を呼ぶ
 - `transfer_fcfs_no_clearance()` は回帰確認・デバッグ用に残っている
-- `clearance_timesteps=0/1`、X/Y/Z問題、corridor/grid sanity checks、高需要grid sanity check（Step 4D）はテスト済み
+- `clearance_timesteps=0/1`、X/Y/Z問題、corridor/grid sanity checks、高需要grid sanity checks（Step 4D clearance=0、Step 4E clearance=1）はテスト済み
 - corridor型 sanity check（`tests_order_control_fcfs_vs_uxsim_standard_medium_network.py`）はコミット名に unsignalized とないが、実態は unsignalized UXsim標準transfer との比較である
-- Step 4Dは clearance-zero FCFS の高需要比較であり、clearance-one FCFS はまだ未比較
-- phase 4-5 の実装・テスト側の最新コミットは 1ef9f9a phase 4-5: add high-demand grid clearance-zero FCFS vs signalized UXsim sanity test
+- Step 4Dは clearance-zero FCFS の高需要比較
+- Step 4Eは clearance-one FCFS と signalized all-red UXsim の高需要比較
+- phase 4-5 の実装・テスト側の最新コミットは af11393 phase 4-5: add high-demand grid clearance-one FCFS vs signalized all-red UXsim sanity test
 - ただし、その後に progress memo 更新コミットがある可能性があるため、git log --oneline -20 で最新状態を確認する
-- 次は Step 4D結果の分析メモ、`clearance_timesteps=1` 高需要比較、信号設定の体系化、Batch Processing / Time-value Transaction / 支払い処理へ進む候補
+- 次は Step 4D/4E結果の分析メモ、clearance=0/1比較整理、信号設定の体系化、Batch Processing / Time-value Transaction / 支払い処理へ進む候補
 - ORDER_EXCHANGE_PHASE4_DESIGN_NOTES.md、ORDER_EXCHANGE_RESEARCH_CONTEXT.md、ORDER_EXCHANGE_FCFS_TRANSFER_DESIGN_NOTES.md も必要に応じて参照してください
 - git log --oneline -20 と git status の結果を貼ります
 - GitHub運用は現在 HTTPS + PAT。将来的にSSH移行を検討する余地があります
