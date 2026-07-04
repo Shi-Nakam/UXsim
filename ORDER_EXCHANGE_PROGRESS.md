@@ -1123,6 +1123,352 @@ python tests_fcfs_order_control_behavior.py
 
 このコミットは origin/feature/intersection-order-control に push 済みである。
 
+### フェーズ4-5実装：クリアランスありFCFSの実装・接続・検証
+
+完了済み。
+
+#### 全体概要
+
+- phase 4-5として、設計メモで整理したクリアランスありFCFSを実装・接続・検証した。
+- 既存のクリアランスなしFCFSは `transfer_fcfs_no_clearance()` として退避済み。
+- 新たに `transfer_fcfs_clearance()` を実装し、現在の `order_control_type=="fcfs"` の通常経路は `transfer_fcfs_clearance()` を呼ぶ。
+- `clearance_timesteps` は World共通設定として追加済み。
+- Nodeには clearance用状態として以下を追加済み。
+  - `order_control_clearance_timesteps`
+  - `last_order_control_inlink`
+  - `last_order_control_entry_timestep`
+- `clearance_timesteps=0` / `1` の基本テストを追加済み。
+- X/Y/Z問題の6テストを追加済み。
+- baseline および `example_00en_simple.py` の主要交通結果は既知基準値と一致。
+- Batch Processing、Time-value Transaction、支払い処理はまだ未実装。
+
+#### Step 1：クリアランスなしFCFSの退避
+
+実施コミット：
+
+- 2b980db phase 4-5: rename clearance-free FCFS transfer
+
+実施内容：
+
+- 既存の `transfer_fcfs()` を `transfer_fcfs_no_clearance()` に改名した。
+- `transfer_fcfs_no_clearance()` は、クリアランスなしFCFSとして回帰確認・デバッグ用に残した。
+- 本研究で評価対象とする最終的なFCFSモデルとしては使用しない旨をコメント・docstringで明記した。
+- この時点では `Node.transfer()` の fcfs 分岐は `transfer_fcfs_no_clearance()` を呼んでおり、挙動は従来どおりだった。
+- `transfer_fcfs_no_clearance()` の内部ロジックは変更していない。
+- `transfer_fcfs_clearance()` はこの時点では未作成。
+
+#### Step 2：clearance設定・Node状態・setter追加
+
+実施コミット：
+
+- 5d98f83 phase 4-5: add order-control clearance settings
+- f03fd81 phase 4-5: clarify clearance state comments
+
+実施内容：
+
+- Worldに `order_control_clearance_timesteps = 1` を追加した。
+- Nodeに以下の属性を追加した。
+  - `order_control_clearance_timesteps`
+  - `last_order_control_inlink`
+  - `last_order_control_entry_timestep`
+- Node側コメントは最終的に以下の趣旨に整理した。
+  - World共通のorder-control clearance設定を、Nodeごとの参照値として保持する。
+  - `last_order_control_*` は、clearance-awareなorder-control transferで、直近にこのNodeへ進入したVehicleのinlinkと進入タイムステップを記録するための初期値。
+- `World.set_order_control_clearance_timesteps(clearance_timesteps)` を追加した。
+- setterは以下を行う。
+  - World共通値を更新する。
+  - 既存全Nodeの `node.order_control_clearance_timesteps` に同じ値を反映する。
+- setterのバリデーション：
+  - intのみ許可。
+  - boolは拒否。
+  - 負値は拒否。
+  - 無効値はValueError。
+- `W.addNode(...)` で新規作成されるNodeは、その時点の `W.order_control_clearance_timesteps` を保持する。
+- `set_order_control_for_nodes()` にclearance_timesteps個別override引数は追加していない。
+- transferロジックはこのStepでは変更していない。
+
+追加テスト：
+
+- `tests_order_control_clearance_settings.py`
+
+確認内容：
+
+- World初期値1。
+- Node初期値1。
+- setterで0/2に変更した際、既存全Nodeに反映。
+- setter後に作成したNodeが現在のWorld共通値を継承。
+- -1, 1.5, "1", True, False を拒否。
+
+#### Step 3A：transfer_fcfs_clearance() の未接続追加
+
+実施コミット：
+
+- 63a553f phase 4-5: add unconnected clearance-aware FCFS transfer method
+
+実施内容：
+
+- Nodeクラス内に `transfer_fcfs_clearance()` を新設した。
+- ただし、この時点では `Node.transfer()` の fcfs 分岐にはまだ接続していなかった。
+- したがって、通常シミュレーション経路ではまだ `transfer_fcfs_clearance()` は呼ばれていなかった。
+- `transfer_fcfs_no_clearance()` の処理をベースに、以下を踏襲した。
+  - candidates の作り方
+  - ソートキー `(arrival_time, tiebreaker, veh.id)`
+  - `route_next_link` を持つVehicleだけを候補にする考え方
+  - `order_control_node_arrival_times` が記録済みのVehicleだけを候補にする考え方
+  - 既存FCFSの通過可否判定
+  - 通過処理
+  - `capacity_in_remain`, `capacity_out_remain`, `flow_capacity_remain` の更新
+  - trip終了処理
+  - `incoming_vehicles` の後処理
+- 新たに追加したクリアランス判定：
+  - 通過前に `current_inlink = veh.link` を保存する。
+  - `s.last_order_control_inlink` が None の場合はクリアランス不要。
+  - `current_inlink == s.last_order_control_inlink` の場合は同方向なのでクリアランス不要。
+  - `current_inlink != s.last_order_control_inlink` の場合は異方向切替として `clearance_timesteps` に基づき判定。
+  - 判定式は `s.W.T - s.last_order_control_entry_timestep > s.order_control_clearance_timesteps`。
+  - クリアランス未充足なら、既存FCFSの通過可否判定を見る前に break。
+  - クリアランス不要または充足後に、既存FCFSの通過可否判定を行う。
+  - 既存FCFSの通過可否判定で通れない場合は continue。
+  - 通過成功後、`last_order_control_inlink` と `last_order_control_entry_timestep` を更新。
+- `last_order_control_inlink` には、通過前に保存した `current_inlink` を使う。
+- `last_order_control_entry_timestep` には現在の timestep `s.W.T` を使う。
+
+#### Step 3B：通常fcfs経路への接続と clearance=0 基本テスト
+
+実施コミット：
+
+- 0e7b300 phase 4-5: connect clearance-aware FCFS transfer and add basic test
+
+実施内容：
+
+- `Node.transfer()` の `order_control_type=="fcfs"` 分岐を、`transfer_fcfs_no_clearance()` から `transfer_fcfs_clearance()` に切り替えた。
+- この変更により、通常のfcfs経路はクリアランスありFCFSを使う状態になった。
+- `transfer_fcfs_no_clearance()` は削除せず、回帰確認・デバッグ用として残した。
+
+変更イメージ：
+
+```
+if s.order_control_eligible and s.order_control_type == "fcfs":
+    s.transfer_fcfs_clearance()
+    return
+```
+
+追加テスト：
+
+- `tests_fcfs_order_control_clearance_basic.py`
+  - 後続Step 3Cで `tests_fcfs_order_control_clearance_0.py` に改名済み。
+
+確認内容：
+
+- `clearance_timesteps=0` の基本挙動を確認。
+- 同時到着2台について、`actual_order == expected_order` を確認。
+- `expected_order` は `(arrival_time, tiebreaker, veh.id)` の昇順。
+- `clearance_timesteps=0` でも、同一タイムステップ内の異方向連続通過が起きないことを確認。
+- 2台ともtrip完了。
+
+#### Step 3C：clearance=0/1 テスト整理・追加
+
+実施コミット：
+
+- 7d6964d phase 4-5: rename FCFS clearance 0 test and add FCFS clearance 1 test
+
+実施内容：
+
+- `tests_fcfs_order_control_clearance_basic.py` を `tests_fcfs_order_control_clearance_0.py` に改名した。
+- `tests_fcfs_order_control_clearance_1.py` を新規追加した。
+- `uxsim/uxsim.py` は変更していない。
+- `transfer_fcfs_clearance()`, `transfer_fcfs_no_clearance()`, `Node.transfer()` は変更していない。
+
+`tests_fcfs_order_control_clearance_0.py`：
+
+- `clearance_timesteps=0` の基本挙動テスト。
+- `actual_order == expected_order` を確認。
+- 2台のout進入時刻が同一でないことを確認。
+- 2台目のout進入時刻が1台目より後であることを確認。
+
+`tests_fcfs_order_control_clearance_1.py`：
+
+- `clearance_timesteps=1` の基本挙動テスト。
+- `actual_order == expected_order` を確認。
+- `time_gap = second_enter_time - first_enter_time` を確認。
+- `time_gap >= 2 * W.DELTAT - tolerance` を確認。
+- 成功時に以下をprintする。
+  - first_enter_time
+  - second_enter_time
+  - time_gap
+  - W.DELTAT
+  - time_gap / W.DELTAT
+- 実際の成功時出力例：
+  - first_enter_time: 21
+  - second_enter_time: 23
+  - time_gap: 2
+  - W.DELTAT: 1
+  - time_gap / W.DELTAT: 2.0
+
+#### Step 3D：X/Y/Z問題テスト追加
+
+実施コミット：
+
+- 7c53265 phase 4-5: add FCFS clearance X/Y/Z tests
+
+新規追加ファイル：
+
+- `tests_fcfs_order_control_clearance_xyz.py`
+
+実施内容：
+
+- X/Y/Z問題の中核挙動を確認する6テストを追加した。
+- `uxsim/uxsim.py` は変更していない。
+- `transfer_fcfs_clearance()`, `transfer_fcfs_no_clearance()`, `Node.transfer()` は変更していない。
+- 既存テストファイルも変更していない。
+
+X/Y/Z問題の定義：
+
+- X：方向A、先着順位1
+- Y：方向B、先着順位2
+- Z：方向A、先着順位3
+- XとZは同じinlinkからmergeへ進入。
+- Yは異なるinlinkからmergeへ進入。
+- 候補順序は `(arrival_time, tiebreaker, veh.id)` により X -> Y -> Z となることを必須assert。
+
+enter_time の扱い：
+
+- enter_time は `Link.vehicles_enter_log` のkeyとして記録される時刻値。
+- Test 1/2では `out.vehicles_enter_log` から `x_enter_time`, `y_enter_time`, `z_enter_time` を取得。
+- Test 3では `outA.vehicles_enter_log` から `x_enter_time`, `z_enter_time` を取得し、`outB.vehicles_enter_log` にveh_yが存在しないことを確認。
+
+gap の扱い：
+
+- Test 1/2：
+  - `y_gap = y_enter_time - x_enter_time`
+  - `z_gap_after_y = z_enter_time - y_enter_time`
+- Test 3：
+  - `z_gap_after_x = z_enter_time - x_enter_time`
+- `tolerance = 1e-9`
+- 上限側にも tolerance を入れる。
+- clearance=0：
+  - `1 * W.DELTAT - tolerance <= gap < 2 * W.DELTAT - tolerance`
+- clearance=1：
+  - `2 * W.DELTAT - tolerance <= gap < 3 * W.DELTAT - tolerance`
+
+使用したネットワーク：
+
+- Network A：Test 1A/1B/2A/2B用。
+  - origA/origB -> merge -> 共通out -> dest。
+  - X/Y/Z全て同じoutへ進入可能。
+- Network B：Test 3A/3B用。
+  - X/ZはoutAへ向かう。
+  - YのみoutBへ向かう。
+  - outBは `capacity_in=0` により受入不能。
+
+作成した6つのテスト：
+
+- Test 1A：`test_xyz_simultaneous_clearance_zero_blocks_z`
+  - Network A、同時到着型、X=0/Y=0/Z=1、clearance=0。
+- Test 1B：`test_xyz_staggered_clearance_zero_blocks_z`
+  - Network A、逐次到着型、X=0/Y=1/Z=2、clearance=0。
+- Test 2A：`test_xyz_simultaneous_clearance_one_blocks_z`
+  - Network A、同時到着型、X=0/Y=0/Z=1、clearance=1。
+- Test 2B：`test_xyz_staggered_clearance_one_blocks_z`
+  - Network A、逐次到着型、X=0/Y=1/Z=2、clearance=1。
+- Test 3A：`test_xyz_simultaneous_y_blocked_z_passes_after_clearance`
+  - Network B、同時到着型、X=0/Y=0/Z=1、clearance=1、Y blocked。
+- Test 3B：`test_xyz_staggered_y_blocked_z_passes_after_clearance`
+  - Network B、逐次到着型、X=0/Y=1/Z=2、clearance=1、Y blocked。
+
+seed探索：
+
+- 同時到着型ではX/Yがmergeに同時到着するため、X/Yの相対順序はtiebreakerに依存する。
+- seed探索により `expected_order == ["veh_x", "veh_y", "veh_z"]` となるseedを採用した。
+- 実際には seed=1 が採用された。
+- seed探索では、`actual_order`, `enter_time`, gap条件を選択基準にしていない。
+- 逐次到着型では seed=0 を使用し、arrival_time により `expected_order == ["veh_x", "veh_y", "veh_z"]` が成立。
+
+テスト結果：
+
+- Test 1A / 1B：clearance=0
+  - `actual_order == expected_order == ["veh_x", "veh_y", "veh_z"]`
+  - `y_gap = 1`
+  - `z_gap_after_y = 1`
+- Test 2A / 2B：clearance=1
+  - `actual_order == expected_order == ["veh_x", "veh_y", "veh_z"]`
+  - `y_gap = 2`
+  - `z_gap_after_y = 2`
+- Test 3A / 3B：Y outlink blocked 簡易版
+  - outBは `capacity_in=0` でブロック。
+  - veh_yはoutBに進入していない。
+  - outAでは veh_x と veh_z が進入。
+  - `x_enter_time=21`, `z_enter_time=23`
+  - `z_gap_after_x=2`
+  - veh_x, veh_z はtrip完了。
+  - veh_y のtrip完了は要求していない。
+
+#### 現在の実装状態
+
+- 現在の `order_control_type=="fcfs"` の通常経路は `transfer_fcfs_clearance()` を呼ぶ。
+- `transfer_fcfs_no_clearance()` は回帰確認・デバッグ用として残っている。
+- `clearance_timesteps` はWorld共通設定として持つ。
+- Nodeごとに `order_control_clearance_timesteps` を保持する。
+- Nodeごとに `last_order_control_inlink` と `last_order_control_entry_timestep` を保持する。
+- 通過成功後、`transfer_fcfs_clearance()` は `last_order_control_inlink` と `last_order_control_entry_timestep` を更新する。
+- clearance=0/1 と X/Y/Z問題についてテスト済み。
+- 標準UXsim挙動を壊さないことを、baselineおよびexampleで確認済み。
+
+#### 実行済みテスト
+
+以下を実行済みで、すべて成功した。
+
+- `python tests_fcfs_order_control_clearance_xyz.py`
+- `python tests_fcfs_order_control_clearance_0.py`
+- `python tests_fcfs_order_control_clearance_1.py`
+- `python tests_order_control_clearance_settings.py`
+- `python tests_fcfs_order_control_transfer.py`
+- `python tests_fcfs_order_control_behavior.py`
+- `python tests_fcfs_order_control_tiebreaker.py`
+- `python tests_order_control_node_arrival_times.py`
+- `python tests_vehicle_research_attributes.py`
+- `python tests_order_exchange_baseline.py`
+- `python demos_and_examples/example_00en_simple.py`
+
+baseline主要交通結果：
+
+- completed trips: 48 / 48
+- total travel time: 2928.0 s
+- average travel time: 61.0 s
+- average delay: 1.0 s
+- delay ratio: 0.017
+- total distance: 48000.0 m
+
+`example_00en_simple.py` 主要交通結果：
+
+- completed trips: 735 / 810
+- total travel time: 119475.0 s
+- average travel time: 162.6 s
+- average delay: 62.6 s
+- delay ratio: 0.385
+- total distance: 1632250.0 m
+
+#### まだ未実装・後続事項
+
+- Batch Processing は未実装。
+- Time-value Transaction は未実装。
+- 支払い処理は未実装。
+- Node別の `clearance_timesteps` override は未実装。
+- `transfer_fcfs_no_clearance()` は残しているが、通常のfcfs経路からは外れている。
+- 今後、ORDER_EXCHANGE_PROGRESS.md のこの記録をもとに、Batch Processing / Time-value Transaction へ進む。
+
+#### 関連コミット
+
+- 2b980db phase 4-5: rename clearance-free FCFS transfer
+- 5d98f83 phase 4-5: add order-control clearance settings
+- f03fd81 phase 4-5: clarify clearance state comments
+- 63a553f phase 4-5: add unconnected clearance-aware FCFS transfer method
+- 0e7b300 phase 4-5: connect clearance-aware FCFS transfer and add basic test
+- 7d6964d phase 4-5: rename FCFS clearance 0 test and add FCFS clearance 1 test
+- 7c53265 phase 4-5: add FCFS clearance X/Y/Z tests
+
+これらは origin/feature/intersection-order-control に push 済みである。
+
 ## 現在までに追加した主なファイル
 
 - tests_order_exchange_baseline.py
@@ -1139,6 +1485,10 @@ python tests_fcfs_order_control_behavior.py
 - tests_fcfs_order_control_behavior.py
 - tests_fcfs_order_control_tiebreaker.py
 - ORDER_EXCHANGE_PHASE4-5_CLEARANCE_FCFS_DESIGN_NOTES.md
+- tests_order_control_clearance_settings.py
+- tests_fcfs_order_control_clearance_0.py
+- tests_fcfs_order_control_clearance_1.py
+- tests_fcfs_order_control_clearance_xyz.py
 
 ## uxsim/uxsim.py の主な変更
 
@@ -1182,20 +1532,33 @@ Node.__init__(...) での追加チェック：
 
 Nodeへの追加メソッド・処理：
 
-- `transfer_fcfs()` を追加
-- `Node.transfer()` の冒頭に、`order_control_eligible=True` かつ `order_control_type=="fcfs"` の場合だけ `transfer_fcfs()` に分岐する処理を追加
+- `transfer_fcfs_no_clearance()` を追加（フェーズ4-3の `transfer_fcfs()` を改名）
+- `transfer_fcfs_clearance()` を追加（phase 4-5）
+- `Node.transfer()` の冒頭に、`order_control_eligible=True` かつ `order_control_type=="fcfs"` の場合だけ `transfer_fcfs_clearance()` に分岐する処理
 - `order_control_type="none"` のNodeでは標準 `Node.transfer()` の既存処理を維持
 
-Node.transfer_fcfs()：
+Node.transfer_fcfs_no_clearance()：
 
-- FCFS候補Vehicleのソートキーを `(arrival_time, tiebreaker, veh.id)` に変更
-- tiebreakerは同時到着時の固定補助順位
-- veh.id は tiebreaker同値時の決定的な最終タイブレーク
-- FCFSの通過可否判定や blocked-outlink skip 本体は変更していない
+- クリアランスなしFCFS。回帰確認・デバッグ用。通常fcfs経路からは外れている
+- FCFS候補Vehicleのソートキーは `(arrival_time, tiebreaker, veh.id)`
+
+Node.transfer_fcfs_clearance()：
+
+- クリアランスありFCFS。現在の通常fcfs経路で使用
+- ソートキーは `(arrival_time, tiebreaker, veh.id)` を踏襲
+- 異方向かつクリアランス未充足なら break、通過不能なら continue
+- 通過成功後に `last_order_control_inlink` と `last_order_control_entry_timestep` を更新
+
+Nodeへの追加属性（phase 4-5）：
+
+- `order_control_clearance_timesteps`
+- `last_order_control_inlink`
+- `last_order_control_entry_timestep`
 
 ### Worldへの追加属性
 
 - order_control_eligibility_prepared
+- order_control_clearance_timesteps（phase 4-5、デフォルト1）
 
 ### Worldへの追加メソッド
 
@@ -1203,6 +1566,7 @@ Node.transfer_fcfs()：
 - infer_order_control_eligible_nodes(...)
 - set_order_control_eligible_flag_for_nodes(...)
 - set_order_control_for_randomly_selected_eligible_nodes(...)
+- set_order_control_clearance_timesteps(clearance_timesteps)（phase 4-5）
 
 ## 現在の重要な設計方針
 
@@ -1283,19 +1647,22 @@ Node.transfer_fcfs()：
 - フェーズ4-3で案A（クリアランスなしFCFS）の初期実装を完了した
 - フェーズ4-3追加検証として、arrival-order behavior と blocked-outlink skip behavior の詳細検証テストまで追加済み
 - フェーズ4-4で同時到着時の固定tiebreaker実装と検証テストまで追加済み
-- フェーズ4-5設計として、案B（クリアランスありFCFS）の正式設計メモを追加済み（実装は未着手）
+- フェーズ4-5設計として、案B（クリアランスありFCFS）の正式設計メモを追加済み
+- フェーズ4-5実装として、クリアランスありFCFSの実装・接続・検証（Step 1〜Step 3D）まで完了済み
+- 通常fcfs経路は `transfer_fcfs_clearance()` を呼ぶ。`transfer_fcfs_no_clearance()` は回帰確認・デバッグ用
 - FCFS候補Vehicleのソートキーは `(arrival_time, tiebreaker, veh.id)` である
 - 標準 Node.transfer() との共通ヘルパー化は行っていない。order-control系共通ヘルパー化は将来必要性が明確になった段階で検討する
 
 ### クリアランスありFCFS設計方針（ORDER_EXCHANGE_PHASE4-5_CLEARANCE_FCFS_DESIGN_NOTES.md 参照）
 
-- phase 4-5では、クリアランスありFCFSを実装する
+- phase 4-5では、クリアランスありFCFSを実装・接続・検証した
 - 研究上のFCFSモデルは、原則としてクリアランスありFCFSである
-- クリアランスなしFCFSは、検証用・デバッグ用・退避用として残す
+- クリアランスなしFCFS（`transfer_fcfs_no_clearance()`）は、検証用・デバッグ用・退避用として残す
 - inlinkを方向代理変数とし、inlinkが異なれば異方向切替とみなす
 - 異方向切替時には `clearance_timesteps` に基づく制約を課す
-- 異方向かつクリアランス未充足のVehicleは、容量・物理制約を見る前に break する
-- クリアランス不要またはクリアランス充足後に容量・物理制約で通れないVehicleは continue できる
+- 異方向かつクリアランス未充足のVehicleは、既存FCFSの通過可否判定を見る前に break する
+- クリアランス不要またはクリアランス充足後に、既存FCFSの通過可否判定で通れないVehicleは continue できる
+- `clearance_timesteps=0/1` の基本テストおよび X/Y/Z問題6テストで挙動を確認済み
 - 標準UXsim挙動を壊さない方針は引き続き最重要である
 
 ### テスト追加方針
@@ -1312,42 +1679,36 @@ Node.transfer_fcfs()：
 
 現在の進捗：
 
-- phase 4-5：クリアランスありFCFSの正式設計メモ作成まで完了済み
+- phase 4-5では、クリアランスありFCFSの実装・接続・基本検証・X/Y/Z問題検証まで完了済み。
+- phase 4-5 の実装・テスト側の最新コミットは 7c53265 phase 4-5: add FCFS clearance X/Y/Z tests。
+- この progress memo 更新コミットがその後に続くため、作業再開時の最新コミットは git log で確認すること。
+- feature/intersection-order-control は origin/feature/intersection-order-control と同期済み。
+- 7c53265 時点では作業ツリーはcleanであった。この progress memo 更新後は、コミット・push後に `git status` で作業ツリーがcleanであることを確認する。
 
 次に進む候補：
 
-- 設計メモに基づいて phase 4-5 の実装計画、または実装プロンプトの作成に進む
-- 実装では、まず以下を慎重に扱う必要がある
-  - `transfer_fcfs()` を `transfer_fcfs_no_clearance()` に改名すること
-  - `transfer_fcfs_clearance()` を新設すること
-  - clearance用Node状態を追加すること
-  - World共通clearance設定を追加すること
-  - 修正版判定順を実装すること
-  - X/Y/Z問題をテストで確認すること
-- Batch Processing、Time-value Transaction、支払い処理は後続フェーズで扱う
-- 標準UXsim挙動を壊さない方針は引き続き最重要である
-- 新しい挙動テストを追加する際も、まずはテストのみを追加し、uxsim/uxsim.py を勝手に変更しない方針を維持する
-- 重要な区切りごとに git push して GitHub へ退避する運用を継続する
+- Batch Processing の設計・実装検討。
+- Time-value Transaction の設計・実装検討。
+- 支払い処理の設計・実装検討。
+- ただし、次に進む前に phase 4-5 の記録が十分か確認する。
 
 ## 新しいチャットで再開する場合
 
 新しいチャットでは、以下を伝える。
 
 - ORDER_EXCHANGE_PROGRESS.md を読んでください
-- ORDER_EXCHANGE_PHASE4_DESIGN_NOTES.md を読んでください
-- ORDER_EXCHANGE_RESEARCH_CONTEXT.md を読んでください
-- ORDER_EXCHANGE_FCFS_TRANSFER_DESIGN_NOTES.md を読んでください
 - ORDER_EXCHANGE_PHASE4-5_CLEARANCE_FCFS_DESIGN_NOTES.md を読んでください
+- tests_fcfs_order_control_clearance_0.py を読んでください
+- tests_fcfs_order_control_clearance_1.py を読んでください
+- tests_fcfs_order_control_clearance_xyz.py を読んでください
 - 現在のブランチは feature/intersection-order-control です
 - feature/intersection-order-control ブランチは origin/feature/intersection-order-control とtracking済みで、GitHubへpush済みです
-- フェーズ4-5設計まで完了済みです（コード実装は未着手）
-- c060dce phase 4-5: add clearance FCFS design notes まで完了・push済みです
-- phase 4-5として、クリアランスありFCFSの正式設計メモは作成済みです
-- まだコード実装はしていません
-- フェーズ4-4として、FCFS同時到着時の固定tiebreaker実装と検証テストが完了しています
-- フェーズ4-3実装に対する詳細検証として、arrival-order behavior と blocked-outlink skip behavior は確認済みです
-- order_control_eligible の自動判定条件は、len(node.inlinks) >= 2 かつ len(node.outlinks) >= 1 に修正済みです
+- 現在の通常fcfs経路は `transfer_fcfs_clearance()` を呼ぶ
+- `transfer_fcfs_no_clearance()` は回帰確認・デバッグ用に残っている
+- `clearance_timesteps=0/1` および X/Y/Z問題はテスト済み
+- phase 4-5 の実装・テスト側の最新コミットは 7c53265 phase 4-5: add FCFS clearance X/Y/Z tests。
+- ただし、その後に progress memo 更新コミットがある可能性があるため、git log --oneline -20 で最新状態を確認する。
+- 次は Batch Processing / Time-value Transaction / 支払い処理へ進む候補
+- ORDER_EXCHANGE_PHASE4_DESIGN_NOTES.md、ORDER_EXCHANGE_RESEARCH_CONTEXT.md、ORDER_EXCHANGE_FCFS_TRANSFER_DESIGN_NOTES.md も必要に応じて参照してください
 - git log --oneline -20 と git status の結果を貼ります
-- 次は、設計メモに基づいて phase 4-5 の実装計画または実装プロンプト作成に進む段階です
-- X/Y/Z問題と修正版判定順を必ず確認してください
 - GitHub運用は現在 HTTPS + PAT。将来的にSSH移行を検討する余地があります
