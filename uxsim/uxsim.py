@@ -334,6 +334,7 @@ class Node:
 
                         outlink.cum_arrival[-1] += s.W.DELTAN
                         veh.link_arrival_time = s.W.T*s.W.DELTAT
+                        veh.record_order_control_earliest_arrival_timestep_for_current_link()
 
                         outlink.capacity_in_remain -= s.W.DELTAN
                     else:
@@ -397,6 +398,7 @@ class Node:
                 inlink.vehicles.popleft()
                 outlink.vehicles_enter_log[s.W.T*s.W.DELTAT] = veh
                 veh.link = outlink
+                veh.record_order_control_earliest_arrival_timestep_for_current_link()
                 veh.x = 0
 
                 if veh.follower != None:
@@ -521,6 +523,7 @@ class Node:
                 inlink.vehicles.popleft()
                 outlink.vehicles_enter_log[s.W.T*s.W.DELTAT] = veh
                 veh.link = outlink
+                veh.record_order_control_earliest_arrival_timestep_for_current_link()
                 veh.x = 0
 
                 if veh.follower != None:
@@ -641,6 +644,7 @@ class Node:
                 inlink.vehicles.popleft()
                 outlink.vehicles_enter_log[s.W.T*s.W.DELTAT] = veh
                 veh.link = outlink
+                veh.record_order_control_earliest_arrival_timestep_for_current_link()
                 veh.x = 0
 
                 if veh.follower != None:
@@ -1207,7 +1211,7 @@ class Vehicle:
     """
     Vehicle or platoon in a network.
 
-    Optional research attributes for order-exchange studies: vot_true, vot_declared, payment_paid, payment_received, order_exchange_log, participates_in_order_exchange, order_control_node_arrival_times, order_control_node_arrival_tiebreakers.
+    Optional research attributes for order-exchange studies: vot_true, vot_declared, payment_paid, payment_received, order_exchange_log, participates_in_order_exchange, order_control_node_arrival_times, order_control_node_arrival_tiebreakers, order_control_earliest_arrival_timesteps.
     """
     def __init__(s, W: "World", orig: Node|str, dest: Node|str, departure_time:int|float, name: str|None=None, route_pref: dict=None, route_choice_principle=None, mode: str="single_trip", links_prefer: list=[], links_avoid: list=[], trip_abort: int=1, departure_time_is_time_step: int=0, attribute=None, user_attribute=None, user_function=None, auto_rename=False, vot_true=None, vot_declared=None, payment_paid=0, payment_received=0, order_exchange_log=None, participates_in_order_exchange=False):
         """
@@ -1279,6 +1283,9 @@ class Vehicle:
             Control state holding a fixed tiebreaker value for each order-control node at first arrival.
             Used as the second sort key when multiple vehicles share the same first arrival time at a node.
             Keys are node names (``node.name``). Initialized to an empty dict.
+        order_control_earliest_arrival_timesteps : dict
+            BATCH research attribute mapping each downstream node name to the earliest arrival timestep
+            (timestep units) estimated at link entry under free-flow conditions. Initialized to an empty dict.
         """
 
         s.W = W
@@ -1377,6 +1384,7 @@ class Vehicle:
         s.participates_in_order_exchange = participates_in_order_exchange
         s.order_control_node_arrival_times = {}
         s.order_control_node_arrival_tiebreakers = {}
+        s.order_control_earliest_arrival_timesteps = {}
 
         s.id = len(s.W.VEHICLES)
         if name != None:
@@ -1603,6 +1611,35 @@ class Vehicle:
             return
         s.order_control_node_arrival_times[node.name] = s.W.T * s.W.DELTAT
         s.order_control_node_arrival_tiebreakers[node.name] = s.W.rng.random()
+
+    def record_order_control_earliest_arrival_timestep_for_current_link(s):
+        """
+        Record the earliest arrival timestep for the current link's end node.
+
+        Notes
+        -----
+        Called immediately after a vehicle enters a link and ``link_arrival_time`` is set.
+        The value is stored in ``order_control_earliest_arrival_timesteps`` keyed by
+        ``vehicle.link.end_node.name``. Timesteps are used throughout; convert to seconds
+        with ``timestep * W.DELTAT`` only when needed for display.
+        """
+        if s.link is None:
+            return
+
+        link = s.link
+        node = link.end_node
+        if link.u <= 0:
+            raise ValueError(
+                f"link {link.name} has non-positive free_flow_speed (link.u={link.u})."
+            )
+
+        link_entry_timestep = int(round(s.link_arrival_time / s.W.DELTAT))
+        free_flow_travel_timesteps = math.ceil((link.length / link.u) / s.W.DELTAT)
+        tau_timesteps = s.W.order_control_batch_tau_timesteps
+        earliest_arrival_timestep = (
+            link_entry_timestep + free_flow_travel_timesteps + tau_timesteps
+        )
+        s.order_control_earliest_arrival_timesteps[node.name] = earliest_arrival_timestep
 
     def route_next_link_choice(s):
         """
@@ -2092,6 +2129,7 @@ class World:
 
         W.order_control_eligibility_prepared = False
         W.order_control_clearance_timesteps = 1
+        W.order_control_batch_tau_timesteps = 1
 
     def addNode(W, name: str, x: float, y: float, signal: list[float]=[0], signal_offset: float=0, signal_offset_old: float|None=None, flow_capacity: float|None=None, number_of_lanes: int=None, auto_rename=False, attribute=None, user_attribute=None, user_function=None, order_control_type="none", batch_size=1, transaction_case=None, order_control_eligible=False) -> Node:
         """
@@ -2238,6 +2276,28 @@ class World:
         W.order_control_clearance_timesteps = clearance_timesteps
         for node in W.NODES:
             node.order_control_clearance_timesteps = clearance_timesteps
+
+    def set_order_control_batch_tau_timesteps(W, tau_timesteps):
+        """
+        Set the world-wide tau interval used when recording earliest arrival timesteps for BATCH.
+
+        Parameters
+        ----------
+        tau_timesteps : int
+            Additional timesteps added to the free-flow link travel time when computing
+            ``earliest_arrival_timestep`` at link entry. Must be a non-negative integer.
+
+        Notes
+        -----
+        Updates W.order_control_batch_tau_timesteps only. This setter does not change
+        traffic behavior; it affects BATCH preparation data recorded at link entry.
+        """
+        if not isinstance(tau_timesteps, int) or isinstance(tau_timesteps, bool):
+            raise ValueError("order_control_batch_tau_timesteps must be a non-negative integer.")
+        if tau_timesteps < 0:
+            raise ValueError("order_control_batch_tau_timesteps must be a non-negative integer.")
+
+        W.order_control_batch_tau_timesteps = tau_timesteps
 
     def infer_order_control_eligible_nodes(W):
         """
