@@ -345,6 +345,33 @@ class Node:
                 else:
                     break
 
+    def get_order_control_batch_trigger_candidates(s):
+        """
+        Return BATCH trigger candidate vehicles in deterministic order (read-only).
+
+        Returns a new sorted list of vehicles from ``incoming_vehicles`` that satisfy
+        BATCH trigger candidate conditions at this node. Non-batch nodes return an empty
+        list without raising. Does not mutate any simulation state.
+        """
+        if not s.order_control_eligible or s.order_control_type != "batch":
+            return []
+
+        candidates = [
+            veh for veh in s.incoming_vehicles
+            if veh.route_next_link is not None
+            and s.name in veh.order_control_node_arrival_times
+            and s.name in veh.order_control_node_arrival_tiebreakers
+            and s.name not in veh.order_control_batch_assignments
+        ]
+        return sorted(
+            candidates,
+            key=lambda veh: (
+                veh.order_control_node_arrival_times[s.name],
+                veh.order_control_node_arrival_tiebreakers[s.name],
+                veh.id,
+            ),
+        )
+
     # クリアランスなしFCFS。回帰確認・デバッグ用に残す。
     # 本研究で評価対象とする最終的なFCFSモデルとしては使用しない。
     def transfer_fcfs_no_clearance(s):
