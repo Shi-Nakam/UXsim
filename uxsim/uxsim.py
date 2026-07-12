@@ -372,6 +372,100 @@ class Node:
             ),
         )
 
+    def _validate_order_control_batch_t_trigger_inputs(s, trigger_vehicle, require_link=False):
+        if not s.order_control_eligible:
+            raise ValueError(
+                f"Node {s.name} is not order-control eligible for BATCH t_trigger estimation."
+            )
+        if s.order_control_type != "batch":
+            raise ValueError(
+                f"Node {s.name} has order_control_type={s.order_control_type!r}; "
+                "expected 'batch' for BATCH t_trigger estimation."
+            )
+        if trigger_vehicle not in s.incoming_vehicles:
+            raise ValueError(
+                f"Vehicle {trigger_vehicle.name} is not in incoming_vehicles of node {s.name}."
+            )
+        if trigger_vehicle.route_next_link is None:
+            raise ValueError(
+                f"Vehicle {trigger_vehicle.name} has no route_next_link at node {s.name}."
+            )
+        if s.name not in trigger_vehicle.order_control_node_arrival_times:
+            raise ValueError(
+                f"Vehicle {trigger_vehicle.name} has no arrival time recorded for node {s.name}."
+            )
+        if s.name not in trigger_vehicle.order_control_node_arrival_tiebreakers:
+            raise ValueError(
+                f"Vehicle {trigger_vehicle.name} has no arrival tiebreaker recorded for node {s.name}."
+            )
+        if s.name not in trigger_vehicle.order_control_earliest_arrival_timesteps:
+            raise ValueError(
+                f"Vehicle {trigger_vehicle.name} has no earliest arrival timestep recorded for node {s.name}."
+            )
+        if s.name in trigger_vehicle.order_control_batch_assignments:
+            raise ValueError(
+                f"Vehicle {trigger_vehicle.name} is already assigned to a batch at node {s.name}."
+            )
+        if require_link and trigger_vehicle.link is None:
+            raise ValueError(
+                f"Vehicle {trigger_vehicle.name} has no current link at node {s.name}."
+            )
+        if (
+            require_link
+            and s.last_order_control_inlink is not None
+            and s.last_order_control_entry_timestep is None
+        ):
+            raise ValueError(
+                f"Node {s.name} has last_order_control_inlink set but "
+                "last_order_control_entry_timestep is None."
+            )
+
+    def _compute_order_control_batch_base_trigger_timestep(s, trigger_vehicle):
+        arrival_timestep = int(
+            round(
+                trigger_vehicle.order_control_node_arrival_times[s.name] / s.W.DELTAT
+            )
+        )
+        first_transfer_timestep = arrival_timestep + 1
+        trigger_earliest_arrival_timestep = (
+            trigger_vehicle.order_control_earliest_arrival_timesteps[s.name]
+        )
+        return max(first_transfer_timestep, trigger_earliest_arrival_timestep)
+
+    def estimate_order_control_batch_t_trigger_level_0(s, trigger_vehicle):
+        """
+        Estimate BATCH trigger timestep at Level 0 (read-only).
+
+        Uses first-transfer and earliest-arrival lower bounds only. Does not consider
+        clearance, capacity, or service-queue state. Returns an int timestep.
+        """
+        s._validate_order_control_batch_t_trigger_inputs(trigger_vehicle)
+        return int(s._compute_order_control_batch_base_trigger_timestep(trigger_vehicle))
+
+    def estimate_order_control_batch_t_trigger_level_1(s, trigger_vehicle):
+        """
+        Estimate BATCH trigger timestep at Level 1 (read-only).
+
+        Uses the Level 0 base timestep and existing clearance state at this node.
+        Returns an int timestep. Raises ValueError on inconsistent clearance state.
+        """
+        s._validate_order_control_batch_t_trigger_inputs(trigger_vehicle, require_link=True)
+        base_trigger_timestep = s._compute_order_control_batch_base_trigger_timestep(
+            trigger_vehicle
+        )
+
+        if s.last_order_control_inlink is None:
+            return int(base_trigger_timestep)
+        if trigger_vehicle.link == s.last_order_control_inlink:
+            return int(base_trigger_timestep)
+
+        clearance_satisfied_timestep = (
+            s.last_order_control_entry_timestep
+            + s.order_control_clearance_timesteps
+            + 1
+        )
+        return int(max(base_trigger_timestep, clearance_satisfied_timestep))
+
     # クリアランスなしFCFS。回帰確認・デバッグ用に残す。
     # 本研究で評価対象とする最終的なFCFSモデルとしては使用しない。
     def transfer_fcfs_no_clearance(s):
