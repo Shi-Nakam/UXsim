@@ -179,6 +179,8 @@ class Node:
         s.order_control_clearance_timesteps = W.order_control_clearance_timesteps
         s.last_order_control_inlink = None
         s.last_order_control_entry_timestep = None
+        s.order_control_batch_service_queue = deque()
+        s.order_control_batch_next_id = 0
         
         #incoming/outgoing links
         s.inlinks: dict[str,Link] = dict()
@@ -1211,7 +1213,7 @@ class Vehicle:
     """
     Vehicle or platoon in a network.
 
-    Optional research attributes for order-exchange studies: vot_true, vot_declared, payment_paid, payment_received, order_exchange_log, participates_in_order_exchange, order_control_node_arrival_times, order_control_node_arrival_tiebreakers, order_control_earliest_arrival_timesteps.
+    Optional research attributes for order-exchange studies: vot_true, vot_declared, payment_paid, payment_received, order_exchange_log, participates_in_order_exchange, order_control_node_arrival_times, order_control_node_arrival_tiebreakers, order_control_earliest_arrival_timesteps, order_control_batch_assignments.
     """
     def __init__(s, W: "World", orig: Node|str, dest: Node|str, departure_time:int|float, name: str|None=None, route_pref: dict=None, route_choice_principle=None, mode: str="single_trip", links_prefer: list=[], links_avoid: list=[], trip_abort: int=1, departure_time_is_time_step: int=0, attribute=None, user_attribute=None, user_function=None, auto_rename=False, vot_true=None, vot_declared=None, payment_paid=0, payment_received=0, order_exchange_log=None, participates_in_order_exchange=False):
         """
@@ -1286,6 +1288,10 @@ class Vehicle:
         order_control_earliest_arrival_timesteps : dict
             BATCH research attribute mapping each downstream node name to the earliest arrival timestep
             (timestep units) estimated at link entry under free-flow conditions. Initialized to an empty dict.
+        order_control_batch_assignments : dict
+            BATCH Processing control state mapping each order-control node name to the batch_id assigned
+            to this vehicle at that node. If a node name is absent, the vehicle is treated as unbatched at
+            that node. Initialized to an empty dict at this stage; no assignments are written yet.
         """
 
         s.W = W
@@ -1385,6 +1391,7 @@ class Vehicle:
         s.order_control_node_arrival_times = {}
         s.order_control_node_arrival_tiebreakers = {}
         s.order_control_earliest_arrival_timesteps = {}
+        s.order_control_batch_assignments = {}
 
         s.id = len(s.W.VEHICLES)
         if name != None:
