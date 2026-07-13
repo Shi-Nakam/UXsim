@@ -466,6 +466,127 @@ class Node:
         )
         return int(max(base_trigger_timestep, clearance_satisfied_timestep))
 
+    def get_order_control_batch_candidates_by_inlink(s, t_trigger):
+        """
+        Return unbatched BATCH candidate vehicles grouped by inlink (read-only).
+
+        Extracts vehicles on all inlinks to this node whose earliest arrival
+        timestep at this node is at most ``t_trigger``, grouped by inlink Link
+        object. Within each inlink, candidate order matches the physical FIFO
+        order of ``inlink.vehicles``. Raises ValueError when node configuration,
+        timestep inputs, missing or invalid earliest-arrival records,
+        non-decreasing earliest-arrival violations, or batch-assignment prefix
+        inconsistencies are detected. Batch assignment is evaluated per current
+        node name (``s.name in veh.order_control_batch_assignments``); assigned
+        vehicles must form a prefix of each inlink queue. Does not use current
+        speed ``veh.v`` or ``route_next_link`` as candidate filters.
+
+        Research scenario assumption: OD demand is between network endpoints;
+        order-control nodes are not used as vehicle destinations; trip-end
+        service units are not handled.
+
+        Does not mutate any simulation state.
+        """
+        if not s.order_control_eligible:
+            raise ValueError(
+                f"Node {s.name} is not order-control eligible for BATCH candidate extraction."
+            )
+        if s.order_control_type != "batch":
+            raise ValueError(
+                f"Node {s.name} has order_control_type={s.order_control_type!r}; "
+                "expected 'batch' for BATCH candidate extraction."
+            )
+
+        if not isinstance(t_trigger, int) or isinstance(t_trigger, bool):
+            raise ValueError(
+                f"Invalid t_trigger={t_trigger!r} for node {s.name}; "
+                "expected a non-negative int timestep."
+            )
+        if t_trigger < 0:
+            raise ValueError(
+                f"Invalid t_trigger={t_trigger} for node {s.name}; "
+                "expected a non-negative int timestep."
+            )
+
+        result = {}
+
+        for inlink in s.inlinks.values():
+            if inlink.end_node is not s:
+                raise ValueError(
+                    f"Node {s.name} has inlink {inlink.name} whose end_node is "
+                    f"{inlink.end_node.name}, not {s.name}."
+                )
+
+            vehicles = list(inlink.vehicles)
+
+            previous_earliest = None
+            in_unassigned_suffix = False
+
+            for veh in vehicles:
+                if veh.link is not inlink:
+                    raise ValueError(
+                        f"Vehicle {veh.name} on inlink {inlink.name} of node {s.name} "
+                        f"has veh.link={getattr(veh.link, 'name', veh.link)!r}, "
+                        f"not {inlink.name}."
+                    )
+                if veh.state != "run":
+                    raise ValueError(
+                        f"Vehicle {veh.name} on inlink {inlink.name} of node {s.name} "
+                        f"has state={veh.state!r}; expected 'run'."
+                    )
+                if s.name not in veh.order_control_earliest_arrival_timesteps:
+                    raise ValueError(
+                        f"Vehicle {veh.name} on inlink {inlink.name} of node {s.name} "
+                        f"has no earliest arrival timestep recorded for node {s.name}."
+                    )
+
+                earliest = veh.order_control_earliest_arrival_timesteps[s.name]
+                if not isinstance(earliest, int) or isinstance(earliest, bool):
+                    raise ValueError(
+                        f"Vehicle {veh.name} on inlink {inlink.name} of node {s.name} "
+                        f"has invalid earliest arrival timestep={earliest!r}; "
+                        "expected a non-negative int."
+                    )
+                if earliest < 0:
+                    raise ValueError(
+                        f"Vehicle {veh.name} on inlink {inlink.name} of node {s.name} "
+                        f"has invalid earliest arrival timestep={earliest}; "
+                        "expected a non-negative int."
+                    )
+
+                if previous_earliest is not None and earliest < previous_earliest:
+                    raise ValueError(
+                        f"Non-decreasing earliest arrival violation on inlink {inlink.name} "
+                        f"at node {s.name}: vehicle {veh.name} has earliest={earliest} "
+                        f"after previous earliest={previous_earliest}."
+                    )
+                previous_earliest = earliest
+
+                is_assigned_at_node = s.name in veh.order_control_batch_assignments
+                if in_unassigned_suffix and is_assigned_at_node:
+                    raise ValueError(
+                        f"Batch assignment prefix violation on inlink {inlink.name} "
+                        f"at node {s.name}: assigned vehicle {veh.name} appears after "
+                        "an unassigned vehicle."
+                    )
+                if not is_assigned_at_node:
+                    in_unassigned_suffix = True
+
+            candidates = []
+            for veh in vehicles:
+                if s.name in veh.order_control_batch_assignments:
+                    continue
+                earliest = veh.order_control_earliest_arrival_timesteps[s.name]
+                if earliest <= t_trigger:
+                    candidates.append(veh)
+                else:
+                    break
+
+            if candidates:
+                result[inlink] = candidates
+
+        return result
+
     # クリアランスなしFCFS。回帰確認・デバッグ用に残す。
     # 本研究で評価対象とする最終的なFCFSモデルとしては使用しない。
     def transfer_fcfs_no_clearance(s):
