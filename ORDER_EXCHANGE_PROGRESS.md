@@ -2206,6 +2206,317 @@ baseline主要交通結果：
 - signalized UXsim standard と FCFS の比較条件をより体系化した実験設計。
 - Batch Processing、Time-value Transaction、支払い処理は引き続き未実装。
 
+### フェーズ4-6設計：BATCH Processing正式設計メモの追加
+
+完了済み。
+
+#### 位置づけ
+
+- phase 4-6として、BATCH Processing実装前の正式設計メモを追加した。
+- 今回は設計メモ作成のみであり、BATCH実装本体はまだ行っていない。
+
+#### 追加したファイル
+
+- `ORDER_EXCHANGE_PHASE4-6_BATCH_PROCESSING_DESIGN_NOTES.md`
+  - phase 4-6：交差点BATCH処理の実装前正式設計メモ
+
+#### 設計メモに含めた主な内容
+
+- UXsim-adapted BATCHの位置づけ
+- `earliest_arrival_timestep` の定義と計算式
+- `t_trigger` と Level 0 / 1 / 2 の位置づけ
+- BATCH候補集合、inlink方向別batch化、Nの定義
+- residual batch、service unit、unresolved
+- Time-value Transactionへの接続方針
+- テスト方針、未解決事項
+
+#### 関連コミット
+
+- bb23372 phase 4-6: add batch processing design notes
+
+#### 一時退避PDFメモの位置づけ
+
+- チャット上限到達時に、phase 4-6A作業内容を一時退避用として `phase4-6A_batch_earliest_arrival_timestep_memo.pdf` を作成した。
+- このPDFはUXsimリポジトリ外（Macデスクトップ）に保存されている。
+- 今後の作業再開時は、更新済みの正式Markdown（本メモおよび `ORDER_EXCHANGE_PHASE4-6_BATCH_PROCESSING_DESIGN_NOTES.md`）を優先して参照する。
+- PDFは背景資料・一時退避用であり、リポジトリ内の正式記録ではない。
+
+### フェーズ4-6A：earliest_arrival_timestep記録
+
+完了済み。
+
+#### 位置づけ
+
+- BATCH形成そのものではなく、BATCH形成の基礎データとなる `earliest_arrival_timestep` の記録機能を実装した。
+- 交通挙動は変更していない（記録処理の追加のみ）。
+
+#### 実装内容
+
+Vehicleに追加した属性：
+
+- `order_control_earliest_arrival_timesteps = {}`
+  - key：下流Nodeの `node.name`
+  - value：timestep単位の `earliest_arrival_timestep`
+
+Worldに追加した設定：
+
+- `W.order_control_batch_tau_timesteps = 1`（初期値）
+- `set_order_control_batch_tau_timesteps(tau_timesteps)`
+  - intのみ許可、bool不可、0以上、不正値はValueError
+
+Vehicleに追加したメソッド：
+
+- `record_order_control_earliest_arrival_timestep_for_current_link()`
+
+記録タイミング（いずれも `veh.link` 設定と `veh.link_arrival_time` 更新の直後）：
+
+- origin `generation_queue` から最初のoutlinkへ実際に投入されたとき
+- 標準 `Node.transfer` で次Linkへ移ったとき
+- `transfer_fcfs_no_clearance` で次Linkへ移ったとき
+- `transfer_fcfs_clearance` で次Linkへ移ったとき
+
+記録しないタイミング：
+
+- `addVehicle()` 直後
+- `generation_queue` 待機中
+- destination到着後の新規記録
+
+計算式：
+
+```
+free_flow_travel_timesteps = ceil((link.length / link.u) / W.DELTAT)
+link_entry_timestep = int(round(veh.link_arrival_time / W.DELTAT))
+earliest_arrival_timestep = link_entry_timestep + free_flow_travel_timesteps + tau_timesteps
+```
+
+#### 今回あえて実装していないこと
+
+- BATCH形成、trigger vehicle処理、candidate set形成
+- service unit処理、residual batch
+- `Node.transfer()` のbatch分岐
+- Time-value Transaction本体
+
+#### 追加テスト
+
+- `tests_order_control_batch_earliest_arrival_timestep.py`
+
+#### 関連コミット
+
+- 94b05f2 phase 4-6: record batch earliest arrival timesteps
+
+### フェーズ4-6B：BATCH状態コンテナの追加
+
+完了済み。
+
+#### 位置づけ
+
+- BATCH Processing用の最小状態管理コンテナのみを追加した。
+- 初期化のみであり、値の書き込み・交通挙動への接続は行っていない。
+
+#### 実装内容
+
+Vehicleに追加：
+
+- `order_control_batch_assignments = {}`
+  - key：`node.name`、value：そのNodeで将来割り当てられる `batch_id`
+  - 対象Node名のkeyが存在しない場合、そのNodeでは未batch
+  - 別Nodeでのみbatch化済みでも、対象Node名のkeyがなければ対象Nodeでは未batch
+
+Nodeに追加：
+
+- `order_control_batch_service_queue = deque()`（将来のservice unit処理順キュー）
+- `order_control_batch_next_id = 0`（将来のbatch_id発行カウンタ）
+- いずれも初期化のみ。queueへの追加・next_idの増加は行わない
+
+#### 追加テスト
+
+- `tests_order_control_batch_state_containers.py`
+
+#### 関連コミット
+
+- 28ed156 phase 4-6: add batch state containers
+
+### フェーズ4-6C：BATCH trigger候補Vehicle識別ヘルパー
+
+完了済み。
+
+#### 位置づけ
+
+- BATCH trigger候補Vehicleを決定的な順序で返す参照専用ヘルパーを追加した。
+- trigger確定・保存、BATCH形成、service queue追加にはまだ接続していない。
+
+#### 実装内容
+
+追加メソッド：
+
+- `Node.get_order_control_batch_trigger_candidates()`
+
+対象Node条件（両方を満たす場合のみ候補抽出、それ以外は `[]` を返す）：
+
+- `order_control_eligible is True`
+- `order_control_type == "batch"`
+
+Vehicle候補条件：
+
+- `incoming_vehicles` に含まれる
+- `route_next_link is not None`
+- 対象Node名が `order_control_node_arrival_times` に存在
+- 対象Node名が `order_control_node_arrival_tiebreakers` に存在
+- 対象Node名が `order_control_batch_assignments` に**存在しない**（Node別判定）
+
+候補順（FCFSと同じ）：
+
+```
+(arrival_time, tiebreaker, veh.id)
+```
+
+重要事項：
+
+- 候補抽出メソッドは新しい乱数を生成しない
+- `incoming_vehicles` をin-placeでsortしない（sorted済み新listを返す）
+- 候補listの各Vehicleはすでに `incoming_vehicles` に入っており、Node端へ到着済みである
+- BATCH形成処理を実行する時点では、返却listの先頭Vehicleを現在のBATCH形成を起動するtrigger vehicleとして使用する想定である
+- ただし phase 4-6C の現段階では、trigger vehicleの確定・保存およびBATCH形成処理には未接続である
+- 参照専用、副作用なし
+
+#### 追加テスト
+
+- `tests_order_control_batch_trigger_candidates.py`
+
+#### 関連コミット
+
+- 40d5ad7 phase 4-6: add batch trigger candidate helper
+
+### フェーズ4-6D：t_trigger推定（Level 0 / Level 1）
+
+完了済み。
+
+#### 位置づけ
+
+- trigger vehicleの予定通過タイムステップ `t_trigger` を推定するLevel 0 / Level 1の参照専用ヘルパーを追加した。
+- BATCH形成、batch_id発行、service queue追加、`Node.transfer()` batch分岐にはまだ接続していない。
+
+#### 実装内容
+
+内部ヘルパー：
+
+- `_validate_order_control_batch_t_trigger_inputs()`
+- `_compute_order_control_batch_base_trigger_timestep()`
+
+公開メソッド：
+
+- `estimate_order_control_batch_t_trigger_level_0(trigger_vehicle)`
+- `estimate_order_control_batch_t_trigger_level_1(trigger_vehicle)`
+
+`t_trigger` の単位はtimestep。計算式に `W.T` は使用しない。
+
+Level 0：
+
+```
+arrival_timestep = int(round(arrival_time_seconds / W.DELTAT))
+first_transfer_timestep = arrival_timestep + 1
+t_trigger = max(first_transfer_timestep, trigger_earliest_arrival_timestep)
+```
+
+Level 1：
+
+- 上記 `base_trigger_timestep` を計算後、既存clearance状態を参照
+- 直前通過なし、または同一inlink：`t_trigger = base_trigger_timestep`
+- 異inlink：`t_trigger = max(base_trigger_timestep, last_entry + clearance + 1)`
+- 不整合時はValueError（Level 0へ自動fallbackしない）
+- 推定結果はNode/Vehicleへ保存しない
+
+#### 追加テスト
+
+- `tests_order_control_batch_t_trigger_estimation.py`（テスト関数21件）
+
+#### 関連コミット
+
+- d79db61 phase 4-6: add batch t_trigger estimators
+
+### フェーズ4-6A〜4-6D：回帰確認
+
+各実装後、以下のテストおよびサンプルがPASSしたことを確認済み。
+
+BATCH関連：
+
+- `tests_order_control_batch_earliest_arrival_timestep.py`
+- `tests_order_control_batch_state_containers.py`
+- `tests_order_control_batch_trigger_candidates.py`
+- `tests_order_control_batch_t_trigger_estimation.py`
+
+FCFS / clearance関連：
+
+- `tests_fcfs_order_control_clearance_0.py`
+- `tests_fcfs_order_control_clearance_1.py`
+- `tests_fcfs_order_control_clearance_xyz.py`
+- `tests_fcfs_order_control_transfer.py`
+- `tests_fcfs_order_control_behavior.py`
+- `tests_fcfs_order_control_tiebreaker.py`
+- `tests_order_control_node_arrival_times.py`
+- `tests_order_control_clearance_settings.py`
+
+baseline / example：
+
+- `tests_order_exchange_baseline.py`
+- `demos_and_examples/example_00en_simple.py`
+
+主要交通結果（phase 4-6A〜4-6D実装後も既知値と一致、交通挙動変化なし）：
+
+`tests_order_exchange_baseline.py`：
+
+- completed trips：48 / 48
+- average speed：16.5 m/s
+- total travel time：2928.0 s
+- average travel time：61.0 s
+- average delay：1.0 s
+- delay ratio：0.017
+- total distance traveled：48000.0 m
+
+`demos_and_examples/example_00en_simple.py`：
+
+- completed trips：735 / 810
+- average speed：11.7 m/s
+- total travel time：119475.0 s
+- average travel time：162.6 s
+- average delay：62.6 s
+- delay ratio：0.385
+- total distance traveled：1632250.0 m
+
+### フェーズ4-6設計議論：目的地Vehicle・比較対象Node・batch順序（設計確定、未実装）
+
+設計メモ `ORDER_EXCHANGE_PHASE4-6_BATCH_PROCESSING_DESIGN_NOTES.md` に正式反映済み。要点のみここに記録する。
+
+#### 当面の研究シナリオ前提（実装ではなくシナリオ設計上の前提）
+
+- 現行UXsimでは、`single_trip` Vehicleの `link.end_node == dest` の場合、通常のinter-link transfer requestとは異なるtrip-end処理経路を取る。
+- したがって、比較対象内部交差点NodeをVehicleの目的地として使用しない。
+- OD需要は原則としてネットワーク端点間に設定する。
+- 標準UXsim、FCFS、BATCH、Time-value Transactionの比較では、ネットワークとOD需要を同一にする。
+- この前提はBATCHだけに有利/不利な条件を置くためではなく、全比較方式で同一条件を維持するためである。
+
+#### 保留した実装（将来課題）
+
+以下は検討したが、現時点では実装しないことにした。
+
+- `order_control_comparison_target` 属性
+- 比較対象Node集合の共通管理setter/getter
+- `validate_order_control_destination_assumptions()` 等の目的地前提自動検証
+- `finalize_scenario()` / `exec_simulation()` への自動検証接続
+- trip-end service unit
+
+理由：比較Node選択方式がランダム選択以外は未実装であり、比較対象Node管理の共通層を今作ると過剰設計の可能性がある。当面は端点間ODでシナリオ側から回避可能。
+
+#### 設計確定・未実装のBATCH候補・batch順序
+
+- 候補包含条件：`recorded_earliest_arrival_timestep <= t_trigger`
+- 候補はNode端到着済みだけでなく、全inlink上の未batch Vehicle
+- `veh.state == "run"` を対象、`veh.v > 0` は条件にしない
+- 同一inlink内は `inlink.vehicles` の物理FIFO順を維持（earliest arrivalや乱数で並べ替えない）
+- trigger batch（trigger vehicleを含むinlink）を最初に処理
+- その他inlink別batchの順序は、trigger到着時点のsnapshot estimated arrivalで決定（未実装）
+- snapshot指標は `order_control_earliest_arrival_timesteps` とは別。tau_timestepsは加えない
+
 ## 現在までに追加した主なファイル
 
 - tests_order_exchange_baseline.py
@@ -2241,6 +2552,16 @@ baseline主要交通結果：
   - 5000台・10000台を0〜500 timestepに投入。
   - signalized側は `[60, W.DELTAT, 60, W.DELTAT]` の全赤付き4相信号。
   - FCFS側は `clearance_timesteps=1`。
+- ORDER_EXCHANGE_PHASE4-6_BATCH_PROCESSING_DESIGN_NOTES.md
+  - phase 4-6：BATCH Processing実装前正式設計メモ。
+- tests_order_control_batch_earliest_arrival_timestep.py
+  - phase 4-6A：`earliest_arrival_timestep` 記録の単体テスト。
+- tests_order_control_batch_state_containers.py
+  - phase 4-6B：BATCH状態コンテナの単体テスト。
+- tests_order_control_batch_trigger_candidates.py
+  - phase 4-6C：BATCH trigger候補識別ヘルパーの単体テスト。
+- tests_order_control_batch_t_trigger_estimation.py
+  - phase 4-6D：t_trigger Level 0/1推定の単体テスト（21テスト関数）。
 
 ## uxsim/uxsim.py の主な変更
 
@@ -2254,12 +2575,15 @@ baseline主要交通結果：
 - participates_in_order_exchange
 - order_control_node_arrival_times
 - order_control_node_arrival_tiebreakers
+- order_control_earliest_arrival_timesteps（phase 4-6A）
+- order_control_batch_assignments（phase 4-6B）
 
 Vehicleへの追加メソッド・処理：
 
 - record_order_control_node_first_arrival(node) を追加
 - order_control_node_arrival_times に、order-control対象Nodeへの初回到着時刻を記録する処理を追加
 - order_control_node_arrival_tiebreakers に、初回到着時の固定tiebreaker値を記録する処理を追加
+- record_order_control_earliest_arrival_timestep_for_current_link() を追加（phase 4-6A）
 - Vehicle.update() 内で incoming_vehicles.append(s) の直後に初回到着時刻記録処理を呼ぶようにした
 
 Vehicleの初回order-control Node到着記録：
@@ -2307,10 +2631,24 @@ Nodeへの追加属性（phase 4-5）：
 - `last_order_control_inlink`
 - `last_order_control_entry_timestep`
 
+Nodeへの追加属性（phase 4-6B）：
+
+- `order_control_batch_service_queue`
+- `order_control_batch_next_id`
+
+Nodeへの追加メソッド（phase 4-6C / 4-6D）：
+
+- `get_order_control_batch_trigger_candidates()`（参照専用）
+- `estimate_order_control_batch_t_trigger_level_0(trigger_vehicle)`（参照専用）
+- `estimate_order_control_batch_t_trigger_level_1(trigger_vehicle)`（参照専用）
+- 内部ヘルパー：`_validate_order_control_batch_t_trigger_inputs()`、`_compute_order_control_batch_base_trigger_timestep()`
+- `Node.transfer()` のbatch分岐はまだ未実装
+
 ### Worldへの追加属性
 
 - order_control_eligibility_prepared
 - order_control_clearance_timesteps（phase 4-5、デフォルト1）
+- order_control_batch_tau_timesteps（phase 4-6A、デフォルト1）
 
 ### Worldへの追加メソッド
 
@@ -2319,6 +2657,7 @@ Nodeへの追加属性（phase 4-5）：
 - set_order_control_eligible_flag_for_nodes(...)
 - set_order_control_for_randomly_selected_eligible_nodes(...)
 - set_order_control_clearance_timesteps(clearance_timesteps)（phase 4-5）
+- set_order_control_batch_tau_timesteps(tau_timesteps)（phase 4-6A）
 
 ## 現在の重要な設計方針
 
@@ -2418,6 +2757,18 @@ Nodeへの追加属性（phase 4-5）：
 - corridor型・grid unsignalized型・grid signalized型のsanity check（Step 4A〜4C）および高需要grid sanity check（Step 4D clearance=0、Step 4E clearance=1）でも極端な破綻は確認されなかった
 - 標準UXsim挙動を壊さない方針は引き続き最重要である
 
+### BATCH Processing設計・実装方針（ORDER_EXCHANGE_PHASE4-6_BATCH_PROCESSING_DESIGN_NOTES.md 参照）
+
+- phase 4-6A〜4-6Dまで、BATCH準備データ・状態コンテナ・trigger候補識別・t_trigger推定（Level 0/1）を実装済み
+- BATCH形成本体、service unit処理、residual batch、`Node.transfer()` batch分岐、Level 2は未実装
+- `earliest_arrival_timestep` はリンク進入時に記録し、候補包含条件に使用する（実装済み）
+- `t_trigger` Level 0/1推定は参照専用ヘルパーとして実装済み。計算式に `W.T` は含めない
+- Level 2は研究上の通常推定方式として将来使用予定。Level 1はLevel 2 unresolved時のfallback。Level 0は最小基準・比較・デバッグ用
+- 当面の研究シナリオでは、比較対象内部交差点Nodeを目的地としない端点間ODを使用する
+- 比較対象Node共通管理・目的地自動検証は将来課題として保留
+- snapshot estimated arrivalによるinlink別batch間順序決定は設計確定・未実装
+- 次フェーズ候補：t_trigger以下の未batch Vehicleを全inlinkからFIFO維持で抽出する参照専用ヘルパー（phase 4-6E相当）
+
 ### テスト追加方針
 
 - 新しい挙動テストを追加する際も、まずはテストのみを追加し、uxsim/uxsim.py を勝手に変更しない方針を維持する
@@ -2433,30 +2784,57 @@ Nodeへの追加属性（phase 4-5）：
 現在の進捗：
 
 - phase 4-5では、クリアランスありFCFSの実装・接続・基本検証・X/Y/Z問題検証まで完了済み。
-- Step 4A〜4Dとして、clearance-zero FCFS を中心とする corridor/grid sanity check 比較を追加済み。
-- Step 4Eとして、clearance-one FCFS と signalized all-red UXsim の高需要grid比較を追加済み。
-- phase 4-5 の実装・テスト側の最新コミットは af11393 phase 4-5: add high-demand grid clearance-one FCFS vs signalized all-red UXsim sanity test。
-- この progress memo 更新コミットが後に続くため、作業再開時の最新コミットは git log で確認すること。
+- Step 4A〜4Eとして、FCFS sanity check比較を追加済み。
+- phase 4-6設計メモ（bb23372）を追加済み。
+- phase 4-6A（94b05f2）：`earliest_arrival_timestep` 記録を実装済み。
+- phase 4-6B（28ed156）：BATCH状態コンテナを実装済み。
+- phase 4-6C（40d5ad7）：BATCH trigger候補識別ヘルパーを実装済み。
+- phase 4-6D（d79db61）：t_trigger Level 0/1推定ヘルパーを実装済み。
+- phase 4-6A〜4-6D実装後の回帰テストはすべてPASS。baseline/example主要交通結果は既知値と一致。
+- **最新コミット（実装側）**：d79db61 phase 4-6: add batch t_trigger estimators
+- **作業開始時点（本メモ更新前）**：working treeはcleanであった（`git status` で確認済み）。
 - feature/intersection-order-control は origin/feature/intersection-order-control と同期済み。
-- af11393 時点では作業ツリーはcleanであった。この progress memo 更新後は、コミット・push後に `git status` で作業ツリーがcleanであることを確認する。
+- 本 progress memo 更新は未コミット。コミット・push後に `git status` で作業ツリーがcleanであることを確認する。
 
-次に進む候補：
+次に進む候補（優先）：
+
+- **phase 4-6E（または次の適切な小フェーズ番号）**：t_trigger以下の未batch Vehicleを、対象Nodeの全inlinkからFIFOを維持して抽出する参照専用ヘルパー。
+  - batch形成はまだ行わない。batch_id発行・service queue追加・`Node.transfer()` batch分岐は行わない。
+  - 当面の端点間OD前提により、trip-end Vehicleは発生させない。
+
+その後の後続フェーズ候補：
+
+- inlink別候補からservice-unit候補を形成
+- trigger方向を先頭にする、その他方向をsnapshot estimated arrivalで並べる
+- 最大batchサイズNの適用、N到達時の打切り
+- batch_id発行、`order_control_batch_assignments` への記録、service queueへの追加
+- residual batch、`Node.transfer()` へのbatch分岐
+- Level 2仮想サービス計算
+
+その他の候補（phase 4-5後続）：
 
 - Step 4D/4Eの結果を踏まえた簡易分析メモの作成。
 - clearance_timesteps=0/1比較の整理。
-- signal offset戦略を変えた比較。
-- signal cycleや全赤時間を変えた比較。
-- demand densityやnetwork sizeを変えた比較。
-- Batch Processing の設計・実装検討。
-- Time-value Transaction の設計・実装検討。
-- 支払い処理の設計・実装検討。
+- 信号設定・需要密度・ネットワークサイズの体系化比較。
+
+将来課題（設計確定・未実装）：
+
+- 比較対象Node集合の独立管理（`order_control_comparison_target` 等）
+- 目的地前提の自動検証
+- trip-end Vehicleを含むservice unit設計
+- Time-value Transaction、支払い処理
 
 ## 新しいチャットで再開する場合
 
 新しいチャットでは、以下を伝える。
 
 - ORDER_EXCHANGE_PROGRESS.md を読んでください
+- ORDER_EXCHANGE_PHASE4-6_BATCH_PROCESSING_DESIGN_NOTES.md を読んでください
 - ORDER_EXCHANGE_PHASE4-5_CLEARANCE_FCFS_DESIGN_NOTES.md を読んでください
+- tests_order_control_batch_earliest_arrival_timestep.py を読んでください
+- tests_order_control_batch_state_containers.py を読んでください
+- tests_order_control_batch_trigger_candidates.py を読んでください
+- tests_order_control_batch_t_trigger_estimation.py を読んでください
 - tests_fcfs_order_control_clearance_0.py を読んでください
 - tests_fcfs_order_control_clearance_1.py を読んでください
 - tests_fcfs_order_control_clearance_xyz.py を読んでください
@@ -2469,13 +2847,12 @@ Nodeへの追加属性（phase 4-5）：
 - feature/intersection-order-control ブランチは origin/feature/intersection-order-control とtracking済みで、GitHubへpush済みです
 - 現在の通常fcfs経路は `transfer_fcfs_clearance()` を呼ぶ
 - `transfer_fcfs_no_clearance()` は回帰確認・デバッグ用に残っている
-- `clearance_timesteps=0/1`、X/Y/Z問題、corridor/grid sanity checks、高需要grid sanity checks（Step 4D clearance=0、Step 4E clearance=1）はテスト済み
-- corridor型 sanity check（`tests_order_control_fcfs_vs_uxsim_standard_medium_network.py`）はコミット名に unsignalized とないが、実態は unsignalized UXsim標準transfer との比較である
-- Step 4Dは clearance-zero FCFS の高需要比較
-- Step 4Eは clearance-one FCFS と signalized all-red UXsim の高需要比較
-- phase 4-5 の実装・テスト側の最新コミットは af11393 phase 4-5: add high-demand grid clearance-one FCFS vs signalized all-red UXsim sanity test
+- phase 4-6A〜4-6Dまで完了。BATCH形成本体・`Node.transfer()` batch分岐は未実装
+- phase 4-6実装側の最新コミットは d79db61 phase 4-6: add batch t_trigger estimators
 - ただし、その後に progress memo 更新コミットがある可能性があるため、git log --oneline -20 で最新状態を確認する
-- 次は Step 4D/4E結果の分析メモ、clearance=0/1比較整理、信号設定の体系化、Batch Processing / Time-value Transaction / 支払い処理へ進む候補
+- 次は phase 4-6E相当：全inlinkからのBATCH候補抽出（参照専用ヘルパー）へ進む予定
+- 目的地Vehicleの扱いは端点間OD前提で保留。比較対象Node共通管理・目的地自動検証は将来課題
+- 一時退避PDF `phase4-6A_batch_earliest_arrival_timestep_memo.pdf` はリポジトリ外。正式Markdownを優先参照
 - ORDER_EXCHANGE_PHASE4_DESIGN_NOTES.md、ORDER_EXCHANGE_RESEARCH_CONTEXT.md、ORDER_EXCHANGE_FCFS_TRANSFER_DESIGN_NOTES.md も必要に応じて参照してください
 - git log --oneline -20 と git status の結果を貼ります
 - GitHub運用は現在 HTTPS + PAT。将来的にSSH移行を検討する余地があります

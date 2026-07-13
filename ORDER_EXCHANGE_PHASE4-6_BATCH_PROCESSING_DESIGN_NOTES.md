@@ -6,12 +6,40 @@ UXsim Order Exchange 改変作業における、phase 4-6：交差点BATCH処理
 
 ---
 
-## 1. このメモの位置づけ
+## 1A. 実装状況サマリ（phase 4-6A〜4-6D）
+
+進捗の詳細・コミットID・回帰結果は [ORDER_EXCHANGE_PROGRESS.md](ORDER_EXCHANGE_PROGRESS.md) を参照。
+
+| 区分 | 内容 |
+|------|------|
+| **実装・テスト・コミット済み** | phase 4-6A：`earliest_arrival_timestep` 記録（94b05f2） |
+| | phase 4-6B：BATCH状態コンテナ（28ed156） |
+| | phase 4-6C：`get_order_control_batch_trigger_candidates()`（40d5ad7） |
+| | phase 4-6D：t_trigger Level 0/1推定（d79db61） |
+| **設計確定・未実装** | BATCH候補集合形成（`earliest <= t_trigger`、全inlink走査） |
+| | inlink別batch形成、N適用、batch_id発行、assignments書き込み |
+| | service queue追加、residual batch、`Node.transfer()` batch分岐 |
+| | snapshot estimated arrivalによるinlink別batch間順序 |
+| | Level 2仮想サービス計算、Level 2→Level 1 fallback |
+| **当面の研究シナリオ前提** | 比較対象内部交差点Nodeを目的地としない端点間OD |
+| | 全比較方式で同一ネットワーク・同一OD需要 |
+| **将来課題** | 比較対象Node共通管理、目的地自動検証、trip-end service unit |
+| | taxi mode向け動的dest検証、Time-value Transaction本体 |
+| **次フェーズ候補** | phase 4-6E：全inlinkからFIFO維持でBATCH候補抽出（参照専用） |
+
+---
+
+## 1B. このメモの位置づけ（続き）
 
 - 本メモは、**UXsimへのBATCH処理実装前の正式設計メモ**である。
 - 背景資料として、以下のPDFメモがある。
   - ファイル名：`UXsim_BATCH_design_note.pdf`
   - タイトル：UXsim向け簡易BATCH処理 実装デザインノート
+- phase 4-6A作業時の一時退避用PDFメモもある。
+  - ファイル名：`phase4-6A_batch_earliest_arrival_timestep_memo.pdf`
+  - 保存場所：UXsimリポジトリ外（Macデスクトップ）
+  - 位置づけ：チャット上限到達時の一時退避用。リポジトリ内の正式記録ではない。
+  - **以後の作業再開時は、本正式メモおよび [ORDER_EXCHANGE_PROGRESS.md](ORDER_EXCHANGE_PROGRESS.md) を優先して参照する。**
 - 本正式メモは、PDFメモを背景資料としつつ、その後の議論で更新・修正された**最新版仕様**をまとめる。
 - **PDFメモの完全再現が目的ではない。** 実装開始・次チャット引き継ぎに必要な仕様をまとめる。
 - 元論文BATCHの忠実再現ではなく、UXsimのリンク流出入制約・アウトリンク容量制約・ノード容量制約・実際のtransfer可否を考慮する **UXsim-adapted BATCH** を対象とする。
@@ -72,22 +100,41 @@ UXsim Order Exchange 改変作業における、phase 4-6：交差点BATCH処理
 
 BATCH実装では、制御ロジック用の時刻は基本的に **timestep 単位**で統一する。
 
+ただし、これは既存の秒単位保存値をそのままtimestepとして扱うことを意味しない。保存形式は秒単位の属性があり、BATCH計算時にはtimestepへ明示的に変換する。
+
 ### 理由
 
 - 現行UXsimでは `vehicle.departure_time` や `vehicle.arrival_time` は timestep 表記である。
-- FCFS clearance実装も、`last_order_control_entry_timestep` や `clearance_timesteps` に基づく timestep ベースで処理している。
-- 秒単位とtimestep単位を混在させるとBATCH候補判定やclearance判定が混乱する。
+- FCFS clearance実装も、`last_order_control_entry_timestep` や `order_control_clearance_timesteps` に基づく timestep ベースで処理している。
+- 秒単位の保存値とtimestep単位の計算値を混同すると、BATCH候補判定やclearance判定が混乱する。
+
+### Node到着時刻の保存と変換
+
+現在実装されている `order_control_node_arrival_times[node.name]` の記録値は**秒単位**である。`record_order_control_node_first_arrival(node)` 呼び出し時に `W.T * W.DELTAT` で記録される。
+
+BATCH制御ロジックでは、この値を `W.DELTAT` で割り、`int(round(...))` によって `arrival_timestep` へ変換して使用する。
+
+```
+arrival_timestep = int(
+    round(
+        order_control_node_arrival_times[node.name]
+        / W.DELTAT
+    )
+)
+```
 
 ### 主要時刻
 
 | 名称 | 単位 | 用途 |
 |------|------|------|
-| `earliest_arrival_timestep` | timestep | BATCH形成の中核データ |
-| `arrival_time_to_node` | timestep | ノード端到着時刻 |
-| `actual_pass_timestep` | timestep | 実通過時刻 |
-| `t_trigger` | timestep | trigger vehicleの予定通過時刻 |
+| `earliest_arrival_timestep` | timestep | BATCH候補包含および `t_trigger` 下限 |
+| `order_control_node_arrival_times[node.name]` | 秒 | 対象Nodeへの初回到着時刻の保存値（`W.T * W.DELTAT`） |
+| `arrival_timestep` | timestep | 上記保存値を変換したBATCH計算用のNode到着時刻 |
+| `actual_pass_timestep` | timestep | 実通過時刻を将来記録する際の制御単位（**未実装**） |
+| `t_trigger` | timestep | trigger vehicleの予定通過タイムステップ |
+| `first_transfer_timestep` | timestep | Node到着後最初のtransfer対象timestep（`arrival_timestep + 1`） |
 
-秒表示が必要な場合だけ、`timestep * W.DELTAT` で秒に変換する。
+秒表示が必要な場合は、`timestep * W.DELTAT` で秒に変換する。
 
 ---
 
@@ -97,14 +144,24 @@ BATCH実装では、制御ロジック用の時刻は基本的に **timestep 単
 - `earliest_arrival_timestep` は **BATCH形成の中核データ**である。
 - 車両が当該Nodeへ向かうリンクへ進入した時点で付与する。
 - これは「自由流・単独・最短条件であれば、このtimestep以降に当該Nodeへ到着可能である」という**下限値**である。
-- UXsim上の実際の `arrival_time_to_node` とは異なる。
-- 実混雑・前方車両・アウトリンク閉塞・ノード容量制約により、実際の `arrival_time_to_node` が `earliest_arrival_timestep` より遅れることはあり得る。
+- UXsim上の実際のノード端到着（`order_control_node_arrival_times[node.name]`、秒単位）とは異なる。
+- 実混雑・前方車両・アウトリンク閉塞・ノード容量制約により、実際のノード端到着が `earliest_arrival_timestep` より遅れることはあり得る。
 - それでもBATCH候補判定では、実到着予測ではなく **`earliest_arrival_timestep`** を用いる。
 
-### 計算式
+### phase 4-6Aで実装済み
+
+- Vehicle属性：`order_control_earliest_arrival_timesteps`（dict、key=`node.name`、value=int timestep）
+- メソッド：`record_order_control_earliest_arrival_timestep_for_current_link()`
+- World設定：`order_control_batch_tau_timesteps`（初期値1）、`set_order_control_batch_tau_timesteps()`
+- テスト：`tests_order_control_batch_earliest_arrival_timestep.py`
+- コミット：94b05f2
+
+### 計算式（実装済み）
 
 ```
 free_flow_travel_timesteps = ceil((link.length / link.u) / W.DELTAT)
+
+link_entry_timestep = int(round(veh.link_arrival_time / W.DELTAT))
 
 earliest_arrival_timestep =
     link_entry_timestep
@@ -116,10 +173,10 @@ earliest_arrival_timestep =
 
 - `link.u` はUXsimの `free_flow_speed`。
 - `W.DELTAT` は1 timestepあたりの秒数。
-- `tau_timesteps` は初期案では **1**。
-- `veh.link_arrival_time` は名前に反して、現在リンクへの進入時刻として使われており、**単位は秒**。
-- そのため、`link_entry_timestep` は `int(veh.link_arrival_time / W.DELTAT)` で復元できる可能性がある。
-- ただし、実装時には既存属性を使うか、BATCH用の明示的な属性を追加するかを確認する。
+- `tau_timesteps` は `W.order_control_batch_tau_timesteps`（初期値1）。
+- `veh.link_arrival_time` は現在リンクへの進入時刻（**単位は秒**）。
+- `ceil` を使うのは、自由流でも到達できない早すぎるtimestepを earliest arrival として扱わないため。
+- `link_entry_timestep` は `int(round(...))` で復元する（浮動小数誤差回避）。
 
 ---
 
@@ -127,15 +184,18 @@ earliest_arrival_timestep =
 
 ### arrival_time_to_node
 
-- 車両が現在リンクの終端、つまり `link.end_node` 側に到着し、Node処理候補になる時刻。
+- 車両が現在リンクの終端、つまり `link.end_node` 側に到着し、Node処理候補になる時刻を指す**概念名**。
 - UXsimコード上は、`vehicle.x == vehicle.link.length` となり、`node.incoming_vehicles` に追加されるタイミングに対応する。
 - 既存order-control改変では `record_order_control_node_first_arrival(node)` が呼ばれる。
 - このメソッドはUXsim標準ではなく、order-control / FCFS改変で追加された補助機能と理解する。
+- 実装上の保存値は `order_control_node_arrival_times[node.name]` で、**単位は秒**（`W.T * W.DELTAT`）。
+- BATCH制御計算では、この保存値から `arrival_timestep` へ変換して使用する（§5参照）。
 
 ### actual_pass_time / actual_pass_timestep
 
 - UXsimのtransfer条件を満たし、実際にinlinkからoutlinkへ移った時刻。
 - outlink容量、inlink流出容量、node流量容量、アウトリンク空間、信号またはorder-control条件などを満たす必要がある。
+- 将来、制御ロジック用に `actual_pass_timestep`（timestep単位）として記録する想定であるが、**現時点では正式な記録属性として未実装**。
 
 ### 重要
 
@@ -165,17 +225,79 @@ earliest_arrival_timestep =
 - BATCH形成のきっかけは、**未batch車両がリンク端に到着すること**である。
 - その車両を **trigger vehicle** と呼ぶ。
 - trigger vehicleはすでにノード端に到着している。
-- trigger vehicleの予定通過時刻を **`t_trigger`** とする。
+- trigger vehicleの予定通過タイムステップを **`t_trigger`** とする。
 - BATCH候補判定は **`earliest_arrival_timestep <= t_trigger`** によって行う。
 - `t_trigger` をどう推定するかが、BATCH形成範囲を左右する。
 
 **Level 0 / 1 / 2 は候補判定の違いではなく、`t_trigger` 推定方法の違い**である。
 
+### Level 0 / 1 / 2 の位置づけ（確定）
+
+| Level | 位置づけ | 状態 |
+|-------|----------|------|
+| **Level 2** | 研究上の通常推定方式として最終的に使用する予定。形成済みservice unitやbatchを仮想的に処理し、現在観測可能な容量・閉塞状態を考慮する。将来いつoutlinkが空くかを完全予測するものではない。unresolvedが発生する可能性がある。 | **未実装** |
+| **Level 1** | Level 2でunresolvedとなり有効なt_triggerを決定できない場合のfallback。既存clearance状態を考慮。必要入力が整っていれば必ず計算できる。不整合時はValueError（Level 0へ自動fallbackしない）。 | **実装済み**（phase 4-6D、d79db61） |
+| **Level 0** | 最小基準・比較・単体検証・デバッグ用。Level 1のfallbackとは位置づけない。 | **実装済み**（phase 4-6D、d79db61） |
+
+### phase 4-6Cで実装済み：trigger候補識別
+
+- `Node.get_order_control_batch_trigger_candidates()`（参照専用）
+- BATCH対象Nodeの `incoming_vehicles` から未batch Vehicleを抽出し、`(arrival_time, tiebreaker, veh.id)` でsorted新listを返す
+- 非BATCH Nodeでは `[]`。新しい乱数は生成しない。副作用なし
+- 候補listの各Vehicleはすでに対象Nodeの `incoming_vehicles` に入っており、Node端へ到着済みである
+- BATCH形成処理を実行する時点では、返却listの先頭Vehicleを現在のBATCH形成を起動するtrigger vehicleとして使用する想定である
+- ただし phase 4-6C の現段階では、trigger vehicleの確定・保存およびBATCH形成処理には未接続である
+- コミット：40d5ad7
+
+### phase 4-6Dで実装済み：t_trigger推定（Level 0 / Level 1）
+
+**共通前提**
+
+- `t_trigger` の単位はtimestep
+- 計算式に **`W.T` は含めない**（後の時刻で再計算しても現在時刻だけでt_triggerが後ろへ動かない）
+- 推定結果はNode/Vehicleへ保存しない。参照専用
+
+**Node到着時刻の変換**
+
+```
+arrival_timestep = int(round(
+    trigger_vehicle.order_control_node_arrival_times[node.name] / W.DELTAT
+))
+first_transfer_timestep = arrival_timestep + 1
+```
+
+（incoming_vehiclesへ登録されるタイムステップの `Node.transfer()` は既に終了しているため、到着timestepそのものではなく次timestepからが最初のtransfer対象）
+
+**Level 0**
+
+```
+trigger_earliest_arrival_timestep =
+    trigger_vehicle.order_control_earliest_arrival_timesteps[node.name]
+
+t_trigger = max(first_transfer_timestep, trigger_earliest_arrival_timestep)
+```
+
+- clearance、容量、service queueは考慮しない
+
+**Level 1**
+
+```
+base_trigger_timestep = max(first_transfer_timestep, trigger_earliest_arrival_timestep)
+```
+
+- `last_order_control_inlink is None` → `t_trigger = base_trigger_timestep`
+- `trigger_vehicle.link == last_order_control_inlink` → `t_trigger = base_trigger_timestep`
+- 異inlink → `clearance_satisfied = last_entry + clearance + 1`、`t_trigger = max(base, clearance_satisfied)`
+- `last_order_control_inlink` があるのに `last_order_control_entry_timestep is None` → ValueError
+- テスト：`tests_order_control_batch_t_trigger_estimation.py`（21テスト関数）
+
+### 旧表（参考、Level 2未実装部分は上記に統合）
+
 | Level | 内容 |
 |-------|------|
-| **Level 0** | trigger vehicleの `arrival_time_to_node` を基礎に簡易推定する。最小実装用の粗い近似。 |
-| **Level 1** | 直近通過inlinkとtrigger inlinkの関係を考慮する。同一inlinkなら短い間隔、異inlinkならT2 / clearance相当を反映する。 |
-| **Level 2** | service unit、batch、vehicleの未処理順序を仮想的に処理し、より現実的な `t_trigger` を推定する。現在観測できる容量制約・ブロック状態を反映する。将来いつアウトリンクが空くかまでは完全予測しない。unresolvedが出た場合はLevel 0またはLevel 1にfallbackする。 |
+| **Level 0** | trigger vehicleの到着情報とearliest下限から簡易推定。（**実装済み**） |
+| **Level 1** | 直近通過inlinkとtrigger inlinkの関係・clearanceを反映。（**実装済み**） |
+| **Level 2** | service unit仮想処理・容量制約反映。unresolved時はLevel 1へfallback。（**未実装**） |
 
 ---
 
@@ -186,8 +308,27 @@ earliest_arrival_timestep =
 ### 候補集合
 
 - 当該Nodeへ向かう**全インリンク上の未batch車両**。
-- 各車両にはリンク進入時点で `earliest_arrival_timestep` が付与されている。
-- `earliest_arrival_timestep <= t_trigger` を満たす車両を候補に含める。
+- 各車両にはリンク進入時点で `earliest_arrival_timestep` が付与されている（phase 4-6Aで実装済み）。
+- `earliest_arrival_timestep <= t_trigger` を満たす車両を候補に含める（**未実装**。次フェーズ4-6E候補）。
+
+### 候補Vehicleの状態条件（設計確定）
+
+- 対象状態は **`veh.state == "run"`** とする。
+- **`veh.v > 0` は条件にしない**。渋滞等により `veh.v == 0` のVehicleも候補になり得る。
+
+### 同一inlink内FIFO（設計確定）
+
+- 単車線を前提とする。
+- `inlink.vehicles` の物理的FIFO順を維持する。
+- earliest arrivalや乱数で同一inlink内を並べ替えない。
+- 後続Vehicleが先行Vehicleを追い越さない。
+
+### Node別batch assignmentの判定（phase 4-6Bで実装済み）
+
+- `order_control_batch_assignments` はNode別dict（key=`node.name`、value=`batch_id`）。
+- 候補除外は **`node.name in veh.order_control_batch_assignments`** で行う。
+- 別Nodeでのみbatch化済み（例：`assignments["other_node"]=0`）の場合、対象Nodeでは未batchとして扱う。
+- 辞書全体が空かどうか、または `len(assignments)>0` だけでVehicle全体を除外してはいけない。
 
 ### 重要
 
@@ -202,7 +343,7 @@ earliest_arrival_timestep =
 ## 11. 同時到着時のtrigger順序
 
 - 同一timestepに複数の未batch車両がリンク端に到着する可能性がある。
-- その場合、既存FCFS改変と同様に、**`arrival_time_to_node`、tiebreaker、`veh.id`** 等で先着順を決める。
+- その場合、既存FCFS改変と同様に、**`order_control_node_arrival_times[node.name]`（秒）、tiebreaker、`veh.id`** 等で先着順を決める。
 - 先着扱いとなった車両をtrigger vehicleとして通常のBATCH形成処理を行う。
 
 ### 例
@@ -223,7 +364,52 @@ earliest_arrival_timestep =
 - batch内の順序は、そのinlink内のFIFO / request orderを破らない。
 - **trigger vehicleを含む方向のbatchを最初に処理**する。
   - これは、trigger vehicleが現在まさに到着してBATCH形成を起動した車両であるため自然な処理順である。
-- 他方向batchの順序は、各batchの先頭車両の到着・request情報に基づき、FCFS的に扱う。
+- 他方向batchの順序は、**snapshot estimated arrival**（下記）に基づく。**未実装**。
+
+### snapshot estimated arrival（設計確定・未実装）
+
+Link進入時に固定された `order_control_earliest_arrival_timesteps` とは**別指標**。batch間順序決定専用。
+
+trigger vehicleがNode端へ到着した時点で、各inlink別batchの先頭Vehicleについて：
+
+```
+remaining_distance = max(0, inlink.length - head_vehicle.x)
+
+remaining_free_flow_timesteps = ceil(
+    (remaining_distance / inlink.u) / W.DELTAT
+)
+
+snapshot_estimated_arrival_timestep =
+    trigger_arrival_timestep + remaining_free_flow_timesteps
+```
+
+その他inlink別batchの処理順キー（昇順）：
+
+```
+(snapshot_estimated_arrival_timestep, head_vehicle.id)
+```
+
+重要：
+
+- **現在速度 `veh.v` は使用しない**。Linkの自由流速度 `inlink.u` を使用する。
+- `order_control_earliest_arrival_timesteps` を上書きしない。
+- 新しい乱数tiebreakerは追加しない。同値時は `head_vehicle.id` を最終キーとする。
+- **`tau_timesteps` は加えない**（相対接近順序評価のため概念上不要）。
+- `inlink.u <= 0` の場合はValueErrorとする予定。
+
+### phase 4-6Bで実装済み：BATCH状態コンテナ
+
+**Vehicle**
+
+- `order_control_batch_assignments = {}`（初期化のみ。assignment書き込みは未実装）
+
+**Node**
+
+- `order_control_batch_service_queue = deque()`（初期化のみ）
+- `order_control_batch_next_id = 0`（初期化のみ。増加は未実装）
+
+- テスト：`tests_order_control_batch_state_containers.py`
+- コミット：28ed156
 
 ---
 
@@ -309,29 +495,88 @@ earliest_arrival_timestep =
 - 一度batch化・単独処理単位化された車両は、**再びbatch候補に入らない**。
 - batch内の車両順序は**固定**される。
 - residual batch内の車両順序も**固定**される。
-- `actual_pass_time` / `actual_pass_timestep` は実通過時に**一度だけ**記録する。
+- `actual_pass_time` / `actual_pass_timestep` は実通過時に**一度だけ**記録する想定（**未実装**）。
 
 ---
 
 ## 18. 初期実装でやること
 
-初期実装対象：
+### 実装済み（phase 4-6A〜4-6D）
 
-1. Vehicle側にBATCH用の `earliest_arrival_timestep` を付与する。
-2. 未batch車両がリンク端に到着したらtrigger vehicleとする。
-3. 同時到着時は既存FCFSと同様にtiebreaker等でtrigger順を決める。
-4. `t_trigger` をLevel 0またはLevel 1で推定する。
-5. `earliest_arrival_timestep <= t_trigger` を満たす未batch車両を候補化する。
-6. 候補をinlink方向別に分ける。
-7. 各方向で最大N台までbatch化する。
-8. Nに達したら今回のbatch形成を打ち切る。
-9. N超過分は今回batch形成には含めず、未batchのまま残す。
-10. batch化済み車両を再候補にしない。
-11. batch内順序を固定する。
-12. 未到着なら待つ。
-13. 容量制約等でbatch途中車両が一時的に通過不可になった場合はresidual batchとして扱う方針を入れる。
-14. 既存FCFS / clearance処理を壊さない。
-15. `order_control_type="batch"` などで既存 `Node.transfer` から分岐できるようにする候補を残す。
+1. Vehicle側にBATCH用の `earliest_arrival_timestep` を付与する。（**phase 4-6A**）
+2. World/Node側にBATCH用状態コンテナを初期化する。（**phase 4-6B**）
+3. BATCH trigger候補Vehicleを決定的順序で返す参照専用ヘルパーを追加する。（**phase 4-6C**）
+4. `t_trigger` をLevel 0 / Level 1で推定する参照専用ヘルパーを追加する。（**phase 4-6D**）
+5. 既存FCFS / clearance処理を壊さないことを回帰テストで確認済み。
+
+### 未実装（次フェーズ以降）
+
+1. 未batch車両がリンク端に到着したらtrigger vehicleとする（trigger確定・保存）。
+2. 同時到着時は既存FCFSと同様にtiebreaker等でtrigger順を決める。
+3. `earliest_arrival_timestep <= t_trigger` を満たす未batch車両を全inlinkからFIFO維持で候補化する。（**phase 4-6E候補**）
+4. 候補をinlink方向別に分ける。
+5. 各方向で最大N台までbatch化する。
+6. Nに達したら今回のbatch形成を打ち切る。
+7. 他方向batchをsnapshot estimated arrivalで並べ、trigger方向を先頭にする。
+8. batch_id発行、`order_control_batch_assignments` への記録、service queueへの追加。
+9. batch化済み車両を再候補にしない。
+10. batch内順序を固定する。未到着なら待つ。
+11. residual batchとして扱う方針を実装する。
+12. `order_control_type="batch"` で `Node.transfer` から分岐する。
+13. Level 2仮想サービス計算とLevel 2→Level 1 fallback。
+
+---
+
+## 18A. 目的地Vehicle・trip-end（当面の前提と将来課題）
+
+### 現行UXsimのtrip-end経路
+
+- `single_trip` Vehicleで `link.end_node == dest` の場合、通常のinter-link transfer requestとは異なるtrip-end処理を取る。
+- 概念的には：`flag_waiting_for_trip_end` を設定し、inlink先頭になった時点で `end_trip()` する。
+- `route_next_link` を持つ通常transferとして `Node.transfer()` へ入らない。
+
+### BATCHへの影響
+
+- 現在のBATCH service unitへ目的地Vehicleを含めるには追加設計が必要。
+- 将来検討例：trip-end Vehicleのservice unit化、route_next_linkありVehicleとの共通処理、batch途中でのend_trip、residual batchとtrip-endの関係、`Node.transfer()` と `Vehicle.end_trip()` の役割分担、trip-end Vehicleがtriggerになる場合の扱い。
+
+### 当面の研究シナリオ前提（実装ではなくシナリオ設計）
+
+- **OD需要は原則ネットワーク端点間に設定し、比較対象内部交差点NodeをVehicleの目的地として使用しない。**
+- 標準UXsim、FCFS、BATCH、Time-value Transactionの比較では、ネットワークとOD需要を同一にする。
+- この前提はBATCHだけに有利/不利な条件を置くためではなく、**全比較方式で同一条件を維持するため**である。
+
+### 保留した実装（将来課題）
+
+当初検討したが、現時点では実装しない：
+
+- `validate_order_control_destination_assumptions()` 等の目的地前提自動検証
+- Node属性 `order_control_comparison_target`
+- Worldメソッド `set_order_control_comparison_targets(...)` / `clear_...` / `get_...`
+- `finalize_scenario()` または `exec_simulation()` への自動検証接続
+- trip-end service unit
+
+理由：比較Node選択方式がランダム選択以外は未実装であり、比較対象Node管理の共通層を今作ると過剰設計の可能性。当面は端点間ODでシナリオ側から回避可能。
+
+### 将来の比較対象Node管理案（設計メモ）
+
+3概念の分離：
+
+| 概念 | 意味 |
+|------|------|
+| `order_control_eligible` | ネットワーク構造上、order controlを適用可能か |
+| `order_control_comparison_target` | 今回の実験で比較対象として選ばれたか（**未実装**） |
+| `order_control_type` | そのケースで none / fcfs / batch / time_value のどれを適用するか |
+
+将来想定される比較Node選択方式：全eligible、ランダム選択、交通量ベース、渋滞指標ベース、中心性ベース、地理的範囲、一定間隔・配置条件、手動指定、外部ファイル、複数条件の組合せ。
+
+将来作業候補：
+
+- A. 比較対象Node集合の独立管理
+- B. 比較対象Node選択方式の共通インターフェース
+- C. 比較対象Node集合確定後のdest重複検証
+- D. taxi mode（`dest` / `dest_list` 動的変化）向け別検証
+- E. trip-end service unit（比較対象Nodeを目的地として許容する場合）
 
 ---
 
@@ -386,7 +631,16 @@ BATCH制御そのものは時間価値取引ではない。しかし、BATCHで�
 
 ## 21. テスト方針
 
-初期テスト候補：
+### 実装済みテスト（phase 4-6A〜4-6D）
+
+- `tests_order_control_batch_earliest_arrival_timestep.py`（phase 4-6A）
+- `tests_order_control_batch_state_containers.py`（phase 4-6B）
+- `tests_order_control_batch_trigger_candidates.py`（phase 4-6C）
+- `tests_order_control_batch_t_trigger_estimation.py`（phase 4-6D、21テスト関数）
+
+phase 4-6A〜4-6D各実装後、FCFS/clearance既存テストおよび `tests_order_exchange_baseline.py`、`example_00en_simple.py` はPASS。主要交通結果は既知値と一致（交通挙動変化なし）。
+
+### 今後のテスト候補
 
 - `earliest_arrival_timestep` が期待通り計算されること。
 - `link.u` / `W.DELTAT` / `tau_timesteps` の単位変換が正しいこと。
@@ -407,15 +661,29 @@ BATCH制御そのものは時間価値取引ではない。しかし、BATCHで�
 
 ## 22. 未解決事項
 
-- `tau_timesteps` を常に1でよいか。
-- `t_trigger` 推定を初期実装でLevel 0にするかLevel 1にするか。
+### 解決済み（phase 4-6A〜4-6D）
+
+- `earliest_arrival_timestep` を既存属性で持つか → **Vehicle.order_control_earliest_arrival_timesteps として実装済み**
+- `tau_timesteps` のWorld設定 → **order_control_batch_tau_timesteps、setter実装済み（初期値1）**
+- t_trigger Level 0 / Level 1推定 → **phase 4-6Dで実装済み**
+- trigger候補の決定順 → **get_order_control_batch_trigger_candidates() で実装済み**
+- Node別batch assignmentの意味 → **order_control_batch_assignments、phase 4-6Bで実装済み（初期化のみ）**
+
+### 未解決・将来課題
+
+- `tau_timesteps` を常に1でよいか（研究比較で可変にするか）。
 - Level 2仮想サービス計算をいつ導入するか。
+- Level 2 unresolved時のLevel 1 fallback接続をいつ実装するか。
+- 全inlinkからのBATCH候補抽出（phase 4-6E）。
+- snapshot estimated arrivalの実装タイミング。
 - residual batchの挿入位置管理をどう実装するか。
-- `earliest_arrival_timestep` を既存 `veh.link_arrival_time` から計算するか、新規属性でより明示的に持つか。
-- `order_control_type` 名を `"batch"` にするか、別名にするか。
 - batch内部構造の具体的データ形式。
+- service unitの具体的データ形式。
+- `order_control_type` 名を `"batch"` にするか、別名にするか（現状 `"batch"` を使用）。
 - debug/log出力の粒度。
+- 比較対象Node共通管理、目的地自動検証、trip-end service unit。
 - Time-value Transactionとどの段階で接続するか。
+- taxi mode向け動的dest検証。
 
 ---
 
@@ -437,8 +705,18 @@ BATCH制御そのものは時間価値取引ではない。しかし、BATCHで�
 - `transfer_fcfs_clearance`
 - `transfer_fcfs_no_clearance`
 - `record_order_control_node_first_arrival`
+- `record_order_control_earliest_arrival_timestep_for_current_link`（phase 4-6A）
+- `get_order_control_batch_trigger_candidates`（phase 4-6C）
+- `estimate_order_control_batch_t_trigger_level_0` / `_level_1`（phase 4-6D）
 - `Link.__init__`
 - `Link.update` / `in_out_flow_constraint` 周辺
+
+### BATCH関連テスト（phase 4-6A〜4-6D）
+
+- `tests_order_control_batch_earliest_arrival_timestep.py`
+- `tests_order_control_batch_state_containers.py`
+- `tests_order_control_batch_trigger_candidates.py`
+- `tests_order_control_batch_t_trigger_estimation.py`
 
 ### FCFS / clearance基本テスト
 
@@ -470,6 +748,9 @@ BATCH制御そのものは時間価値取引ではない。しかし、BATCHで�
 - 現在ブランチ。
 - `git status`。
 - `git log --oneline -20`。
-- **BATCH実装前**であること。
-- FCFS / clearance までは検証済みであること。
-- 次は **BATCH実装**に入る段階であること。
+- **phase 4-6A〜4-6Dまで実装・コミット済み**（最新実装コミット：d79db61）。
+- **BATCH形成本体・`Node.transfer()` batch分岐は未実装**。
+- FCFS / clearance までは検証済み。
+- 次は **phase 4-6E相当：全inlinkからのBATCH候補抽出（参照専用）** へ進む段階。
+- 目的地Vehicleは端点間OD前提で保留。比較対象Node共通管理・自動検証は将来課題。
+- 一時退避PDF `phase4-6A_batch_earliest_arrival_timestep_memo.pdf` はリポジトリ外。正式Markdownを優先参照。
