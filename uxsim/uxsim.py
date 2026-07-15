@@ -587,6 +587,281 @@ class Node:
 
         return result
 
+    def get_ordered_order_control_batch_candidates_by_inlink(
+        s, candidates_by_inlink, trigger_vehicle
+    ):
+        """
+        Order Phase 4-6E inlink-grouped BATCH candidates for processing (read-only).
+
+        Takes the inlink-to-candidate-list dict from Phase 4-6E and returns a list of
+        ``(inlink, fifo_candidate_list)`` tuples in BATCH processing order. The trigger
+        vehicle's inlink is always first. Other inlinks are ordered by
+        ``snapshot_estimated_arrival_timestep`` computed from each group's head vehicle
+        current position and link free-flow speed at the trigger vehicle's first-arrival
+        timestep; ties break on ``head_vehicle.id``. Intra-inlink FIFO order is unchanged.
+        Each returned candidate list is a new ``list(...)`` copy. Does not mutate inputs
+        or simulation state.
+
+        Research scenario assumption: OD demand is between network endpoints;
+        order-control nodes are not used as vehicle destinations; trip-end service
+        units are not handled.
+        """
+        if not s.order_control_eligible:
+            raise ValueError(
+                f"Node {s.name} is not order-control eligible for BATCH candidate ordering."
+            )
+        if s.order_control_type != "batch":
+            raise ValueError(
+                f"Node {s.name} has order_control_type={s.order_control_type!r}; "
+                "expected 'batch' for BATCH candidate ordering."
+            )
+
+        if not isinstance(candidates_by_inlink, dict) or not candidates_by_inlink:
+            raise ValueError(
+                f"Invalid candidates_by_inlink for node {s.name}; "
+                "expected a non-empty dict."
+            )
+
+        node_inlinks = list(s.inlinks.values())
+        seen_vehicles = set()
+
+        for inlink, candidates in candidates_by_inlink.items():
+            if inlink not in node_inlinks:
+                raise ValueError(
+                    f"Inlink {getattr(inlink, 'name', inlink)!r} in candidates_by_inlink "
+                    f"is not an inlink of node {s.name}."
+                )
+            if inlink.end_node is not s:
+                raise ValueError(
+                    f"Inlink {inlink.name} in candidates_by_inlink has end_node "
+                    f"{inlink.end_node.name}, not {s.name}."
+                )
+            if not isinstance(candidates, list) or not candidates:
+                raise ValueError(
+                    f"Invalid candidate list for inlink {inlink.name} at node {s.name}; "
+                    "expected a non-empty list."
+                )
+
+            unassigned_suffix = []
+            unassigned_suffix_started = False
+            for veh in inlink.vehicles:
+                is_assigned_at_node = s.name in veh.order_control_batch_assignments
+                if not is_assigned_at_node:
+                    unassigned_suffix_started = True
+                    unassigned_suffix.append(veh)
+                elif unassigned_suffix_started:
+                    raise ValueError(
+                        f"Batch assignment prefix violation on inlink {inlink.name} "
+                        f"at node {s.name}: assigned vehicle {veh.name} appears after "
+                        "an unassigned vehicle."
+                    )
+
+            if candidates != unassigned_suffix[: len(candidates)]:
+                raise ValueError(
+                    f"Candidate list for inlink {inlink.name} at node {s.name} is not a "
+                    "contiguous prefix of the unassigned suffix."
+                )
+
+            previous_index = None
+            for veh in candidates:
+                if veh in seen_vehicles:
+                    raise ValueError(
+                        f"Vehicle {veh.name} appears in multiple candidate lists at "
+                        f"node {s.name}."
+                    )
+                seen_vehicles.add(veh)
+
+                if veh not in inlink.vehicles:
+                    raise ValueError(
+                        f"Candidate vehicle {veh.name} is not on inlink {inlink.name} "
+                        f"at node {s.name}."
+                    )
+                if veh.link is not inlink:
+                    raise ValueError(
+                        f"Candidate vehicle {veh.name} has veh.link="
+                        f"{getattr(veh.link, 'name', veh.link)!r}, not {inlink.name}."
+                    )
+                if veh.state != "run":
+                    raise ValueError(
+                        f"Candidate vehicle {veh.name} on inlink {inlink.name} at node "
+                        f"{s.name} has state={veh.state!r}; expected 'run'."
+                    )
+                if s.name in veh.order_control_batch_assignments:
+                    raise ValueError(
+                        f"Candidate vehicle {veh.name} is already assigned to a batch "
+                        f"at node {s.name}."
+                    )
+
+                current_index = list(inlink.vehicles).index(veh)
+                if previous_index is not None and current_index <= previous_index:
+                    raise ValueError(
+                        f"Candidate list for inlink {inlink.name} at node {s.name} "
+                        "violates physical FIFO order."
+                    )
+                previous_index = current_index
+
+        if trigger_vehicle is None:
+            raise ValueError(
+                f"trigger_vehicle is None for BATCH candidate ordering at node {s.name}."
+            )
+        if trigger_vehicle.link is None:
+            raise ValueError(
+                f"trigger_vehicle {trigger_vehicle.name} has no current link at node "
+                f"{s.name}."
+            )
+        if trigger_vehicle.state != "run":
+            raise ValueError(
+                f"trigger_vehicle {trigger_vehicle.name} has state="
+                f"{trigger_vehicle.state!r}; expected 'run' at node {s.name}."
+            )
+        if trigger_vehicle not in s.incoming_vehicles:
+            raise ValueError(
+                f"trigger_vehicle {trigger_vehicle.name} is not in incoming_vehicles "
+                f"of node {s.name}."
+            )
+        if s.name not in trigger_vehicle.order_control_node_arrival_times:
+            raise ValueError(
+                f"trigger_vehicle {trigger_vehicle.name} has no arrival time recorded "
+                f"for node {s.name}."
+            )
+        if s.name not in trigger_vehicle.order_control_node_arrival_tiebreakers:
+            raise ValueError(
+                f"trigger_vehicle {trigger_vehicle.name} has no arrival tiebreaker "
+                f"recorded for node {s.name}."
+            )
+        if s.name in trigger_vehicle.order_control_batch_assignments:
+            raise ValueError(
+                f"trigger_vehicle {trigger_vehicle.name} is already assigned to a "
+                f"batch at node {s.name}."
+            )
+
+        trigger_inlink = trigger_vehicle.link
+        if trigger_inlink not in candidates_by_inlink:
+            raise ValueError(
+                f"trigger inlink {trigger_inlink.name} is not in candidates_by_inlink "
+                f"at node {s.name}."
+            )
+
+        trigger_candidates = candidates_by_inlink[trigger_inlink]
+        if not trigger_candidates:
+            raise ValueError(
+                f"trigger inlink {trigger_inlink.name} has an empty candidate list at "
+                f"node {s.name}."
+            )
+        if trigger_candidates[0] is not trigger_vehicle:
+            raise ValueError(
+                f"trigger_vehicle {trigger_vehicle.name} is not the first candidate on "
+                f"trigger inlink {trigger_inlink.name} at node {s.name}."
+            )
+
+        arrival_seconds = trigger_vehicle.order_control_node_arrival_times[s.name]
+        if (
+            not isinstance(arrival_seconds, (int, float))
+            or isinstance(arrival_seconds, bool)
+            or not math.isfinite(arrival_seconds)
+            or arrival_seconds < 0
+        ):
+            raise ValueError(
+                f"Invalid trigger arrival time={arrival_seconds!r} for vehicle "
+                f"{trigger_vehicle.name} at node {s.name}."
+            )
+
+        deltat = s.W.DELTAT
+        if (
+            not isinstance(deltat, (int, float))
+            or isinstance(deltat, bool)
+            or not math.isfinite(deltat)
+            or deltat <= 0
+        ):
+            raise ValueError(
+                f"Invalid W.DELTAT={deltat!r} for BATCH candidate ordering at node "
+                f"{s.name}."
+            )
+
+        trigger_arrival_timestep = int(round(arrival_seconds / deltat))
+
+        sorted_other_groups = []
+        for inlink, candidates in candidates_by_inlink.items():
+            if inlink is trigger_inlink:
+                continue
+
+            head_vehicle = candidates[0]
+
+            link_length = inlink.length
+            if (
+                not isinstance(link_length, (int, float))
+                or isinstance(link_length, bool)
+                or not math.isfinite(link_length)
+                or link_length < 0
+            ):
+                raise ValueError(
+                    f"Invalid length={link_length!r} for inlink {inlink.name} at node "
+                    f"{s.name}."
+                )
+
+            link_u = inlink.u
+            if (
+                not isinstance(link_u, (int, float))
+                or isinstance(link_u, bool)
+                or not math.isfinite(link_u)
+                or link_u <= 0
+            ):
+                raise ValueError(
+                    f"Invalid free-flow speed u={link_u!r} for inlink {inlink.name} "
+                    f"at node {s.name}."
+                )
+
+            head_x = head_vehicle.x
+            if (
+                not isinstance(head_x, (int, float))
+                or isinstance(head_x, bool)
+                or not math.isfinite(head_x)
+            ):
+                raise ValueError(
+                    f"Invalid x={head_x!r} for head vehicle {head_vehicle.name} on "
+                    f"inlink {inlink.name} at node {s.name}."
+                )
+
+            head_vehicle_id = head_vehicle.id
+            if (
+                not isinstance(head_vehicle_id, int)
+                or isinstance(head_vehicle_id, bool)
+                or head_vehicle_id < 0
+            ):
+                raise ValueError(
+                    f"Invalid id={head_vehicle_id!r} for head vehicle {head_vehicle.name} "
+                    f"on inlink {inlink.name} at node {s.name}."
+                )
+
+            remaining_distance = max(0, link_length - head_x)
+            remaining_free_flow_timesteps = math.ceil(
+                (remaining_distance / link_u) / deltat
+            )
+            snapshot_estimated_arrival_timestep = (
+                trigger_arrival_timestep + remaining_free_flow_timesteps
+            )
+
+            sorted_other_groups.append(
+                (
+                    inlink,
+                    candidates,
+                    snapshot_estimated_arrival_timestep,
+                    head_vehicle_id,
+                )
+            )
+
+        sorted_other_groups.sort(
+            key=lambda group: (group[2], group[3])
+        )
+
+        ordered_groups = [
+            (trigger_inlink, list(candidates_by_inlink[trigger_inlink]))
+        ]
+        for inlink, candidates, _, _ in sorted_other_groups:
+            ordered_groups.append((inlink, list(candidates)))
+
+        return ordered_groups
+
     # クリアランスなしFCFS。回帰確認・デバッグ用に残す。
     # 本研究で評価対象とする最終的なFCFSモデルとしては使用しない。
     def transfer_fcfs_no_clearance(s):
