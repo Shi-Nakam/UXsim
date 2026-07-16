@@ -862,6 +862,88 @@ class Node:
 
         return ordered_groups
 
+    def apply_order_control_batch_max_size(
+        s, ordered_candidates_by_inlink, max_batch_size
+    ):
+        """
+        Apply per-inlink maximum batch size to ordered candidate groups (read-only).
+
+        Takes an ordered list of ``(inlink, fifo_candidate_list)`` tuples and returns
+        a new list selecting vehicles for the current single BATCH formation pass.
+        ``max_batch_size`` is the maximum number of vehicles per inlink-direction batch,
+        not a cap on the total vehicles across all directions. Groups are processed in
+        input order. If a group has fewer than ``max_batch_size`` vehicles, all are
+        included and processing continues. If a group has at least ``max_batch_size``
+        vehicles, the first ``max_batch_size`` vehicles in FIFO order are included and
+        the current formation pass ends. Returns ``(inlink, selected_vehicle_list)``
+        tuples with new candidate lists. Does not mutate inputs or simulation state.
+        """
+        if not isinstance(max_batch_size, int) or isinstance(max_batch_size, bool):
+            raise ValueError(
+                f"Invalid max_batch_size={max_batch_size!r} for node {s.name}; "
+                "expected an int >= 1."
+            )
+        if max_batch_size < 1:
+            raise ValueError(
+                f"Invalid max_batch_size={max_batch_size} for node {s.name}; "
+                "expected an int >= 1."
+            )
+
+        if not isinstance(ordered_candidates_by_inlink, list):
+            raise ValueError(
+                f"Invalid ordered_candidates_by_inlink for node {s.name}; "
+                "expected a non-empty list."
+            )
+        if not ordered_candidates_by_inlink:
+            raise ValueError(
+                f"Invalid ordered_candidates_by_inlink for node {s.name}; "
+                "expected a non-empty list."
+            )
+
+        node_inlinks = list(s.inlinks.values())
+        seen_inlinks = set()
+        result = []
+
+        for item in ordered_candidates_by_inlink:
+            if not isinstance(item, tuple) or len(item) != 2:
+                raise ValueError(
+                    f"Invalid ordered candidate group for node {s.name}; "
+                    "expected a 2-tuple (inlink, candidate_list)."
+                )
+
+            inlink, candidates = item
+
+            if inlink not in node_inlinks:
+                raise ValueError(
+                    f"Inlink {getattr(inlink, 'name', inlink)!r} in ordered candidate "
+                    f"groups is not an inlink of node {s.name}."
+                )
+            if inlink.end_node is not s:
+                raise ValueError(
+                    f"Inlink {inlink.name} in ordered candidate groups has end_node "
+                    f"{inlink.end_node.name}, not {s.name}."
+                )
+            if inlink in seen_inlinks:
+                raise ValueError(
+                    f"Inlink {inlink.name} appears more than once in ordered candidate "
+                    f"groups at node {s.name}."
+                )
+            seen_inlinks.add(inlink)
+
+            if not isinstance(candidates, list) or not candidates:
+                raise ValueError(
+                    f"Invalid candidate list for inlink {inlink.name} at node {s.name}; "
+                    "expected a non-empty list."
+                )
+
+            if len(candidates) < max_batch_size:
+                result.append((inlink, list(candidates)))
+            else:
+                result.append((inlink, list(candidates[:max_batch_size])))
+                break
+
+        return result
+
     # クリアランスなしFCFS。回帰確認・デバッグ用に残す。
     # 本研究で評価対象とする最終的なFCFSモデルとしては使用しない。
     def transfer_fcfs_no_clearance(s):
