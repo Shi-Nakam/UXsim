@@ -944,6 +944,151 @@ class Node:
 
         return result
 
+    def register_order_control_batch_service_units(s, selected_groups_by_inlink):
+        """
+        Register per-inlink direction batches as formal service units at this node.
+
+        Takes an ordered list of ``(inlink, fifo_vehicle_list)`` tuples and, for each
+        group, issues a node-local batch ID, records ``vehicle.order_control_batch_assignments``
+        under this node's name, and appends one service-unit dict
+        ``{"batch_id", "inlink", "vehicles"}`` to ``order_control_batch_service_queue``.
+        Advances ``order_control_batch_next_id`` by the number of registered batches.
+        Supports repeated calls on the same node with continuing IDs and queue state.
+        Raises ``ValueError`` on invalid input without mutating state. Rolls back partial
+        updates from the current call if an exception occurs during registration.
+        Returns ``None`` on success.
+        """
+        if not s.order_control_eligible:
+            raise ValueError(
+                f"Node {s.name} is not order-control eligible for BATCH service-unit "
+                "registration."
+            )
+        if s.order_control_type != "batch":
+            raise ValueError(
+                f"Node {s.name} has order_control_type={s.order_control_type!r}; "
+                "expected 'batch' for BATCH service-unit registration."
+            )
+
+        if not isinstance(selected_groups_by_inlink, list):
+            raise ValueError(
+                f"Invalid selected_groups_by_inlink for node {s.name}; "
+                "expected a non-empty list."
+            )
+        if not selected_groups_by_inlink:
+            raise ValueError(
+                f"Invalid selected_groups_by_inlink for node {s.name}; "
+                "expected a non-empty list."
+            )
+
+        initial_next_id = s.order_control_batch_next_id
+        if (
+            not isinstance(initial_next_id, int)
+            or isinstance(initial_next_id, bool)
+            or initial_next_id < 0
+        ):
+            raise ValueError(
+                f"Node {s.name} has invalid order_control_batch_next_id="
+                f"{initial_next_id!r}; expected a non-negative int."
+            )
+
+        if not isinstance(s.order_control_batch_service_queue, deque):
+            raise ValueError(
+                f"Node {s.name} has invalid order_control_batch_service_queue="
+                f"{type(s.order_control_batch_service_queue).__name__!r}; "
+                "expected a deque."
+            )
+
+        node_inlinks = list(s.inlinks.values())
+        seen_inlinks = set()
+        seen_vehicles = set()
+        planned_service_units = []
+
+        for group_index, item in enumerate(selected_groups_by_inlink):
+            if not isinstance(item, tuple) or len(item) != 2:
+                raise ValueError(
+                    f"Invalid selected group at index {group_index} for node {s.name}; "
+                    "expected a 2-tuple (inlink, vehicles)."
+                )
+
+            inlink, vehicles = item
+
+            if inlink not in node_inlinks:
+                raise ValueError(
+                    f"Inlink {getattr(inlink, 'name', inlink)!r} in selected groups "
+                    f"is not an inlink of node {s.name}."
+                )
+            if inlink.end_node is not s:
+                raise ValueError(
+                    f"Inlink {inlink.name} in selected groups has end_node "
+                    f"{inlink.end_node.name}, not {s.name}."
+                )
+            if inlink in seen_inlinks:
+                raise ValueError(
+                    f"Inlink {inlink.name} appears more than once in selected groups "
+                    f"at node {s.name}."
+                )
+            seen_inlinks.add(inlink)
+
+            if not isinstance(vehicles, list) or not vehicles:
+                raise ValueError(
+                    f"Invalid vehicle list for inlink {inlink.name} at node {s.name}; "
+                    "expected a non-empty list."
+                )
+
+            for veh in vehicles:
+                if veh in seen_vehicles:
+                    raise ValueError(
+                        f"Vehicle {veh.name} appears in multiple selected groups at "
+                        f"node {s.name}."
+                    )
+                seen_vehicles.add(veh)
+
+                if veh.link is not inlink:
+                    raise ValueError(
+                        f"Vehicle {veh.name} has veh.link="
+                        f"{getattr(veh.link, 'name', veh.link)!r}, not {inlink.name} "
+                        f"at node {s.name}."
+                    )
+                if veh.state != "run":
+                    raise ValueError(
+                        f"Vehicle {veh.name} on inlink {inlink.name} at node {s.name} "
+                        f"has state={veh.state!r}; expected 'run'."
+                    )
+                if s.name in veh.order_control_batch_assignments:
+                    existing_batch_id = veh.order_control_batch_assignments[s.name]
+                    raise ValueError(
+                        f"Vehicle {veh.name} is already assigned at node {s.name} "
+                        f"with batch_id={existing_batch_id}."
+                    )
+
+            batch_id = initial_next_id + group_index
+            planned_service_units.append(
+                {
+                    "batch_id": batch_id,
+                    "inlink": inlink,
+                    "vehicles": list(vehicles),
+                }
+            )
+
+        assigned_vehicles_added = []
+        appended_service_unit_count = 0
+        try:
+            for service_unit in planned_service_units:
+                batch_id = service_unit["batch_id"]
+                for veh in service_unit["vehicles"]:
+                    veh.order_control_batch_assignments[s.name] = batch_id
+                    assigned_vehicles_added.append(veh)
+                s.order_control_batch_service_queue.append(service_unit)
+                appended_service_unit_count += 1
+            s.order_control_batch_next_id = initial_next_id + len(planned_service_units)
+        except Exception:
+            for veh in assigned_vehicles_added:
+                del veh.order_control_batch_assignments[s.name]
+            for _ in range(appended_service_unit_count):
+                s.order_control_batch_service_queue.pop()
+            s.order_control_batch_next_id = initial_next_id
+            raise
+
     # クリアランスなしFCFS。回帰確認・デバッグ用に残す。
     # 本研究で評価対象とする最終的なFCFSモデルとしては使用しない。
     def transfer_fcfs_no_clearance(s):
