@@ -6,9 +6,9 @@ UXsim Order Exchange 改変作業における、phase 4-6：交差点BATCH処理
 
 ---
 
-## 1A. 実装状況サマリ（phase 4-6A〜4-6D）
+## 1A. 実装状況サマリ（phase 4-6A〜4-6J）
 
-進捗の詳細・コミットID・回帰結果は [ORDER_EXCHANGE_PROGRESS.md](ORDER_EXCHANGE_PROGRESS.md) を参照。
+進捗の詳細・コミットID・回帰結果は [ORDER_EXCHANGE_PROGRESS.md](ORDER_EXCHANGE_PROGRESS.md) を参照。Phase 4-6E〜4-6Jの設計・判断経緯の詳細は **§1C** を参照。
 
 | 区分 | 内容 |
 |------|------|
@@ -16,16 +16,21 @@ UXsim Order Exchange 改変作業における、phase 4-6：交差点BATCH処理
 | | phase 4-6B：BATCH状態コンテナ（28ed156） |
 | | phase 4-6C：`get_order_control_batch_trigger_candidates()`（40d5ad7） |
 | | phase 4-6D：t_trigger Level 0/1推定（d79db61） |
-| **設計確定・未実装** | BATCH候補集合形成（`earliest <= t_trigger`、全inlink走査） |
-| | inlink別batch形成、N適用、batch_id発行、assignments書き込み |
-| | service queue追加、residual batch、`Node.transfer()` batch分岐 |
-| | snapshot estimated arrivalによるinlink別batch間順序 |
-| | Level 2仮想サービス計算、Level 2→Level 1 fallback |
+| | phase 4-6E：`get_order_control_batch_candidates_by_inlink()`（4cdc16f） |
+| | phase 4-6F：`get_ordered_order_control_batch_candidates_by_inlink()`（d00cb85） |
+| | phase 4-6G：`apply_order_control_batch_max_size()`（c7a80e8） |
+| | phase 4-6H：`register_order_control_batch_service_units()`（8cf6dec） |
+| | phase 4-6I：`form_order_control_batch()`（d10a6db） |
+| | phase 4-6J：`order_control_batch_t_trigger_level` とNode群一括設定（1ae9204） |
+| **service unit登録まで完成** | trigger候補取得 → t_trigger推定 → 全inlink候補抽出 → 処理順決定 → N適用 → batch ID・assignment・service queue登録 → 統合メソッド → Node設定 |
+| **未実装** | service queueに基づくVehicle実通過、通過後Vehicle削除、完了service unit削除 |
+| | BATCH専用transfer統括、`Node.transfer()` batch分岐 |
+| | Level 2仮想サービス推定、residual batch、Time-value Transaction |
+| | FCFSとN=1 BATCHの完全同等性テスト（実通過実装後） |
 | **当面の研究シナリオ前提** | 比較対象内部交差点Nodeを目的地としない端点間OD |
 | | 全比較方式で同一ネットワーク・同一OD需要 |
-| **将来課題** | 比較対象Node共通管理、目的地自動検証、trip-end service unit |
-| | taxi mode向け動的dest検証、Time-value Transaction本体 |
-| **次フェーズ候補** | phase 4-6E：全inlinkからFIFO維持でBATCH候補抽出（参照専用） |
+| **研究基本設定（明示指定）** | `batch_size=10`、`order_control_batch_t_trigger_level=1` |
+| **次フェーズ候補** | phase 4-6K：service queue先頭service unitの実通過メソッド（単体実装、`Node.transfer()`未接続） |
 
 ---
 
@@ -45,6 +50,671 @@ UXsim Order Exchange 改変作業における、phase 4-6：交差点BATCH処理
 - 元論文BATCHの忠実再現ではなく、UXsimのリンク流出入制約・アウトリンク容量制約・ノード容量制約・実際のtransfer可否を考慮する **UXsim-adapted BATCH** を対象とする。
 - 既存FCFS / clearance実装を壊さずに拡張することを重視する。
 - PDFメモに含まれていたBATCH以外の重要考察、特に **Time-value Transaction**、**リスク込みVOT**、**仮想通過時刻の利用可能性** も本メモに残す。
+
+---
+
+## 1C. Phase 4-6E〜4-6J 実装記録（引き継ぎ用）
+
+本節は、Phase 4-6E〜4-6Jの設計・実装・テスト・判断経緯を、**現在の `uxsim/uxsim.py` とテスト**に一致する形で記録する。別担当者または別AIが本メモとリポジトリのみを読んで次工程を安全に再開できることを目的とする。
+
+**後の実装で変更された判断：** §10・§12・§18・§21の旧記述（「4-6E〜4-6G未実装」「snapshot estimated arrival未実装」「service unit形式TBD」等）は、Phase 4-6E〜4-6J完了時点では **§1Cが正** である。旧節は設計経緯の参考として残し、実装状況は本節を優先参照すること。
+
+### 1C.1 対象範囲と現在地点
+
+#### Phaseと実コードの対応
+
+| Phase | メソッド / 属性 | コミット |
+|-------|----------------|----------|
+| 4-6C（入力元） | `Node.get_order_control_batch_trigger_candidates()` | 40d5ad7 |
+| 4-6D（入力元） | `Node.estimate_order_control_batch_t_trigger_level_0()` / `_level_1()` | d79db61 |
+| **4-6E** | `Node.get_order_control_batch_candidates_by_inlink(s, t_trigger)` | 4cdc16f |
+| **4-6F** | `Node.get_ordered_order_control_batch_candidates_by_inlink(s, candidates_by_inlink, trigger_vehicle)` | d00cb85 |
+| **4-6G** | `Node.apply_order_control_batch_max_size(s, ordered_candidates_by_inlink, max_batch_size)` | c7a80e8 |
+| **4-6H** | `Node.register_order_control_batch_service_units(s, selected_groups_by_inlink)` | 8cf6dec |
+| **4-6I** | `Node.form_order_control_batch(s, t_trigger_level, max_batch_size)` | d10a6db |
+| **4-6J** | `node.order_control_batch_t_trigger_level`、`_validate_order_control_batch_t_trigger_level()`、`Node.__init__()`、`World.addNode()`、`World.set_order_control_for_nodes()`、`World.set_order_control_for_randomly_selected_eligible_nodes()` | 1ae9204 |
+
+#### 現在地点（Phase 4-6J完了時点）
+
+- **実装済み：** trigger候補取得 → t_trigger推定（Level 0/1）→ 全inlink候補抽出 → 処理順決定 → 方向別N適用 → batch ID・assignment・service unit正式登録 → 統合メソッド → 既存の `batch_size` 一括設定機能を維持・利用しながら、新しい `order_control_batch_t_trigger_level` 設定を Node別・Node群一括・ランダム選択Node群へ追加。
+- **未実装：** service queueに基づくVehicle実通過、通過後Vehicle削除、完了service unit削除、BATCH専用transfer統括、`Node.transfer()` BATCH分岐、Level 2仮想サービス推定、residual batch、Time-value Transaction、FCFSとN=1 BATCHの完全同等性テスト。
+
+#### 研究基本設定（明示指定）
+
+```python
+W.set_order_control_for_nodes(
+    target_node_names,
+    order_control_type="batch",
+    batch_size=10,
+    transaction_case=None,
+    order_control_batch_t_trigger_level=1,
+)
+```
+
+`batch_size` のNode既定値は **1** のまま維持。研究条件では **10** を明示指定する。
+
+---
+
+### 1C.2 BATCH処理全体のデータフロー（Phase 4-6E〜4-6J）
+
+```
+Node端へ到着済みの未batch Vehicleから trigger候補を取得する          [4-6C]
+    ↓
+trigger候補listの先頭Vehicleをtriggerとして選ぶ                    [4-6I内]
+    ↓
+Level 0またはLevel 1でt_triggerを推定する                          [4-6D]
+    ↓
+全inlinkから候補Vehicleを抽出する                                  [4-6E] ★
+    ↓
+trigger inlinkを先頭にして候補群を順序付けする                      [4-6F] ★
+    ↓
+方向別最大batchサイズNを適用する                                    [4-6G] ★
+    ↓
+batch ID、Vehicle assignment、service unitを正式登録する            [4-6H] ★
+    ↓
+上記を統合メソッドから一続きに実行する                              [4-6I] ★
+    ↓
+既存のbatch_size設定機構を維持しつつ、                              [4-6J] ★
+order_control_batch_t_trigger_levelを
+Node別・Node群一括で設定可能にする
+```
+
+★印は Phase 4-6E〜4-6J で完成した処理。
+
+**次工程（未実装）：**
+
+- service queueに従うVehicleの実通過
+- 通過済みVehicleのservice unitからの削除
+- 完了service unitのqueueからの削除
+- BATCH専用transfer統括
+- `Node.transfer()` へのBATCH分岐
+- Level 2の仮想サービス推定
+- residual batch
+- Time-value Transaction
+
+#### 前段（4-6C・4-6D）との接続
+
+- **4-6C** `get_order_control_batch_trigger_candidates()`：対象Nodeの `incoming_vehicles` から、当該Nodeで未batch assignmentの到着済みVehicleを、到着時刻・タイブレーカー・id順に並べて返す（read-only）。
+- **4-6D** `estimate_order_control_batch_t_trigger_level_0/1(trigger_vehicle)`：選ばれたtrigger vehicleに対し `t_trigger`（int timestep）を推定する（read-only）。Level 1は異方向切替時のみclearanceを反映し、それ以外はLevel 0と同値。
+- **4-6I** は上記2段を含め、4-6E〜4-6Hを順に呼ぶ。
+
+---
+
+### 1C.3 主要データ構造と用語
+
+#### 1C.3.1 VehicleのNode別batch assignment
+
+**属性：** `vehicle.order_control_batch_assignments`
+
+**形式：**
+
+```python
+{
+    node_name: batch_id,  # batch_id は非負int
+    ...
+}
+```
+
+- keyはNode名（`str`）、valueは当該Nodeにおけるbatch ID。
+- 登録時は辞書全体を置き換えず、**現在Nodeのkeyだけ**を追加する。
+- 別Nodeの既存assignmentは維持する。
+- 同じNodeでassignment済みのVehicleは再assignmentしない（`ValueError`）。
+- 同一Vehicleが同一Nodeを再訪すると既存assignmentが残るため、現key設計では再assignmentは `ValueError` になる。**同一Node再訪への本格対応は未実装。**
+
+#### 1C.3.2 Nodeのservice queue
+
+**属性：** `node.order_control_batch_service_queue`
+**型：** `collections.deque`
+
+**service unitの形式：**
+
+```python
+{
+    "batch_id": batch_id,      # 非負int。queue内位置（queue[0]等）とは無関係
+    "inlink": inlink,          # Linkオブジェクト
+    "vehicles": list(vehicles), # FIFO順のVehicle list（新しいlist容器）
+}
+```
+
+- 1方向別batch = 1 service unit。1回の形成結果全体を1件にまとめない。
+- 複数方向があれば複数service unitに分ける。
+- `list(vehicles)` で新容器を作り、Vehicleオブジェクト自体は複製しない。
+- queue末尾へ追加。既存要素の内容・順序は変更しない。
+- 同一inlinkのservice unitが複数存在してよい（別形成機会・別batch ID）。
+
+#### 1C.3.3 Node別batch ID
+
+**属性：** `node.order_control_batch_next_id`
+
+- Nodeごとの非負整数。ネットワーク全体で一意である必要はない。
+- 方向別batchごとに1 ID。1回の登録で複数方向なら入力順に連番。
+- 登録した方向別batch数だけ `next_id` を進める。複数回登録時は更新済み `next_id` から再開。
+
+**queue添字とbatch IDの区別：** `queue[0]`・`queue[1]` の0・1はqueue内位置（Python添字）であり、batch IDではない。
+
+#### 1C.3.4 最大batchサイズ（`node.batch_size` と `max_batch_size`）
+
+| 名称 | 種別 | 意味 |
+|------|------|------|
+| `node.batch_size` | Node属性（設定値） | Nodeに保存する研究設定。`World.set_order_control_for_nodes()` で一括設定。既定値 **1** |
+| `max_batch_size` | メソッド引数 | `form_order_control_batch()` / `apply_order_control_batch_max_size()` の引数名 |
+
+- `order_control_batch_max_size` というNode属性は**存在しない**（当初案は撤回、§1C.12参照）。
+- 将来のBATCH専用transferからの呼び出し予定：
+
+```python
+s.form_order_control_batch(
+    t_trigger_level=s.order_control_batch_t_trigger_level,
+    max_batch_size=s.batch_size,
+)
+```
+
+- **N** は1回の形成で作る**1方向batch**のVehicle数上限。**1 timestepの通過台数上限ではない。**
+
+#### 1C.3.5 t_trigger Level
+
+**属性：** `node.order_control_batch_t_trigger_level`（既定値 **1**、有効値 **0** または **1**）
+
+| Level | 内容 | 実装 |
+|-------|------|------|
+| **0** | 初回通過可能timestep、trigger vehicleのearliest arrival等の基本下限制約で `t_trigger` 推定 | 実装済み |
+| **1** | Level 0の基本値を使用。直前通過inlinkとtrigger inlinkが異なる場合のみclearance状態を考慮。`last_order_control_inlink` が `None`、またはtrigger inlinkが `last_order_control_inlink` と同じ場合はLevel 0相当 | 実装済み |
+| **2** | 仮想サービス計算による推定（設計上想定） | **未実装**（設定・形成とも専用 `ValueError`） |
+
+---
+
+### 1C.4 Phase 4-6E：inlink別候補Vehicle抽出
+
+**メソッド：** `Node.get_order_control_batch_candidates_by_inlink(s, t_trigger)`
+
+| 項目 | 内容 |
+|------|------|
+| 引数 | `t_trigger`：非負 `int`（`bool`不可） |
+| 戻り値 | `dict`：`{inlink: [vehicles...]}`。候補がないinlinkはキーに含めない |
+| 副作用 | **なし**（read-only） |
+
+**処理概要：**
+
+1. Nodeがorder-control対象かつ `order_control_type == "batch"` であることを検証。
+2. 対象Nodeの**全inlink**を走査。
+3. 各inlinkについて、物理FIFO順（`inlink.vehicles`）で未assignment Vehicleのうち、`order_control_earliest_arrival_timesteps[s.name] <= t_trigger` を満たす先頭連続部分を候補とする（`earliest > t_trigger` に達したらそのinlinkの走査を打切り）。
+4. assignment済みVehicleは候補から除外。assignmentは各inlinkで未assignmentが物理queueの**接頭辞**であることを検証（prefix violationで `ValueError`）。
+5. `veh.v` や `route_next_link` は候補フィルタに使わない。
+
+**重要な意味論：**
+
+- triggerは到着済みVehicleだが、同じ形成に入る候補は**未到着でも** `earliest_arrival_timestep <= t_trigger` なら含まれ得る。
+- Node端へ未到着でも、t_triggerまでに到着可能と評価されれば候補に含まれる。
+
+**戻り値例：**
+
+```python
+{link_a: [A1, A2], link_b: [B1]}
+```
+
+**主な `ValueError` 条件：** 非eligible / 非batch Node、不正 `t_trigger`、inlinkの `end_node` 不一致、`veh.link` 不一致、非 `run` state、earliest未記録・不正・非単調減少、assignment prefix violation。
+
+**テスト：** `tests_order_control_batch_candidates_by_inlink.py`（22テスト）— 全inlink走査、FIFO、未到着候補包含、prefix検証、read-only、副作用なし。
+
+---
+
+### 1C.5 Phase 4-6F：候補群の処理順決定
+
+**メソッド：** `Node.get_ordered_order_control_batch_candidates_by_inlink(s, candidates_by_inlink, trigger_vehicle)`
+
+| 項目 | 内容 |
+|------|------|
+| 入力 | 4-6Eの `dict`、trigger vehicle |
+| 戻り値 | `list` of `(inlink, candidate_list)`。各listは新しい `list(...)` 容器 |
+| 副作用 | **なし**（read-only） |
+
+**処理順：**
+
+1. trigger vehicleのinlinkを**常に先頭**。
+2. その他inlinkは `snapshot_estimated_arrival_timestep` 昇順、同値時は `head_vehicle.id` 昇順。
+3. 各inlink内のFIFO順は維持。trigger vehicleはtrigger inlink候補listの**先頭**である必要がある。
+
+**`snapshot_estimated_arrival_timestep` の計算（実コード）：**
+
+```
+trigger_arrival_timestep = round(trigger_vehicle.order_control_node_arrival_times[s.name] / W.DELTAT)
+remaining_distance = max(0, inlink.length - head_vehicle.x)
+remaining_free_flow_timesteps = ceil((remaining_distance / inlink.u) / W.DELTAT)
+snapshot_estimated_arrival_timestep = trigger_arrival_timestep + remaining_free_flow_timesteps
+```
+
+- trigger vehicleの**初回到着timestep**を基準とし、他inlinkの先頭Vehicleが自由流速度でNode端へ到達するまでの残りtimestepを加算する。
+- 現速度 `veh.v` は使わない（形成時点の位置 `x` とリンク自由流速度 `u` のみ）。
+
+**戻り値例：**
+
+```python
+[(link_b, [B1]), (link_a, [A1, A2])]
+```
+
+**主な `ValueError` 条件：** 空dict、非Node inlink、候補listが未assignment接頭辞でない、Vehicle重複、trigger不在・非先頭、trigger未着・未記録・既assignment。
+
+**テスト：** `tests_order_control_batch_candidate_group_ordering.py`（24テスト）— trigger inlink先頭、snapshot順、タイブレーク、FIFO整合、入力不変。
+
+---
+
+### 1C.6 Phase 4-6G：方向別最大batchサイズの適用
+
+**メソッド：** `Node.apply_order_control_batch_max_size(s, ordered_candidates_by_inlink, max_batch_size)`
+
+| 項目 | 内容 |
+|------|------|
+| `max_batch_size` | 方向別batchごとの上限（全方向合計上限ではない） |
+| 戻り値 | 新しい外側 `list`、各Vehicle listも新容器。Vehicleオブジェクトは同一 |
+| 副作用 | **なし**（read-only） |
+
+**ルール：**
+
+- 入力の方向順を維持。
+- 候補数 < N：全Vehicle採用し次方向へ。
+- 候補数 ≥ N：FIFO先頭N台採用し**形成処理を終了**（以降の方向は含めない）。
+
+**例（N=2）：**
+
+```
+入力: [(link_b, [B1]), (link_a, [A1,A2,A3]), (link_c, [C1])]
+出力: [(link_b, [B1]), (link_a, [A1, A2])]
+```
+
+**主な `ValueError` 条件：** `max_batch_size` が、boolを除く1以上のintではない場合（`int` ではない、`bool` である、または1未満である場合）、空list、inlink重複、空候補list。
+
+**N=1とFCFS：** 将来FCFS比較条件として使用可能だが、service queue実通過が未実装のため完全なFCFS同等性テストは未実施。
+
+**テスト：** `tests_order_control_batch_max_size_application.py`（12テスト）。
+
+---
+
+### 1C.7 Phase 4-6H：正式batch・service unit登録
+
+**メソッド：** `Node.register_order_control_batch_service_units(s, selected_groups_by_inlink)`
+
+Phase 4-6E〜4-6Hの中で**唯一の正式な状態変更**を行うメソッド。
+
+| 項目 | 内容 |
+|------|------|
+| 入力 | `[(inlink, vehicles), ...]`（非空） |
+| 戻り値 | 正常時 `None` |
+| 副作用 | assignment追加、service queue末尾追加、`order_control_batch_next_id` 更新 |
+
+**登録前検証（`planned_service_units` 構築）：** Node eligible・batch、非空list、2要素tuple、非空vehicle list、Node inlink・`end_node` 一致、inlink重複なし、Vehicle重複なし、`veh.link is inlink`、`state=="run"`、当該Node未assignment、`next_id` 非負int、queueが `deque`。
+
+**正式状態変更の順序：**
+
+1. 各Vehicleへ `order_control_batch_assignments[s.name] = batch_id`
+2. 各service unitを `order_control_batch_service_queue` 末尾へ追加
+3. `order_control_batch_next_id = initial_next_id + len(planned_service_units)`
+
+**ロールバック（例外時）：**
+
+- 今回追加したassignmentのみ `del veh.order_control_batch_assignments[s.name]`
+- 今回追加したqueue末尾要素のみ `pop()`
+- `order_control_batch_next_id` を `initial_next_id` へ復元
+- 元の例外をそのまま `raise`
+
+**テスト修正経緯（`test_append_to_existing_service_queue`）：**
+
+| | 修正前（不自然） | 修正後（正しい連続性） |
+|--|------------------|------------------------|
+| 既存batch ID | 99 | 0 |
+| 登録前 `next_id` | 0 | 1 |
+| 新規発行batch ID | — | 1 |
+| 登録後 `next_id` | — | 2 |
+
+**テスト：** `tests_order_control_batch_service_unit_registration.py`（18テスト）— batch ID発行、assignment、queue追加、複数回登録、ロールバック、副作用範囲。
+
+---
+
+### 1C.8 Phase 4-6I：BATCH形成統合メソッド
+
+**メソッド：** `Node.form_order_control_batch(s, t_trigger_level, max_batch_size)`
+
+| 項目 | 内容 |
+|------|------|
+| 呼び出し単位 | 同一Nodeで繰り返し呼ばれる。1回の呼出しで最大1回のBATCH形成（シミュレーション全体で1回ではない） |
+| trigger選択 | trigger候補listの先頭Vehicle |
+| 戻り値 | `"no_trigger_candidate"`（正常・形成なし）または `"batch_formed"`（登録完了） |
+
+**True/Falseを使わない理由：** `False` は処理失敗と誤解されうる。trigger候補なしは正常結果のため状態説明文字列を採用。
+
+**helper呼出し順序（再実装せず委譲）：**
+
+```
+get_order_control_batch_trigger_candidates()
+    ↓（空なら "no_trigger_candidate" で return）
+estimate_order_control_batch_t_trigger_level_0 または _level_1
+    ↓
+get_order_control_batch_candidates_by_inlink(t_trigger)
+    ↓（空dictは内部不整合 ValueError）
+get_ordered_order_control_batch_candidates_by_inlink(...)
+    ↓
+apply_order_control_batch_max_size(..., max_batch_size)
+    ↓（空listは内部不整合 ValueError）
+register_order_control_batch_service_units(...)
+    ↓
+"batch_formed"
+```
+
+- Level 2は専用 `ValueError`。統合メソッド側にロールバックは重複実装しない（4-6Hに委譲）。
+
+**テスト修正経緯（`test_uses_existing_helper_methods`）：**
+
+- 初版：`inspect.getsource()` でソース文字列検索 → 改行・括弧・変数名で壊れやすい。
+- 最終版：bound methodをテスト内wrapperへ一時置換、`call_order` に記録、wrapperから元メソッドを同引数で実行、`finally` で復元。本番コードにテスト専用分岐なし。
+
+**テスト：** `tests_order_control_batch_formation_integration.py`（14テスト）。
+
+---
+
+### 1C.9 Phase 4-6J：BATCH設定値とNode群への設定
+
+**追加属性：** `node.order_control_batch_t_trigger_level`（既定 **1**）
+
+**モジュールヘルパー：** `_validate_order_control_batch_t_trigger_level(value, node_name=None)` — 0/1のみ有効、2は専用 `ValueError`、`bool` 不可。
+
+**拡張箇所：**
+
+- `Node.__init__(..., order_control_batch_t_trigger_level=1)`
+- `World.addNode(..., order_control_batch_t_trigger_level=1)`
+- `World.set_order_control_for_nodes(..., order_control_batch_t_trigger_level=1)`
+- `World.set_order_control_for_randomly_selected_eligible_nodes(..., order_control_batch_t_trigger_level=1)`
+
+**設計意図：**
+
+- t_trigger推定LevelをNode属性として保持（通常は全対象Nodeへ同値を一括設定、必要時はNode別上書き可）。
+- 最大batchサイズは既存 `node.batch_size` を使用。`order_control_batch_max_size` は追加しない。
+- 標準Node・FCFS Node・time_value Nodeも属性を持つが、現時点の交通処理では未使用。
+
+**`set_order_control_for_nodes()` の原子性（2パス）：**
+
+1. **検証パス：** `order_control_type`、`batch_size`、`transaction_case`、`t_trigger_level`、全対象Nodeの存在・eligibility
+2. **更新パス：** 全検証成功後のみ `order_control_type`、`batch_size`、`transaction_case`、`order_control_batch_t_trigger_level` を一括更新
+
+対象リスト後半に不正Nodeがあっても、前半だけ更新された状態を残さない。
+
+**ランダム選択setter：** Node選択のみ担当。設定適用は `set_order_control_for_nodes()` へ委譲。`random_seed` による選択再現性を維持。
+
+**テスト：** `tests_order_control_batch_node_settings.py`（11テスト）。既存設定テストも最小更新：`tests_node_order_control_attributes.py`、`tests_world_order_control_setters.py`、`tests_random_eligible_order_control.py`、`tests_order_control_eligibility.py`。
+
+---
+
+### 1C.10 原子性・副作用・エラー処理
+
+#### read-onlyメソッド
+
+次のメソッドは、BATCHの候補取得・推定・選択を行うが、Vehicleのbatch assignment、Nodeのservice queue、Nodeのnext batch IDを変更しない。
+
+- `Node.get_order_control_batch_trigger_candidates()`
+- `Node.estimate_order_control_batch_t_trigger_level_0()`
+- `Node.estimate_order_control_batch_t_trigger_level_1()`
+- `Node.get_order_control_batch_candidates_by_inlink()`
+- `Node.get_ordered_order_control_batch_candidates_by_inlink()`
+- `Node.apply_order_control_batch_max_size()`
+
+#### 状態を変更するメソッド
+
+**`Node.register_order_control_batch_service_units()`**
+
+- Vehicleの `order_control_batch_assignments`、Nodeの `order_control_batch_service_queue`、Nodeの `order_control_batch_next_id` を直接更新する。
+- 登録途中に例外が発生した場合のロールバック処理も、このメソッドが担当する。
+
+**`Node.form_order_control_batch()`**
+
+- 最後に `Node.register_order_control_batch_service_units()` を呼び出すため、正常終了すると、Vehicleのbatch assignment、Nodeのservice queue、Nodeのnext batch IDが更新される。
+- 実際の登録処理と、登録途中に例外が発生した場合のロールバック処理は、`Node.register_order_control_batch_service_units()` が担当する。
+
+**`World.set_order_control_for_nodes()`**
+
+- 指定されたNodeの `order_control_type`、`batch_size`、`transaction_case`、`order_control_batch_t_trigger_level` を更新する。
+
+**`World.set_order_control_for_randomly_selected_eligible_nodes()`**
+
+- ランダムに選択したNode名を `World.set_order_control_for_nodes()` へ渡す。
+- Node設定の実際の更新処理は、`World.set_order_control_for_nodes()` が担当する。
+
+#### エラー・副作用の原則
+
+- 正式登録**前**のhelperで例外 → assignment・queue・`next_id` は未変更。
+- 正式登録**中**の例外 → 4-6Hが部分更新をロールバック。
+- 統合メソッドは例外を別例外へ置き換えない。
+- setterは全検証後に一括更新。不正 `t_trigger_level` を属性へ保存してからエラーにしない。
+- BATCH形成・登録は別Nodeのassignmentや状態を変更しない。
+- Link順序、Vehicle位置・速度、`World.T` 等は変更しない。
+
+---
+
+### 1C.11 テスト体系と回帰結果
+
+#### BATCH専用テスト（Phase 4-6A〜4-6J）
+
+| ファイル | テスト数 | 主な保証内容 |
+|----------|----------|--------------|
+| `tests_order_control_batch_earliest_arrival_timestep.py` | 3 | earliest記録（4-6A） |
+| `tests_order_control_batch_state_containers.py` | 5 | 状態コンテナ初期化（4-6B） |
+| `tests_order_control_batch_trigger_candidates.py` | 9 | trigger候補（4-6C） |
+| `tests_order_control_batch_t_trigger_estimation.py` | 21 | Level 0/1推定（4-6D） |
+| `tests_order_control_batch_candidates_by_inlink.py` | 22 | 候補抽出・FIFO・read-only（4-6E） |
+| `tests_order_control_batch_candidate_group_ordering.py` | 24 | trigger inlink先頭・snapshot順（4-6F） |
+| `tests_order_control_batch_max_size_application.py` | 12 | N適用・方向打切り（4-6G） |
+| `tests_order_control_batch_service_unit_registration.py` | 18 | 登録・ロールバック（4-6H） |
+| `tests_order_control_batch_formation_integration.py` | 14 | helper接続順・戻り値（4-6I） |
+| `tests_order_control_batch_node_settings.py` | 11 | t_trigger_level設定・原子性（4-6J） |
+
+#### 設定・eligibility関連
+
+| ファイル | 保証内容 |
+|----------|----------|
+| `tests_node_order_control_attributes.py` | Node属性初期値・検証 |
+| `tests_world_order_control_setters.py` | 一括setter・2パス更新 |
+| `tests_random_eligible_order_control.py` | ランダム選択再現性 |
+| `tests_order_control_eligibility.py` | eligibility検証 |
+
+#### FCFS・clearance回帰
+
+| ファイル | 保証内容 |
+|----------|----------|
+| `tests_fcfs_order_control_clearance_0.py` | clearance=0 |
+| `tests_fcfs_order_control_clearance_1.py` | clearance=1 |
+| `tests_fcfs_order_control_clearance_xyz.py` | X/Y/Z問題 |
+| `tests_fcfs_order_control_transfer.py` | FCFS transfer基本 |
+| `tests_fcfs_order_control_behavior.py` | FCFS挙動 |
+| `tests_fcfs_order_control_tiebreaker.py` | タイブレーカー |
+| `tests_order_control_clearance_settings.py` | clearance設定 |
+| `tests_order_control_fcfs_vs_uxsim_standard_*.py` 等 | sanity check比較 |
+
+#### 回帰結果（Phase 4-6J完了時点、従来既知値と一致）
+
+**`tests_order_exchange_baseline.py`：**
+
+| 指標 | 値 |
+|------|-----|
+| completed trips | 48 / 48 |
+| average speed | 16.5 m/s |
+| total travel time | 2928.0 s |
+| average travel time | 61.0 s |
+| average delay | 1.0 s |
+| delay ratio | 0.017 |
+| total distance traveled | 48000.0 m |
+
+**`demos_and_examples/example_00en_simple.py`：**
+
+| 指標 | 値 |
+|------|-----|
+| completed trips | 735 / 810 |
+| average speed | 11.7 m/s |
+| total travel time | 119475.0 s |
+| average travel time | 162.6 s |
+| average delay | 62.6 s |
+| delay ratio | 0.385 |
+| total distance traveled | 1632250.0 m |
+
+テスト成功に加え、**従来の既知値と一致したため、Phase 4-6E〜4-6Jによる回帰は検出されていない。**
+
+---
+
+### 1C.12 設計判断と途中で修正した論点
+
+#### 1C.12.1 `order_control_batch_max_size` 案の撤回
+
+当初 `order_control_batch_max_size` を新Node属性として追加する案を検討。既存の `node.batch_size` と `World.set_order_control_for_nodes()` 一括設定が存在するため、同義属性の二重管理を避け撤回。**正式設定値は `node.batch_size`。**
+
+#### 1C.12.2 World共通属性案の撤回
+
+World側へ共通BATCH設定属性を新設する案を検討したが、既存setterで `batch_size` 一括設定可能なため新設せず、`t_trigger_level` のみ既存setterへ追加。
+
+#### 1C.12.3 `batch_size` 既定値1の維持
+
+研究基本条件はN=10だが、Node・setterの既定値は1を維持。研究では10を明示指定、N=1は将来FCFS比較に使いやすく、既存API挙動も維持。
+
+#### 1C.12.4 `t_trigger_level` 基本値を1にした理由
+
+Level 1は `last_order_control_inlink` が `None`、またはtrigger inlinkが `last_order_control_inlink` と同じ場合はLevel 0と同値。異方向時のみclearance反映。既存テストで確認済みのため通常設定をLevel 1とした。
+
+#### 1C.12.5 BATCH形成を `Vehicle.update()` にしなかった理由
+
+`Vehicle.update()` はVehicleごとに順次実行される。同一timestep到着のB1・C1がA1.update()時点で未登録の可能性があり、更新順にBATCH結果が依存する危険がある。到着検出は `Vehicle.update()`、形成は次timestepの `Node.transfer()` で前timestepまでの到着が揃った状態で行う責務分離を採用。
+
+#### 1C.12.6 到着timestepと最初の通過判定
+
+`World.exec_simulation()` の順序：`Link.update()` → `Node.generate()` → `Node.update()` → `Node.transfer()` → `Vehicle.carfollow()` → `Vehicle.update()`。`incoming_vehicles` への追加は同timestepの `Vehicle.update()`。最初の通過判定は**次timestepの `Node.transfer()`**。`first_transfer_timestep = arrival_timestep + 1` と一致。
+
+#### 1C.12.7 固定タイブレーカー
+
+同時到着Vehicleが次回trigger候補として比較される場合も、初回Node到着時に保存したタイブレーカーを使用。次回形成時に再付与しない。
+
+#### 1C.12.8 1 timestepあたりのBATCH形成回数
+
+1 Node・1 timestepで新規BATCH形成は最大1回。`form_order_control_batch()` をwhileループで繰り返さない。
+
+#### 1C.12.9 既存service queueがある場合の新規形成
+
+queueが空でなくても未batch到着Vehicleがあれば新BATCHを形成しqueue末尾へ追加。確定済み既存service unitへ後付けしない。同一inlinkのservice unit複数連続を許容。
+
+#### 1C.12.10 True/Falseを統合メソッド戻り値にしなかった理由
+
+trigger候補が存在しないことは正常な結果であり、処理失敗ではない。
+
+Falseを返すと失敗と誤解される可能性があるため、正常状態を明示する文字列 `"no_trigger_candidate"` と `"batch_formed"` を戻り値として採用した。
+
+（実装詳細は §1C.8 も参照。）
+
+---
+
+### 1C.13 現在未実装の範囲
+
+既存FCFS通過処理（`transfer_fcfs_clearance()` 等）は完成している一方、BATCHは**service unit正式登録まで**である。
+
+- service queueに基づくVehicle実通過
+- service unit内Vehicleの通過後削除
+- 完了service unitのqueueからの削除
+- 同一inlinkの連続service unitを同一timestep内に続けてサービスする処理（設計確定・未実装）
+- 異方向service unitへのclearance適用
+- BATCH専用transfer統括メソッド
+- `Node.transfer()` へのBATCH分岐
+- Level 2仮想サービス推定
+- residual batch
+- Time-value Transaction
+- FCFSとN=1 BATCHの完全同等性テスト
+
+---
+
+### 1C.14 次工程：Phase 4-6K（service queueに基づく実通過）
+
+Phase 4-6Kは**未実装**。以下は設計上の確定事項と未確定事項。
+
+#### 確定済み設計
+
+- BATCH形成と実通過メソッドを分離。実通過は登録済みservice queueのみ処理。
+- queue先頭から処理。service unit内はFIFO。
+- Vehicleは `incoming_vehicles` に存在しNode端へ到着済み、service unit先頭、inlink物理先頭である必要がある。
+- batch assignmentとservice unitのbatch ID・inlinkが一致する必要がある。
+- 下流空間・容量等を確認。容量が許す限り同一timestepに複数Vehicle通過可能。
+- 同一inlink連続service unitも条件が許せば同一timestep内に続けて処理可能。連続service unit合計がNを超えてもよい（Nは形成単位上限、timestep通過上限ではない）。
+- 異なるinlinkのservice unitへ切り替わる場合はclearance適用。
+- 通過済みVehicleをservice unitから削除、空unitをqueueから削除。
+- 実通過メソッドは `incoming_vehicles` 全体をクリアしない。
+- Phase 4-6Kでは `Node.transfer()` へまだ接続しない。
+
+#### 今後確認する事項
+
+- 実通過メソッドの正式名称・戻り値
+- 同一inlink service unitをまたぐループ構造
+- 容量不足・clearance未充足時の停止条件
+- 不整合時の `ValueError` 範囲
+- 標準UXsim・FCFSのLink間遷移コードとの共有方法
+- 実通過中例外のロールバック範囲
+- trip-end待ちVehicle処理
+- `incoming_vehicles` からの削除方法
+- `last_order_control_inlink` / `last_order_control_entry_timestep` の更新方法
+- 同一timestepに異方向service unitへ進まないことのテスト
+- 実通過後の次timestep再登録との整合
+- FCFSとN=1 BATCH比較を開始できる時期
+
+---
+
+### 1C.15 次回再開時チェックリスト
+
+| 項目 | 値 |
+|------|-----|
+| ブランチ | `feature/intersection-order-control` |
+| 最新コミット | `1ae9204` |
+| 最新コミット件名 | `phase 4-6: add bulk and per-node batch trigger-level settings` |
+| working tree | 実装コミット `1ae9204` はpush済み。本Markdown更新は未commit |
+| Phase 4-6E〜4-6J | 実装・テスト・commit・push済み |
+| `Node.transfer()` | BATCH分岐は**未接続** |
+| BATCH service queue | 正式登録まで完成、実通過は未実装 |
+| 研究基本設定 | `batch_size=10`、`order_control_batch_t_trigger_level=1` |
+| `batch_size` 既定値 | 1 |
+| 次工程 | Phase 4-6K：service queue実通過メソッド（単体、`Node.transfer()`未接続） |
+| Phase 4-6K後の予定 | BATCH専用transfer統括 → `Node.transfer()`接続 → 回帰テスト → N=1 BATCHとFCFS同等性テスト |
+
+**再開時に読むファイル・メソッド・テスト：**
+
+- メモ：本ファイル §1C、[ORDER_EXCHANGE_PROGRESS.md](ORDER_EXCHANGE_PROGRESS.md)
+- 実装：`uxsim/uxsim.py` の `form_order_control_batch`、`register_order_control_batch_service_units`、`get_order_control_batch_*`、`estimate_order_control_batch_t_trigger_level_*`、`set_order_control_for_nodes`
+- テスト：`tests_order_control_batch_formation_integration.py`、`tests_order_control_batch_service_unit_registration.py`、§1C.11一覧
+- コミット：`git log --oneline -20` で `1ae9204` 以降を確認
+
+---
+
+### 1C.16 関連コミット・ファイル・テスト一覧
+
+#### コミット（Phase 4-6E〜4-6J）
+
+| SHA | 内容 |
+|-----|------|
+| `4cdc16f` | inlink別BATCH候補Vehicle抽出（4-6E） |
+| `d00cb85` | trigger inlink優先と他inlink候補群の順序付け（4-6F） |
+| `c7a80e8` | 方向別最大batchサイズの適用（4-6G） |
+| `8cf6dec` | batch ID、Vehicle assignment、service unitの正式登録（4-6H） |
+| `d10a6db` | trigger選択から正式登録までの統合（4-6I） |
+| `1ae9204` | BATCH t_trigger Levelの一括設定・Node別設定（4-6J） |
+
+#### 主要実装ファイル
+
+- `uxsim/uxsim.py`
+
+#### 主要テストファイル
+
+- `tests_order_control_batch_candidates_by_inlink.py`
+- `tests_order_control_batch_candidate_group_ordering.py`
+- `tests_order_control_batch_max_size_application.py`
+- `tests_order_control_batch_service_unit_registration.py`
+- `tests_order_control_batch_formation_integration.py`
+- `tests_order_control_batch_node_settings.py`
+- `tests_order_control_batch_t_trigger_estimation.py`
+- `tests_order_control_batch_trigger_candidates.py`
+- `tests_order_control_batch_state_containers.py`
+- `tests_order_control_batch_earliest_arrival_timestep.py`
+- `tests_node_order_control_attributes.py`
+- `tests_world_order_control_setters.py`
+- `tests_random_eligible_order_control.py`
+- `tests_order_control_eligibility.py`
+- FCFS・clearance・baseline：§1C.11参照
 
 ---
 
@@ -309,7 +979,7 @@ base_trigger_timestep = max(first_transfer_timestep, trigger_earliest_arrival_ti
 
 - 当該Nodeへ向かう**全インリンク上の未batch車両**。
 - 各車両にはリンク進入時点で `earliest_arrival_timestep` が付与されている（phase 4-6Aで実装済み）。
-- `earliest_arrival_timestep <= t_trigger` を満たす車両を候補に含める（**未実装**。次フェーズ4-6E候補）。
+- `earliest_arrival_timestep <= t_trigger` を満たす車両を候補に含める。（**Phase 4-6Eで実装済み。詳細は§1C.4**）
 
 ### 候補Vehicleの状態条件（設計確定）
 
@@ -364,9 +1034,11 @@ base_trigger_timestep = max(first_transfer_timestep, trigger_earliest_arrival_ti
 - batch内の順序は、そのinlink内のFIFO / request orderを破らない。
 - **trigger vehicleを含む方向のbatchを最初に処理**する。
   - これは、trigger vehicleが現在まさに到着してBATCH形成を起動した車両であるため自然な処理順である。
-- 他方向batchの順序は、**snapshot estimated arrival**（下記）に基づく。**未実装**。
+- 他方向batchの順序は、**snapshot estimated arrival**（下記）に基づく。（**Phase 4-6Fで実装済み。詳細は§1C.5**）
 
-### snapshot estimated arrival（設計確定・未実装）
+### snapshot estimated arrival（Phase 4-6Fで実装済み）
+
+**後の実装で変更：** 以下は設計段階の記述。実装仕様は **§1C.5** の計算式を正とする。
 
 Link進入時に固定された `order_control_earliest_arrival_timesteps` とは**別指標**。batch間順序決定専用。
 
@@ -395,18 +1067,18 @@ snapshot_estimated_arrival_timestep =
 - `order_control_earliest_arrival_timesteps` を上書きしない。
 - 新しい乱数tiebreakerは追加しない。同値時は `head_vehicle.id` を最終キーとする。
 - **`tau_timesteps` は加えない**（相対接近順序評価のため概念上不要）。
-- `inlink.u <= 0` の場合はValueErrorとする予定。
+- `inlink.u <= 0` の場合はValueErrorとする。
 
 ### phase 4-6Bで実装済み：BATCH状態コンテナ
 
 **Vehicle**
 
-- `order_control_batch_assignments = {}`（初期化のみ。assignment書き込みは未実装）
+- `order_control_batch_assignments = {}`（Vehicle側。Phase 4-6Hで当該Node keyへの書き込みを実装済み。§1C.3.1）
 
 **Node**
 
 - `order_control_batch_service_queue = deque()`（初期化のみ）
-- `order_control_batch_next_id = 0`（初期化のみ。増加は未実装）
+- `order_control_batch_next_id = 0`（Phase 4-6Hで登録時に増加。§1C.3.3）
 
 - テスト：`tests_order_control_batch_state_containers.py`
 - コミット：28ed156
@@ -501,7 +1173,7 @@ snapshot_estimated_arrival_timestep =
 
 ## 18. 初期実装でやること
 
-### 実装済み（phase 4-6A〜4-6D）
+### 当初の実装済み範囲（Phase 4-6A〜4-6D）
 
 1. Vehicle側にBATCH用の `earliest_arrival_timestep` を付与する。（**phase 4-6A**）
 2. World/Node側にBATCH用状態コンテナを初期化する。（**phase 4-6B**）
@@ -509,21 +1181,23 @@ snapshot_estimated_arrival_timestep =
 4. `t_trigger` をLevel 0 / Level 1で推定する参照専用ヘルパーを追加する。（**phase 4-6D**）
 5. 既存FCFS / clearance処理を壊さないことを回帰テストで確認済み。
 
-### 未実装（次フェーズ以降）
+### 当初の未実装項目とPhase 4-6J完了時点の状況
 
-1. 未batch車両がリンク端に到着したらtrigger vehicleとする（trigger確定・保存）。
-2. 同時到着時は既存FCFSと同様にtiebreaker等でtrigger順を決める。
-3. `earliest_arrival_timestep <= t_trigger` を満たす未batch車両を全inlinkからFIFO維持で候補化する。（**phase 4-6E候補**）
-4. 候補をinlink方向別に分ける。
-5. 各方向で最大N台までbatch化する。
-6. Nに達したら今回のbatch形成を打ち切る。
-7. 他方向batchをsnapshot estimated arrivalで並べ、trigger方向を先頭にする。
-8. batch_id発行、`order_control_batch_assignments` への記録、service queueへの追加。
-9. batch化済み車両を再候補にしない。
-10. batch内順序を固定する。未到着なら待つ。
-11. residual batchとして扱う方針を実装する。
-12. `order_control_type="batch"` で `Node.transfer` から分岐する。
-13. Level 2仮想サービス計算とLevel 2→Level 1 fallback。
+**後の実装で変更：** 項目1〜9の多くは Phase 4-6C〜4-6I で実装済み（§1C）。以下は実装状況付きの整理。
+
+1. 未batch車両がリンク端に到着したらtrigger vehicleとする（**4-6C・4-6Iで実装済み**）。
+2. 同時到着時は既存FCFSと同様にtiebreaker等でtrigger順を決める（**4-6Cで実装済み**）。
+3. `earliest_arrival_timestep <= t_trigger` を満たす未batch車両を全inlinkからFIFO維持で候補化する。（**4-6E実装済み。§1C.4**）
+4. 候補をinlink方向別に分ける。（**4-6E実装済み**）
+5. 各方向で最大N台までbatch化する。（**4-6G実装済み。§1C.6**）
+6. Nに達したら今回のbatch形成を打ち切る。（**4-6G実装済み**）
+7. 他方向batchをsnapshot estimated arrivalで並べ、trigger方向を先頭にする。（**4-6F実装済み。§1C.5**）
+8. batch_id発行、`order_control_batch_assignments` への記録、service queueへの追加。（**4-6H実装済み。§1C.7**）
+9. batch化済み車両を再候補にしない。（**4-6C・4-6Eで実装済み**）
+10. batch内順序を固定する。未到着なら待つ。（**service queue実通過は未実装。Phase 4-6K候補**）
+11. residual batchとして扱う方針を実装する。（**未実装**）
+12. `order_control_type="batch"` で `Node.transfer` から分岐する。（**未実装**）
+13. Level 2仮想サービス計算とLevel 2→Level 1 fallback。（**未実装**）
 
 ---
 
@@ -631,31 +1305,31 @@ BATCH制御そのものは時間価値取引ではない。しかし、BATCHで�
 
 ## 21. テスト方針
 
-### 実装済みテスト（phase 4-6A〜4-6D）
+### 当初の実装済みテスト（Phase 4-6A〜4-6D）
 
-- `tests_order_control_batch_earliest_arrival_timestep.py`（phase 4-6A）
-- `tests_order_control_batch_state_containers.py`（phase 4-6B）
-- `tests_order_control_batch_trigger_candidates.py`（phase 4-6C）
-- `tests_order_control_batch_t_trigger_estimation.py`（phase 4-6D、21テスト関数）
+- `tests_order_control_batch_earliest_arrival_timestep.py`（Phase 4-6A）
+- `tests_order_control_batch_state_containers.py`（Phase 4-6B）
+- `tests_order_control_batch_trigger_candidates.py`（Phase 4-6C）
+- `tests_order_control_batch_t_trigger_estimation.py`（Phase 4-6D、21テスト関数）
 
-phase 4-6A〜4-6D各実装後、FCFS/clearance既存テストおよび `tests_order_exchange_baseline.py`、`example_00en_simple.py` はPASS。主要交通結果は既知値と一致（交通挙動変化なし）。
+Phase 4-6A〜4-6D各実装後、FCFS/clearance既存テストおよび `tests_order_exchange_baseline.py`、`example_00en_simple.py` はPASS。主要交通結果は既知値と一致（確認対象の主要指標に回帰は検出されなかった）。
 
-### 今後のテスト候補
+Phase 4-6E〜4-6Jで追加されたBATCH形成・登録・設定のテストは **§1C.11** を参照。
 
-- `earliest_arrival_timestep` が期待通り計算されること。
-- `link.u` / `W.DELTAT` / `tau_timesteps` の単位変換が正しいこと。
-- 未batch車両がtriggerになったとき、候補集合が `earliest_arrival_timestep <= t_trigger` で形成されること。
-- 同一timestep同時到着時にtiebreaker等でtrigger順が決まること。
-- 同時到着した他方向車両がcandidate setに含まれ、方向別batchとして処理されること。
-- 同一inlink方向ごとにbatchが形成されること。
-- Nに達したら今回のbatch形成を打ち切ること。
-- N超過分が未batchとして残ること。
-- 次回triggerが、残り未batch車両のうち実際に次に到着した車両になること。
-- batch化済み車両が再候補にならないこと。
-- batch内未到着車両がいる場合に順序を維持して待つこと。
-- 容量制約等でbatch途中車両が一時的に通過不可になった場合にresidual batchになること。
-- N=1の場合にFCFS系挙動と比較できること。
-- `clearance_timesteps=1` でFCFSより方向切替回数が減る可能性を確認すること。
+### Phase 4-6J完了後も残るテスト課題
+
+- service queueに基づくVehicle実通過
+- service unit内の未到着Vehicleが到着まで待つこと
+- 同一inlinkの連続service unitを同一timestep内に続けて処理すること
+- 同一inlinkの連続service unitをまたいだ通過台数がNを超えてもよいこと
+- 異なるinlinkのservice unitへ切り替わる際のclearance
+- 容量不足時の停止
+- 通過済みVehicleのservice unitからの削除
+- 完了service unitのqueueからの削除
+- residual batch
+- N=1 BATCHとFCFSの完全同等性
+- `Node.transfer()` 接続後の回帰確認
+- `clearance_timesteps=1` でFCFSより方向切替回数が減る可能性を確認すること（BATCH実通過接続後）
 
 ---
 
@@ -674,11 +1348,11 @@ phase 4-6A〜4-6D各実装後、FCFS/clearance既存テストおよび `tests_or
 - `tau_timesteps` を常に1でよいか（研究比較で可変にするか）。
 - Level 2仮想サービス計算をいつ導入するか。
 - Level 2 unresolved時のLevel 1 fallback接続をいつ実装するか。
-- 全inlinkからのBATCH候補抽出（phase 4-6E）。
-- snapshot estimated arrivalの実装タイミング。
+- 全inlinkからのBATCH候補抽出（**4-6E実装済み。§1C**）。
+- snapshot estimated arrival（**4-6F実装済み。§1C**）。
 - residual batchの挿入位置管理をどう実装するか。
 - batch内部構造の具体的データ形式。
-- service unitの具体的データ形式。
+- service unitの具体的データ形式。（**4-6Hで確定。§1C.3.2**）
 - `order_control_type` 名を `"batch"` にするか、別名にするか（現状 `"batch"` を使用）。
 - debug/log出力の粒度。
 - 比較対象Node共通管理、目的地自動検証、trip-end service unit。
@@ -701,22 +1375,34 @@ phase 4-6A〜4-6D各実装後、FCFS/clearance既存テストおよび `tests_or
 
 - `Vehicle.update`
 - `Vehicle.carfollow`
-- `Node.transfer`
+- `Node.transfer`（BATCH分岐は**未接続**）
 - `transfer_fcfs_clearance`
 - `transfer_fcfs_no_clearance`
 - `record_order_control_node_first_arrival`
 - `record_order_control_earliest_arrival_timestep_for_current_link`（phase 4-6A）
 - `get_order_control_batch_trigger_candidates`（phase 4-6C）
 - `estimate_order_control_batch_t_trigger_level_0` / `_level_1`（phase 4-6D）
+- `get_order_control_batch_candidates_by_inlink`（phase 4-6E）
+- `get_ordered_order_control_batch_candidates_by_inlink`（phase 4-6F）
+- `apply_order_control_batch_max_size`（phase 4-6G）
+- `register_order_control_batch_service_units`（phase 4-6H）
+- `form_order_control_batch`（phase 4-6I）
+- `_validate_order_control_batch_t_trigger_level`、`set_order_control_for_nodes`（phase 4-6J）
 - `Link.__init__`
 - `Link.update` / `in_out_flow_constraint` 周辺
 
-### BATCH関連テスト（phase 4-6A〜4-6D）
+### BATCH関連テスト（phase 4-6A〜4-6J）
 
 - `tests_order_control_batch_earliest_arrival_timestep.py`
 - `tests_order_control_batch_state_containers.py`
 - `tests_order_control_batch_trigger_candidates.py`
 - `tests_order_control_batch_t_trigger_estimation.py`
+- `tests_order_control_batch_candidates_by_inlink.py`
+- `tests_order_control_batch_candidate_group_ordering.py`
+- `tests_order_control_batch_max_size_application.py`
+- `tests_order_control_batch_service_unit_registration.py`
+- `tests_order_control_batch_formation_integration.py`
+- `tests_order_control_batch_node_settings.py`
 
 ### FCFS / clearance基本テスト
 
@@ -745,12 +1431,14 @@ phase 4-6A〜4-6D各実装後、FCFS/clearance既存テストおよび `tests_or
 
 ### 再開時に確認すること
 
-- 現在ブランチ。
+- 現在ブランチ：`feature/intersection-order-control`。
 - `git status`。
 - `git log --oneline -20`。
-- **phase 4-6A〜4-6Dまで実装・コミット済み**（最新実装コミット：d79db61）。
-- **BATCH形成本体・`Node.transfer()` batch分岐は未実装**。
+- **Phase 4-6E〜4-6Jは実装・テスト・commit・push済み**（最新実装コミット：**1ae9204**、`origin/feature/intersection-order-control` へpush済み）。
+- **本Markdown更新は未commit**（実装コミットとは区別すること）。
+- **BATCH形成・service unit登録は実装済み。`Node.transfer()` batch分岐とservice queue実通過は未実装**。
 - FCFS / clearance までは検証済み。
-- 次は **phase 4-6E相当：全inlinkからのBATCH候補抽出（参照専用）** へ進む段階。
+- 次は **phase 4-6K：service queueに基づく実通過メソッド（単体実装、`Node.transfer()`未接続）**。
+- 詳細は **§1C** を優先参照。
 - 目的地Vehicleは端点間OD前提で保留。比較対象Node共通管理・自動検証は将来課題。
 - 一時退避PDF `phase4-6A_batch_earliest_arrival_timestep_memo.pdf` はリポジトリ外。正式Markdownを優先参照。
