@@ -1089,6 +1089,89 @@ class Node:
             s.order_control_batch_next_id = initial_next_id
             raise
 
+    def form_order_control_batch(s, t_trigger_level, max_batch_size):
+        """
+        Run one BATCH formation and formal registration cycle at this node.
+
+        Intended for repeated calls on the same node; each call performs at most one
+        BATCH formation using the current trigger-candidate list. Selects the first
+        trigger candidate, estimates ``t_trigger`` via the existing level-specific
+        estimator, then delegates candidate extraction, inlink ordering, max-size
+        application, and service-unit registration to the existing helper methods.
+        Returns ``"no_trigger_candidate"`` when no trigger candidate exists, or
+        ``"batch_formed"`` when registration completes. Propagates exceptions from
+        helper methods without modification.
+        """
+        if not s.order_control_eligible:
+            raise ValueError(
+                f"Node {s.name} is not order-control eligible for BATCH formation."
+            )
+        if s.order_control_type != "batch":
+            raise ValueError(
+                f"Node {s.name} has order_control_type={s.order_control_type!r}; "
+                "expected 'batch' for BATCH formation."
+            )
+
+        if not isinstance(t_trigger_level, int) or isinstance(t_trigger_level, bool):
+            raise ValueError(
+                f"Invalid t_trigger_level={t_trigger_level!r} for node {s.name}; "
+                "expected a non-bool int."
+            )
+
+        if t_trigger_level == 0:
+            pass
+        elif t_trigger_level == 1:
+            pass
+        elif t_trigger_level == 2:
+            raise ValueError(
+                f"Node {s.name} received t_trigger_level=2; "
+                "Level 2 is planned but virtual-service estimation is not yet implemented."
+            )
+        else:
+            raise ValueError(
+                f"Node {s.name} received unsupported t_trigger_level={t_trigger_level}; "
+                "supported design levels are 0, 1, and 2."
+            )
+
+        trigger_candidates = s.get_order_control_batch_trigger_candidates()
+        if not trigger_candidates:
+            return "no_trigger_candidate"
+
+        trigger_vehicle = trigger_candidates[0]
+
+        if t_trigger_level == 0:
+            t_trigger = s.estimate_order_control_batch_t_trigger_level_0(trigger_vehicle)
+        else:
+            t_trigger = s.estimate_order_control_batch_t_trigger_level_1(trigger_vehicle)
+
+        candidates_by_inlink = s.get_order_control_batch_candidates_by_inlink(t_trigger)
+        if not candidates_by_inlink:
+            raise ValueError(
+                f"Node {s.name} has trigger vehicle {trigger_vehicle.name} with "
+                f"t_trigger={t_trigger}, but candidate extraction returned an empty dict."
+            )
+
+        ordered_candidates_by_inlink = (
+            s.get_ordered_order_control_batch_candidates_by_inlink(
+                candidates_by_inlink,
+                trigger_vehicle,
+            )
+        )
+
+        selected_groups_by_inlink = s.apply_order_control_batch_max_size(
+            ordered_candidates_by_inlink,
+            max_batch_size,
+        )
+        if not selected_groups_by_inlink:
+            raise ValueError(
+                f"Node {s.name} has trigger vehicle {trigger_vehicle.name} with "
+                f"max_batch_size={max_batch_size}, but max-size application returned "
+                "an empty list."
+            )
+
+        s.register_order_control_batch_service_units(selected_groups_by_inlink)
+        return "batch_formed"
+
     # クリアランスなしFCFS。回帰確認・デバッグ用に残す。
     # 本研究で評価対象とする最終的なFCFSモデルとしては使用しない。
     def transfer_fcfs_no_clearance(s):
