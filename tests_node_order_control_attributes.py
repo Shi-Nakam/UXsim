@@ -22,6 +22,7 @@ assert node_default.order_control_type == "none"
 assert node_default.batch_size == 1
 assert node_default.transaction_case is None
 assert node_default.order_control_eligible is False
+assert node_default.order_control_batch_t_trigger_level == 1
 
 node_eligible = W.addNode("node_eligible", 4, 0, order_control_eligible=True)
 assert node_eligible.order_control_eligible is True
@@ -33,6 +34,7 @@ assert node_fcfs.order_control_type == "fcfs"
 assert node_fcfs.batch_size == 1
 assert node_fcfs.transaction_case is None
 assert node_fcfs.order_control_eligible is True
+assert node_fcfs.order_control_batch_t_trigger_level == 1
 
 node_batch = W.addNode(
     "node_batch", 2, 0, order_control_eligible=True, order_control_type="batch", batch_size=10
@@ -40,6 +42,7 @@ node_batch = W.addNode(
 assert node_batch.order_control_type == "batch"
 assert node_batch.batch_size == 10
 assert node_batch.transaction_case is None
+assert node_batch.order_control_batch_t_trigger_level == 1
 
 node_tv = W.addNode(
     "node_tv",
@@ -52,6 +55,7 @@ node_tv = W.addNode(
 assert node_tv.order_control_type == "time_value"
 assert node_tv.batch_size == 1
 assert node_tv.transaction_case == "I"
+assert node_tv.order_control_batch_t_trigger_level == 1
 
 for kwargs in (
     {"order_control_type": "invalid"},

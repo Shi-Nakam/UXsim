@@ -39,11 +39,13 @@ for node in (node_a, node_b):
     assert node.order_control_type == "batch"
     assert node.batch_size == 10
     assert node.transaction_case is None
+    assert node.order_control_batch_t_trigger_level == 1
 
 for node in (node_c, node_d):
     assert node.order_control_type == "none"
     assert node.batch_size == 1
     assert node.transaction_case is None
+    assert node.order_control_batch_t_trigger_level == 1
 
 W.set_order_control_for_nodes(["node_c"], order_control_type="time_value", transaction_case="I")
 assert node_c.order_control_type == "time_value"

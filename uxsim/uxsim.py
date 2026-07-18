@@ -18,13 +18,51 @@ from .analyzer import *
 from .utils import *
 from .scenario_reader_writer import *
 
+
+def _validate_order_control_batch_t_trigger_level(value, node_name=None):
+    if not isinstance(value, int) or isinstance(value, bool):
+        if node_name is not None:
+            raise ValueError(
+                f"Node {node_name} received invalid "
+                f"order_control_batch_t_trigger_level={value!r}; "
+                "expected 0 or 1 as a non-bool int."
+            )
+        raise ValueError(
+            f"Invalid order_control_batch_t_trigger_level={value!r}; "
+            "expected 0 or 1 as a non-bool int."
+        )
+    if value == 2:
+        if node_name is not None:
+            raise ValueError(
+                f"Node {node_name} received "
+                f"order_control_batch_t_trigger_level=2; "
+                "Level 2 is planned, but virtual-service estimation "
+                "is not yet implemented."
+            )
+        raise ValueError(
+            "order_control_batch_t_trigger_level=2 is planned, but "
+            "Level 2 virtual-service estimation is not yet implemented."
+        )
+    if value not in (0, 1):
+        if node_name is not None:
+            raise ValueError(
+                f"Node {node_name} received invalid "
+                f"order_control_batch_t_trigger_level={value}; "
+                "expected 0 or 1 as a non-bool int."
+            )
+        raise ValueError(
+            f"Invalid order_control_batch_t_trigger_level={value}; "
+            "expected 0 or 1 as a non-bool int."
+        )
+
+
 class Node:
     """
     Node in a network.
 
-    Optional research attributes for intersection order control: order_control_type, batch_size, transaction_case, order_control_eligible.
+    Optional research attributes for intersection order control: order_control_type, batch_size, transaction_case, order_control_eligible, order_control_batch_t_trigger_level.
     """
-    def __init__(s, W: "World", name: str, x: float, y: float, signal: list[float]=[0], signal_offset: float=0, signal_offset_old: float|None=None, flow_capacity: float|None=None, number_of_lanes: int|None=None, auto_rename=False, attribute=None, user_attribute=None, user_function=None, order_control_type="none", batch_size=1, transaction_case=None, order_control_eligible=False):
+    def __init__(s, W: "World", name: str, x: float, y: float, signal: list[float]=[0], signal_offset: float=0, signal_offset_old: float|None=None, flow_capacity: float|None=None, number_of_lanes: int|None=None, auto_rename=False, attribute=None, user_attribute=None, user_function=None, order_control_type="none", batch_size=1, transaction_case=None, order_control_eligible=False, order_control_batch_t_trigger_level=1):
         """
         Create a node.
 
@@ -73,6 +111,8 @@ class Node:
             Transaction case for time-value order control (research use): "I", "II", "III", or None. Default is None.
         order_control_eligible : bool, optional
             Whether this node is eligible for intersection order control (research use). Default is False.
+        order_control_batch_t_trigger_level : int, optional
+            Estimator level used to calculate the planned trigger-passage timestep when forming a BATCH at this node. Default is 1.
 
         Notes
         -----
@@ -160,6 +200,11 @@ class Node:
                 'A node must be order_control_eligible=True before using fcfs, batch, or time_value order control.'
             )
 
+        _validate_order_control_batch_t_trigger_level(
+            order_control_batch_t_trigger_level,
+            node_name=name,
+        )
+
         s.W = W
         #node position (for visualization)
         s.x = x
@@ -173,6 +218,7 @@ class Node:
         s.batch_size = batch_size
         s.transaction_case = transaction_case
         s.order_control_eligible = order_control_eligible
+        s.order_control_batch_t_trigger_level = order_control_batch_t_trigger_level
         # World共通のorder-control clearance設定を、Nodeごとの参照値として保持する。
         # last_order_control_* は、clearance-awareなorder-control transferで、
         # 直近にこのNodeへ進入したVehicleのinlinkと進入タイムステップを記録するための初期値。
@@ -2965,7 +3011,7 @@ class World:
         W.order_control_clearance_timesteps = 1
         W.order_control_batch_tau_timesteps = 1
 
-    def addNode(W, name: str, x: float, y: float, signal: list[float]=[0], signal_offset: float=0, signal_offset_old: float|None=None, flow_capacity: float|None=None, number_of_lanes: int=None, auto_rename=False, attribute=None, user_attribute=None, user_function=None, order_control_type="none", batch_size=1, transaction_case=None, order_control_eligible=False) -> Node:
+    def addNode(W, name: str, x: float, y: float, signal: list[float]=[0], signal_offset: float=0, signal_offset_old: float|None=None, flow_capacity: float|None=None, number_of_lanes: int=None, auto_rename=False, attribute=None, user_attribute=None, user_function=None, order_control_type="none", batch_size=1, transaction_case=None, order_control_eligible=False, order_control_batch_t_trigger_level=1) -> Node:
         """
         Add a node to world.
 
@@ -3012,6 +3058,8 @@ class World:
             Transaction case for time-value order control (research use): "I", "II", "III", or None. Default is None.
         order_control_eligible : bool, optional
             Whether this node is eligible for intersection order control (research use). Default is False.
+        order_control_batch_t_trigger_level : int, optional
+            Estimator level used to calculate the planned trigger-passage timestep when forming a BATCH at this node. Default is 1.
 
         Notes
         -----
@@ -3028,9 +3076,9 @@ class World:
         signal_t : float
             The elapsed time since the current signal phase started. When it is larger than `Link.signal[Link.signal_phase]`, the phase changes to the next one.
         """
-        return Node(W, name, x, y, signal=signal, signal_offset=signal_offset, signal_offset_old=signal_offset_old, flow_capacity=flow_capacity, number_of_lanes=number_of_lanes, auto_rename=auto_rename, attribute=attribute, user_attribute=user_attribute, user_function=user_function, order_control_type=order_control_type, batch_size=batch_size, transaction_case=transaction_case, order_control_eligible=order_control_eligible)
+        return Node(W, name, x, y, signal=signal, signal_offset=signal_offset, signal_offset_old=signal_offset_old, flow_capacity=flow_capacity, number_of_lanes=number_of_lanes, auto_rename=auto_rename, attribute=attribute, user_attribute=user_attribute, user_function=user_function, order_control_type=order_control_type, batch_size=batch_size, transaction_case=transaction_case, order_control_eligible=order_control_eligible, order_control_batch_t_trigger_level=order_control_batch_t_trigger_level)
 
-    def set_order_control_for_nodes(W, node_names, order_control_type="none", batch_size=1, transaction_case=None):
+    def set_order_control_for_nodes(W, node_names, order_control_type="none", batch_size=1, transaction_case=None, order_control_batch_t_trigger_level=1):
         """
         Apply intersection order control settings to multiple nodes for research use.
 
@@ -3044,6 +3092,8 @@ class World:
             Batch size for batch order control. Default is 1.
         transaction_case : str or None, optional
             Transaction case for time-value order control: "I", "II", "III", or None. Default is None.
+        order_control_batch_t_trigger_level : int, optional
+            Estimator level used to calculate the planned trigger-passage timestep when forming a BATCH at this node. Default is 1.
 
         Notes
         -----
@@ -3070,7 +3120,9 @@ class World:
         if transaction_case not in allowed_transaction_cases:
             raise ValueError('transaction_case must be None, "I", "II", or "III".')
 
-        configured_nodes = []
+        _validate_order_control_batch_t_trigger_level(order_control_batch_t_trigger_level)
+
+        nodes_to_configure = []
         for node_name in node_names:
             node = W.get_node(node_name)
             if order_control_type != "none" and not node.order_control_eligible:
@@ -3078,12 +3130,15 @@ class World:
                     f"Node '{node.name}' is not eligible for intersection order control "
                     f"(order_control_eligible=False)."
                 )
+            nodes_to_configure.append(node)
+
+        for node in nodes_to_configure:
             node.order_control_type = order_control_type
             node.batch_size = batch_size
             node.transaction_case = transaction_case
-            configured_nodes.append(node)
+            node.order_control_batch_t_trigger_level = order_control_batch_t_trigger_level
 
-        return configured_nodes
+        return nodes_to_configure
 
     def set_order_control_clearance_timesteps(W, clearance_timesteps):
         """
@@ -3190,6 +3245,7 @@ class World:
         batch_size=1,
         transaction_case=None,
         random_seed=None,
+        order_control_batch_t_trigger_level=1,
     ):
         """
         Randomly select a fraction of order_control_eligible nodes and apply order control settings.
@@ -3216,6 +3272,8 @@ class World:
             Transaction case for time-value order control: "I", "II", "III", or None. Default is None.
         random_seed : int or None, optional
             Random seed for node selection. Default is None.
+        order_control_batch_t_trigger_level : int, optional
+            Estimator level used to calculate the planned trigger-passage timestep when forming a BATCH at this node. Default is 1.
 
         Returns
         -------
@@ -3253,6 +3311,7 @@ class World:
             order_control_type=order_control_type,
             batch_size=batch_size,
             transaction_case=transaction_case,
+            order_control_batch_t_trigger_level=order_control_batch_t_trigger_level,
         )
 
     def addLink(W, name: str, start_node: Node|str, end_node: Node|str, length: float, free_flow_speed: float=20, jam_density: float=0.2, jam_density_per_lane: float|None=None, number_of_lanes: int=1, merge_priority: float=1, signal_group: list[int]=[0], capacity_out: float|None=None, capacity_in: float|None=None, eular_dx=None, attribute=None, user_attribute=None, user_function=None, auto_rename=False) -> Link:

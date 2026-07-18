@@ -54,6 +54,7 @@ selected = W.set_order_control_for_randomly_selected_eligible_nodes(
     order_control_type="batch",
     batch_size=10,
     random_seed=0,
+    order_control_batch_t_trigger_level=1,
 )
 assert len(selected) == 2
 
@@ -63,6 +64,7 @@ for node in selected:
     assert node.batch_size == 10
     assert node.transaction_case is None
     assert node.order_control_eligible is True
+    assert node.order_control_batch_t_trigger_level == 1
 
 for merge in merges:
     if merge.name in selected_names:
@@ -85,6 +87,7 @@ selected2 = W2.set_order_control_for_randomly_selected_eligible_nodes(
     order_control_type="batch",
     batch_size=10,
     random_seed=0,
+    order_control_batch_t_trigger_level=1,
 )
 assert [node.name for node in selected2] == [node.name for node in selected]
 

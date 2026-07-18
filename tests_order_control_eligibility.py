@@ -54,10 +54,16 @@ else:
     raise AssertionError("Expected ValueError for ineligible merge node")
 
 W.set_order_control_eligible_flag_for_nodes(["merge"], True)
-configured = W.set_order_control_for_nodes(["merge"], order_control_type="batch", batch_size=10)
+configured = W.set_order_control_for_nodes(
+    ["merge"],
+    order_control_type="batch",
+    batch_size=10,
+    order_control_batch_t_trigger_level=1,
+)
 assert configured == [merge]
 assert merge.order_control_type == "batch"
 assert merge.batch_size == 10
+assert merge.order_control_batch_t_trigger_level == 1
 
 W.set_order_control_eligible_flag_for_nodes(["merge"], False)
 W.set_order_control_for_nodes(["merge"], order_control_type="none")
