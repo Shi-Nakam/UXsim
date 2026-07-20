@@ -1218,6 +1218,221 @@ class Node:
         s.register_order_control_batch_service_units(selected_groups_by_inlink)
         return "batch_formed"
 
+    def serve_order_control_batch_service_queue(s) -> int:
+        """
+        Transfer vehicles through registered BATCH service units at this node.
+
+        Processes the formal ``order_control_batch_service_queue`` in order using a
+        working list snapshot. Returns the number of Vehicle objects that completed an
+        inlink-to-outlink transfer during this call.
+
+        If the head vehicle of a service unit has not yet arrived at the node
+        (``vehicle not in incoming_vehicles``), no vehicle is transferred, later
+        service units are not evaluated, and the unfinished unit remains in the queue.
+
+        If clearance is required but not yet satisfied, the method waits in the same
+        way: no transfer, no later service units, queue order preserved.
+
+        When no vehicle has been transferred yet in this call and the head vehicle
+        has arrived and clearance is satisfied but downstream space and capacity
+        conditions are not met, the blocked service unit stays at its original queue
+        position, same-inlink later service units are skipped, and different-inlink
+        later service units are evaluated in order using the same arrival, clearance,
+        and capacity checks.
+
+        After the first vehicle transfers in this call, vehicles in the same inlink
+        direction are processed FIFO for as long as arrival, clearance, and downstream
+        space and capacity allow. Consecutive same-inlink service units are processed
+        in the same timestep without a fixed count limit; the total vehicles served
+        across multiple units may exceed ``batch_size``.
+
+        If a later vehicle cannot transfer after one or more vehicles have already
+        transferred in this call, processing stops for the entire timestep because
+        same-inlink followers cannot overtake and different-inlink units cannot satisfy
+        direction-change clearance in the same timestep.
+
+        Reaching a different-inlink service unit after at least one transfer in this
+        call also ends processing for the timestep.
+
+        Completed service units (empty ``vehicles`` lists) are removed from the formal
+        queue when the method returns, including when processing ends early. Unfinished
+        units keep their original relative order.
+        """
+        if (s.last_order_control_inlink is None) != (
+            s.last_order_control_entry_timestep is None
+        ):
+            raise ValueError(
+                f"Node {s.name} has inconsistent order-control clearance history: "
+                f"last_order_control_inlink={s.last_order_control_inlink!r}, "
+                f"last_order_control_entry_timestep="
+                f"{s.last_order_control_entry_timestep!r}."
+            )
+
+        if not s.order_control_batch_service_queue:
+            return 0
+
+        service_units_to_check = list(s.order_control_batch_service_queue)
+        transferred_vehicle_count = 0
+        blocked_inlinks = set()
+        active_inlink = None
+
+        def _finalize_service_queue():
+            s.order_control_batch_service_queue.clear()
+            for service_unit in service_units_to_check:
+                if service_unit["vehicles"]:
+                    s.order_control_batch_service_queue.append(service_unit)
+
+        def _clearance_satisfied(inlink):
+            clearance_required = (
+                s.last_order_control_inlink is not None
+                and inlink != s.last_order_control_inlink
+            )
+            if not clearance_required:
+                return True
+            return (
+                s.W.T - s.last_order_control_entry_timestep
+                > s.order_control_clearance_timesteps
+            )
+
+        def _validate_service_unit_vehicle(veh, service_unit):
+            batch_id = service_unit["batch_id"]
+            inlink = service_unit["inlink"]
+            if s.name not in veh.order_control_batch_assignments:
+                raise ValueError(
+                    f"Vehicle {veh.name} at node {s.name} has no batch assignment "
+                    f"for service unit batch_id={batch_id}."
+                )
+            if veh.order_control_batch_assignments[s.name] != batch_id:
+                raise ValueError(
+                    f"Vehicle {veh.name} at node {s.name} has batch assignment "
+                    f"{veh.order_control_batch_assignments[s.name]!r}, expected "
+                    f"{batch_id} for service unit batch_id={batch_id}."
+                )
+            if veh.link is not inlink:
+                raise ValueError(
+                    f"Vehicle {veh.name} at node {s.name} has veh.link="
+                    f"{getattr(veh.link, 'name', veh.link)!r}, expected "
+                    f"{inlink.name} for service unit batch_id={batch_id}."
+                )
+            if veh.route_next_link is None:
+                raise ValueError(
+                    f"Vehicle {veh.name} at node {s.name} has route_next_link=None "
+                    f"for service unit batch_id={batch_id}."
+                )
+
+        def _can_transfer(veh, inlink, outlink):
+            return (
+                outlink is not None
+                and len(inlink.vehicles) > 0
+                and veh == inlink.vehicles[0]
+                and (
+                    len(outlink.vehicles) < outlink.number_of_lanes
+                    or outlink.vehicles[-outlink.number_of_lanes].x
+                    > outlink.delta_per_lane * s.W.DELTAN
+                )
+                and outlink.capacity_in_remain >= s.W.DELTAN
+                and inlink.capacity_out_remain >= s.W.DELTAN
+                and s.flow_capacity_remain >= s.W.DELTAN
+            )
+
+        def _transfer_vehicle(veh, inlink, outlink):
+            inlink.cum_departure[-1] += s.W.DELTAN
+            outlink.cum_arrival[-1] += s.W.DELTAN
+            inlink.traveltime_actual[
+                int(veh.link_arrival_time / s.W.DELTAT) :
+            ] = s.W.T * s.W.DELTAT - veh.link_arrival_time
+
+            veh.link_arrival_time = s.W.T * s.W.DELTAT
+
+            inlink.capacity_out_remain -= s.W.DELTAN
+            outlink.capacity_in_remain -= s.W.DELTAN
+            if s.flow_capacity is not None:
+                s.flow_capacity_remain -= s.W.DELTAN
+
+            inlink.vehicles.popleft()
+            outlink.vehicles_enter_log[s.W.T * s.W.DELTAT] = veh
+            veh.link = outlink
+            veh.record_order_control_earliest_arrival_timestep_for_current_link()
+            veh.x = 0
+
+            if veh.follower is not None:
+                veh.follower.leader = None
+                veh.follower = None
+
+            if len(outlink.vehicles) > 0:
+                veh.lane = (outlink.vehicles[-1].lane + 1) % outlink.number_of_lanes
+            else:
+                veh.lane = 0
+
+            veh.leader = None
+            if len(outlink.vehicles) >= outlink.number_of_lanes:
+                veh.leader = outlink.vehicles[-outlink.number_of_lanes]
+                veh.leader.follower = veh
+                assert veh.leader.lane == veh.lane
+
+            x_next = veh.move_remain * outlink.u / inlink.u
+            if veh.leader is not None:
+                x_cong = veh.leader.x_old - veh.link.delta_per_lane * veh.W.DELTAN
+                if x_cong < veh.x:
+                    x_cong = veh.x
+                if x_next > x_cong:
+                    x_next = x_cong
+
+            if x_next >= outlink.length:
+                x_next = outlink.length
+
+            veh.x = x_next
+            veh.v += veh.x / s.W.DELTAT
+            veh.move_remain = 0
+
+            outlink.vehicles.append(veh)
+            s.incoming_vehicles.remove(veh)
+
+            s.last_order_control_inlink = inlink
+            s.last_order_control_entry_timestep = s.W.T
+
+        for service_unit in service_units_to_check:
+            inlink = service_unit["inlink"]
+
+            if transferred_vehicle_count == 0 and inlink in blocked_inlinks:
+                continue
+
+            if (
+                transferred_vehicle_count > 0
+                and active_inlink is not None
+                and inlink != active_inlink
+            ):
+                break
+
+            while service_unit["vehicles"]:
+                veh = service_unit["vehicles"][0]
+                outlink = veh.route_next_link
+
+                if veh not in s.incoming_vehicles:
+                    _finalize_service_queue()
+                    return transferred_vehicle_count
+
+                _validate_service_unit_vehicle(veh, service_unit)
+
+                if not _clearance_satisfied(inlink):
+                    _finalize_service_queue()
+                    return transferred_vehicle_count
+
+                if not _can_transfer(veh, inlink, outlink):
+                    if transferred_vehicle_count == 0:
+                        blocked_inlinks.add(inlink)
+                        break
+                    _finalize_service_queue()
+                    return transferred_vehicle_count
+
+                _transfer_vehicle(veh, inlink, outlink)
+                service_unit["vehicles"].pop(0)
+                transferred_vehicle_count += 1
+                active_inlink = inlink
+
+        _finalize_service_queue()
+        return transferred_vehicle_count
+
     # クリアランスなしFCFS。回帰確認・デバッグ用に残す。
     # 本研究で評価対象とする最終的なFCFSモデルとしては使用しない。
     def transfer_fcfs_no_clearance(s):

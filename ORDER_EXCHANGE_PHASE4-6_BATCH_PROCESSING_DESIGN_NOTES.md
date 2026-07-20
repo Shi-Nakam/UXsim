@@ -6,9 +6,9 @@ UXsim Order Exchange 改変作業における、phase 4-6：交差点BATCH処理
 
 ---
 
-## 1A. 実装状況サマリ（phase 4-6A〜4-6J）
+## 1A. 実装状況サマリ（phase 4-6A〜4-6K）
 
-進捗の詳細・コミットID・回帰結果は [ORDER_EXCHANGE_PROGRESS.md](ORDER_EXCHANGE_PROGRESS.md) を参照。Phase 4-6E〜4-6Jの設計・判断経緯の詳細は **§1C** を参照。
+進捗の詳細・コミットID・回帰結果は [ORDER_EXCHANGE_PROGRESS.md](ORDER_EXCHANGE_PROGRESS.md) を参照。Phase 4-6E〜4-6Jの設計・判断経緯の詳細は **§1C**、Phase 4-6Kの実装記録は **§1D** を参照。
 
 | 区分 | 内容 |
 |------|------|
@@ -22,15 +22,19 @@ UXsim Order Exchange 改変作業における、phase 4-6：交差点BATCH処理
 | | phase 4-6H：`register_order_control_batch_service_units()`（8cf6dec） |
 | | phase 4-6I：`form_order_control_batch()`（d10a6db） |
 | | phase 4-6J：`order_control_batch_t_trigger_level` とNode群一括設定（1ae9204） |
-| **service unit登録まで完成** | trigger候補取得 → t_trigger推定 → 全inlink候補抽出 → 処理順決定 → N適用 → batch ID・assignment・service queue登録 → 統合メソッド → Node設定 |
-| **未実装** | service queueに基づくVehicle実通過、通過後Vehicle削除、完了service unit削除 |
-| | BATCH専用transfer統括、`Node.transfer()` batch分岐 |
-| | Level 2仮想サービス推定、residual batch、Time-value Transaction |
-| | FCFSとN=1 BATCHの完全同等性テスト（実通過実装後） |
+| | phase 4-6K正式Markdown記録（9a2f32f：4-6E〜4-6J記録） |
+| **実装・テスト完了（未commit）** | phase 4-6K：`serve_order_control_batch_service_queue()`（単体実装、`Node.transfer()`未接続）、`tests_order_control_batch_service_queue_transfer.py`（33テスト） |
+| **service unit登録〜実通過まで完成** | trigger候補取得 → t_trigger推定 → 全inlink候補抽出 → 処理順決定 → N適用 → batch ID・assignment・service queue登録 → 統合メソッド → Node設定 → **登録済みservice queueに基づくVehicle実通過（4-6K）** |
+| **未実装** | BATCH専用transfer統括、`Node.transfer()` batch分岐 |
+| | 新規BATCH形成と実通過の統合（1 timestep内の統括呼出し） |
+| | `incoming_vehicles` 全体のtimestep末整理 |
+| | Level 2仮想サービス推定、Time-value Transaction |
+| | N=1 BATCHとFCFSのシミュレーション全体での完全同一性テスト（`Node.transfer()`接続後） |
+| | trip-end VehicleのBATCH service unit対応 |
 | **当面の研究シナリオ前提** | 比較対象内部交差点Nodeを目的地としない端点間OD |
 | | 全比較方式で同一ネットワーク・同一OD需要 |
 | **研究基本設定（明示指定）** | `batch_size=10`、`order_control_batch_t_trigger_level=1` |
-| **次フェーズ候補** | phase 4-6K：service queue先頭service unitの実通過メソッド（単体実装、`Node.transfer()`未接続） |
+| **次フェーズ候補** | BATCH専用transfer統括メソッドの設計・実装 → `Node.transfer()` BATCH分岐接続 → 接続後回帰テスト → N=1 BATCHとFCFS完全同一性テスト |
 
 ---
 
@@ -57,7 +61,7 @@ UXsim Order Exchange 改変作業における、phase 4-6：交差点BATCH処理
 
 本節は、Phase 4-6E〜4-6Jの設計・実装・テスト・判断経緯を、**現在の `uxsim/uxsim.py` とテスト**に一致する形で記録する。別担当者または別AIが本メモとリポジトリのみを読んで次工程を安全に再開できることを目的とする。
 
-**後の実装で変更された判断：** §10・§12・§18・§21の旧記述（「4-6E〜4-6G未実装」「snapshot estimated arrival未実装」「service unit形式TBD」等）は、Phase 4-6E〜4-6J完了時点では **§1Cが正** である。旧節は設計経緯の参考として残し、実装状況は本節を優先参照すること。
+**後の実装で変更された判断：** §10・§12・§18・§21の旧記述（「4-6E〜4-6G未実装」「snapshot estimated arrival未実装」「service unit形式TBD」等）は、Phase 4-6E〜4-6J完了時点では **§1Cが正** である。Phase 4-6K（service queue実通過）完了時点では **§1Dが正** である。旧節は設計経緯の参考として残し、実装状況は本節および §1D を優先参照すること。
 
 ### 1C.1 対象範囲と現在地点
 
@@ -604,80 +608,60 @@ Falseを返すと失敗と誤解される可能性があるため、正常状態
 
 ---
 
-### 1C.13 現在未実装の範囲
+### 1C.13 現在未実装の範囲（Phase 4-6K完了後）
 
-既存FCFS通過処理（`transfer_fcfs_clearance()` 等）は完成している一方、BATCHは**service unit正式登録まで**である。
+Phase 4-6K（**§1D**）により、service queueに基づくVehicle実通過・通過後Vehicle削除・完了service unit削除・同一inlink連続service unitの同一timestep内処理・異方向service unitへのclearance適用・residual部分のFIFO保持は**実装済み**である。
 
-- service queueに基づくVehicle実通過
-- service unit内Vehicleの通過後削除
-- 完了service unitのqueueからの削除
-- 同一inlinkの連続service unitを同一timestep内に続けてサービスする処理（設計確定・未実装）
-- 異方向service unitへのclearance適用
+**引き続き未実装：**
+
 - BATCH専用transfer統括メソッド
 - `Node.transfer()` へのBATCH分岐
+- 1 timestep内の新規BATCH形成と実通過の統合呼出し
+- `incoming_vehicles` 全体のtimestep末整理
 - Level 2仮想サービス推定
-- residual batch
+- trip-end VehicleのBATCH service unit対応
 - Time-value Transaction
-- FCFSとN=1 BATCHの完全同等性テスト
+- N=1 BATCHとFCFSのシミュレーション全体での完全同一性テスト（`Node.transfer()`接続後）
+
+**注記：** §15の設計段階記述にあった「residual batchを一時的に後ろへ回す」方針は、Phase 4-6K実装では採用していない。未完了service unitは正式queueの最後尾へ移動せず、元の相対順序で残す（**§1D.11**）。
 
 ---
 
-### 1C.14 次工程：Phase 4-6K（service queueに基づく実通過）
+### 1C.14 Phase 4-6K（service queueに基づく実通過）— 実装完了
 
-Phase 4-6Kは**未実装**。以下は設計上の確定事項と未確定事項。
+Phase 4-6Kは**実装・テスト・回帰確認完了**（コードは未commit）。詳細は **§1D** を正とする。
 
-#### 確定済み設計
+#### 確定済み設計（§1C.14で列挙していた項目は §1D で実装済み）
 
-- BATCH形成と実通過メソッドを分離。実通過は登録済みservice queueのみ処理。
-- queue先頭から処理。service unit内はFIFO。
-- Vehicleは `incoming_vehicles` に存在しNode端へ到着済み、service unit先頭、inlink物理先頭である必要がある。
-- batch assignmentとservice unitのbatch ID・inlinkが一致する必要がある。
-- 下流空間・容量等を確認。容量が許す限り同一timestepに複数Vehicle通過可能。
-- 同一inlink連続service unitも条件が許せば同一timestep内に続けて処理可能。連続service unit合計がNを超えてもよい（Nは形成単位上限、timestep通過上限ではない）。
-- 異なるinlinkのservice unitへ切り替わる場合はclearance適用。
-- 通過済みVehicleをservice unitから削除、空unitをqueueから削除。
-- 実通過メソッドは `incoming_vehicles` 全体をクリアしない。
-- Phase 4-6Kでは `Node.transfer()` へまだ接続しない。
+- メソッド名：`serve_order_control_batch_service_queue()`、戻り値：`int`（通過Vehicleオブジェクト数）
+- BATCH形成（`form_order_control_batch()`）と実通過を分離
+- `Node.transfer()` へは**未接続**（Phase 4-6Kの意図的な範囲外）
 
-#### 今後確認する事項
+#### 旧「今後確認する事項」
 
-- 実通過メソッドの正式名称・戻り値
-- 同一inlink service unitをまたぐループ構造
-- 容量不足・clearance未充足時の停止条件
-- 不整合時の `ValueError` 範囲
-- 標準UXsim・FCFSのLink間遷移コードとの共有方法
-- 実通過中例外のロールバック範囲
-- trip-end待ちVehicle処理
-- `incoming_vehicles` からの削除方法
-- `last_order_control_inlink` / `last_order_control_entry_timestep` の更新方法
-- 同一timestepに異方向service unitへ進まないことのテスト
-- 実通過後の次timestep再登録との整合
-- FCFSとN=1 BATCH比較を開始できる時期
+§1C.14に列挙していた未確定事項は、Phase 4-6K実装・33テストで確定した。回答は **§1D** 各節を参照。
 
 ---
 
-### 1C.15 次回再開時チェックリスト
+### 1C.15 次回再開時チェックリスト（Phase 4-6K完了後）
 
 | 項目 | 値 |
 |------|-----|
 | ブランチ | `feature/intersection-order-control` |
-| 最新コミット | `1ae9204` |
-| 最新コミット件名 | `phase 4-6: add bulk and per-node batch trigger-level settings` |
-| working tree | 実装コミット `1ae9204` はpush済み。本Markdown更新は未commit |
-| Phase 4-6E〜4-6J | 実装・テスト・commit・push済み |
+| 最新コミット（Markdown） | `9a2f32f`（Phase 4-6E〜4-6J正式記録） |
+| Phase 4-6K実装 | 完了・テスト・回帰確認済み、**未commit** |
+| working tree（Markdown更新前） | `uxsim/uxsim.py` 変更、`tests_order_control_batch_service_queue_transfer.py` 未追跡 |
 | `Node.transfer()` | BATCH分岐は**未接続** |
-| BATCH service queue | 正式登録まで完成、実通過は未実装 |
+| BATCH service queue | 正式登録（4-6H）および実通過（4-6K）まで完成 |
 | 研究基本設定 | `batch_size=10`、`order_control_batch_t_trigger_level=1` |
 | `batch_size` 既定値 | 1 |
-| 次工程 | Phase 4-6K：service queue実通過メソッド（単体、`Node.transfer()`未接続） |
-| Phase 4-6K後の予定 | BATCH専用transfer統括 → `Node.transfer()`接続 → 回帰テスト → N=1 BATCHとFCFS同等性テスト |
+| 次工程 | BATCH専用transfer統括 → `Node.transfer()`接続 → 接続後回帰 → N=1 BATCHとFCFS完全同一性テスト |
 
 **再開時に読むファイル・メソッド・テスト：**
 
-- メモ：本ファイル §1C、[ORDER_EXCHANGE_PROGRESS.md](ORDER_EXCHANGE_PROGRESS.md)
-- 実装：`uxsim/uxsim.py` の `form_order_control_batch`、`register_order_control_batch_service_units`、`get_order_control_batch_*`、`estimate_order_control_batch_t_trigger_level_*`、`set_order_control_for_nodes`
-- テスト：`tests_order_control_batch_formation_integration.py`、`tests_order_control_batch_service_unit_registration.py`、§1C.11一覧
-- コミット：`git log --oneline -20` で `1ae9204` 以降を確認
+- メモ：本ファイル **§1D**、§1C、[ORDER_EXCHANGE_PROGRESS.md](ORDER_EXCHANGE_PROGRESS.md)
+- 実装：`serve_order_control_batch_service_queue`、`form_order_control_batch`、`register_order_control_batch_service_units`、`transfer_fcfs_clearance`
+- テスト：`tests_order_control_batch_service_queue_transfer.py`（33テスト）、§1D.17一覧
 
 ---
 
@@ -715,6 +699,472 @@ Phase 4-6Kは**未実装**。以下は設計上の確定事項と未確定事項
 - `tests_random_eligible_order_control.py`
 - `tests_order_control_eligibility.py`
 - FCFS・clearance・baseline：§1C.11参照
+
+---
+
+## 1D. Phase 4-6K：service queueに基づくVehicle実通過
+
+本節は、Phase 4-6E〜4-6J（§1C）で正式登録された `order_control_batch_service_queue` に従い、Vehicleをinlinkからoutlinkへ実際に移動させる **Phase 4-6K** の設計・実装・テスト・判断理由を記録する。別担当者または別AIが本メモとリポジトリのみを読んで次工程を安全に再開できることを目的とする。
+
+**位置づけ：** Phase 4-6Kは §1C の直後工程である。BATCH形成（`form_order_control_batch()`）は行わず、登録済みservice unitのみを処理する。
+
+### 1D.1 対象範囲と現在地点
+
+#### Phaseと実コードの対応
+
+| Phase | メソッド | 状態 |
+|-------|----------|------|
+| **4-6K** | `Node.serve_order_control_batch_service_queue(s) -> int` | 実装・33テスト・指定既存回帰19本＋example成功。**未commit** |
+| 入力（4-6H） | `register_order_control_batch_service_units()` | commit済み（8cf6dec） |
+| 参考（FCFS） | `transfer_fcfs_clearance()` | Link間遷移の実装元 |
+
+#### 現在地点（Phase 4-6K完了時点）
+
+- **実装済み：** 登録済みservice queueに基づくVehicle実通過、service unit内FIFO、同一inlink連続service unit処理、未到着待機、clearance判定、下流空間・各容量条件判定、0台通過時の異方向service unit確認、1台以上通過後の停止規則、residual部分の保持、完了service unit削除、未完了service unitの正式queue順維持、FCFSと同じLink間遷移、通過Vehicle数の戻り値、必要最小限の重大不整合検出。
+- **意図的に未接続：** `Node.transfer()` からの呼出し。Phase 4-6Kは単体メソッドとして完成させ、シミュレーション本体への統合は次工程とする。
+- **引き続き未実装：** BATCH専用transfer統括、新規BATCH形成と実通過の統合、incoming_vehicles全体のtimestep末整理、Level 2、trip-end Vehicle対応、Time-value Transaction、N=1 BATCHとFCFSのシミュレーション全体での完全同一性テスト。
+
+---
+
+### 1D.2 メソッドの責任と戻り値
+
+#### 完全なシグネチャ
+
+```python
+def serve_order_control_batch_service_queue(s) -> int:
+```
+
+#### 責任分担
+
+| メソッド | 責任 |
+|----------|------|
+| `Node.form_order_control_batch()` | 新しいBATCHを形成し、Vehicle assignmentとservice unitを正式登録する |
+| `Node.serve_order_control_batch_service_queue()` | すでに登録済みのservice unitに従い、Vehicleを実際にLink間で移動させる |
+
+`serve_order_control_batch_service_queue()` は新しいBATCHを形成しない。
+
+#### 戻り値
+
+今回のメソッド呼出しで、実際にinlink→outlinkのLink間遷移を完了した **Vehicleオブジェクト数**（`int`）を返す。
+
+- 0台通過：`return 0`
+- 3台通過：`return 3`
+
+**注意：** 戻り値は `W.DELTAN` を掛けた交通量（platoon流量）ではない。Vehicleオブジェクト1台ごとに1を加算する。
+
+正式service queueが空の場合は、状態を変更せず `0` を返す。
+
+---
+
+### 1D.3 service queue、service unit、residual部分の定義
+
+#### 正式service queue
+
+- **属性：** `node.order_control_batch_service_queue`
+- **型：** `collections.deque`
+- **役割：** 次のtimestepにも引き継ぐservice unitの正式な待ち順。未完了service unitは正式queue内に残る。
+
+#### service unit
+
+```python
+{
+    "batch_id": batch_id,
+    "inlink": inlink,
+    "vehicles": [vehicle_1, vehicle_2, ...],
+}
+```
+
+同じinlink方向に属し、同じbatch IDを持つFIFO順のVehicle列。
+
+#### 完了service unit
+
+`service_unit["vehicles"] == []` となったservice unit。処理終了時に正式service queueから削除する。
+
+#### 未完了service unit
+
+Vehicleが1台以上残っているservice unit。正式service queue内の**元の相対順序**で残す。未完了service unitを正式queueの最後尾へ移動しない。
+
+#### residual部分
+
+service unitから1台以上が通過した後、途中Vehicleが下流空間・各容量条件を満たさず通過不能になった場合に残る未通過Vehicle列。
+
+例：通過前 `[A1, A2, A3]` でA1のみ通過しA2が通過不能のとき、residual部分は `[A2, A3]`。
+
+- residual部分は元のservice unit内にFIFO順で残す
+- 別のservice unitとして作り直さない
+
+#### 下流空間・各容量条件
+
+以下をまとめた呼称：
+
+- outlinkへの進入空間（先行Vehicleとの間隔）
+- `outlink.capacity_in_remain`
+- `inlink.capacity_out_remain`
+- `node.flow_capacity_remain`（`flow_capacity` が設定されているNodeのみ）
+
+---
+
+### 1D.4 Vehicleごとの判断順序
+
+各service unitのFIFO先頭Vehicleについて、**必ず次の順**に判断する。これがPhase 4-6Kの中心規則である。
+
+```
+1. Node端へ到着済みか（incoming_vehicles に存在するか）
+        ↓
+2. clearanceを満たすか
+        ↓
+3. 下流空間・各容量条件を満たすか
+        ↓
+4. すべて満たすならVehicleを通過させる
+```
+
+---
+
+### 1D.5 未到着時の処理
+
+#### 判定
+
+```python
+vehicle not in node.incoming_vehicles
+```
+
+未到着は内部不整合（`ValueError`）ではない。BATCH形成時（`t_trigger` 時点）には到着可能と評価されたVehicleが、実通過時点ではまだNode端に到着していない場合がある。
+
+#### 未到着時の動作
+
+- Vehicleを通過させない
+- service unit内のVehicle順を変更しない
+- **後続service unitを確認しない**
+- そのtimestepの処理全体を終了する
+- それまでに完了したservice unitだけを正式queueから削除する
+- 未完了service unitを元の順番で正式queueに残す
+- それまでに通過したVehicleオブジェクト数を返す
+
+#### 後続service unitを確認しない理由
+
+未到着Vehicleを飛ばして別方向のservice unitを処理すると、BATCH形成時（4-6H/4-6I）に固定したservice queue順序を崩すため。
+
+---
+
+### 1D.6 clearance判定
+
+#### 使用する既存状態
+
+- `node.last_order_control_inlink`
+- `node.last_order_control_entry_timestep`
+- `node.order_control_clearance_timesteps`
+
+#### clearance履歴のペア整合性（メソッド入口で1回のみ）
+
+正常状態は次の2種類のみ：
+
+| 状態 | `last_order_control_inlink` | `last_order_control_entry_timestep` |
+|------|----------------------------|-------------------------------------|
+| 通過履歴なし | `None` | `None` |
+| 通過履歴あり | not `None` | not `None` |
+
+片方だけが `None` の場合は `ValueError`。
+
+#### clearance不要
+
+- 過去に通過したVehicleがない（両方 `None`）
+- 処理対象inlinkが `last_order_control_inlink` と同じ
+
+#### clearance必要
+
+処理対象inlinkが `last_order_control_inlink` と異なる場合。既存FCFS（`transfer_fcfs_clearance()`）と同じ式：
+
+```python
+s.W.T - s.last_order_control_entry_timestep > s.order_control_clearance_timesteps
+```
+
+`W.T` と `last_order_control_entry_timestep` はいずれもtimestep番号。`W.DELTAT`（秒）を引かない。
+
+#### clearance未充足時
+
+- Vehicleを通過させない
+- 後続service unitを確認しない
+- そのtimestepの処理全体を終了する
+- 完了済みservice unitだけを正式queueから削除する
+- 未完了service unitを元の順番で残す
+- それまでの通過Vehicleオブジェクト数を返す
+
+既存FCFSのclearance未充足時の停止（後続候補へ進まない）と同じ考え方。
+
+#### 通過成功後のclearance履歴更新
+
+Vehicleを**実際に通過させた場合のみ**更新：
+
+```python
+s.last_order_control_inlink = inlink
+s.last_order_control_entry_timestep = s.W.T
+```
+
+通過できなかった場合は更新しない。
+
+---
+
+### 1D.7 下流空間・各容量条件を満たさない場合
+
+先頭Vehicleが到着済みでclearanceも満たしているが、下流空間・各容量条件を満たさず通過できない場合。**今回のメソッド呼出しで既に何台通過したか**（`transferred_vehicle_count`）で処理を分ける。
+
+#### 1D.7.1 今回の呼出しで、まだ1台も通過していない場合（`transferred_vehicle_count == 0`）
+
+- 通過不能service unitを正式queue内の**元の位置**に残す（最後尾へ移さない）
+- **同じinlinkの後続service unitは確認しない**（単車線では物理的先頭が通過不能なら後方Vehicleは追い越せず必ず通過不能）
+- **異なるinlinkの後続service unitを順番に確認する**（まだ1台も通過していないため、過去の最終通過時刻によっては異方向へのclearanceがすでに満たされている可能性がある）
+
+異方向service unitについても、§1D.4と同じ判断順（未到着 → clearance → 下流空間・各容量条件）を適用する。異方向service unitも通過不能で通過Vehicle数が0台のままなら、さらに後方の別inlinkのservice unitを確認できる。
+
+ただし、一度通過不能と判定されたinlinkは `blocked_inlinks` に記録し、そのinlinkの後続service unitは確認しない。
+
+#### 1D.7.2 今回の呼出しで、すでに1台以上通過した場合（`transferred_vehicle_count > 0`）
+
+次のVehicleが下流空間・各容量条件を満たさず通過不能になったら、**そのtimestepの処理全体を終了**する。
+
+理由：
+
+- 同一inlinkの後続Vehicleは単車線で通過不能Vehicleを追い越せない
+- 異方向service unitは、現在timestepにすでにVehicleが通過したため、同じtimestep内に方向切替clearanceを満たせない
+
+通過不能Vehicleと後続Vehicleはservice unitに残し、次のtimestepに再判定する。
+
+---
+
+### 1D.8 最初のVehicleが通過した後の処理
+
+今回の呼出しで最初のVehicleが通過した後は、通過したVehicleのinlink方向（`active_inlink`）のみを処理する。
+
+1. 現在のservice unit内をFIFO順に処理する
+2. service unitが完了（`vehicles` が空）したら後続service unitを確認する
+3. 後続service unitが同じinlinkなら処理を続ける
+4. さらに同じinlinkのservice unitが続く限り、**件数に上限なく**処理を繰り返す
+5. 同一inlinkの途中Vehicleが通過不能になったら終了する（§1D.7.2）
+6. 異なるinlinkのservice unitに到達しても終了する
+
+異方向で終了する理由：現在timestepにVehicleが通過したため、方向切替clearanceを同じtimestep内に満たせない。
+
+---
+
+### 1D.9 同一inlinkの連続service unit
+
+同じinlinkのservice unitが2件に限らず、3件以上を含む任意の件数だけ連続する可能性がある。到着・clearance・下流空間・各容量条件を満たす限り、同じtimestep内で連続処理する。**固定上限を設けない。**
+
+複数service unitをまたいだ合計通過Vehicle数が `node.batch_size`（N）を超えてもよい。
+
+**`node.batch_size` の意味：**
+
+- 1回のBATCH形成（`form_order_control_batch()`）で作る1方向service unitの最大Vehicle数
+- **1 timestepの通過Vehicle数上限ではない**
+
+---
+
+### 1D.10 作業用listと正式service queue
+
+#### 2つの入れ物の役割
+
+| 入れ物 | 役割 |
+|--------|------|
+| **正式service queue**（`order_control_batch_service_queue`） | 次timestepにも引き継ぐ正式な待ち順。未完了service unitを残し、完了service unitを取り除く |
+| **作業用list**（`service_units_to_check`） | 今回のメソッド呼出しでservice unitを確認する順番。開始時の確認順を維持する |
+
+開始時に作成：
+
+```python
+service_units_to_check = list(s.order_control_batch_service_queue)
+```
+
+#### 具体例
+
+**開始時の正式queue：** `A → B → C`
+
+**処理結果：** Aは未完了、Bは完了、Cは未完了または未処理
+
+**終了時の正式queue：** `A → C`（完了したBは削除）
+
+作業用listは `A, B, C` の確認順を保持する。Bが完了して正式queueから除かれても、作業用list上の確認順は変化しない。これにより、正式queueの途中にある完了service unitを除外しつつ、未完了service unitの元の順序を維持できる。
+
+**途中終了の例（clearance未充足）：**
+
+- 開始時：`A → B → C`
+- A：未完了、B：完了、C：clearance未充足で終了
+- 終了時：`A → C`（空になったBを正式queueに残さない）
+
+#### service unit自体は複製しない
+
+`list(...)` 変換は外側のlistのみ新規作成する。各service unit辞書は複製しない。正式queueと作業用listは同じservice unit辞書への参照を共有するため、作業用list側で `vehicles` からVehicleを削除すると、正式queueに残る同じservice unitでもVehicle数が減る。外側の並び順は別管理。
+
+#### 処理終了時の正式queue整理（`_finalize_service_queue()`）
+
+作業用listのうち、`vehicles` が残っている未完了service unitだけを、元の順番で正式queueへ戻す。これにより完了service unitの削除と未完了service unitの相対順序維持を同時に行う。
+
+---
+
+### 1D.11 residual部分と正式queue順
+
+residual部分（§1D.3）は元のservice unit内の `vehicles` リストにFIFO順で残す。別service unitには分割しない。
+
+未完了service unit（residualを含む）は正式service queueの**元の相対順序**で残す。**最後尾へ移動しない。**
+
+> **§15との関係：** 設計段階の「residual batchを一時的に後ろへ回す」記述は、Phase 4-6K実装では採用していない。現在の実装仕様は本節（§1D）を正とする。
+
+---
+
+### 1D.12 Link間遷移
+
+通過可能Vehicleについて、`Node.transfer_fcfs_clearance()` と同じ方法でLink間遷移を行う。BATCH独自のVehicle移動方法は作っていない。
+
+更新対象（少なくとも）：
+
+- `inlink.cum_departure`、`outlink.cum_arrival`
+- `inlink.traveltime_actual`、`vehicle.link_arrival_time`
+- `inlink.capacity_out_remain`、`outlink.capacity_in_remain`
+- `node.flow_capacity_remain`（`flow_capacity` 設定時のみ）
+- `inlink.vehicles`、`outlink.vehicles_enter_log`
+- `vehicle.link`、新Linkの `order_control_earliest_arrival_timesteps`
+- `vehicle.x`、`vehicle.lane`、`vehicle.leader`、`vehicle.follower`
+- `vehicle.move_remain`（通過後0）、`vehicle.v`
+- `outlink.vehicles`、`node.incoming_vehicles`（通過Vehicleを削除）
+- `last_order_control_inlink`、`last_order_control_entry_timestep`
+
+#### move_remain
+
+`Vehicle.carfollow()` で計算される、現在timestepにinlink終端を越えて進もうとした残り距離。通過時に `move_remain * outlink.u / inlink.u` でoutlink側移動距離へ換算し、使用後に0へ戻す。
+
+#### trip-end Vehicle
+
+比較対象内部Nodeを目的地としない研究シナリオ前提を維持。Phase 4-6Kではtrip-end VehicleをBATCH service unitで処理する機能は実装していない。
+
+---
+
+### 1D.13 blocked_inlinksとactive_inlink
+
+実装で使用する一時状態：
+
+| 変数 | 意味 |
+|------|------|
+| `blocked_inlinks` | 今回の呼出しでまだ1台も通過していない間（`transferred_vehicle_count == 0`）に、下流空間・各容量条件を満たさず通過不能と判定されたinlinkの集合。同じinlinkの後続service unitは確認しない |
+| `active_inlink` | 今回の呼出しで最初にVehicleが通過したinlink。最初の通過後は `active_inlink` と同じinlinkのservice unitだけを処理し、異なるinlinkに到達した時点で終了 |
+
+---
+
+### 1D.14 必要最小限の実行時検証
+
+登録時（4-6H）に保証済みの不変条件を、実通過時に全Vehicleについて重複検証しない。
+
+**実通過時に検証する重大不整合（`ValueError`）：**
+
+- clearance履歴のinlinkとtimestepの片方だけが `None`
+- 先頭Vehicleに現在Node向けbatch assignmentがない
+- assignmentのbatch IDとservice unitのbatch IDが一致しない
+- Vehicleの現在Linkとservice unitのinlinkが一致しない
+- `vehicle.route_next_link` が `None`
+
+**正常な待機・通過不能（`ValueError` にしない）：**
+
+- 未到着（`not in incoming_vehicles`）
+- clearance未充足
+- 物理的先頭でない（`veh != inlink.vehicles[0]`）
+- 下流Link進入空間不足
+- outlink流入容量不足、inlink流出容量不足、Node流量容量不足
+
+**実通過時に繰り返していない検証：** Vehicle重複、service unit全体のFIFO、queue後方service unitの全構造、全Vehicleのassignment、batch_sizeやt_trigger_levelの型・範囲。
+
+---
+
+### 1D.15 N=1 BATCHとFCFSの対応
+
+N=1では、各service unitが到着済みtrigger Vehicle 1台で構成される。
+
+| 状況 | FCFS（`transfer_fcfs_clearance()`） | N=1 BATCH（`serve_order_control_batch_service_queue()`） |
+|------|-------------------------------------|----------------------------------------------------------|
+| clearance未充足 | 後続候補へ進まず停止 | 後続service unitへ進まず停止 |
+| 下流空間・各容量条件未充足 | 後続候補を確認（`continue`） | 同inlink後続service unitは確認しない（単車線で追い越せない）。異inlinkのservice unitを確認 |
+| 次timestep | 保存済み到着順から再評価 | 未完了service unitを元の正式queue順から再評価 |
+
+Phase 4-6Kでは単体レベルの判断順の対応まで33テストで確認済み。シミュレーション全体での完全同一性は `Node.transfer()` 接続後の課題。
+
+---
+
+### 1D.16 docstringの設計記録
+
+`serve_order_control_batch_service_queue()` のdocstringに、次の主要規則を記載済み：
+
+- 未到着は後続へ進まず待つ
+- clearance未充足も後続へ進まず待つ
+- 0台通過時の通過不能では異方向service unitを確認する
+- 最初の通過後は同一inlinkを処理する
+- 1台以上通過後の途中通過不能では全体終了
+- 異方向に到達しても全体終了
+- 同一inlink連続service unitに固定上限を設けない
+- 完了service unitは途中終了時もqueueから削除する
+- 未完了service unitの相対順序を維持する
+
+---
+
+### 1D.17 テストと回帰結果
+
+#### 新規テストファイル
+
+`tests_order_control_batch_service_queue_transfer.py`
+
+- テスト関数数：**33**
+- `TESTS` 登録数：**33**（各テスト1回実行）
+- 結果：`Order-control batch service-queue transfer tests passed.`
+
+#### テスト範囲（整理）
+
+| カテゴリ | テスト例 |
+|----------|----------|
+| 基本通過 | 空queue、1台通過、複数台通過、residual部分のFIFO保持 |
+| 未到着 | `test_not_arrived_waits` |
+| clearance | 履歴なし、同一inlink不要、異方向未充足、充足後通過、履歴ペア不整合（両方向）、成功時のみ履歴更新 |
+| 下流空間・容量 | 下流進入空間、outlink流入、inlink流出、Node流量（不足・通過時減少） |
+| 物理的先頭 | `test_not_physical_head` |
+| 連続service unit | 同一inlink3件以上、N超過通過、0台通過時異方向確認、同inlink後続スキップ |
+| 作業用list・queue整理 | 中間完了unit削除、途中終了時完了unit削除、1台以上通過後に後方unitへ進まない |
+| 重大不整合 | assignment欠如、batch ID不一致、Vehicle Link不一致、`route_next_link=None` |
+| Link遷移 | `test_link_transition_updates` |
+| N=1とFCFS対応 | `test_n1_clearance_blocks_later_unit`、`test_n1_capacity_fail_checks_different_inlink` |
+
+#### 新規Phase 4-6Kテスト1本・指定既存回帰テスト19本・example
+
+新規Phase 4-6Kテスト1本（テスト関数33件）、指定既存回帰テスト19本、example 1本がすべて exit code 0。baseline・exampleの主要交通結果は従来の既知値と一致し、確認対象の主要指標に回帰は検出されなかった。
+
+**baseline（`tests_order_exchange_baseline.py`）：** completed trips 48/48、average speed 16.5 m/s、total travel time 2928.0 s、average travel time 61.0 s、average delay 1.0 s、delay ratio 0.017、total distance traveled 48000.0 m
+
+**example（`example_00en_simple.py`）：** completed trips 735/810、average speed 11.7 m/s、total travel time 119475.0 s、average travel time 162.6 s、average delay 62.6 s、delay ratio 0.385、total distance traveled 1632250.0 m
+
+---
+
+### 1D.18 未実装範囲と次工程
+
+Phase 4-6K完了後の次工程候補（いずれも**未実装**）：
+
+1. BATCH専用transfer統括メソッド
+2. 1 timestepごとの新規BATCH形成回数の管理
+3. 形成済みservice queueの実通過との接続（統合呼出し）
+4. `incoming_vehicles` の最終整理
+5. `Node.transfer()` へのBATCH分岐
+6. 接続後の回帰テスト
+7. N=1 BATCHとFCFSの完全同一性テスト（シミュレーション全体）
+
+引き続き未実装：Level 2仮想サービス推定、trip-end VehicleのBATCH対応、Time-value Transaction。
+
+---
+
+### 1D.19 再開時チェックリスト
+
+| 項目 | 値 |
+|------|-----|
+| ブランチ | `feature/intersection-order-control` |
+| 最新コミット（Markdown） | `9a2f32f` — Phase 4-6E〜4-6J正式記録 |
+| Phase 4-6K | 実装・33テスト・回帰完了。**本Markdown更新時点では未commit** |
+| 変更中ファイル | `uxsim/uxsim.py`、`tests_order_control_batch_service_queue_transfer.py`、本正式Markdown 2ファイル |
+| `Node.transfer()` | BATCH分岐**未接続** |
+| 次に読む実装 | `Node.serve_order_control_batch_service_queue()` |
+| 次に読むテスト | `tests_order_control_batch_service_queue_transfer.py` |
+| 次工程 | BATCH専用transfer統括と `Node.transfer()` 接続の設計 |
 
 ---
 
@@ -1129,15 +1579,24 @@ snapshot_estimated_arrival_timestep =
 
 ## 15. residual batch
 
-- **未到着**と**容量制約による通過不能**は区別する。
-- 未到着の場合は、batchの番を維持して到着を待つ。
-- 容量制約・アウトリンク閉塞・node容量不足等により、batch途中車両が一時的に通過不可になった場合、未通過部分を **residual batch** として扱う。
+### Phase 4-6Kの確定仕様（§1Dを正とする）
+
+1. **未到着**と**下流空間・各容量条件による通過不能**を区別する。
+2. 未到着なら、後続service unitへ進まず到着を待つ（§1D.5）。
+3. 一部通過後に残った未通過Vehicle列を **residual部分** と呼ぶ（§1D.3）。
+4. residual部分を元service unit内にFIFO順で残す。別service unitとして作り直さない。
+5. 未完了service unitを正式service queueの**最後尾へ移動しない**。未完了service unit同士の相対順序を維持する。
+6. 次のtimestepでは、正式service queueの元の順番から再評価する。
+7. 今回の呼出しでまだ1台も通過していない場合に限り、下流空間・各容量条件を満たさないservice unitを残したまま、条件を満たし得る異inlinkの後続service unitを確認する（§1D.7.1）。
+
+### 設計段階の旧案（参考）
+
+- 容量制約・アウトリンク閉塞・node容量不足等により、batch途中車両が一時的に通過不可になった場合、未通過部分を **residual batch** として扱う、という用語・概念は維持する。
 - residual batchは元batch内の未通過部分であり、**内部順序を維持**する。
-- residual batchは一時的に後ろへ回す。
-- 既存FCFSでは、容量制約等で通過できないvehicleがあっても、clearance未充足とは区別しながら後続候補を処理する構造を採っていた。
-- BATCHでも、未到着待ちと容量制約による一時的通過不可を区別し、容量制約等の場合にはresidual batchとして後回しにする。
-- 具体的な後回し処理は、既存FCFSのcontinue/break方針を参考にして実装時に決める。
-- 将来到着する新規batchに無制限に抜かされないようにするため、**residual batchの挿入位置管理**は実装時の重要課題として残す。
+- 設計段階では、未完了service unitを一時的にqueue後方へ移す案も検討した。しかし、N=1 BATCHとFCFSの評価順を対応させる観点から、Phase 4-6Kではこの案を採用しなかった。
+- 既存FCFSでは、容量制約等で通過できないvehicleがあっても、clearance未充足とは区別しながら後続候補を処理する構造を採っていた。Phase 4-6Kでは、0台通過時の通過不能に限り異inlink後続service unitの確認という形で、FCFSのcontinueに相当する処理を実装している（§1D.7.1）。
+
+> 現在の実装仕様は **§1D.11** を正とする。旧案の「queue後方へ移す」記述は設計経緯の参考であり、現行コードの動作ではない。
 
 ---
 
@@ -1181,9 +1640,9 @@ snapshot_estimated_arrival_timestep =
 4. `t_trigger` をLevel 0 / Level 1で推定する参照専用ヘルパーを追加する。（**phase 4-6D**）
 5. 既存FCFS / clearance処理を壊さないことを回帰テストで確認済み。
 
-### 当初の未実装項目とPhase 4-6J完了時点の状況
+### 当初の未実装項目とPhase 4-6K完了時点の状況
 
-**後の実装で変更：** 項目1〜9の多くは Phase 4-6C〜4-6I で実装済み（§1C）。以下は実装状況付きの整理。
+**後の実装で変更：** 項目1〜9は主に Phase 4-6C〜4-6I で実装され、項目10〜11は Phase 4-6K で実装された。以下に Phase 4-6K 完了時点の状況を示す。
 
 1. 未batch車両がリンク端に到着したらtrigger vehicleとする（**4-6C・4-6Iで実装済み**）。
 2. 同時到着時は既存FCFSと同様にtiebreaker等でtrigger順を決める（**4-6Cで実装済み**）。
@@ -1194,8 +1653,8 @@ snapshot_estimated_arrival_timestep =
 7. 他方向batchをsnapshot estimated arrivalで並べ、trigger方向を先頭にする。（**4-6F実装済み。§1C.5**）
 8. batch_id発行、`order_control_batch_assignments` への記録、service queueへの追加。（**4-6H実装済み。§1C.7**）
 9. batch化済み車両を再候補にしない。（**4-6C・4-6Eで実装済み**）
-10. batch内順序を固定する。未到着なら待つ。（**service queue実通過は未実装。Phase 4-6K候補**）
-11. residual batchとして扱う方針を実装する。（**未実装**）
+10. batch内順序を固定する。未到着なら待つ。（**4-6Kで実装済み。§1D**）
+11. residual batchとして扱う方針を実装する。（**4-6Kでresidual部分の保持を実装済み。§1D.3・§1D.11。queue最後尾移動は採用せず**）
 12. `order_control_type="batch"` で `Node.transfer` から分岐する。（**未実装**）
 13. Level 2仮想サービス計算とLevel 2→Level 1 fallback。（**未実装**）
 
@@ -1316,48 +1775,56 @@ Phase 4-6A〜4-6D各実装後、FCFS/clearance既存テストおよび `tests_or
 
 Phase 4-6E〜4-6Jで追加されたBATCH形成・登録・設定のテストは **§1C.11** を参照。
 
-### Phase 4-6J完了後も残るテスト課題
+Phase 4-6Kで追加されたservice queue実通過テストは **§1D.17** を参照（`tests_order_control_batch_service_queue_transfer.py`、33テスト）。
 
-- service queueに基づくVehicle実通過
-- service unit内の未到着Vehicleが到着まで待つこと
-- 同一inlinkの連続service unitを同一timestep内に続けて処理すること
-- 同一inlinkの連続service unitをまたいだ通過台数がNを超えてもよいこと
-- 異なるinlinkのservice unitへ切り替わる際のclearance
-- 容量不足時の停止
-- 通過済みVehicleのservice unitからの削除
-- 完了service unitのqueueからの削除
-- residual batch
-- N=1 BATCHとFCFSの完全同等性
-- `Node.transfer()` 接続後の回帰確認
-- `clearance_timesteps=1` でFCFSより方向切替回数が減る可能性を確認すること（BATCH実通過接続後）
+### Phase 4-6J完了時点の未実施テストとPhase 4-6Kでの対応
+
+| 課題 | 4-6Kでの状況 |
+|------|-------------|
+| service queueに基づくVehicle実通過 | **実装・テスト済み（§1D）** |
+| service unit内の未到着Vehicleが到着まで待つこと | **テスト済み** |
+| 同一inlinkの連続service unitを同一timestep内に続けて処理すること | **テスト済み** |
+| 同一inlinkの連続service unitをまたいだ通過台数がNを超えてもよいこと | **テスト済み** |
+| 異なるinlinkのservice unitへ切り替わる際のclearance | **テスト済み** |
+| 容量不足時の停止 | **テスト済み** |
+| 通過済みVehicleのservice unitからの削除 | **実装済み** |
+| 完了service unitのqueueからの削除 | **実装・テスト済み** |
+| residual batch | **residual部分のFIFO保持を実装・テスト済み（queue最後尾移動なし）** |
+| N=1 BATCHとFCFSの完全同等性 | **単体判断順はテスト済み。シミュレーション全体は接続後** |
+| `Node.transfer()` 接続後の回帰確認 | **未実施（次工程）** |
+| `clearance_timesteps=1` でFCFSより方向切替回数が減る可能性 | **接続後の検証課題** |
 
 ---
 
 ## 22. 未解決事項
 
-### 解決済み（phase 4-6A〜4-6D）
+### 解決済み
 
-- `earliest_arrival_timestep` を既存属性で持つか → **Vehicle.order_control_earliest_arrival_timesteps として実装済み**
-- `tau_timesteps` のWorld設定 → **order_control_batch_tau_timesteps、setter実装済み（初期値1）**
+- `earliest_arrival_timestep` → **Vehicle.order_control_earliest_arrival_timesteps として実装済み**（phase 4-6A）
+- `tau_timesteps` のWorld設定 → **order_control_batch_tau_timesteps、setter実装済み**（初期値1、phase 4-6A）
 - t_trigger Level 0 / Level 1推定 → **phase 4-6Dで実装済み**
-- trigger候補の決定順 → **get_order_control_batch_trigger_candidates() で実装済み**
-- Node別batch assignmentの意味 → **order_control_batch_assignments、phase 4-6Bで実装済み（初期化のみ）**
+- trigger候補の決定順 → **get_order_control_batch_trigger_candidates() で実装済み**（phase 4-6C）
+- Node別batch assignment → **order_control_batch_assignments、phase 4-6Bで初期化、4-6Hで書き込み**
+- 全inlinkからのBATCH候補抽出 → **phase 4-6Eで実装済み**（§1C.4）
+- snapshot estimated arrivalによるinlink別batch間順序 → **phase 4-6Fで実装済み**（§1C.5）
+- service unitの具体的データ形式 → **phase 4-6Hで確定**（§1C.3.2）。batch内部構造もこのservice unit形式を指す
+- residual部分と正式queue順 → **phase 4-6Kで方針確定・実装済み**（元の相対順序を維持、最後尾へ移動しない。§1D.11）
+- service queueに基づくVehicle実通過 → **phase 4-6Kで実装済み**（§1D）
 
 ### 未解決・将来課題
 
 - `tau_timesteps` を常に1でよいか（研究比較で可変にするか）。
 - Level 2仮想サービス計算をいつ導入するか。
 - Level 2 unresolved時のLevel 1 fallback接続をいつ実装するか。
-- 全inlinkからのBATCH候補抽出（**4-6E実装済み。§1C**）。
-- snapshot estimated arrival（**4-6F実装済み。§1C**）。
-- residual batchの挿入位置管理をどう実装するか。
-- batch内部構造の具体的データ形式。
-- service unitの具体的データ形式。（**4-6Hで確定。§1C.3.2**）
-- `order_control_type` 名を `"batch"` にするか、別名にするか（現状 `"batch"` を使用）。
+- BATCH専用transfer統括メソッド。
+- `Node.transfer()` へのBATCH分岐。
+- N=1 BATCHとFCFSのシミュレーション全体での完全同一性（単体判断順は4-6Kで確認済み。接続後の課題）。
 - debug/log出力の粒度。
-- 比較対象Node共通管理、目的地自動検証、trip-end service unit。
-- Time-value Transactionとどの段階で接続するか。
+- 比較対象Node共通管理。
+- 目的地自動検証。
+- trip-end service unit。
 - taxi mode向け動的dest検証。
+- Time-value Transactionとどの段階で接続するか。
 
 ---
 
@@ -1388,10 +1855,11 @@ Phase 4-6E〜4-6Jで追加されたBATCH形成・登録・設定のテストは 
 - `register_order_control_batch_service_units`（phase 4-6H）
 - `form_order_control_batch`（phase 4-6I）
 - `_validate_order_control_batch_t_trigger_level`、`set_order_control_for_nodes`（phase 4-6J）
+- `serve_order_control_batch_service_queue`（**phase 4-6K。`Node.transfer()`未接続**）
 - `Link.__init__`
 - `Link.update` / `in_out_flow_constraint` 周辺
 
-### BATCH関連テスト（phase 4-6A〜4-6J）
+### BATCH関連テスト（Phase 4-6A〜4-6K）
 
 - `tests_order_control_batch_earliest_arrival_timestep.py`
 - `tests_order_control_batch_state_containers.py`
@@ -1403,6 +1871,7 @@ Phase 4-6E〜4-6Jで追加されたBATCH形成・登録・設定のテストは 
 - `tests_order_control_batch_service_unit_registration.py`
 - `tests_order_control_batch_formation_integration.py`
 - `tests_order_control_batch_node_settings.py`
+- `tests_order_control_batch_service_queue_transfer.py`（**phase 4-6K、33テスト**）
 
 ### FCFS / clearance基本テスト
 
@@ -1434,11 +1903,11 @@ Phase 4-6E〜4-6Jで追加されたBATCH形成・登録・設定のテストは 
 - 現在ブランチ：`feature/intersection-order-control`。
 - `git status`。
 - `git log --oneline -20`。
-- **Phase 4-6E〜4-6Jは実装・テスト・commit・push済み**（最新実装コミット：**1ae9204**、`origin/feature/intersection-order-control` へpush済み）。
-- **本Markdown更新は未commit**（実装コミットとは区別すること）。
-- **BATCH形成・service unit登録は実装済み。`Node.transfer()` batch分岐とservice queue実通過は未実装**。
+- **Phase 4-6E〜4-6Jは実装・テスト・commit・push済み**（最新Markdownコミット：**9a2f32f**）。
+- **Phase 4-6Kは実装・33テスト・回帰確認済み。本Markdown更新時点では未commit。**
+- **BATCH形成・service unit登録・service queue実通過は実装済み。`Node.transfer()` batch分岐は未実装。**
 - FCFS / clearance までは検証済み。
-- 次は **phase 4-6K：service queueに基づく実通過メソッド（単体実装、`Node.transfer()`未接続）**。
-- 詳細は **§1C** を優先参照。
+- 次は **BATCH専用transfer統括メソッドの設計・実装 → `Node.transfer()` BATCH分岐接続**。
+- 詳細は **§1D** を優先参照（4-6K）、形成・登録は **§1C**。
 - 目的地Vehicleは端点間OD前提で保留。比較対象Node共通管理・自動検証は将来課題。
 - 一時退避PDF `phase4-6A_batch_earliest_arrival_timestep_memo.pdf` はリポジトリ外。正式Markdownを優先参照。
