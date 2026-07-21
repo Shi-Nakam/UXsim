@@ -1433,6 +1433,32 @@ class Node:
         _finalize_service_queue()
         return transferred_vehicle_count
 
+    def transfer_batch(s) -> dict:
+        """
+        Run one BATCH formation attempt and one service-queue transfer at this node.
+
+        Calls ``form_order_control_batch()`` exactly once using this node's
+        ``order_control_batch_t_trigger_level`` and ``batch_size``, then calls
+        ``serve_order_control_batch_service_queue()`` exactly once regardless of
+        whether a new BATCH was formed. On normal completion, clears
+        ``incoming_vehicles``. If either step raises, ``incoming_vehicles`` is left
+        unchanged and the exception propagates unchanged.
+
+        Returns a dict with ``formation_result`` (``"batch_formed"`` or
+        ``"no_trigger_candidate"``) and ``transferred_vehicle_count`` (the number of
+        vehicles that completed an inlink-to-outlink transfer in this call).
+        """
+        formation_result = s.form_order_control_batch(
+            t_trigger_level=s.order_control_batch_t_trigger_level,
+            max_batch_size=s.batch_size,
+        )
+        transferred_vehicle_count = s.serve_order_control_batch_service_queue()
+        s.incoming_vehicles = []
+        return {
+            "formation_result": formation_result,
+            "transferred_vehicle_count": transferred_vehicle_count,
+        }
+
     # クリアランスなしFCFS。回帰確認・デバッグ用に残す。
     # 本研究で評価対象とする最終的なFCFSモデルとしては使用しない。
     def transfer_fcfs_no_clearance(s):
