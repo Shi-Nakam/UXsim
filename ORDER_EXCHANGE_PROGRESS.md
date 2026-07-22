@@ -2394,7 +2394,7 @@ Vehicle候補条件：
 #### 位置づけ
 
 - trigger vehicleの予定通過タイムステップ `t_trigger` を推定するLevel 0 / Level 1の参照専用ヘルパーを追加した。
-- BATCH形成、batch_id発行、service queue追加、`Node.transfer()` batch分岐にはまだ接続していない。
+- BATCH形成、batch_id発行、service queue追加、`Node.transfer()` batch分岐にはまだ接続していない（**4-6M（§1F）で `Node.transfer()` 接続済み**）。
 
 #### 実装内容
 
@@ -2498,9 +2498,7 @@ baseline / example：
 - BATCH形成（`form_order_control_batch()`）とは責任分離。本メソッドは新規BATCHを形成しない
 - 戻り値は今回の呼出しでLink間遷移を完了したVehicleオブジェクト数（`W.DELTAN` を掛けた交通量ではない）
 - Link間遷移は `transfer_fcfs_clearance()` と同じ処理を使用
-- **`Node.transfer()` へは未接続**（意図的な範囲外）
-
-#### 主要な判断規則（詳細は ORDER_EXCHANGE_PHASE4-6_BATCH_PROCESSING_DESIGN_NOTES.md **§1D**）
+- **`Node.transfer()` へは未接続**（Phase 4-6K時点の意図的な範囲外。**4-6M（§1F）で接続済み**）
 
 - Vehicleごとの判断順：到着済み → clearance → 下流空間・各容量条件 → 通過
 - 未到着・clearance未充足：後続service unitを確認せず、そのtimestepの処理全体を終了
@@ -2550,9 +2548,7 @@ baseline / example：
 - `formation_result`：`"batch_formed"` または `"no_trigger_candidate"`
 - `transferred_vehicle_count`：今回の呼出しでLink間遷移を完了したVehicleオブジェクト数を表すint。`W.DELTAN` を掛けた交通量ではない。
 
-- **`Node.transfer()` へは未接続**（意図的な範囲外）
-
-#### 責任分担（詳細は ORDER_EXCHANGE_PHASE4-6_BATCH_PROCESSING_DESIGN_NOTES.md **§1E**）
+- **`Node.transfer()` へは未接続**（Phase 4-6L時点の意図的な範囲外。**4-6M（§1F）で接続済み**）
 
 | メソッド | 責任 |
 |----------|------|
@@ -2582,9 +2578,101 @@ baseline / example：
 
 #### コミット状況
 
-- Phase 4-6Lの実装・テストは完了しているが、**本Markdown更新時点ではコードは未commit**
-- 最新commit：`12e8eae`（Phase 4-6K）
-- working tree：`uxsim/uxsim.py` 変更（4-6L含む）、`tests_order_control_batch_transfer.py` 未追跡、本正式Markdown 2ファイル変更
+- Phase 4-6Lの実装・テストは commit `e9f3ce9` 済み
+
+### フェーズ4-6M：Node.transfer()へのBATCH分岐接続
+
+#### 実装内容
+
+- `Node.transfer()` 冒頭へBATCH分岐4行を追加（**本番コード変更はこの4行のみ**）
+
+```python
+if s.order_control_eligible and s.order_control_type == "batch":
+    s.transfer_batch()
+    return
+```
+
+- 分岐条件：`order_control_eligible` が True **かつ** `order_control_type == "batch"`（`order_control_type` だけでは分岐しない）
+- 既存FCFS分岐の直後、標準UXsim transferの直前に配置
+- `transfer_batch()` を1回呼び、直後に `return`（`return s.transfer_batch()` にはしない。`Node.transfer()` の戻り値は従来どおり `None`）
+- FCFS分岐・標準UXsim transferの本体は変更していない
+- `transfer_batch()` および配下の形成・実通過メソッドは変更していない
+
+#### 分岐後にreturnする理由
+
+`transfer_batch()` の後に `return` しない場合、同一Node・同一timestepでBATCH処理と標準UXsim transferの両方が実行されるおそれがある。同一timestepにBATCHと標準方式の両方でVehicleを移動させないため、`transfer_batch()` 呼出し後に `Node.transfer()` を終了する。
+
+#### 実シミュレーション時系列（確認済み）
+
+`World.exec_simulation()` では `Node.transfer()` が `Vehicle.update()` より先に実行される。
+
+- timestep Tの `Node.transfer()`：VehicleはまだNode端への到着登録前 → BATCH形成されない
+- timestep Tの `Vehicle.update()`：VehicleがNode端へ到着し、同じNodeの `incoming_vehicles` へ登録
+- timestep T+1の `Node.transfer()`：BATCH分岐から `transfer_batch()` を呼び、形成・実通過可否確認・条件充足時は同timestepにLink間移動
+
+`first_transfer_timestep = arrival_timestep + 1` と整合。
+
+#### Vehicle引継ぎ（確認済み）
+
+**batch assignment済みVehicle（Node端に残る場合）：**
+
+- 下流空間・各容量条件により通過不能：BATCH形成済み、inlink上に残る、次timestepに既存service unitのFIFO先頭として再確認、新batch IDなし
+- clearance未充足で通過しなかったbatch assignment済みVehicle：B1自身について異方向切替clearanceを確認し、clearance未充足で当該timestepの処理を終了。B1のassignmentと未完了service unitを維持し、`Vehicle.update()` で再登録。clearance充足後のtimestep 12で通過。新batch IDやservice unit重複登録なし
+- service unit内の未到着Vehicleはもともと `incoming_vehicles` に存在しない（再登録対象ではない）
+
+**到着済み・未batch Vehicle（今回のservice unitへ未登録）：**
+
+- t_trigger候補範囲外、方向別N超過、trigger方向N到達による形成打切り（他方向）
+- 共通：`transfer_batch()` 正常終了時に `incoming_vehicles` から削除 → 同timestep末の `Vehicle.update()` で再登録 → 次timestepのtrigger候補になり得る
+
+#### 異方向同時到着・Level 0/Level 1（確認済み）
+
+**3方向同時到着（batch_size=1、tiebreaker A1→B1→C1）：** A1がtrigger、1回の `Node.transfer()` で形成1回、A1のみ登録、B1・C1は形成打切りで未batch。
+
+**A1・B1 2方向シナリオ（batch_size=1、clearance_timesteps=1）：**
+
+| 項目 | 値 |
+|------|-----|
+| A1・B1のNode初回到着timestep | 10 |
+| A1の形成・実通過timestep | 11 |
+| B1のLevel 0 t_trigger | 11 |
+| A1通過後のclearance下限 | 13 |
+| B1のLevel 1 t_trigger | 13 |
+
+#### N=1 BATCHとclearance付きFCFSの完全一致（確認済み）
+
+- BATCH：`batch_size=1`、`order_control_batch_t_trigger_level=1`
+- FCFS：`order_control_type="fcfs"`
+- 共通：同一ネットワーク・OD（A1/B1/A2/B2/A3/B3、departure 0/20/40）・seed・clearance=1・容量・経路
+- Vehicle単位（全6台）：Node初回到着時刻、outlink初回進入timestep、進入順序、通過inlink順序、trip終了timestep — **完全一致**
+- 全6台のoutlink進入・trip終了記録の存在、全6台のtrip完了を明示確認（偽陽性防止）
+- Node状態履歴（Link名で比較）、方向切替回数、clearance待機（少なくとも1回）— **一致**
+- 集計値：completed trips、total/average travel time — **一致**
+- total distanceはN=1比較から除外（誤った `travel_time * 20` 推定は使用しない）
+- **最初の不一致なし**
+
+#### 追加テスト
+
+- `tests_order_control_batch_node_transfer_integration.py`（テスト関数13件、`TESTS` 登録13件）
+- 結果：`Order-control batch Node.transfer integration tests passed.`
+
+テスト範囲：BATCH/FCFS/標準UXsim分岐、実シミュレーション時系列、容量不足による再登録、clearance未充足Vehicleの再登録とclearance充足後の通過、未batch Vehicle引継ぎ（3分類）、3方向同時到着、Level 0/Level 1 t_trigger、N=1 BATCH・FCFS完全一致。
+
+#### 回帰確認（Phase 4-6M実装後）
+
+新規Phase 4-6Mテスト1本（13テスト関数）、指定既存回帰テスト21ファイル、example 1本がすべて exit code 0。N=1比較テストのレビュー修正後も、新規テスト・主要回帰テスト・baseline・exampleを再実行し成功。主要交通結果は従来の既知値と一致（確認対象の主要指標に回帰は検出されなかった）。
+
+`tests_order_exchange_baseline.py`：completed trips 48/48、average speed 16.5 m/s、total travel time 2928.0 s、average travel time 61.0 s、average delay 1.0 s、delay ratio 0.017、total distance traveled 48000.0 m
+
+`demos_and_examples/example_00en_simple.py`：completed trips 735/810、average speed 11.7 m/s、total travel time 119475.0 s、average travel time 162.6 s、average delay 62.6 s、delay ratio 0.385、total distance traveled 1632250.0 m
+
+#### コミット状況
+
+- Phase 4-6Mの実装・テストは完了しているが、**本Markdown更新時点ではコードは未commit**
+- 最新commit：`e9f3ce9`（Phase 4-6L）
+- working tree：`uxsim/uxsim.py` 変更（4-6M BATCH分岐4行含む）、`tests_order_control_batch_node_transfer_integration.py` 未追跡、本正式Markdown 2ファイル変更
+
+詳細設計・判断経緯は ORDER_EXCHANGE_PHASE4-6_BATCH_PROCESSING_DESIGN_NOTES.md **§1F** を参照。
 
 ### フェーズ4-6設計議論：目的地Vehicle・比較対象Node・batch順序（設計確定、未実装）
 
@@ -2759,7 +2847,7 @@ Nodeへの追加メソッド（Phase 4-6関連）：
 - `estimate_order_control_batch_t_trigger_level_0(trigger_vehicle)`（参照専用）
 - `estimate_order_control_batch_t_trigger_level_1(trigger_vehicle)`（参照専用）
 - 内部ヘルパー：`_validate_order_control_batch_t_trigger_inputs()`、`_compute_order_control_batch_base_trigger_timestep()`
-- `Node.transfer()` のbatch分岐はまだ未実装
+- `Node.transfer()` のbatch分岐は **Phase 4-6Mで実装済み**（§1F）
 
 ### Worldへの追加属性
 
@@ -2877,9 +2965,10 @@ Nodeへの追加メソッド（Phase 4-6関連）：
 ### BATCH Processing設計・実装方針（ORDER_EXCHANGE_PHASE4-6_BATCH_PROCESSING_DESIGN_NOTES.md 参照）
 
 - phase 4-6A〜4-6Jまで、BATCH準備データ・状態コンテナ・trigger候補識別・t_trigger推定（Level 0/1）・全inlink候補抽出・処理順決定・方向別N適用・正式登録・統合メソッド・Node群設定を実装済み
-- **phase 4-6K：** `serve_order_control_batch_service_queue()` により、登録済みservice queueに基づくVehicle実通過を実装済み（commit `12e8eae`、単体、`Node.transfer()`未接続）。新規Phase 4-6Kテスト1本（33テスト関数）
-- **phase 4-6L：** `transfer_batch()` により、BATCH形成と実通過を各1回呼ぶ統括メソッドを実装済み（単体、**未commit**、`Node.transfer()`未接続）。新規Phase 4-6Lテスト1本（17テスト関数）・指定既存回帰テスト・exampleがすべて成功
-- `Node.transfer()` batch分岐、接続後の実シミュレーション時系列テスト、N=1 BATCHとFCFSのシミュレーション全体での完全同一性、Level 2、trip-end Vehicle対応、Time-value Transactionは未実装
+- **phase 4-6K：** `serve_order_control_batch_service_queue()` により、登録済みservice queueに基づくVehicle実通過を実装済み（commit `12e8eae`、単体）。新規Phase 4-6Kテスト1本（33テスト関数）
+- **phase 4-6L：** `transfer_batch()` により、BATCH形成と実通過を各1回呼ぶ統括メソッドを実装済み（commit `e9f3ce9`）。新規Phase 4-6Lテスト1本（17テスト関数）
+- **phase 4-6M：** `Node.transfer()` へのBATCH分岐接続、実シミュレーション時系列、Vehicle引継ぎ、N=1 BATCHとclearance付きFCFSの完全一致を実装・テスト済み（**未commit**）。新規Phase 4-6Mテスト1本（13テスト関数）
+- Level 2、trip-end Vehicle対応、Time-value Transactionは未実装
 - `earliest_arrival_timestep` はリンク進入時に記録し、候補包含条件に使用する（実装済み）
 - `t_trigger` Level 0/1推定は参照専用ヘルパーとして実装済み。計算式に `W.T` は含めない
 - Level 2は研究上の通常推定方式として将来使用予定。現時点では未実装（設定・形成とも専用ValueError）
@@ -2887,8 +2976,8 @@ Nodeへの追加メソッド（Phase 4-6関連）：
 - 研究基本設定：`batch_size=10`、`order_control_batch_t_trigger_level=1` を `set_order_control_for_nodes()` で明示指定。`batch_size` 既定値は1
 - 当面の研究シナリオでは、比較対象内部交差点Nodeを目的地としない端点間ODを使用する
 - 比較対象Node共通管理・目的地自動検証は将来課題として保留
-- 次フェーズ候補：**`Node.transfer()` へのBATCH分岐接続**（`transfer_batch()` 呼出し）→ 接続後回帰 → N=1 BATCHとFCFS完全同一性テスト
-- 詳細設計・判断経緯は ORDER_EXCHANGE_PHASE4-6_BATCH_PROCESSING_DESIGN_NOTES.md **§1C**（形成・登録）、**§1D**（実通過）、**§1E**（統括）を参照
+- 次工程候補：Level 2仮想サービス推定の設計 → 複数ネットワーク条件でのBATCH動作確認 → 感度分析設計 → Time-value Transaction接続設計
+- 詳細設計・判断経緯は ORDER_EXCHANGE_PHASE4-6_BATCH_PROCESSING_DESIGN_NOTES.md **§1C**（形成・登録）、**§1D**（実通過）、**§1E**（統括）、**§1F**（`Node.transfer()` 接続）を参照
 
 ### テスト追加方針
 
@@ -2917,24 +3006,25 @@ Nodeへの追加メソッド（Phase 4-6関連）：
 - phase 4-6H（8cf6dec）：batch ID・assignment・service unit正式登録を実装済み。
 - phase 4-6I（d10a6db）：BATCH形成統合メソッドを実装済み。
 - phase 4-6J（1ae9204）：`order_control_batch_t_trigger_level` を既存の `batch_size` 一括設定機構と併せてNode群へ設定可能にした（push済み）。
-- phase 4-6K（12e8eae）：`serve_order_control_batch_service_queue()` により登録済みservice queueのVehicle実通過を実装・commit済み。`Node.transfer()` へは未接続。
-- phase 4-6L（未commit）：`transfer_batch()` によりBATCH形成と実通過を各1回呼ぶ統括メソッドを実装。新規Phase 4-6Lテスト1本（テスト関数17件）、指定既存回帰テスト、exampleがすべて成功。baseline/example既知値一致を確認済み。`Node.transfer()` へは未接続。
-- Phase 4-6A〜4-6L実装後の指定テストはすべてPASS。baseline・exampleの主要交通結果は既知値と一致し、確認対象の主要指標に回帰は検出されなかった。
-- **最新commit：** `12e8eae` phase 4-6K: implement vehicle transfer based on the batch service queue
-- **作業中（未commit）：** `uxsim/uxsim.py`（4-6L含む）、`tests_order_control_batch_transfer.py` 未追跡、本 progress memo および設計メモ更新
+- phase 4-6K（12e8eae）：`serve_order_control_batch_service_queue()` により登録済みservice queueのVehicle実通過を実装・commit済み。
+- phase 4-6L（e9f3ce9）：`transfer_batch()` によりBATCH形成と実通過を各1回呼ぶ統括メソッドを実装・commit済み。新規Phase 4-6Lテスト1本（17テスト関数）、指定既存回帰テスト、exampleがすべて成功。
+- phase 4-6M（未commit）：`Node.transfer()` へBATCH分岐4行を追加。実シミュレーション時系列、Vehicle再登録・未batch引継ぎ、3方向同時到着、Level 0/Level 1 t_trigger、N=1 BATCH・FCFS完全一致を確認。新規Phase 4-6Mテスト1本（13テスト関数）、指定既存回帰テスト、exampleがすべて成功。baseline/example既知値一致を確認済み。
+- Phase 4-6A〜4-6M実装後の指定テストはすべてPASS。baseline・exampleの主要交通結果は既知値と一致し、確認対象の主要指標に回帰は検出されなかった。
+- **最新commit：** `e9f3ce9` phase 4-6L: orchestrate batch formation and vehicle transfer
+- **作業中（未commit）：** `uxsim/uxsim.py`（4-6M BATCH分岐4行含む）、`tests_order_control_batch_node_transfer_integration.py` 未追跡、本 progress memo および設計メモ更新
 
-次に進む候補（優先）：
+次に進む候補（優先順は未確定）：
 
-- **`Node.transfer()` へのBATCH分岐接続**（`order_control_eligible` かつ `order_control_type == "batch"` で `transfer_batch()` を1 timestepに1回呼び、return）。
-- 接続後の全回帰テスト。
-- **N=1 BATCHとFCFSの完全同一性テスト**（`Node.transfer()` 接続後。単体判断順は4-6Kで確認済み）。
+- **Level 2仮想サービス推定の設計**
+- **複数ネットワーク・複数OD・右左折あり条件でのBATCH動作確認**
+- **Nとt_trigger levelの感度分析設計**
+- **trip-end Vehicle対応の必要性再検討**
+- **Time-value Transactionへの接続設計**
 
-確定設計・実装記録は ORDER_EXCHANGE_PHASE4-6_BATCH_PROCESSING_DESIGN_NOTES.md **§1E.13** を参照。
+確定設計・実装記録は ORDER_EXCHANGE_PHASE4-6_BATCH_PROCESSING_DESIGN_NOTES.md **§1F.15** を参照。
 
 その後の後続フェーズ候補：
 
-- `Node.transfer()` へのbatch分岐接続後の回帰テスト
-- N=1 BATCHとFCFSの同等性テスト（シミュレーション全体）
 - Level 2仮想サービス計算
 - Time-value Transaction接続
 - trip-end VehicleのBATCH service unit対応
@@ -2983,13 +3073,14 @@ Nodeへの追加メソッド（Phase 4-6関連）：
 - feature/intersection-order-control ブランチは origin/feature/intersection-order-control とtracking済みで、GitHubへpush済みです
 - 現在の通常fcfs経路は `transfer_fcfs_clearance()` を呼ぶ
 - `transfer_fcfs_no_clearance()` は回帰確認・デバッグ用に残っている
-- Phase 4-6A〜4-6Kまで完了（実装・テスト・commit済み、最新コードコミット `12e8eae`）
-- Phase 4-6Lまで完了（`transfer_batch()` 実装・17テスト・回帰確認済み。**コードは未commit**）
-- BATCH形成・service unit登録・service queue実通過・統括呼出しは実装済み。`Node.transfer()` batch分岐は未実装
-- 最新commit：`12e8eae` phase 4-6K: implement vehicle transfer based on the batch service queue
-- working tree：`uxsim/uxsim.py` 変更（4-6L含む）、`tests_order_control_batch_transfer.py` 未追跡
-- 次は **`Node.transfer()` へのBATCH分岐接続**（§1E.13）
-- ORDER_EXCHANGE_PHASE4-6_BATCH_PROCESSING_DESIGN_NOTES.md の **§1E**（4-6L統括）を優先参照。実通過は **§1D**、形成・登録は **§1C**
+- Phase 4-6A〜4-6Lまで完了（実装・テスト・commit済み、最新コードコミット `e9f3ce9`）
+- Phase 4-6Mまで完了（`Node.transfer()` BATCH分岐・13テスト・回帰確認済み。**コードは未commit**）
+- BATCH形成・service unit登録・service queue実通過・統括呼出し・`Node.transfer()` 接続は実装済み
+- 最新commit：`e9f3ce9` phase 4-6L: orchestrate batch formation and vehicle transfer
+- working tree：`uxsim/uxsim.py` 変更（4-6M BATCH分岐4行含む）、`tests_order_control_batch_node_transfer_integration.py` 未追跡
+- 次工程候補は Level 2仮想サービス推定、Level 2 unresolved時のLevel 1 fallback、複数ネットワーク・複数OD・右左折あり条件でのBATCH動作確認、Nとt_trigger levelの感度分析設計、trip-end Vehicle対応の必要性再検討、Time-value Transaction接続設計（優先順未確定。**§1F.15**）
+- ORDER_EXCHANGE_PHASE4-6_BATCH_PROCESSING_DESIGN_NOTES.md の **§1F** を優先参照。統括は **§1E**、実通過は **§1D**、形成・登録は **§1C**
+- tests_order_control_batch_node_transfer_integration.py を読んでください
 - 目的地Vehicleの扱いは端点間OD前提で保留。比較対象Node共通管理・目的地自動検証は将来課題
 - 一時退避PDF `phase4-6A_batch_earliest_arrival_timestep_memo.pdf` はリポジトリ外。正式Markdownを優先参照
 - ORDER_EXCHANGE_PHASE4_DESIGN_NOTES.md、ORDER_EXCHANGE_RESEARCH_CONTEXT.md、ORDER_EXCHANGE_FCFS_TRANSFER_DESIGN_NOTES.md も必要に応じて参照してください

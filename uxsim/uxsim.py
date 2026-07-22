@@ -1713,6 +1713,10 @@ class Node:
             s.transfer_fcfs_clearance()
             return
 
+        if s.order_control_eligible and s.order_control_type == "batch":
+            s.transfer_batch()
+            return
+
         outlinks = []
         outlink_candidates = {veh.route_next_link:0 for veh in s.incoming_vehicles if veh.route_next_link != None}
         for outlink in outlink_candidates.keys():
