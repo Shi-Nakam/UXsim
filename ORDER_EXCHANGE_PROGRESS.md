@@ -2668,11 +2668,94 @@ if s.order_control_eligible and s.order_control_type == "batch":
 
 #### コミット状況
 
-- Phase 4-6Mの実装・テストは完了しているが、**本Markdown更新時点ではコードは未commit**
-- 最新commit：`e9f3ce9`（Phase 4-6L）
-- working tree：`uxsim/uxsim.py` 変更（4-6M BATCH分岐4行含む）、`tests_order_control_batch_node_transfer_integration.py` 未追跡、本正式Markdown 2ファイル変更
+- Phase 4-6Mの実装・テストは commit `b03538c` 済み
+- Phase 4-6Nのroute_next_link参照順修正は commit `05fa2d1` 済み
+- Phase 4-6Nのclearance=0比較テスト3本は commit `f339b88` 済み
+- **最新commit：** `f339b88`（Phase 4-6N clearance=0比較テスト）
+- 診断スクリプト4本・本正式Markdown 2ファイル：**未commit**
 
-詳細設計・判断経緯は ORDER_EXCHANGE_PHASE4-6_BATCH_PROCESSING_DESIGN_NOTES.md **§1F** を参照。
+詳細設計・判断経緯は ORDER_EXCHANGE_PHASE4-6_BATCH_PROCESSING_DESIGN_NOTES.md **§1F** を参照。Phase 4-6Nの比較・診断は **§1G** を参照。
+
+### フェーズ4-6N：比較テストとNode再訪状態の診断
+
+#### commit済み作業
+
+**commit `05fa2d1` — route_next_link参照順修正**
+
+- `serve_order_control_batch_service_queue()` で、service unit FIFO先頭Vehicleについて `incoming_vehicles` 確認を `route_next_link` 参照より先に行うよう修正。
+- 未到着Vehicleは `route_next_link` 属性をまだ持たない場合がある（正常状態）。AttributeErrorにしない。
+- 到着済みで `route_next_link=None` は既存どおり `ValueError`。
+- 回帰テスト `test_not_arrived_without_route_next_link_attribute` を追加。
+
+**commit `f339b88` — clearance=0比較テスト3本**
+
+- `tests_order_control_batch_vs_fcfs_vs_uxsim_standard_medium_network.py`
+- `tests_order_control_batch_vs_fcfs_vs_uxsim_standard_grid_network.py`
+- `tests_order_control_batch_vs_fcfs_vs_signalized_uxsim_standard_grid_network.py`
+- 共通：BATCH Level 1（暫定）、N=10、clearance=0。Node再訪状態修正**前**の基準値。
+
+#### Medium network比較結果（commit済みテスト）
+
+- 500 Vehicle、corridor、eligible 10、同一seed。
+- UXsim / FCFS / BATCH いずれも completed 383/500。
+- BATCH/FCFS average travel time ratio **1.0003**（BATCHがごくわずかに長い）。
+
+#### Unsignalized grid比較結果（commit済みテスト）
+
+- 1000 Vehicle、6×6 grid、eligible 36。
+- 全方式 completed 1000/1000。
+- BATCH/FCFS average travel time ratio **1.0006**（+0.1 s/veh）。
+
+#### Signalized grid比較結果（commit済みテスト）
+
+- 1000 Vehicle、signal `[60,60]`、FCFS/BATCHはunsignalized gridと同一結果。
+- FCFS/signalized ratio ≈ **0.500**、BATCH/FCFS ratio **1.0006**。
+
+#### 未commit診断：clearance=1 high-demand
+
+- ファイル：`tests_order_control_batch_clearance_one_vs_fcfs_vs_signalized_uxsim_all_red_grid_high_demand.py`
+- signalized all-red：`signal=[60, 1, 60, 1]`（phase 0=東西方向が青、phase 1=全赤、phase 2=南北方向が青、phase 3=全赤）、staggered offset
+- 5,000台BATCHで prefix violation（`g_5_4`、`h_5_3_4`、`veh_1952`）。10,000台BATCH未実行。
+- signalized all-red vs FCFSは再現：5000台 ratio ≈ 1.386、10000台 ≈ 1.142。
+
+#### 未commit診断：clearance=0 high-demand再現
+
+- ファイル：`tests_order_control_batch_clearance_zero_vs_fcfs_vs_signalized_uxsim_grid_high_demand_5000.py`
+- W.T=605で prefix violation（`g_4_1`、`v_5_4_1`、`veh_1619`）。
+- **clearance=0でも再現。** clearance=1 queue滞留は必要条件ではない。
+
+#### 未commit診断：batch ID 318 lifecycle
+
+- ファイル：`tests_order_control_batch_assignment_318_lifecycle_diagnostic.py`
+- W.T=583：veh_1619がg_4_1を通過、service unit 318は**正常削除**、assignment 318のみ残存。
+- W.T=604–605：別inlinkから再接近、prefix violation。
+- **service unit誤削除ではない。**
+
+#### 未commit診断：Node再訪
+
+- ファイル：`tests_order_control_node_revisit_diagnostic_high_demand_5000.py`
+- T≤605再接近：signalized 17 / 4207（約0.40%）、FCFS 10 / 4442（約0.23%）、BATCH 12 / 4412（約0.27%）。分母は各方式でT≤605までに1回以上Nodeへ接近したVehicle数（全5,000台ではない）
+- 全期間：signalized **42.7%**、FCFS **23.0%** が再訪（BATCHはT=605で停止のため全期間未取得）。
+- **Node再訪はBATCH固有ではない。**
+- BATCH固有問題は過去assignmentの現在訪問への漏出。
+- FCFSも過去到着状態の再利用可能性を検討する必要あり。
+
+#### 根本原因（設計メモ §1G.12）
+
+- `order_control_node_arrival_times`、`order_control_earliest_arrival_timesteps`、`order_control_batch_assignments` 等がNode名keyのみ。
+- 訪問単位を区別できず、再訪時に過去状態が現状態として解釈される。
+- assignment削除だけでは不十分。Node訪問単位の状態設計が必要（`visit_id` は設計候補）。
+
+#### 未完了のhigh-demand BATCH性能比較
+
+- 5,000台・10,000台のBATCH clearance=0/1比較は prefix violationで未完了または未実行。性能結果は取得済みと記載しない。
+
+#### コミット状況
+
+- Phase 4-6Nの実装・比較テスト：`05fa2d1`、`f339b88` commit済み。
+- 診断スクリプト4本：**未commit**（後続で通常テストと分離保存予定）。
+
+詳細は ORDER_EXCHANGE_PHASE4-6_BATCH_PROCESSING_DESIGN_NOTES.md **§1G** を参照。
 
 ### フェーズ4-6設計議論：目的地Vehicle・比較対象Node・batch順序（設計確定、未実装）
 
@@ -2967,17 +3050,21 @@ Nodeへの追加メソッド（Phase 4-6関連）：
 - phase 4-6A〜4-6Jまで、BATCH準備データ・状態コンテナ・trigger候補識別・t_trigger推定（Level 0/1）・全inlink候補抽出・処理順決定・方向別N適用・正式登録・統合メソッド・Node群設定を実装済み
 - **phase 4-6K：** `serve_order_control_batch_service_queue()` により、登録済みservice queueに基づくVehicle実通過を実装済み（commit `12e8eae`、単体）。新規Phase 4-6Kテスト1本（33テスト関数）
 - **phase 4-6L：** `transfer_batch()` により、BATCH形成と実通過を各1回呼ぶ統括メソッドを実装済み（commit `e9f3ce9`）。新規Phase 4-6Lテスト1本（17テスト関数）
-- **phase 4-6M：** `Node.transfer()` へのBATCH分岐接続、実シミュレーション時系列、Vehicle引継ぎ、N=1 BATCHとclearance付きFCFSの完全一致を実装・テスト済み（**未commit**）。新規Phase 4-6Mテスト1本（13テスト関数）
+- **phase 4-6M：** `Node.transfer()` へのBATCH分岐接続、実シミュレーション時系列、Vehicle引継ぎ、N=1 BATCHとclearance付きFCFSの完全一致を実装・テスト済み（commit `b03538c`）。新規Phase 4-6Mテスト1本（13テスト関数）
+- **phase 4-6N：** route_next_link参照順修正（`05fa2d1`）、clearance=0比較テスト3本（`f339b88`）。high-demand prefix violation診断・Node再訪診断は**未commit**
+- **現時点の主要課題：** Node再訪を区別しないorder-control状態管理（設計メモ **§1G**）
 - Level 2、trip-end Vehicle対応、Time-value Transactionは未実装
 - `earliest_arrival_timestep` はリンク進入時に記録し、候補包含条件に使用する（実装済み）
 - `t_trigger` Level 0/1推定は参照専用ヘルパーとして実装済み。計算式に `W.T` は含めない
 - Level 2は研究上の通常推定方式として将来使用予定。現時点では未実装（設定・形成とも専用ValueError）
 - snapshot estimated arrivalによるinlink別batch間順序決定は phase 4-6F で実装済み
-- 研究基本設定：`batch_size=10`、`order_control_batch_t_trigger_level=1` を `set_order_control_for_nodes()` で明示指定。`batch_size` 既定値は1
+- **batch_sizeの基本値：** 10（`set_order_control_for_nodes()` で明示指定。Node既定値は1）
+- **t_trigger推定の研究基本設計：** 通常方式はLevel 2。Level 2でunresolvedの場合はLevel 1へfallback。必要に応じてLevel 0へfallback。Level 2は未実装
+- **現時点の暫定比較設定：** `order_control_batch_t_trigger_level=1`（Level 2実装前。clearance=0比較テスト3本などで使用）
 - 当面の研究シナリオでは、比較対象内部交差点Nodeを目的地としない端点間ODを使用する
 - 比較対象Node共通管理・目的地自動検証は将来課題として保留
-- 次工程候補：Level 2仮想サービス推定の設計 → 複数ネットワーク条件でのBATCH動作確認 → 感度分析設計 → Time-value Transaction接続設計
-- 詳細設計・判断経緯は ORDER_EXCHANGE_PHASE4-6_BATCH_PROCESSING_DESIGN_NOTES.md **§1C**（形成・登録）、**§1D**（実通過）、**§1E**（統括）、**§1F**（`Node.transfer()` 接続）を参照
+- 次工程（§1G.15）：診断スクリプト分離 → Node訪問単位の状態設計 → 設計レビュー → FCFS・BATCHの訪問対応 → 小規模再訪テスト → high-demand再実行
+- 詳細設計・判断経緯は ORDER_EXCHANGE_PHASE4-6_BATCH_PROCESSING_DESIGN_NOTES.md **§1C**（形成・登録）、**§1D**（実通過）、**§1E**（統括）、**§1F**（`Node.transfer()` 接続）、**§1G**（比較・診断）を参照
 
 ### テスト追加方針
 
@@ -2995,45 +3082,36 @@ Nodeへの追加メソッド（Phase 4-6関連）：
 
 - phase 4-5では、クリアランスありFCFSの実装・接続・基本検証・X/Y/Z問題検証まで完了済み。
 - Step 4A〜4Eとして、FCFS sanity check比較を追加済み。
-- phase 4-6設計メモ（bb23372）を追加済み。
-- phase 4-6A（94b05f2）：`earliest_arrival_timestep` 記録を実装済み。
-- phase 4-6B（28ed156）：BATCH状態コンテナを実装済み。
-- phase 4-6C（40d5ad7）：BATCH trigger候補識別ヘルパーを実装済み。
-- phase 4-6D（d79db61）：t_trigger Level 0/1推定ヘルパーを実装済み。
-- phase 4-6E（4cdc16f）：inlink別BATCH候補Vehicle抽出を実装済み。
-- phase 4-6F（d00cb85）：trigger inlink優先と候補群順序付けを実装済み。
-- phase 4-6G（c7a80e8）：方向別最大batchサイズ適用を実装済み。
-- phase 4-6H（8cf6dec）：batch ID・assignment・service unit正式登録を実装済み。
-- phase 4-6I（d10a6db）：BATCH形成統合メソッドを実装済み。
-- phase 4-6J（1ae9204）：`order_control_batch_t_trigger_level` を既存の `batch_size` 一括設定機構と併せてNode群へ設定可能にした（push済み）。
-- phase 4-6K（12e8eae）：`serve_order_control_batch_service_queue()` により登録済みservice queueのVehicle実通過を実装・commit済み。
-- phase 4-6L（e9f3ce9）：`transfer_batch()` によりBATCH形成と実通過を各1回呼ぶ統括メソッドを実装・commit済み。新規Phase 4-6Lテスト1本（17テスト関数）、指定既存回帰テスト、exampleがすべて成功。
-- phase 4-6M（未commit）：`Node.transfer()` へBATCH分岐4行を追加。実シミュレーション時系列、Vehicle再登録・未batch引継ぎ、3方向同時到着、Level 0/Level 1 t_trigger、N=1 BATCH・FCFS完全一致を確認。新規Phase 4-6Mテスト1本（13テスト関数）、指定既存回帰テスト、exampleがすべて成功。baseline/example既知値一致を確認済み。
-- Phase 4-6A〜4-6M実装後の指定テストはすべてPASS。baseline・exampleの主要交通結果は既知値と一致し、確認対象の主要指標に回帰は検出されなかった。
-- **最新commit：** `e9f3ce9` phase 4-6L: orchestrate batch formation and vehicle transfer
-- **作業中（未commit）：** `uxsim/uxsim.py`（4-6M BATCH分岐4行含む）、`tests_order_control_batch_node_transfer_integration.py` 未追跡、本 progress memo および設計メモ更新
+- phase 4-6A〜4-6M：BATCH形成〜`Node.transfer()` 接続まで実装・commit済み（4-6Mは `b03538c`）。
+- **phase 4-6N（commit済み）：**
+  - `05fa2d1`：route_next_link参照順修正、回帰テスト `test_not_arrived_without_route_next_link_attribute`
+  - `f339b88`：clearance=0比較テスト3本（medium・unsignalized grid・signalized grid）。Node再訪状態修正**前**の基準値
+- **phase 4-6N（診断・未commit）：** batch ID 318 lifecycle、clearance=0/1 high-demand再現、Node再訪診断
+- **phase 4-6N（正式記録）：** 比較結果・診断結果を正式Markdown 2ファイルへ記録済み（本更新。未commit）
+- clearance=0ではBATCHとFCFSはほぼ同等（medium ratio 1.0003、grid ratio 1.0006）。BATCHがごくわずかに長い
+- high-demand BATCH比較（5,000台・10,000台、clearance=0/1）はprefix violationで未完了または未実行
+- **現時点の主要課題：** Node再訪を区別しないorder-control状態管理
+- **最新commit：** `f339b88` phase 4-6N: add clearance-zero BATCH comparison tests before node-revisit state fix
 
-次に進む候補（優先順は未確定）：
+次工程（合意した作業順。設計メモ **§1G.15**）：
 
-- **Level 2仮想サービス推定の設計**
-- **複数ネットワーク・複数OD・右左折あり条件でのBATCH動作確認**
-- **Nとt_trigger levelの感度分析設計**
-- **trip-end Vehicle対応の必要性再検討**
-- **Time-value Transactionへの接続設計**
-
-確定設計・実装記録は ORDER_EXCHANGE_PHASE4-6_BATCH_PROCESSING_DESIGN_NOTES.md **§1F.15** を参照。
+1. route_next_link確認順修正を独立commit — **完了**（`05fa2d1`）
+2. 成功済みclearance=0比較3本を独立commit — **完了**（`f339b88`）
+3. 比較結果とNode再訪診断結果を正式Markdownへ記録 — **完了**（本更新。未commit）
+4. 診断スクリプトを通常テストと分離して保存
+5. Node訪問単位の状態設計を作成
+6. 設計レビュー
+7. FCFS・BATCHの順で訪問対応を実装
+8. 小規模再訪テスト
+9. 5,000台clearance=0を再実行
+10. 5,000台・10,000台clearance=1を再実行
 
 その後の後続フェーズ候補：
 
-- Level 2仮想サービス計算
+- Level 2仮想サービス計算・Level 2 unresolved時のLevel 1 fallback
 - Time-value Transaction接続
 - trip-end VehicleのBATCH service unit対応
-
-その他の候補（phase 4-5後続）：
-
-- Step 4D/4Eの結果を踏まえた簡易分析メモの作成。
-- clearance_timesteps=0/1比較の整理。
-- 信号設定・需要密度・ネットワークサイズの体系化比較。
+- Nとt_trigger levelの感度分析設計
 
 将来課題（設計確定・未実装）：
 
@@ -3047,7 +3125,7 @@ Nodeへの追加メソッド（Phase 4-6関連）：
 新しいチャットでは、以下を伝える。
 
 - ORDER_EXCHANGE_PROGRESS.md を読んでください
-- ORDER_EXCHANGE_PHASE4-6_BATCH_PROCESSING_DESIGN_NOTES.md を読んでください
+- ORDER_EXCHANGE_PHASE4-6_BATCH_PROCESSING_DESIGN_NOTES.md を読んでください（**§1G** を優先参照）
 - ORDER_EXCHANGE_PHASE4-5_CLEARANCE_FCFS_DESIGN_NOTES.md を読んでください
 - tests_order_control_batch_earliest_arrival_timestep.py を読んでください
 - tests_order_control_batch_state_containers.py を読んでください
@@ -3061,6 +3139,10 @@ Nodeへの追加メソッド（Phase 4-6関連）：
 - tests_order_control_batch_node_settings.py を読んでください
 - tests_order_control_batch_service_queue_transfer.py を読んでください
 - tests_order_control_batch_transfer.py を読んでください
+- tests_order_control_batch_node_transfer_integration.py を読んでください
+- tests_order_control_batch_vs_fcfs_vs_uxsim_standard_medium_network.py を読んでください
+- tests_order_control_batch_vs_fcfs_vs_uxsim_standard_grid_network.py を読んでください
+- tests_order_control_batch_vs_fcfs_vs_signalized_uxsim_standard_grid_network.py を読んでください
 - tests_fcfs_order_control_clearance_0.py を読んでください
 - tests_fcfs_order_control_clearance_1.py を読んでください
 - tests_fcfs_order_control_clearance_xyz.py を読んでください
@@ -3073,14 +3155,17 @@ Nodeへの追加メソッド（Phase 4-6関連）：
 - feature/intersection-order-control ブランチは origin/feature/intersection-order-control とtracking済みで、GitHubへpush済みです
 - 現在の通常fcfs経路は `transfer_fcfs_clearance()` を呼ぶ
 - `transfer_fcfs_no_clearance()` は回帰確認・デバッグ用に残っている
-- Phase 4-6A〜4-6Lまで完了（実装・テスト・commit済み、最新コードコミット `e9f3ce9`）
-- Phase 4-6Mまで完了（`Node.transfer()` BATCH分岐・13テスト・回帰確認済み。**コードは未commit**）
-- BATCH形成・service unit登録・service queue実通過・統括呼出し・`Node.transfer()` 接続は実装済み
-- 最新commit：`e9f3ce9` phase 4-6L: orchestrate batch formation and vehicle transfer
-- working tree：`uxsim/uxsim.py` 変更（4-6M BATCH分岐4行含む）、`tests_order_control_batch_node_transfer_integration.py` 未追跡
-- 次工程候補は Level 2仮想サービス推定、Level 2 unresolved時のLevel 1 fallback、複数ネットワーク・複数OD・右左折あり条件でのBATCH動作確認、Nとt_trigger levelの感度分析設計、trip-end Vehicle対応の必要性再検討、Time-value Transaction接続設計（優先順未確定。**§1F.15**）
-- ORDER_EXCHANGE_PHASE4-6_BATCH_PROCESSING_DESIGN_NOTES.md の **§1F** を優先参照。統括は **§1E**、実通過は **§1D**、形成・登録は **§1C**
-- tests_order_control_batch_node_transfer_integration.py を読んでください
+- Phase 4-6A〜4-6Mまで完了（実装・テスト・commit済み。4-6Mは `b03538c`）
+- Phase 4-6N（commit済み）：route_next_link参照順修正（`05fa2d1`）、clearance=0比較テスト3本（`f339b88`）
+- Phase 4-6N（診断・未commit）：`tests_order_control_batch_assignment_318_lifecycle_diagnostic.py`、`tests_order_control_batch_clearance_zero_vs_fcfs_vs_signalized_uxsim_grid_high_demand_5000.py`、`tests_order_control_batch_clearance_one_vs_fcfs_vs_signalized_uxsim_all_red_grid_high_demand.py`、`tests_order_control_node_revisit_diagnostic_high_demand_5000.py`
+- **最新commit：** `f339b88` phase 4-6N: add clearance-zero BATCH comparison tests before node-revisit state fix
+- **直前commit：** `05fa2d1` phase 4-6N: defer route_next_link lookup until batch vehicle arrival
+- **現時点の主要課題：** Node再訪を区別しないorder-control状態管理。BATCH prefix violationは過去assignment残存とNode再訪の組合せ。service unit誤削除ではない
+- Node再訪はBATCH固有ではない（signalized全期間42.7%、FCFS 23.0%）。FCFSも過去到着状態の再利用可能性を検討する必要あり
+- high-demand BATCH性能比較（5,000台・10,000台）は未完了。性能結果は取得済みと記載しない
+- 次工程（§1G.15）：診断スクリプト分離 → Node訪問単位の状態設計 → 設計レビュー → FCFS・BATCHの訪問対応 → 小規模再訪テスト → high-demand再実行
+- ORDER_EXCHANGE_PHASE4-6_BATCH_PROCESSING_DESIGN_NOTES.md の **§1G** を優先参照。`Node.transfer()` 接続は **§1F**、統括は **§1E**、実通過は **§1D**、形成・登録は **§1C**
+- 次に読む実装：`Vehicle.record_order_control_node_first_arrival()`、earliest arrival記録処理、`Vehicle.update()`、`Vehicle.route_next_link_choice()`、`Node.transfer_fcfs_clearance()`、`Node.form_order_control_batch()`、`Node.get_order_control_batch_candidates_by_inlink()`、`Node.serve_order_control_batch_service_queue()`
 - 目的地Vehicleの扱いは端点間OD前提で保留。比較対象Node共通管理・目的地自動検証は将来課題
 - 一時退避PDF `phase4-6A_batch_earliest_arrival_timestep_memo.pdf` はリポジトリ外。正式Markdownを優先参照
 - ORDER_EXCHANGE_PHASE4_DESIGN_NOTES.md、ORDER_EXCHANGE_RESEARCH_CONTEXT.md、ORDER_EXCHANGE_FCFS_TRANSFER_DESIGN_NOTES.md も必要に応じて参照してください
