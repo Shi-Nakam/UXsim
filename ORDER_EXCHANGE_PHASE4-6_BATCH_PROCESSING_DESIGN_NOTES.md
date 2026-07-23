@@ -27,7 +27,8 @@ UXsim Order Exchange 改変作業における、phase 4-6：交差点BATCH処理
 | | phase 4-6M：`Node.transfer()` へのBATCH分岐接続（b03538c） |
 | | phase 4-6N：`serve_order_control_batch_service_queue()` のroute_next_link参照順修正（05fa2d1） |
 | | phase 4-6N：clearance=0比較テスト3本（f339b88） |
-| **診断のみ（未commit）** | phase 4-6N：batch ID 318 lifecycle診断、clearance=0/1 high-demand再現診断、Node再訪診断（通常回帰テストとしては未保存） |
+| | phase 4-6N：比較・Node再訪診断の正式記録（c06936c） |
+| **診断スクリプト（通常回帰テストから分離済み・未commit）** | `diagnostics/order_control/` に4本＋README。`tests_` 接頭辞なし。自動テスト探索対象に含めない。既知のprefix violationは意図的再現（非zero終了は診断結果）。詳細は `diagnostics/order_control/README.md` |
 | **BATCH形成〜シミュレーション接続まで完成** | trigger候補取得 → … → service queue登録（4-6I）→ 実通過（4-6K）→ 統括呼出し（4-6L）→ **`Node.transfer()` 接続（4-6M）** |
 | **現時点の主要課題** | Node再訪を区別しないorder-control状態管理（**§1G**） |
 | **未実装** | Level 2仮想サービス推定、Level 2 unresolved時のLevel 1 fallback接続 |
@@ -38,7 +39,7 @@ UXsim Order Exchange 改変作業における、phase 4-6：交差点BATCH処理
 | | 全比較方式で同一ネットワーク・同一OD需要 |
 | **研究基本設定（明示指定）** | 研究の通常方式は **Level 2**（未実装）。Level 2で解決不能時は **Level 1** へfallback、必要に応じて **Level 0** へfallback。 |
 | | 暫定比較では `batch_size=10`、`order_control_batch_t_trigger_level=1`（Level 1は最終基本設定ではない） |
-| **次工程候補** | 診断スクリプトの通常テストとの分離保存 → Node訪問単位の状態設計 → 設計レビュー → FCFS・BATCHの訪問対応実装（**§1G.15**） |
+| **次工程候補** | Node訪問単位の状態設計 → 設計レビュー → FCFS・BATCHの訪問対応実装（**§1G.15** Step 5以降） |
 
 ---
 
@@ -1798,14 +1799,17 @@ Phase 4-6Mではsnapshot estimated arrivalの計算を重複実装・重複テ�
 |-------|------|------|
 | **4-6N（一部）** | `serve_order_control_batch_service_queue()` のroute_next_link参照順修正 | commit済み（`05fa2d1`） |
 | **4-6N（一部）** | clearance=0比較テスト3本 | commit済み（`f339b88`） |
-| **4-6N（診断）** | high-demand prefix violation再現・lifecycle診断・Node再訪診断 | **未commit**（意図的に通常回帰テストと分離予定） |
+| **4-6N（一部）** | 比較・Node再訪診断の正式記録 | commit済み（`c06936c`） |
+| **4-6N（診断）** | high-demand prefix violation再現・lifecycle診断・Node再訪診断 | **通常回帰テストから分離済み・未commit**（`diagnostics/order_control/`） |
 | **4-6N（未完了）** | Node訪問単位の制御状態設計・実装 | **未着手** |
 
 **ブランチ：** `feature/intersection-order-control`
 
-**最新commit：** `f339b88` — phase 4-6N: add clearance-zero BATCH comparison tests before node-revisit state fix
+**最新commit：** `c06936c` — phase 4-6N: document clearance-zero UXsim-FCFS-BATCH comparisons and node-revisit diagnostics
 
-**直前commit：** `05fa2d1` — phase 4-6N: defer route_next_link lookup until batch vehicle arrival
+**直前commit：** `f339b88` — phase 4-6N: add clearance-zero BATCH comparison tests before node-revisit state fix
+
+**その前：** `05fa2d1` — phase 4-6N: defer route_next_link lookup until batch vehicle arrival
 
 **Phase 4-6M：** `b03538c` — phase 4-6M: connect BATCH transfer and add integration tests
 
@@ -1933,9 +1937,11 @@ FCFS・BATCHのnetwork・制御条件は §1G.5 のunsignalized gridケースと
 - 性能優劣をassert条件としていない。
 - 比較テストは **Node再訪状態修正前の基準値** である（commit `f339b88`）。
 
-### 1G.8 Clearance=1 high-demand比較の失敗（未commit診断）
+### 1G.8 Clearance=1 high-demand比較の失敗（診断スクリプトへ分離）
 
-**診断ファイル（未commit）：** `tests_order_control_batch_clearance_one_vs_fcfs_vs_signalized_uxsim_all_red_grid_high_demand.py`
+**診断スクリプト：** `diagnostics/order_control/batch_clearance_one_vs_fcfs_vs_signalized_uxsim_all_red_grid_high_demand_diagnostic.py`（通常回帰テストから分離済み・**未commit**）
+
+診断スクリプトの目的、既知の非zero終了、実行方法については `diagnostics/order_control/README.md` を参照。
 
 **条件：** 6×6 grid、5000台・10000台、内部grid `clearance=1`、signalized all-red `signal=[60, 1, 60, 1]`（phase 0=東西方向が青、phase 1=全赤、phase 2=南北方向が青、phase 3=全赤）、staggered offset、BATCH `clearance=1`、N=10、Level 1（Level 2実装前の暫定比較設定）。
 
@@ -1956,9 +1962,11 @@ assigned vehicle veh_1952 appears after an unassigned vehicle.
 
 この時点ではclearance=1によるservice queue滞留が原因候補だったが、後続のclearance=0診断（§1G.9）で必要条件ではないことが判明した。
 
-### 1G.9 Clearance=0 high-demandでの再現（未commit診断）
+### 1G.9 Clearance=0 high-demandでの再現（診断スクリプトへ分離）
 
-**診断ファイル（未commit）：** `tests_order_control_batch_clearance_zero_vs_fcfs_vs_signalized_uxsim_grid_high_demand_5000.py`
+**診断スクリプト：** `diagnostics/order_control/batch_clearance_zero_vs_fcfs_vs_signalized_uxsim_grid_high_demand_5000_diagnostic.py`（通常回帰テストから分離済み・**未commit**）
+
+診断スクリプトの目的、既知の非zero終了、実行方法については `diagnostics/order_control/README.md` を参照。
 
 **条件：** 5,000 Vehicle、departure 0–500、TMAX=30000、clearance=0、BATCH Level 1、N=10。10,000台は未実行。
 
@@ -1985,9 +1993,11 @@ assigned vehicle veh_1619 appears after an unassigned vehicle.
 
 その後の§1G.10・§1G.11の診断により、第1回訪問のassignment残存とNode再訪の組合せが根本原因と判明した。高需要そのものを根本原因と断定しない。高需要は、Node再訪と過去状態漏出を発見しやすくした再現条件として位置づける。
 
-### 1G.10 Batch ID 318 lifecycle診断（未commit）
+### 1G.10 Batch ID 318 lifecycle診断（診断スクリプトへ分離）
 
-**診断ファイル（未commit）：** `tests_order_control_batch_assignment_318_lifecycle_diagnostic.py`
+**診断スクリプト：** `diagnostics/order_control/batch_assignment_318_lifecycle_diagnostic.py`（通常回帰テストから分離済み・**未commit**）
+
+診断スクリプトの目的、既知の非zero終了、実行方法については `diagnostics/order_control/README.md` を参照。
 
 **対象：** Node `g_4_1`、Vehicle `veh_1619`、batch ID **318**
 
@@ -2014,9 +2024,11 @@ assigned vehicle veh_1619 appears after an unassigned vehicle.
 - veh_1619は後に同じNodeへ再接近した。
 - prefix検証はNode名keyの過去assignmentを現在訪問のassignmentとして扱った（§1C.4、§1C.3.1）。
 
-### 1G.11 UXsim・FCFS・BATCHのNode再訪診断（未commit）
+### 1G.11 UXsim・FCFS・BATCHのNode再訪診断（診断スクリプトへ分離）
 
-**診断ファイル（未commit）：** `tests_order_control_node_revisit_diagnostic_high_demand_5000.py`
+**診断スクリプト：** `diagnostics/order_control/node_revisit_high_demand_5000_diagnostic.py`（通常回帰テストから分離済み・**未commit**）
+
+診断スクリプトの目的、既知の非zero終了、実行方法については `diagnostics/order_control/README.md` を参照。
 
 **条件：** 5,000 Vehicle、6×6 grid、departure 0–500、同一vehicle_plans、signalized UXsim / FCFS c=0 / BATCH c=0 N=10 Level 1。
 
@@ -2145,8 +2157,8 @@ Node再訪対応前に、以下を**取得済みと記載しない。**
 
 1. route_next_link確認順修正を独立commit — **完了**（`05fa2d1`）
 2. 成功済みclearance=0比較3本を独立commit — **完了**（`f339b88`）
-3. 比較結果とNode再訪診断結果を正式Markdownへ記録 — **完了**（本更新。未commit）
-4. 診断スクリプトを通常テストと分離して保存
+3. 比較結果とNode再訪診断結果を正式Markdownへ記録 — **完了**（`c06936c`）
+4. 診断スクリプトを通常テストと分離して保存 — **完了**（`diagnostics/order_control/`。本Markdown更新時点では未commit）
 5. Node訪問単位の状態設計を作成
 6. 設計レビュー
 7. FCFS・BATCHの順で訪問対応を実装
@@ -2159,11 +2171,17 @@ Node再訪対応前に、以下を**取得済みと記載しない。**
 | 項目 | 値 |
 |------|-----|
 | ブランチ | `feature/intersection-order-control` |
-| 最新commit | `f339b88` |
-| 直前commit | `05fa2d1` |
+| 最新commit | `c06936c` |
+| 直前commit | `f339b88` |
+| その前 | `05fa2d1` |
 | Phase 4-6M | `b03538c` |
-| commit済み | route_next_link確認順修正、未到着・route_next_link属性なし回帰テスト、clearance=0比較テスト3本 |
-| 未commit | lifecycle診断、clearance=0 high-demand再現、clearance=1 high-demand再現、Node再訪診断、正式Markdown 2ファイル（本更新） |
+| Step 1 | 完了・commit済み（`05fa2d1`） |
+| Step 2 | 完了・commit済み（`f339b88`） |
+| Step 3 | 完了・commit済み（`c06936c`） |
+| Step 4 | 通常テストからの分離完了・**未commit** |
+| 次は | Step 5：Node訪問単位の状態設計 |
+| commit済み | route_next_link確認順修正、未到着・route_next_link属性なし回帰テスト、clearance=0比較テスト3本、正式Markdown記録（`c06936c`） |
+| 未commit | `diagnostics/order_control/README.md`、`diagnostics/order_control/` 内診断スクリプト4本、本Markdown更新2ファイル |
 | 現在の結論 | Node再訪はUXsim標準・FCFS・BATCHで発生。BATCH prefix violationは過去assignment残存とNode再訪の組合せ。service unit誤削除ではない。FCFSも過去到着状態の再利用可能性あり。 |
 
 **次に読む実装：**
@@ -2175,14 +2193,17 @@ Node再訪対応前に、以下を**取得済みと記載しない。**
 - `Node.form_order_control_batch()`、`Node.get_order_control_batch_candidates_by_inlink()`
 - `Node.serve_order_control_batch_service_queue()`
 
-**次に読む診断（未commit）：**
+**次に読む診断（`diagnostics/order_control/`。通常回帰テストから分離済み・未commit）：**
 
-- `tests_order_control_batch_assignment_318_lifecycle_diagnostic.py`
-- `tests_order_control_node_revisit_diagnostic_high_demand_5000.py`
-- `tests_order_control_batch_clearance_zero_vs_fcfs_vs_signalized_uxsim_grid_high_demand_5000.py`
-- `tests_order_control_batch_clearance_one_vs_fcfs_vs_signalized_uxsim_all_red_grid_high_demand.py`
+- `diagnostics/order_control/README.md`
+- `diagnostics/order_control/batch_assignment_318_lifecycle_diagnostic.py`
+- `diagnostics/order_control/batch_clearance_one_vs_fcfs_vs_signalized_uxsim_all_red_grid_high_demand_diagnostic.py`
+- `diagnostics/order_control/batch_clearance_zero_vs_fcfs_vs_signalized_uxsim_grid_high_demand_5000_diagnostic.py`
+- `diagnostics/order_control/node_revisit_high_demand_5000_diagnostic.py`
 
-**次工程：** 診断スクリプトを通常テストと分離 → Node訪問単位の状態設計 → 設計レビュー → FCFS・BATCHの訪問対応
+診断スクリプトの目的、既知の非zero終了、実行方法については `diagnostics/order_control/README.md` を参照。
+
+**次工程：** Node訪問単位の状態設計（Step 5）→ 設計レビュー → FCFS・BATCHの訪問対応
 
 ---
 
@@ -2904,12 +2925,17 @@ Phase 4-6Mで追加された `Node.transfer()` 接続統合テストは **§1F.1
 - `tests_order_control_batch_vs_fcfs_vs_uxsim_standard_grid_network.py`（phase 4-6N、commit `f339b88`）
 - `tests_order_control_batch_vs_fcfs_vs_signalized_uxsim_standard_grid_network.py`（phase 4-6N、commit `f339b88`）
 
-### Phase 4-6N診断スクリプト（未commit。通常回帰テストとしては未保存）
+### Phase 4-6N診断スクリプト（通常回帰テストから分離済み・未commit）
 
-- `tests_order_control_batch_assignment_318_lifecycle_diagnostic.py`
-- `tests_order_control_batch_clearance_zero_vs_fcfs_vs_signalized_uxsim_grid_high_demand_5000.py`
-- `tests_order_control_batch_clearance_one_vs_fcfs_vs_signalized_uxsim_all_red_grid_high_demand.py`
-- `tests_order_control_node_revisit_diagnostic_high_demand_5000.py`
+保存先：`diagnostics/order_control/`。ファイル名は `tests_` で始まらない。通常の自動テスト探索対象に含めない。既知のprefix violationは意図的再現であり、非zero終了は診断結果（通常テスト失敗ではない）。
+
+- `diagnostics/order_control/README.md`
+- `diagnostics/order_control/batch_assignment_318_lifecycle_diagnostic.py`
+- `diagnostics/order_control/batch_clearance_zero_vs_fcfs_vs_signalized_uxsim_grid_high_demand_5000_diagnostic.py`
+- `diagnostics/order_control/batch_clearance_one_vs_fcfs_vs_signalized_uxsim_all_red_grid_high_demand_diagnostic.py`
+- `diagnostics/order_control/node_revisit_high_demand_5000_diagnostic.py`
+
+診断スクリプトの目的、既知の非zero終了、実行方法については `diagnostics/order_control/README.md` を参照。
 
 ### FCFS / clearance基本テスト
 
@@ -2942,10 +2968,10 @@ Phase 4-6Mで追加された `Node.transfer()` 接続統合テストは **§1F.1
 - `git status`。
 - `git log --oneline -20`。
 - **Phase 4-6A〜4-6M：** 実装・テスト・commit済み（4-6Mは `b03538c`）。
-- **Phase 4-6N（一部commit済み）：** route_next_link参照順修正（`05fa2d1`）、clearance=0比較テスト3本（`f339b88`）。
-- **Phase 4-6N（診断・未commit）：** lifecycle診断、high-demand再現診断、Node再訪診断。
+- **Phase 4-6N（commit済み）：** route_next_link参照順修正（`05fa2d1`）、clearance=0比較テスト3本（`f339b88`）、正式記録（`c06936c`）。
+- **Phase 4-6N（診断）：** 4本＋READMEを `diagnostics/order_control/` へ分離済み・**未commit**。詳細は `diagnostics/order_control/README.md`。
 - **現時点の主要課題：** Node再訪を区別しないorder-control状態管理（**§1G**）。
 - **優先参照：** ORDER_EXCHANGE_PHASE4-6_BATCH_PROCESSING_DESIGN_NOTES.md の **§1G** を優先参照。`Node.transfer()` 接続は **§1F**、統括は **§1E**、実通過は **§1D**、形成・登録は **§1C**。
-- **次工程（§1G.15）：** 診断スクリプト分離 → Node訪問単位の状態設計 → 設計レビュー → FCFS・BATCHの訪問対応 → 小規模再訪テスト → high-demand再実行。
+- **次工程（§1G.15 Step 5）：** Node訪問単位の状態設計 → 設計レビュー → FCFS・BATCHの訪問対応 → 小規模再訪テスト → high-demand再実行。
 - 目的地Vehicleは端点間OD前提で保留。比較対象Node共通管理・自動検証は将来課題。
 - 一時退避PDF `phase4-6A_batch_earliest_arrival_timestep_memo.pdf` はリポジトリ外。正式Markdownを優先参照。
