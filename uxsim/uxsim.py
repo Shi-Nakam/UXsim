@@ -1406,13 +1406,13 @@ class Node:
 
             while service_unit["vehicles"]:
                 veh = service_unit["vehicles"][0]
-                outlink = veh.route_next_link
 
                 if veh not in s.incoming_vehicles:
                     _finalize_service_queue()
                     return transferred_vehicle_count
 
                 _validate_service_unit_vehicle(veh, service_unit)
+                outlink = veh.route_next_link
 
                 if not _clearance_satisfied(inlink):
                     _finalize_service_queue()

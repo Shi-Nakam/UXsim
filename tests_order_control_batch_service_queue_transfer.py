@@ -192,6 +192,41 @@ def test_not_arrived_waits():
     assert merge.last_order_control_inlink is None
 
 
+def test_not_arrived_without_route_next_link_attribute():
+    W = _build_network("sq_not_arrived_no_route_attr")
+    merge = W.get_node("merge")
+    link1 = W.get_link("link1")
+    link2 = W.get_link("link2")
+    out = W.get_link("out")
+    a1 = _make_vehicle(W, "orig1", "A1")
+    b1 = _make_vehicle(W, "orig2", "B1")
+    _setup_arrived_vehicle(merge, b1, link2, out, 0, 10.0, 0.2, 200.0)
+    a1.link = link1
+    a1.state = "run"
+    a1.x = 200.0
+    if hasattr(a1, "route_next_link"):
+        delattr(a1, "route_next_link")
+    assert not hasattr(a1, "route_next_link")
+    a1.order_control_batch_assignments["merge"] = 0
+    link1.vehicles.append(a1)
+    _register_service_unit(merge, 0, link1, [a1])
+    _register_service_unit(merge, 1, link2, [b1])
+    before = _queue_snapshot(merge)
+    out_cum = out.cum_arrival[-1]
+
+    count = merge.serve_order_control_batch_service_queue()
+    assert count == 0
+    assert _queue_snapshot(merge) == before
+    assert a1 not in merge.incoming_vehicles
+    assert a1.order_control_batch_assignments.get("merge") == 0
+    assert not hasattr(a1, "route_next_link")
+    assert b1 in merge.incoming_vehicles
+    assert b1.link is link2
+    assert b1.link is not out
+    assert out.cum_arrival[-1] == out_cum
+    assert merge.last_order_control_inlink is None
+
+
 def test_clearance_no_history():
     W = _build_network("sq_clr_none")
     merge = W.get_node("merge")
@@ -814,6 +849,7 @@ TESTS = [
     test_single_vehicle_transfer,
     test_multiple_vehicles_same_unit,
     test_not_arrived_waits,
+    test_not_arrived_without_route_next_link_attribute,
     test_clearance_no_history,
     test_clearance_same_inlink_not_required,
     test_clearance_blocks_and_stops,
