@@ -2250,10 +2250,13 @@ Node再訪対応前に、以下を**取得済みと記載しない。**
 **現行設計方針：**
 
 - Vehicleごとに単調増加する整数 **`visit_id`** を用いる。
-- 新しいLinkへ進入したときに1増やす。同一訪問中は変更しない。
-- `incoming_vehicles` への再登録では増やさない。
+- **`visit_id` はすべてのLink進入を数える番号ではない。** 次の条件を満たすNodeへ向かうLinkへ進入した場合だけ1増やす。
+  - `end_node.order_control_eligible is True`
+  - `end_node.order_control_type != "none"`
+- したがって **`visit_id` はVehicleごとのorder-control対象Node訪問番号** として扱う。
+- 同一訪問中は変更しない。`incoming_vehicles` への再登録では増やさない。
 - 同じNodeへの再訪では新しい `visit_id` になる。
-- 「次に発行する訪問番号」という別属性は設けない。
+- 「次に発行する訪問番号」という別属性は設けない。Vehicle属性 `order_control_visit_id` が最後に発行した値を保持する（初期値 `0`）。
 
 **制御上の訪問識別（概念）：** `Vehicle` + `Node` + `visit_id`
 
@@ -2275,9 +2278,11 @@ Vehicleは、現在向かっているorder-control対象Nodeについて、**現
 | 到着tiebreaker | FCFS同時到着の順序 |
 | 現在訪問のBATCH assignment | 形成・prefix検証・実通過 |
 
-order-control対象外Nodeへの訪問状態は**作成しない**。
+order-control対象外Nodeへの訪問状態は**作成しない**。新しく進入したLinkの `end_node` がorder-control対象外の場合は `order_control_current_visit = None` とし、`order_control_visit_id` は増やさない（直前の対象Node訪問状態を対象外Link上に残さない）。
 
-**データ構造（未確定）：** 第一候補はVehicle上の1つの辞書。専用クラス・個別属性等との比較は、実コード確認後に最終決定する（**§1H.16.2**）。
+**データ構造（決定済み）：** Vehicle上の1つの辞書 `order_control_current_visit`（未訪問時は `None`）。Vehicle属性 `order_control_visit_id`（初期値 `0`）と併用する。
+
+**辞書キー（第一案）：** `visit_id`、`node`、`inlink`、`earliest_arrival_timestep`、`arrival_time`、`arrival_tiebreaker`、`batch_assignment`。`node` と `inlink` はオブジェクト参照とする。
 
 ### 1H.5 現在制御状態と分析用履歴の分離
 
@@ -2286,6 +2291,8 @@ order-control対象外Nodeへの訪問状態は**作成しない**。
 | **常に保持** | 現在訪問の制御状態 | FCFS・BATCHの現在制御に使用 |
 | **初回分析履歴（既存属性を維持）** | `order_control_node_arrival_times`、`order_control_node_arrival_tiebreakers`、`order_control_earliest_arrival_timesteps` | 同一Vehicle・同一Nodeの**初回値のみ**保存。再訪時に上書きしない。FCFS・BATCHの現在制御には使わない |
 | **過去batch ID** | 研究分析用 | 履歴として保持。現在有効なassignmentとは分離。具体的な利用方法は未確定 |
+
+**段階移行（`order_control_earliest_arrival_timesteps`）：** 移行完了後の最終方針は上表のとおり初回のみ記録とする。Phase 4-6Oでは既存BATCH挙動を変えないため、同辞書は**現行どおり再訪時にも上書き**する（FCFS・BATCHは引き続き既存辞書を参照）。初回分析履歴としての上書き禁止へ切り替えるのは Phase 4-6R（BATCH参照先を現在訪問状態へ変更）と同時とする（**§1H.13**、**§1H.14**）。
 
 **分析データの基本方針：**
 
@@ -2299,15 +2306,19 @@ order-control対象外Nodeへの訪問状態は**作成しない**。
 
 ### 1H.6 訪問開始処理
 
-`end_node` がorder-control対象NodeであるLinkへ進入した時点で、現在訪問状態を新規作成する（対象外Nodeでは作成しない）。
+Link進入時の処理は、研究対象Vehicleの5つのLink進入経路（`Node.generate`、標準 `Node.transfer`、FCFS 2種、BATCH `_transfer_vehicle`）から、Vehicle共通メソッド **`begin_order_control_visit_on_link_entry()`** をそれぞれ1回だけ呼ぶ形に集約する。
 
-- `visit_id` を1増やす（新しいLink進入時のみ）。
+**Vehicle初期状態：** `order_control_visit_id = 0`、`order_control_current_visit = None`。
+
+**対象外Nodeへ向かうLinkへ進入した場合：** `order_control_current_visit = None`、`order_control_visit_id` は増やさない。Originから最初に進入したLinkの `end_node` が対象外でもこの状態を維持する。
+
+**対象Nodeへ向かうLinkへ進入した場合**（`end_node.order_control_eligible` かつ `order_control_type != "none"`）：
+
+- `order_control_visit_id` を1増やし、現在訪問状態を新規作成する（初めての対象Node訪問では `order_control_visit_id = 1`）。
 - 訪問先Node、inlinkを記録する。
-- earliest arrival timestepを**現在訪問状態**へ記録する（既存 `record_order_control_earliest_arrival_timestep_for_current_link()` と同等の計算。初回分析履歴へは初回のみ記録し、再訪時は上書きしない）。
-- Node端到着時刻・tiebreakerは**未記録を表す初期状態**とする。
-- BATCH assignmentは**assignmentなしを表す初期状態**とする。
-
-（未記録・assignmentなしの具体的な表現—`None`、キー非作成等—は **§1H.16.3** の第一候補として試行後に決定。）
+- earliest arrival timestepを**現在訪問状態**へ記録する（既存 `record_order_control_earliest_arrival_timestep_for_current_link()` と同等の計算）。
+- Phase 4-6Oでは、既存 `order_control_earliest_arrival_timesteps` も**現行どおり再訪時に上書き**する（**§1H.5**）。初回のみ記録へ変更するのは Phase 4-6R と同時。
+- `arrival_time`、`arrival_tiebreaker`、`batch_assignment` の初期値は **`None`**（未記録・assignmentなし）。
 
 ### 1H.7 Node端到着処理
 
@@ -2409,15 +2420,15 @@ VehicleがNodeを実際に通過した場合、service unit側とVehicle側を**
 |----------|--------|
 | `order_control_node_arrival_times` | 初回分析履歴として維持（上書きしない） |
 | `order_control_node_arrival_tiebreakers` | 同上 |
-| `order_control_earliest_arrival_timesteps` | 同上（現行はLink進入のたびに上書きするため、移行時に初回のみ記録へ変更） |
+| `order_control_earliest_arrival_timesteps` | 初回分析履歴として初回のみ記録（再訪時に上書きしない）。**Phase 4-6Oでは現行の上書き挙動を維持**し、Phase 4-6RでBATCH参照先切替と同時に初回履歴化へ変更 |
 | `order_control_batch_assignments`（Node名key） | 現在訪問へのassignmentと、過去の分析用batch情報へ分離 |
 
 **移行順：**
 
-1. 現在訪問状態の共通基盤（Phase 4-6O）
+1. 現在訪問状態の共通基盤（Phase 4-6O）— 現在訪問へのearliest記録、既存辞書の上書き挙動は維持
 2. Node端到着記録の訪問対応（Phase 4-6P）
 3. FCFSの参照先変更（Phase 4-6Q）
-4. BATCH形成の参照先変更（Phase 4-6R）
+4. BATCH形成の参照先変更（Phase 4-6R）— 現在訪問状態への参照切替と、`order_control_earliest_arrival_timesteps` の初回履歴化を同時実施
 5. service unit・実通過対応（Phase 4-6S）
 
 移行完了後、FCFS・BATCHの現在制御が既存の初回履歴辞書を参照していないことを確認する。
@@ -2428,10 +2439,10 @@ VehicleがNodeを実際に通過した場合、service unit側とVehicle側を**
 
 | Phase | 内容 |
 |-------|------|
-| **4-6O** | 現在訪問状態の共通基盤 |
+| **4-6O** | 現在訪問状態の共通基盤（`begin_order_control_visit_on_link_entry()`、現在訪問へのearliest記録。既存 `order_control_earliest_arrival_timesteps` は再訪時上書きを維持） |
 | **4-6P** | Node端到着記録の訪問対応 |
 | **4-6Q** | FCFSの参照先変更 |
-| **4-6R** | BATCH形成の訪問対応 |
+| **4-6R** | BATCH形成の訪問対応（参照先を現在訪問状態へ切替。`order_control_earliest_arrival_timesteps` を初回分析履歴化） |
 | **4-6S** | service unit・実通過の訪問対応 |
 | **4-6T** | 統合・小規模再訪テスト |
 | **4-6U** | high-demand再実行 |
@@ -2455,26 +2466,25 @@ VehicleがNodeを実際に通過した場合、service unit側とVehicle側を**
 #### 1H.16.1 決定済み
 
 - Node訪問を制御単位として区別する
-- Vehicleごとの単調増加整数 `visit_id` を使用する
-- 現在訪問状態はorder-control対象Nodeだけに作る
+- Vehicleごとの単調増加整数 `visit_id` を使用する（order-control対象Nodeへの訪問時のみ増加。**§1H.3**）
+- 現在訪問状態はorder-control対象Nodeだけに作る。対象外Nodeへ向かうLink進入時は `order_control_current_visit = None` とし `order_control_visit_id` は増やさない
 - FCFS・BATCHは現在訪問状態を制御に使う
-- 既存の初回履歴は分析用として上書きせず維持する
+- 既存の初回履歴は分析用として上書きせず維持する（`order_control_earliest_arrival_timesteps` の初回履歴化は Phase 4-6R と同時。**§1H.5**）
 - 過去のbatch IDも分析用履歴として保持する
 - service unitは登録時の `visit_id` を保持する
 - 通過時にservice unit側とVehicle側の2状態を更新する
 - 経路選択とNode再訪の可否は変更しない
+- 現在訪問状態はVehicle上の1つの辞書 `order_control_current_visit`（`None` 初期）と `order_control_visit_id`（`0` 初期）で保持する
+- 辞書キー：`visit_id`、`node`、`inlink`、`earliest_arrival_timestep`、`arrival_time`、`arrival_tiebreaker`、`batch_assignment`（`node`・`inlink` はオブジェクト参照）
+- Link進入処理は `begin_order_control_visit_on_link_entry()` に集約し、5つのLink進入経路から各1回呼ぶ
+- `arrival_time`、`arrival_tiebreaker`、`batch_assignment` の初期値は `None`
 
 #### 1H.16.2 実コード・既存テスト確認後に最終決定
 
-- 現在訪問状態の具体的な属性名・データ構造
-- 1つの辞書か専用クラスか
 - service unitの並行リスト案か、Vehicleと `visit_id` を1組にする案か
-- 各小Phaseの厳密な境界
 
 #### 1H.16.3 第一候補として試行し、小規模テストで確認
 
-- 未記録状態を `None` で表す案
-- assignmentなしを `None` で表す案
 - Node側へBATCH形成履歴を保存する案
 
 #### 1H.16.4 現時点では保留
@@ -2491,19 +2501,17 @@ VehicleがNodeを実際に通過した場合、service unit側とVehicle側を**
 | 項目 | 値 |
 |------|-----|
 | Step 1〜4 | 完了・commit済み（`05fa2d1`、`f339b88`、`c06936c`、`0e35799`） |
-| Step 5 | 設計記録完了（**§1H**。本Markdown更新時点では未commit） |
+| Step 5 | 設計記録完了（**§1H**） |
+| Phase 4-6O実装前調査 | 完了（本Markdown更新。§1H.3・§1H.4・§1H.5・§1H.6・§1H.13・§1H.14・§1H.16 反映） |
 | 実装 | **未着手**（Phase 4-6O〜） |
-| 最新commit | `0e35799` |
+| 最新commit | `7c35335` |
 | high-demand BATCH比較 | 未完了（5,000台 c=0/1：prefix violation停止。10,000台：未実行） |
 
 **次工程：**
 
-1. §1Hの設計記録をレビュー
-2. 実コード・既存テストを調査
-3. §1H.16の要確認事項を決定可能な範囲で決定
-4. Phase 4-6Oの具体的実装設計
-5. Phase 4-6O実装・テスト
-6. 正式記録・commit・push
+1. Phase 4-6Oの実装指示作成
+2. Phase 4-6O実装・テスト
+3. 正式記録・commit・push
 
 **再開時に読むもの：**
 

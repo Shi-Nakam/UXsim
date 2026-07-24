@@ -2674,7 +2674,8 @@ if s.order_control_eligible and s.order_control_type == "batch":
 - Phase 4-6Nの比較・Node再訪診断の正式記録は commit `c06936c` 済み
 - Phase 4-6Nの診断スクリプト分離は commit `0e35799` 済み
 - **最新commit：** `0e35799`（Phase 4-6N 診断スクリプト分離）
-- Phase 4-6N Step 5：Node訪問単位の共通状態設計を設計メモ **§1H** に記録済み（本Markdown更新時点では未commit）
+- Phase 4-6N Step 5：Node訪問単位の共通状態設計を設計メモ **§1H** に記録済み
+- Phase 4-6O実装前調査：完了（設計メモ **§1H** 反映。本Markdown更新時点では未commit）
 - **実装は未着手**（Phase 4-6O〜）
 
 詳細設計・判断経緯は ORDER_EXCHANGE_PHASE4-6_BATCH_PROCESSING_DESIGN_NOTES.md **§1F**（接続）、**§1G**（診断）、**§1H**（訪問状態設計）を参照。
@@ -2765,14 +2766,29 @@ Phase 4-6N Step 5として、FCFS・BATCH共通のNode訪問単位状態設計�
 
 **要点：**
 
-- `visit_id`：Vehicleごとの単調増加整数。新Link進入時に増加。`incoming_vehicles` 再登録では増加しない。
+- `visit_id`：Vehicleごとのorder-control対象Node訪問番号（対象Node向けLink進入時のみ増加。詳細は **§1H.3** および下記4-6O実装前調査）。
 - 現在訪問状態：order-control対象Nodeへの訪問のみ1件保持（visit_id、Node、inlink、earliest arrival、到着時刻、tiebreaker、現在assignment）。
 - 既存の `order_control_node_arrival_times` 等は**初回分析履歴**として維持（再訪時に上書きしない）。FCFS・BATCHの現在制御には使わない。
 - FCFS・BATCHは現在訪問状態を参照。service unit登録時に `visit_id` を保存。通過時にservice unit側とVehicle側を別々に更新。
-- 属性構造、service unit形式、BATCH履歴構造等は実コード確認後に最終決定（§1H.16）。
+- service unit形式、BATCH履歴構造等の一部は未決定（§1H.16）。
 - high-demand BATCH性能比較は未完了（prefix violationで停止または未実行）。
 
 詳細は ORDER_EXCHANGE_PHASE4-6_BATCH_PROCESSING_DESIGN_NOTES.md **§1H** を参照。診断スクリプトは `diagnostics/order_control/README.md` を参照。
+
+### フェーズ4-6O実装前調査（完了・未実装）
+
+Phase 4-6O実装前の実コード調査を完了し、設計メモ **§1H** に反映した。**実装は未着手。**
+
+- `visit_id` はorder-control対象Nodeへの訪問時だけ増加する
+- 対象外Nodeへ向かう場合は `order_control_current_visit = None` とし、`order_control_visit_id` は増やさない
+- Originから最初に対象外Nodeへ向かう場合は `order_control_visit_id = 0`、`order_control_current_visit = None` を維持する
+- 現在訪問状態はVehicle上の辞書（`order_control_current_visit`）とする
+- Link進入処理はVehicle共通メソッド `begin_order_control_visit_on_link_entry()` に集約する
+- Phase 4-6Oでは既存 `order_control_earliest_arrival_timesteps` の再訪時上書き挙動を維持する
+- 初回分析履歴化は Phase 4-6R のBATCH参照先変更と同時に行う
+- 次工程：Phase 4-6Oの実装指示作成
+
+詳細は設計メモ **§1H** を参照。
 
 ### フェーズ4-6設計議論：目的地Vehicle・比較対象Node・batch順序（設計確定、未実装）
 
