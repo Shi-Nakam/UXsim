@@ -2675,8 +2675,9 @@ if s.order_control_eligible and s.order_control_type == "batch":
 - Phase 4-6Nの診断スクリプト分離は commit `0e35799` 済み
 - **最新commit：** `0e35799`（Phase 4-6N 診断スクリプト分離）
 - Phase 4-6N Step 5：Node訪問単位の共通状態設計を設計メモ **§1H** に記録済み
-- Phase 4-6O実装前調査：完了（設計メモ **§1H** 反映。本Markdown更新時点では未commit）
-- **実装は未着手**（Phase 4-6O〜）
+- Phase 4-6O実装前調査：完了（設計メモ **§1H** 反映）
+- Phase 4-6O：実装・専用テスト・回帰確認済み（設計メモ **§1H.18**。本Markdown更新時点では未commit）
+- **次工程：** Phase 4-6P（**§1H.18**・**§1H.17** 参照）
 
 詳細設計・判断経緯は ORDER_EXCHANGE_PHASE4-6_BATCH_PROCESSING_DESIGN_NOTES.md **§1F**（接続）、**§1G**（診断）、**§1H**（訪問状態設計）を参照。
 
@@ -2775,9 +2776,9 @@ Phase 4-6N Step 5として、FCFS・BATCH共通のNode訪問単位状態設計�
 
 詳細は ORDER_EXCHANGE_PHASE4-6_BATCH_PROCESSING_DESIGN_NOTES.md **§1H** を参照。診断スクリプトは `diagnostics/order_control/README.md` を参照。
 
-### フェーズ4-6O実装前調査（完了・未実装）
+### フェーズ4-6O実装前調査（完了）
 
-Phase 4-6O実装前の実コード調査を完了し、設計メモ **§1H** に反映した。**実装は未着手。**
+Phase 4-6O実装前の実コード調査を完了し、設計メモ **§1H** に反映した（後続のフェーズ4-6O実装記録へ続く）。
 
 - `visit_id` はorder-control対象Nodeへの訪問時だけ増加する
 - 対象外Nodeへ向かう場合は `order_control_current_visit = None` とし、`order_control_visit_id` は増やさない
@@ -2786,9 +2787,29 @@ Phase 4-6O実装前の実コード調査を完了し、設計メモ **§1H** に
 - Link進入処理はVehicle共通メソッド `begin_order_control_visit_on_link_entry()` に集約する
 - Phase 4-6Oでは既存 `order_control_earliest_arrival_timesteps` の再訪時上書き挙動を維持する
 - 初回分析履歴化は Phase 4-6R のBATCH参照先変更と同時に行う
-- 次工程：Phase 4-6Oの実装指示作成
 
 詳細は設計メモ **§1H** を参照。
+
+### フェーズ4-6O：現在訪問状態の共通基盤（実装済み・未commit）
+
+Phase 4-6Oとして、FCFS・BATCH共通のNode訪問単位「現在訪問状態」基盤を実装し、専用テスト・回帰確認まで完了した。詳細は設計メモ **§1H.18** を参照。
+
+**実装要点：**
+
+- Vehicle属性：`order_control_visit_id`（初期 `0`）、`order_control_current_visit`（初期 `None`）
+- Link進入共通メソッド：`begin_order_control_visit_on_link_entry()`（5経路から各1回呼び出し）
+- earliest計算ヘルパー：`_compute_order_control_earliest_arrival_timestep_for_current_link()`
+- 既存 `record_order_control_earliest_arrival_timestep_for_current_link()` は維持（既存辞書のみ更新）
+- `visit_id` はorder-control対象Node訪問時のみ増加。対象外Nodeでは `current_visit = None`
+- 既存 `order_control_earliest_arrival_timesteps` は再訪時上書きを維持。FCFS・BATCH参照先は未変更
+
+**専用テスト：** `tests_order_control_current_visit_state.py`（15件、全PASS）
+
+**回帰テスト：** 指定10本すべてPASS。baseline・exampleは既知値と一致、交通結果に変化なし。
+
+**未実装（Phase 4-6P〜）：** Node端到着時刻・tiebreakerの現在訪問記録、FCFS/BATCH参照先変更、service unit、訪問終了処理等。
+
+**次工程：** Phase 4-6P（実装前に `Vehicle.update()` と `record_order_control_node_first_arrival()` を再確認）
 
 ### フェーズ4-6設計議論：目的地Vehicle・比較対象Node・batch順序（設計確定、未実装）
 

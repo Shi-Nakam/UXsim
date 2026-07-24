@@ -382,7 +382,7 @@ class Node:
 
                         outlink.cum_arrival[-1] += s.W.DELTAN
                         veh.link_arrival_time = s.W.T*s.W.DELTAT
-                        veh.record_order_control_earliest_arrival_timestep_for_current_link()
+                        veh.begin_order_control_visit_on_link_entry()
 
                         outlink.capacity_in_remain -= s.W.DELTAN
                     else:
@@ -1352,7 +1352,7 @@ class Node:
             inlink.vehicles.popleft()
             outlink.vehicles_enter_log[s.W.T * s.W.DELTAT] = veh
             veh.link = outlink
-            veh.record_order_control_earliest_arrival_timestep_for_current_link()
+            veh.begin_order_control_visit_on_link_entry()
             veh.x = 0
 
             if veh.follower is not None:
@@ -1514,7 +1514,7 @@ class Node:
                 inlink.vehicles.popleft()
                 outlink.vehicles_enter_log[s.W.T*s.W.DELTAT] = veh
                 veh.link = outlink
-                veh.record_order_control_earliest_arrival_timestep_for_current_link()
+                veh.begin_order_control_visit_on_link_entry()
                 veh.x = 0
 
                 if veh.follower != None:
@@ -1639,7 +1639,7 @@ class Node:
                 inlink.vehicles.popleft()
                 outlink.vehicles_enter_log[s.W.T*s.W.DELTAT] = veh
                 veh.link = outlink
-                veh.record_order_control_earliest_arrival_timestep_for_current_link()
+                veh.begin_order_control_visit_on_link_entry()
                 veh.x = 0
 
                 if veh.follower != None:
@@ -1764,7 +1764,7 @@ class Node:
                 inlink.vehicles.popleft()
                 outlink.vehicles_enter_log[s.W.T*s.W.DELTAT] = veh
                 veh.link = outlink
-                veh.record_order_control_earliest_arrival_timestep_for_current_link()
+                veh.begin_order_control_visit_on_link_entry()
                 veh.x = 0
 
                 if veh.follower != None:
@@ -2410,6 +2410,12 @@ class Vehicle:
             BATCH Processing control state mapping each order-control node name to the batch_id assigned
             to this vehicle at that node. If a node name is absent, the vehicle is treated as unbatched at
             that node. Initialized to an empty dict at this stage; no assignments are written yet.
+        order_control_visit_id : int
+            Last issued visit number for order-control target nodes on this vehicle. ``0`` means no such
+            visit has started yet. Initialized to ``0``.
+        order_control_current_visit : dict or None
+            Current visit state for the order-control target node this vehicle is approaching, or ``None``
+            when not approaching such a node. Initialized to ``None``.
         """
 
         s.W = W
@@ -2510,6 +2516,8 @@ class Vehicle:
         s.order_control_node_arrival_tiebreakers = {}
         s.order_control_earliest_arrival_timesteps = {}
         s.order_control_batch_assignments = {}
+        s.order_control_visit_id = 0
+        s.order_control_current_visit = None
 
         s.id = len(s.W.VEHICLES)
         if name != None:
@@ -2737,6 +2745,30 @@ class Vehicle:
         s.order_control_node_arrival_times[node.name] = s.W.T * s.W.DELTAT
         s.order_control_node_arrival_tiebreakers[node.name] = s.W.rng.random()
 
+    def _compute_order_control_earliest_arrival_timestep_for_current_link(s):
+        """
+        Compute the earliest arrival timestep for the current link's end node.
+
+        Returns
+        -------
+        int
+            Earliest arrival timestep in simulation timestep units.
+        """
+        link = s.link
+        if link is None:
+            raise ValueError(
+                "Vehicle has no current link for earliest arrival timestep computation."
+            )
+        if link.u <= 0:
+            raise ValueError(
+                f"link {link.name} has non-positive free_flow_speed (link.u={link.u})."
+            )
+
+        link_entry_timestep = int(round(s.link_arrival_time / s.W.DELTAT))
+        free_flow_travel_timesteps = math.ceil((link.length / link.u) / s.W.DELTAT)
+        tau_timesteps = s.W.order_control_batch_tau_timesteps
+        return link_entry_timestep + free_flow_travel_timesteps + tau_timesteps
+
     def record_order_control_earliest_arrival_timestep_for_current_link(s):
         """
         Record the earliest arrival timestep for the current link's end node.
@@ -2747,24 +2779,54 @@ class Vehicle:
         The value is stored in ``order_control_earliest_arrival_timesteps`` keyed by
         ``vehicle.link.end_node.name``. Timesteps are used throughout; convert to seconds
         with ``timestep * W.DELTAT`` only when needed for display.
+
+        This method records only the legacy earliest-arrival dictionary. It does not
+        update ``order_control_visit_id`` or ``order_control_current_visit``.
         """
         if s.link is None:
             return
 
-        link = s.link
-        node = link.end_node
-        if link.u <= 0:
-            raise ValueError(
-                f"link {link.name} has non-positive free_flow_speed (link.u={link.u})."
-            )
-
-        link_entry_timestep = int(round(s.link_arrival_time / s.W.DELTAT))
-        free_flow_travel_timesteps = math.ceil((link.length / link.u) / s.W.DELTAT)
-        tau_timesteps = s.W.order_control_batch_tau_timesteps
         earliest_arrival_timestep = (
-            link_entry_timestep + free_flow_travel_timesteps + tau_timesteps
+            s._compute_order_control_earliest_arrival_timestep_for_current_link()
         )
+        s.order_control_earliest_arrival_timesteps[s.link.end_node.name] = (
+            earliest_arrival_timestep
+        )
+
+    def begin_order_control_visit_on_link_entry(s):
+        """
+        Begin or refresh order-control visit state after entering a link.
+
+        Notes
+        -----
+        Called once immediately after a vehicle enters a link and ``link_arrival_time``
+        is set. Always records the earliest arrival timestep in the legacy dictionary.
+        If the link's ``end_node`` is order-control eligible, increments
+        ``order_control_visit_id`` and creates ``order_control_current_visit``.
+        Otherwise clears ``order_control_current_visit`` without incrementing the visit id.
+        """
+        if s.link is None:
+            return
+
+        earliest_arrival_timestep = (
+            s._compute_order_control_earliest_arrival_timestep_for_current_link()
+        )
+        node = s.link.end_node
         s.order_control_earliest_arrival_timesteps[node.name] = earliest_arrival_timestep
+
+        if node.order_control_eligible and node.order_control_type != "none":
+            s.order_control_visit_id += 1
+            s.order_control_current_visit = {
+                "visit_id": s.order_control_visit_id,
+                "node": node,
+                "inlink": s.link,
+                "earliest_arrival_timestep": earliest_arrival_timestep,
+                "arrival_time": None,
+                "arrival_tiebreaker": None,
+                "batch_assignment": None,
+            }
+        else:
+            s.order_control_current_visit = None
 
     def route_next_link_choice(s):
         """

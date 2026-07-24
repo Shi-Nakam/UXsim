@@ -31,16 +31,16 @@ UXsim Order Exchange 改変作業における、phase 4-6：交差点BATCH処理
 | | phase 4-6N：診断スクリプトの通常回帰テストからの分離保存（0e35799） |
 | **診断スクリプト** | `diagnostics/order_control/`（4本＋README）。通常回帰テストから分離済み（`0e35799`）。詳細は `diagnostics/order_control/README.md` |
 | **BATCH形成〜シミュレーション接続まで完成** | trigger候補取得 → … → service queue登録（4-6I）→ 実通過（4-6K）→ 統括呼出し（4-6L）→ **`Node.transfer()` 接続（4-6M）** |
-| **現時点の主要課題** | Node再訪に対応するFCFS・BATCH共通訪問状態の**実装**（設計は **§1H** で記録済み・**未実装**） |
+| **現時点の主要課題** | Node端到着時の現在訪問状態への記録（**Phase 4-6P**。4-6O基盤は **§1H.18** で実装済み） |
 | **未実装** | Level 2仮想サービス推定、Level 2 unresolved時のLevel 1 fallback接続 |
 | | trip-end VehicleのBATCH service unit対応 |
-| | Node訪問単位の制御状態（**§1H** 設計済み。実装は Phase 4-6O〜） |
+| | Node訪問単位の制御状態（**§1H** 設計済み。**Phase 4-6O** 基盤実装済み・**§1H.18**。4-6P〜未実装） |
 | | Time-value Transaction、比較対象Node共通管理、目的地自動検証、taxi mode向け動的dest検証 |
 | **当面の研究シナリオ前提** | 比較対象内部交差点Nodeを目的地としない端点間OD |
 | | 全比較方式で同一ネットワーク・同一OD需要 |
 | **研究基本設定（明示指定）** | 研究の通常方式は **Level 2**（未実装）。Level 2で解決不能時は **Level 1** へfallback、必要に応じて **Level 0** へfallback。 |
 | | 暫定比較では `batch_size=10`、`order_control_batch_t_trigger_level=1`（Level 1は最終基本設定ではない） |
-| **次工程候補** | §1H設計レビュー → Phase 4-6O実装（**§1H.14**・**§1H.17**） |
+| **次工程候補** | Phase 4-6P実装（**§1H.18**・**§1H.17**） |
 
 ---
 
@@ -2439,7 +2439,7 @@ VehicleがNodeを実際に通過した場合、service unit側とVehicle側を**
 
 | Phase | 内容 |
 |-------|------|
-| **4-6O** | 現在訪問状態の共通基盤（`begin_order_control_visit_on_link_entry()`、現在訪問へのearliest記録。既存 `order_control_earliest_arrival_timesteps` は再訪時上書きを維持） |
+| **4-6O** | 現在訪問状態の共通基盤（**実装済み**。§1H.18） |
 | **4-6P** | Node端到着記録の訪問対応 |
 | **4-6Q** | FCFSの参照先変更 |
 | **4-6R** | BATCH形成の訪問対応（参照先を現在訪問状態へ切替。`order_control_earliest_arrival_timesteps` を初回分析履歴化） |
@@ -2502,15 +2502,16 @@ VehicleがNodeを実際に通過した場合、service unit側とVehicle側を**
 |------|-----|
 | Step 1〜4 | 完了・commit済み（`05fa2d1`、`f339b88`、`c06936c`、`0e35799`） |
 | Step 5 | 設計記録完了（**§1H**） |
-| Phase 4-6O実装前調査 | 完了（本Markdown更新。§1H.3・§1H.4・§1H.5・§1H.6・§1H.13・§1H.14・§1H.16 反映） |
-| 実装 | **未着手**（Phase 4-6O〜） |
-| 最新commit | `7c35335` |
+| Phase 4-6O実装前調査 | 完了（§1H.3・§1H.4・§1H.5・§1H.6・§1H.13・§1H.14・§1H.16 反映） |
+| Phase 4-6O | **実装・専用テスト・回帰確認済み**（**§1H.18**。本Markdown更新時点では未commit） |
+| 実装 | Phase 4-6P〜未着手 |
+| 最新commit | `6efeab7` |
 | high-demand BATCH比較 | 未完了（5,000台 c=0/1：prefix violation停止。10,000台：未実行） |
 
 **次工程：**
 
-1. Phase 4-6Oの実装指示作成
-2. Phase 4-6O実装・テスト
+1. Phase 4-6P実装前に `Vehicle.update()` と `record_order_control_node_first_arrival()` を再確認
+2. Phase 4-6P実装・テスト（Node端到着時の `arrival_time`・`arrival_tiebreaker` を現在訪問状態へ記録）
 3. 正式記録・commit・push
 
 **再開時に読むもの：**
@@ -2519,6 +2520,121 @@ VehicleがNodeを実際に通過した場合、service unit側とVehicle側を**
 - `diagnostics/order_control/README.md`
 - 現在訪問状態に関連するVehicle・Node実装
 - 既存FCFS・BATCHテスト
+
+### 1H.18 Phase 4-6O実装記録
+
+**状態：** 実装・専用テスト・回帰確認済み。本Markdown更新時点では未commit。
+
+#### 1H.18.1 Vehicle属性・現在訪問辞書
+
+`Vehicle.__init__` に追加：
+
+- `order_control_visit_id = 0`
+- `order_control_current_visit = None`
+
+order-control対象Nodeへの訪問開始時の `order_control_current_visit` 辞書：
+
+```python
+{
+    "visit_id": int,
+    "node": Node,
+    "inlink": Link,
+    "earliest_arrival_timestep": int,
+    "arrival_time": None,
+    "arrival_tiebreaker": None,
+    "batch_assignment": None,
+}
+```
+
+`node` と `inlink` はオブジェクト参照。Phase 4-6Oでは、`arrival_time`、`arrival_tiebreaker`、`batch_assignment` はいずれも `None` で開始する。`arrival_time` と `arrival_tiebreaker` の記録は Phase 4-6P、`batch_assignment` の現在訪問対応は後続のBATCH対応Phaseで実装する。
+
+#### 1H.18.2 追加・維持メソッド
+
+| メソッド | 役割 |
+|----------|------|
+| `_compute_order_control_earliest_arrival_timestep_for_current_link()` | earliest arrival timestep を計算して `int` で返す |
+| `begin_order_control_visit_on_link_entry()` | Link進入後に earliest 記録・対象Node判定・visit_id増加・現在訪問辞書作成または `None` 化 |
+| `record_order_control_earliest_arrival_timestep_for_current_link()` | **維持**。既存 `order_control_earliest_arrival_timesteps` のみ更新。`visit_id` と `order_control_current_visit` には触れない |
+
+#### 1H.18.3 Link進入経路への接続
+
+`begin_order_control_visit_on_link_entry()` を次の5経路から、各Link進入につき1回だけ呼ぶ：
+
+1. `Node.generate`
+2. `Node.transfer`
+3. `Node.transfer_fcfs_no_clearance`
+4. `Node.transfer_fcfs_clearance`
+5. `serve_order_control_batch_service_queue()` 内の `_transfer_vehicle`
+
+#### 1H.18.4 visit_idの動作（実装確認済み）
+
+- order-control対象Nodeへ向かうLink進入時のみ `order_control_visit_id` を1増加
+- 対象条件：`node.order_control_eligible` かつ `node.order_control_type != "none"`
+- 対象外Nodeでは `visit_id` を増やさず `order_control_current_visit = None`
+- Originから最初に対象外Nodeへ向かう場合は `0` / `None` を維持
+- 最初の対象Node訪問で `visit_id = 1`
+- 同一対象Nodeへの再訪でも新しい `visit_id` を発行
+
+#### 1H.18.5 Earliest arrivalの段階移行（Phase 4-6O時点）
+
+- 現在訪問辞書へ `earliest_arrival_timestep` を記録
+- 既存 `order_control_earliest_arrival_timesteps` も更新（end_node 名 key）
+- 既存辞書は再訪時にも従来どおり上書き（回帰互換維持）
+- FCFS・BATCHはまだ既存辞書を参照（現在訪問状態は制御に未接続）
+- 既存辞書の初回分析履歴化は **Phase 4-6R**（BATCH参照先切替と同時）
+
+#### 1H.18.6 Phase 4-6Oで変更していない範囲
+
+- `Vehicle.update()` のNode端到着処理
+- 現在訪問への `arrival_time`・`arrival_tiebreaker` 記録（Phase 4-6P）
+- FCFSの参照先変更（Phase 4-6Q）
+- BATCH候補・形成の参照先変更（Phase 4-6R）
+- BATCH assignmentの現在訪問対応
+- service unitへの `visit_id` 追加・実通過照合（Phase 4-6S）
+- 訪問終了処理・BATCH履歴
+- high-demand比較の再実行
+
+#### 1H.18.7 専用テスト
+
+**ファイル：** `tests_order_control_current_visit_state.py`（15関数、**全件PASS**）
+
+| # | テスト関数 | 確認範囲 |
+|---|-----------|----------|
+| 1 | `test_vehicle_initial_values` | Vehicle初期値 |
+| 2 | `test_origin_to_ineligible_first_link` | 対象外Nodeへの最初のLink進入 |
+| 3 | `test_first_eligible_node_visit_via_generate` | 最初の対象Node訪問 |
+| 4 | `test_eligible_to_ineligible_clears_current_visit` | 対象Nodeから対象外Nodeへ |
+| 5 | `test_next_eligible_visit_after_ineligible_link` | 次の対象Node訪問 |
+| 6 | `test_same_eligible_node_revisit_gets_new_visit_id` | 同一対象Nodeへの再訪 |
+| 7 | `test_earliest_arrival_timestep_calculation` | earliest arrival計算 |
+| 8 | `test_legacy_earliest_dict_overwrites_on_revisit` | 既存earliest辞書の上書き互換 |
+| 9 | `test_legacy_record_method_does_not_touch_current_visit` | 既存記録メソッドの互換性 |
+| 10 | `test_incoming_vehicles_reregistration_does_not_increment_visit_id` | incoming再登録でID不変 |
+| 11 | `test_link_entry_via_node_generate` | Link進入経路：generate |
+| 12 | `test_link_entry_via_standard_transfer` | Link進入経路：標準transfer |
+| 13 | `test_link_entry_via_transfer_fcfs_no_clearance` | Link進入経路：FCFS no clearance |
+| 14 | `test_link_entry_via_transfer_fcfs_clearance` | Link進入経路：FCFS clearance |
+| 15 | `test_link_entry_via_batch_transfer_vehicle` | Link進入経路：BATCH `_transfer_vehicle` |
+
+上記のうち、Link進入経路を確認する既存4テスト（#12〜#15）を補強し、5つのLink進入経路すべてについて、進入先Linkの `end_node` がorder-control対象Nodeである場合に現在訪問状態が正しく作成されることを確認した（`Node.generate` は #3・#11 で確認）。確認した5経路は `Node.generate`、`Node.transfer`、`Node.transfer_fcfs_no_clearance`、`Node.transfer_fcfs_clearance`、`serve_order_control_batch_service_queue()` 内の `_transfer_vehicle` である。各経路では、`order_control_visit_id` が進入前より1増加すること、`order_control_current_visit` が作成されること、現在訪問の `node` が進入先Linkの `end_node`、`inlink` が進入先Linkと一致すること、`earliest_arrival_timestep` が既存式による手計算値と一致すること、`arrival_time`・`arrival_tiebreaker`・`batch_assignment` が `None` であること、既存 `order_control_earliest_arrival_timesteps` にも進入先Nodeの値が記録されることを確認した。対象外Node進入の確認も維持している：Originから対象外Nodeへ進入した場合は `visit_id` を増やさず `current visit` は `None`（#2）、対象Nodeから対象外Nodeへ進入した場合は `visit_id` を維持し `current visit` を `None` にする（#4）。
+
+#### 1H.18.8 回帰テスト（すべてPASS）
+
+- `tests_order_control_batch_earliest_arrival_timestep.py`
+- `tests_order_control_batch_state_containers.py`
+- `tests_order_control_batch_service_queue_transfer.py`
+- `tests_order_control_batch_node_transfer_integration.py`
+- `tests_order_control_batch_transfer.py`
+- `tests_order_control_eligibility.py`
+- `tests_fcfs_order_control_clearance_0.py`
+- `tests_fcfs_order_control_clearance_1.py`
+- `tests_order_exchange_baseline.py`
+- `demos_and_examples/example_00en_simple.py`
+
+**交通結果：** baseline・exampleとも既知値と一致。既存交通結果に変化なし。
+
+- baseline：48/48 trips、平均速度 16.5 m/s、総旅行時間 2928.0 s、平均旅行時間 61.0 s、平均遅延 1.0 s、遅延比 0.017、総走行距離 48000.0 m
+- example：735/810 trips、平均速度 11.7 m/s、総旅行時間 119475.0 s、平均旅行時間 162.6 s、平均遅延 62.6 s、遅延比 0.385、総走行距離 1632250.0 m
 
 ---
 
