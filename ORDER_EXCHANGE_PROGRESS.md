@@ -2673,11 +2673,11 @@ if s.order_control_eligible and s.order_control_type == "batch":
 - Phase 4-6Nのclearance=0比較テスト3本は commit `f339b88` 済み
 - Phase 4-6Nの比較・Node再訪診断の正式記録は commit `c06936c` 済み
 - Phase 4-6Nの診断スクリプト分離は commit `0e35799` 済み
-- **最新commit：** `0e35799`（Phase 4-6N 診断スクリプト分離）
+- **最新commit：** `e3243e7`（Phase 4-6O 現在訪問状態基盤）
 - Phase 4-6N Step 5：Node訪問単位の共通状態設計を設計メモ **§1H** に記録済み
-- Phase 4-6O実装前調査：完了（設計メモ **§1H** 反映）
-- Phase 4-6O：実装・専用テスト・回帰確認済み（設計メモ **§1H.18**。本Markdown更新時点では未commit）
-- **次工程：** Phase 4-6P（**§1H.18**・**§1H.17** 参照）
+- Phase 4-6O：commit `e3243e7` で完了（設計メモ **§1H.18**）
+- Phase 4-6P：実装前調査・乱数設計調査を完了（設計メモ **§1H.19**）。本番実装は未着手
+- **次工程：** §1H.19 レビュー後に Phase 4-6P 実装指示作成
 
 詳細設計・判断経緯は ORDER_EXCHANGE_PHASE4-6_BATCH_PROCESSING_DESIGN_NOTES.md **§1F**（接続）、**§1G**（診断）、**§1H**（訪問状態設計）を参照。
 
@@ -2749,7 +2749,8 @@ if s.order_control_eligible and s.order_control_type == "batch":
 
 - `order_control_node_arrival_times`、`order_control_earliest_arrival_timesteps`、`order_control_batch_assignments` 等がNode名keyのみ。
 - 訪問単位を区別できず、再訪時に過去状態が現状態として解釈される。
-- assignment削除だけでは不十分。Node訪問単位の状態設計が必要（`visit_id` は設計候補）。
+- assignment削除だけでは不十分であり、Node訪問単位の状態設計が必要。
+- `visit_id` を用いる現在訪問状態の基盤は Phase 4-6O で実装済み（commit `e3243e7`）。FCFS・BATCH への参照先変更は後続 Phase で行う。
 
 #### 未完了のhigh-demand BATCH性能比較
 
@@ -2809,7 +2810,18 @@ Phase 4-6Oとして、FCFS・BATCH共通のNode訪問単位「現在訪問状態
 
 **未実装（Phase 4-6P〜）：** Node端到着時刻・tiebreakerの現在訪問記録、FCFS/BATCH参照先変更、service unit、訪問終了処理等。
 
-**次工程：** Phase 4-6P（実装前に `Vehicle.update()` と `record_order_control_node_first_arrival()` を再確認）
+**次工程：** Phase 4-6P（設計メモ **§1H.19**・**§1H.17** 参照。実装未着手）
+
+### フェーズ4-6P：実装前調査・到着記録と乱数設計（設計記録のみ、未実装）
+
+- Phase 4-6Oは commit `e3243e7` で完了
+- Phase 4-6P実装前調査を完了
+- 初回 tiebreaker は既存どおり `W.rng`
+- 再訪 tiebreaker は独立 `order_control_rng`（`random_seed` から `SeedSequence` で派生）
+- `W.rng` の既存乱数列は変更しない
+- Phase 4-6P 本番実装は未着手
+- 次は正式記録レビュー後に実装指示作成
+- 詳細は設計メモ **§1H.19**
 
 ### フェーズ4-6設計議論：目的地Vehicle・比較対象Node・batch順序（設計確定、未実装）
 
@@ -3153,10 +3165,10 @@ Nodeへの追加メソッド（Phase 4-6関連）：
 2. clearance=0比較3本 — **完了**（`f339b88`）
 3. 正式Markdown記録 — **完了**（`c06936c`）
 4. 診断スクリプト分離 — **完了**（`0e35799`）
-5. Node訪問単位の状態設計 — **完了**（**§1H**。本Markdown更新時点では未commit）
-6. §1H設計レビュー
-7. 実コード・既存テスト調査
-8. Phase 4-6O実装・テスト
+5. Node訪問単位の状態設計 — **完了**（**§1H**、commit `7c35335`）
+6. §1H設計レビュー — **完了**
+7. 実コード・既存テスト調査 — **完了**
+8. Phase 4-6O実装・テスト — **完了**（`e3243e7`）
 9. FCFS・BATCHの訪問対応（Phase 4-6P〜4-6S）
 10. 小規模再訪テスト・high-demand再実行（Phase 4-6T〜4-6U）
 
