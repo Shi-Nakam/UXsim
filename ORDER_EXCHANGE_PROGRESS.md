@@ -2672,10 +2672,12 @@ if s.order_control_eligible and s.order_control_type == "batch":
 - Phase 4-6Nのroute_next_link参照順修正は commit `05fa2d1` 済み
 - Phase 4-6Nのclearance=0比較テスト3本は commit `f339b88` 済み
 - Phase 4-6Nの比較・Node再訪診断の正式記録は commit `c06936c` 済み
-- **最新commit：** `c06936c`（Phase 4-6N 正式記録）
-- 診断スクリプト（`diagnostics/order_control/` 4本＋README）・本Markdown更新2ファイル：**未commit**
+- Phase 4-6Nの診断スクリプト分離は commit `0e35799` 済み
+- **最新commit：** `0e35799`（Phase 4-6N 診断スクリプト分離）
+- Phase 4-6N Step 5：Node訪問単位の共通状態設計を設計メモ **§1H** に記録済み（本Markdown更新時点では未commit）
+- **実装は未着手**（Phase 4-6O〜）
 
-詳細設計・判断経緯は ORDER_EXCHANGE_PHASE4-6_BATCH_PROCESSING_DESIGN_NOTES.md **§1F** を参照。Phase 4-6Nの比較・診断は **§1G** を参照。
+詳細設計・判断経緯は ORDER_EXCHANGE_PHASE4-6_BATCH_PROCESSING_DESIGN_NOTES.md **§1F**（接続）、**§1G**（診断）、**§1H**（訪問状態設計）を参照。
 
 ### フェーズ4-6N：比較テストとNode再訪状態の診断
 
@@ -2714,27 +2716,27 @@ if s.order_control_eligible and s.order_control_type == "batch":
 
 #### 診断スクリプトへ分離（clearance=1 high-demand）
 
-- 診断スクリプト：`diagnostics/order_control/batch_clearance_one_vs_fcfs_vs_signalized_uxsim_all_red_grid_high_demand_diagnostic.py`（通常回帰テストから分離済み・**未commit**）
+- 診断スクリプト：`diagnostics/order_control/batch_clearance_one_vs_fcfs_vs_signalized_uxsim_all_red_grid_high_demand_diagnostic.py`（`0e35799` commit済み）
 - signalized all-red：`signal=[60, 1, 60, 1]`（phase 0=東西方向が青、phase 1=全赤、phase 2=南北方向が青、phase 3=全赤）、staggered offset
 - 5,000台BATCHで prefix violation（`g_5_4`、`h_5_3_4`、`veh_1952`）。10,000台BATCH未実行。
 - signalized all-red vs FCFSは再現：5000台 ratio ≈ 1.386、10000台 ≈ 1.142。
 
 #### 診断スクリプトへ分離（clearance=0 high-demand再現）
 
-- 診断スクリプト：`diagnostics/order_control/batch_clearance_zero_vs_fcfs_vs_signalized_uxsim_grid_high_demand_5000_diagnostic.py`（通常回帰テストから分離済み・**未commit**）
+- 診断スクリプト：`diagnostics/order_control/batch_clearance_zero_vs_fcfs_vs_signalized_uxsim_grid_high_demand_5000_diagnostic.py`（`0e35799` commit済み）
 - W.T=605で prefix violation（`g_4_1`、`v_5_4_1`、`veh_1619`）。
 - **clearance=0でも再現。** clearance=1 queue滞留は必要条件ではない。
 
 #### 診断スクリプトへ分離（batch ID 318 lifecycle）
 
-- 診断スクリプト：`diagnostics/order_control/batch_assignment_318_lifecycle_diagnostic.py`（通常回帰テストから分離済み・**未commit**）
+- 診断スクリプト：`diagnostics/order_control/batch_assignment_318_lifecycle_diagnostic.py`（`0e35799` commit済み）
 - W.T=583：veh_1619がg_4_1を通過、service unit 318は**正常削除**、assignment 318のみ残存。
 - W.T=604–605：別inlinkから再接近、prefix violation。
 - **service unit誤削除ではない。**
 
 #### 診断スクリプトへ分離（Node再訪）
 
-- 診断スクリプト：`diagnostics/order_control/node_revisit_high_demand_5000_diagnostic.py`（通常回帰テストから分離済み・**未commit**）
+- 診断スクリプト：`diagnostics/order_control/node_revisit_high_demand_5000_diagnostic.py`（`0e35799` commit済み）
 - T≤605再接近：signalized 17 / 4207（約0.40%）、FCFS 10 / 4442（約0.23%）、BATCH 12 / 4412（約0.27%）。分母は各方式でT≤605までに1回以上Nodeへ接近したVehicle数（全5,000台ではない）
 - 全期間：signalized **42.7%**、FCFS **23.0%** が再訪（BATCHはT=605で停止のため全期間未取得）。
 - **Node再訪はBATCH固有ではない。**
@@ -2751,19 +2753,26 @@ if s.order_control_eligible and s.order_control_type == "batch":
 
 - 5,000台・10,000台のBATCH clearance=0/1比較は prefix violationで未完了または未実行。性能結果は取得済みと記載しない。
 
-#### 診断スクリプトの保存状態
-
-- 診断スクリプト4本は通常回帰テストから**分離済み**。保存先は `diagnostics/order_control/`。ファイル名は `tests_` で始まらない。通常の自動テスト探索対象に含めない。
-- 既知のprefix violationを意図的に再現する。非zero終了は診断結果であり、通常テスト失敗ではない。
-- 診断スクリプトの目的、既知の非zero終了、実行方法については `diagnostics/order_control/README.md` を参照。
-
 #### コミット状況
 
 - Phase 4-6Nの実装・比較テスト：`05fa2d1`、`f339b88` commit済み。
 - Phase 4-6Nの正式記録：`c06936c` commit済み。
-- 診断スクリプト（`diagnostics/order_control/` 4本＋README）：**分離済み・未commit**。
+- Phase 4-6Nの診断スクリプト分離：`0e35799` commit済み（`diagnostics/order_control/`）。
 
-詳細は ORDER_EXCHANGE_PHASE4-6_BATCH_PROCESSING_DESIGN_NOTES.md **§1G** を参照。
+### フェーズ4-6N Step 5：Node訪問単位の共通状態設計（設計記録済み・未実装）
+
+Phase 4-6N Step 5として、FCFS・BATCH共通のNode訪問単位状態設計を検討し、設計メモ **§1H** に正式記録した。**実装は未着手。**
+
+**要点：**
+
+- `visit_id`：Vehicleごとの単調増加整数。新Link進入時に増加。`incoming_vehicles` 再登録では増加しない。
+- 現在訪問状態：order-control対象Nodeへの訪問のみ1件保持（visit_id、Node、inlink、earliest arrival、到着時刻、tiebreaker、現在assignment）。
+- 既存の `order_control_node_arrival_times` 等は**初回分析履歴**として維持（再訪時に上書きしない）。FCFS・BATCHの現在制御には使わない。
+- FCFS・BATCHは現在訪問状態を参照。service unit登録時に `visit_id` を保存。通過時にservice unit側とVehicle側を別々に更新。
+- 属性構造、service unit形式、BATCH履歴構造等は実コード確認後に最終決定（§1H.16）。
+- high-demand BATCH性能比較は未完了（prefix violationで停止または未実行）。
+
+詳細は ORDER_EXCHANGE_PHASE4-6_BATCH_PROCESSING_DESIGN_NOTES.md **§1H** を参照。診断スクリプトは `diagnostics/order_control/README.md` を参照。
 
 ### フェーズ4-6設計議論：目的地Vehicle・比較対象Node・batch順序（設計確定、未実装）
 
@@ -3059,8 +3068,8 @@ Nodeへの追加メソッド（Phase 4-6関連）：
 - **phase 4-6K：** `serve_order_control_batch_service_queue()` により、登録済みservice queueに基づくVehicle実通過を実装済み（commit `12e8eae`、単体）。新規Phase 4-6Kテスト1本（33テスト関数）
 - **phase 4-6L：** `transfer_batch()` により、BATCH形成と実通過を各1回呼ぶ統括メソッドを実装済み（commit `e9f3ce9`）。新規Phase 4-6Lテスト1本（17テスト関数）
 - **phase 4-6M：** `Node.transfer()` へのBATCH分岐接続、実シミュレーション時系列、Vehicle引継ぎ、N=1 BATCHとclearance付きFCFSの完全一致を実装・テスト済み（commit `b03538c`）。新規Phase 4-6Mテスト1本（13テスト関数）
-- **phase 4-6N：** route_next_link参照順修正（`05fa2d1`）、clearance=0比較テスト3本（`f339b88`）、正式記録（`c06936c`）。診断スクリプトは `diagnostics/order_control/` へ分離済み・**未commit**
-- **現時点の主要課題：** Node再訪を区別しないorder-control状態管理（設計メモ **§1G**）
+- **phase 4-6N：** route_next_link参照順修正（`05fa2d1`）、clearance=0比較テスト3本（`f339b88`）、正式記録（`c06936c`）、診断スクリプト分離（`0e35799`）。Node訪問単位の共通状態設計は **§1H** に記録済み（**実装未着手**）
+- **現時点の主要課題：** §1H設計の実装（Phase 4-6O〜。設計メモ **§1H**）
 - Level 2、trip-end Vehicle対応、Time-value Transactionは未実装
 - `earliest_arrival_timestep` はリンク進入時に記録し、候補包含条件に使用する（実装済み）
 - `t_trigger` Level 0/1推定は参照専用ヘルパーとして実装済み。計算式に `W.T` は含めない
@@ -3071,8 +3080,8 @@ Nodeへの追加メソッド（Phase 4-6関連）：
 - **現時点の暫定比較設定：** `order_control_batch_t_trigger_level=1`（Level 2実装前。clearance=0比較テスト3本などで使用）
 - 当面の研究シナリオでは、比較対象内部交差点Nodeを目的地としない端点間ODを使用する
 - 比較対象Node共通管理・目的地自動検証は将来課題として保留
-- 次工程（§1G.15 Step 5）：Node訪問単位の状態設計 → 設計レビュー → FCFS・BATCHの訪問対応 → 小規模再訪テスト → high-demand再実行
-- 詳細設計・判断経緯は ORDER_EXCHANGE_PHASE4-6_BATCH_PROCESSING_DESIGN_NOTES.md **§1C**（形成・登録）、**§1D**（実通過）、**§1E**（統括）、**§1F**（`Node.transfer()` 接続）、**§1G**（比較・診断）を参照
+- 次工程（§1H.17）：§1H設計レビュー → 実コード調査 → Phase 4-6O実装
+- 詳細設計・判断経緯は ORDER_EXCHANGE_PHASE4-6_BATCH_PROCESSING_DESIGN_NOTES.md **§1C**（形成・登録）、**§1D**（実通過）、**§1E**（統括）、**§1F**（`Node.transfer()` 接続）、**§1G**（比較・診断）、**§1H**（訪問状態設計）を参照
 
 ### テスト追加方針
 
@@ -3092,28 +3101,27 @@ Nodeへの追加メソッド（Phase 4-6関連）：
 - Step 4A〜4Eとして、FCFS sanity check比較を追加済み。
 - phase 4-6A〜4-6M：BATCH形成〜`Node.transfer()` 接続まで実装・commit済み（4-6Mは `b03538c`）。
 - **phase 4-6N（commit済み）：**
-  - `05fa2d1`：route_next_link参照順修正、回帰テスト `test_not_arrived_without_route_next_link_attribute`
-  - `f339b88`：clearance=0比較テスト3本（medium・unsignalized grid・signalized grid）。Node再訪状態修正**前**の基準値
-  - `c06936c`：比較結果・Node再訪診断結果の正式Markdown記録
-- **phase 4-6N（診断）：** 4本＋READMEを `diagnostics/order_control/` へ分離済み・**未commit**
-- **phase 4-6N（本Markdown更新）：** 診断パス参照更新（本更新。未commit）
-- clearance=0ではBATCHとFCFSはほぼ同等（medium ratio 1.0003、grid ratio 1.0006）。BATCHがごくわずかに長い
+  - `05fa2d1`：route_next_link参照順修正
+  - `f339b88`：clearance=0比較テスト3本
+  - `c06936c`：比較結果・Node再訪診断の正式記録
+  - `0e35799`：診断スクリプトを `diagnostics/order_control/` へ分離
+- **phase 4-6N Step 5：** Node訪問単位の共通状態設計を **§1H** に記録済み（本Markdown更新時点では未commit）。**実装は未着手**
+- clearance=0ではBATCHとFCFSはほぼ同等（medium ratio 1.0003、grid ratio 1.0006）
 - high-demand BATCH比較（5,000台・10,000台、clearance=0/1）はprefix violationで未完了または未実行
-- **現時点の主要課題：** Node再訪を区別しないorder-control状態管理
-- **最新commit：** `c06936c` phase 4-6N: document clearance-zero UXsim-FCFS-BATCH comparisons and node-revisit diagnostics
+- **最新commit：** `0e35799` phase 4-6N: store node-revisit and BATCH prefix-violation diagnostics separately from regression tests
 
-次工程（合意した作業順。設計メモ **§1G.15**）：
+次工程（設計メモ **§1H.17**）：
 
-1. route_next_link確認順修正を独立commit — **完了**（`05fa2d1`）
-2. 成功済みclearance=0比較3本を独立commit — **完了**（`f339b88`）
-3. 比較結果とNode再訪診断結果を正式Markdownへ記録 — **完了**（`c06936c`）
-4. 診断スクリプトを通常テストと分離して保存 — **完了**（`diagnostics/order_control/`。本Markdown更新時点では未commit）
-5. Node訪問単位の状態設計を作成
-6. 設計レビュー
-7. FCFS・BATCHの順で訪問対応を実装
-8. 小規模再訪テスト
-9. 5,000台clearance=0を再実行
-10. 5,000台・10,000台clearance=1を再実行
+1. route_next_link確認順修正 — **完了**（`05fa2d1`）
+2. clearance=0比較3本 — **完了**（`f339b88`）
+3. 正式Markdown記録 — **完了**（`c06936c`）
+4. 診断スクリプト分離 — **完了**（`0e35799`）
+5. Node訪問単位の状態設計 — **完了**（**§1H**。本Markdown更新時点では未commit）
+6. §1H設計レビュー
+7. 実コード・既存テスト調査
+8. Phase 4-6O実装・テスト
+9. FCFS・BATCHの訪問対応（Phase 4-6P〜4-6S）
+10. 小規模再訪テスト・high-demand再実行（Phase 4-6T〜4-6U）
 
 その後の後続フェーズ候補：
 
@@ -3134,7 +3142,7 @@ Nodeへの追加メソッド（Phase 4-6関連）：
 新しいチャットでは、以下を伝える。
 
 - ORDER_EXCHANGE_PROGRESS.md を読んでください
-- ORDER_EXCHANGE_PHASE4-6_BATCH_PROCESSING_DESIGN_NOTES.md を読んでください（**§1G** を優先参照）
+- ORDER_EXCHANGE_PHASE4-6_BATCH_PROCESSING_DESIGN_NOTES.md を読んでください（**§1H** を優先参照。診断は **§1G**）
 - ORDER_EXCHANGE_PHASE4-5_CLEARANCE_FCFS_DESIGN_NOTES.md を読んでください
 - tests_order_control_batch_earliest_arrival_timestep.py を読んでください
 - tests_order_control_batch_state_containers.py を読んでください
@@ -3165,18 +3173,17 @@ Nodeへの追加メソッド（Phase 4-6関連）：
 - 現在の通常fcfs経路は `transfer_fcfs_clearance()` を呼ぶ
 - `transfer_fcfs_no_clearance()` は回帰確認・デバッグ用に残っている
 - Phase 4-6A〜4-6Mまで完了（実装・テスト・commit済み。4-6Mは `b03538c`）
-- Phase 4-6N（commit済み）：route_next_link参照順修正（`05fa2d1`）、clearance=0比較テスト3本（`f339b88`）、正式記録（`c06936c`）
-- Phase 4-6N（診断）：`diagnostics/order_control/README.md`、`diagnostics/order_control/batch_assignment_318_lifecycle_diagnostic.py`、`diagnostics/order_control/batch_clearance_one_vs_fcfs_vs_signalized_uxsim_all_red_grid_high_demand_diagnostic.py`、`diagnostics/order_control/batch_clearance_zero_vs_fcfs_vs_signalized_uxsim_grid_high_demand_5000_diagnostic.py`、`diagnostics/order_control/node_revisit_high_demand_5000_diagnostic.py`（通常回帰テストから分離済み・**未commit**）
-- 診断スクリプトの目的、既知の非zero終了、実行方法については `diagnostics/order_control/README.md` を参照
-- **最新commit：** `c06936c` phase 4-6N: document clearance-zero UXsim-FCFS-BATCH comparisons and node-revisit diagnostics
-- **直前commit：** `f339b88` phase 4-6N: add clearance-zero BATCH comparison tests before node-revisit state fix
-- **その前：** `05fa2d1` phase 4-6N: defer route_next_link lookup until batch vehicle arrival
-- Step 1：完了・commit済み（`05fa2d1`）。Step 2：完了・commit済み（`f339b88`）。Step 3：完了・commit済み（`c06936c`）。Step 4：通常テストからの分離完了・**未commit**。次はStep 5：Node訪問単位の状態設計
-- **現時点の主要課題：** Node再訪を区別しないorder-control状態管理。BATCH prefix violationは過去assignment残存とNode再訪の組合せ。service unit誤削除ではない
-- Node再訪はBATCH固有ではない（signalized全期間42.7%、FCFS 23.0%）。FCFSも過去到着状態の再利用可能性を検討する必要あり
-- high-demand BATCH性能比較（5,000台・10,000台）は未完了。性能結果は取得済みと記載しない
-- 次工程（§1G.15 Step 5）：Node訪問単位の状態設計 → 設計レビュー → FCFS・BATCHの訪問対応 → 小規模再訪テスト → high-demand再実行
-- ORDER_EXCHANGE_PHASE4-6_BATCH_PROCESSING_DESIGN_NOTES.md の **§1G** を優先参照。`Node.transfer()` 接続は **§1F**、統括は **§1E**、実通過は **§1D**、形成・登録は **§1C**
+- Phase 4-6N（commit済み）：`05fa2d1`、`f339b88`、`c06936c`、`0e35799`
+- Phase 4-6N Step 5：Node訪問単位の共通状態設計を **§1H** に記録済み（本Markdown更新時点では未commit）。**実装は未着手**
+- 診断スクリプト：`diagnostics/order_control/README.md` および同ディレクトリ内4本（`0e35799` commit済み）
+- **最新commit：** `0e35799` phase 4-6N: store node-revisit and BATCH prefix-violation diagnostics separately from regression tests
+- **直前commit：** `c06936c`
+- Step 1〜4：完了・commit済み。Step 5：設計記録完了（§1H、未commit）。次は§1H設計レビュー → Phase 4-6O
+- **現時点の主要課題：** §1H設計の実装（Phase 4-6O〜）。BATCH prefix violationの根本原因は過去assignment残存とNode再訪の組合せ（§1G）
+- Node再訪はBATCH固有ではない（signalized全期間42.7%、FCFS 23.0%）
+- high-demand BATCH性能比較は未完了
+- 次工程（§1H.17）：§1H設計レビュー → 実コード調査 → Phase 4-6O実装
+- ORDER_EXCHANGE_PHASE4-6_BATCH_PROCESSING_DESIGN_NOTES.md の **§1H** を優先参照
 - 次に読む実装：`Vehicle.record_order_control_node_first_arrival()`、earliest arrival記録処理、`Vehicle.update()`、`Vehicle.route_next_link_choice()`、`Node.transfer_fcfs_clearance()`、`Node.form_order_control_batch()`、`Node.get_order_control_batch_candidates_by_inlink()`、`Node.serve_order_control_batch_service_queue()`
 - 目的地Vehicleの扱いは端点間OD前提で保留。比較対象Node共通管理・目的地自動検証は将来課題
 - 一時退避PDF `phase4-6A_batch_earliest_arrival_timestep_memo.pdf` はリポジトリ外。正式Markdownを優先参照
