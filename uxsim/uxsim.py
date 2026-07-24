@@ -3243,6 +3243,11 @@ class World:
         ## parameter setting
         
         W.rng = np.random.default_rng(seed=random_seed)
+        order_control_seed_sequence = np.random.SeedSequence(random_seed)
+        order_control_child_seed_sequence = order_control_seed_sequence.spawn(1)[0]
+        W.order_control_rng = np.random.default_rng(
+            order_control_child_seed_sequence
+        )
         W.random_seed = random_seed
 
         W.TMAX = tmax   #simulation time (s)
