@@ -205,6 +205,7 @@ def test_fcfs_node_calls_fcfs_once():
     out = W.get_link("out")
     veh = _make_vehicle(W, "orig1", "A1")
     _setup_arrived_vehicle(merge, veh, link1, out, 0, 10.0, 0.1, 200.0, move_remain=5.0)
+    _begin_arrived_current_visit_for_test(veh, merge, link1, 0, 10.0, 0.1)
     state = _install_call_wrappers(merge)
     try:
         result = merge.transfer()
