@@ -288,11 +288,7 @@ def test_origin_to_ineligible_first_link():
 
     assert veh.order_control_visit_id == 0
     _assert_current_visit_none(veh)
-    link_entry = int(round(veh.link_arrival_time / W.DELTAT))
-    expected = expected_earliest_arrival_timestep(
-        link_entry, link_o_m, W, W.order_control_batch_tau_timesteps
-    )
-    assert veh.order_control_earliest_arrival_timesteps["m"] == expected
+    assert veh.order_control_earliest_arrival_timesteps == {}
 
 
 def test_first_eligible_node_visit_via_generate():
@@ -344,7 +340,7 @@ def test_eligible_to_ineligible_clears_current_visit():
     assert veh.link.name == "out"
     assert veh.order_control_visit_id == 1
     _assert_current_visit_none(veh)
-    assert "dest" in veh.order_control_earliest_arrival_timesteps
+    assert "dest" not in veh.order_control_earliest_arrival_timesteps
 
 
 def test_next_eligible_visit_after_ineligible_link():
@@ -472,14 +468,14 @@ def test_earliest_arrival_timestep_calculation():
     assert computed == expected
 
 
-def test_legacy_earliest_dict_overwrites_on_revisit():
-    W = _build_revisit_world("current_visit_legacy_overwrite")
+def test_legacy_earliest_dict_preserves_first_visit_on_revisit():
+    W = _build_revisit_world("current_visit_legacy_preserve")
     merge = W.get_node("merge")
     link1 = W.get_link("link1")
     link2 = W.get_link("link2")
     out = W.get_link("out")
     mid_orig2 = W.get_link("mid_orig2")
-    veh = W.addVehicle("orig1", "dest", 0, name="veh_legacy_overwrite")
+    veh = W.addVehicle("orig1", "dest", 0, name="veh_legacy_preserve")
 
     _advance_until_on_link(veh, "link1")
     first_value = veh.order_control_earliest_arrival_timesteps["merge"]
@@ -502,7 +498,7 @@ def test_legacy_earliest_dict_overwrites_on_revisit():
 
     while veh.link.name != "mid_orig2":
         if not W.check_simulation_ongoing():
-            raise AssertionError("Vehicle did not reach mid_orig2 for overwrite test")
+            raise AssertionError("Vehicle did not reach mid_orig2 for preserve test")
         W.exec_simulation(duration_t2=1)
 
     orig2 = W.get_node("orig2")
@@ -511,20 +507,21 @@ def test_legacy_earliest_dict_overwrites_on_revisit():
     orig2.incoming_vehicles = [veh]
     orig2.transfer()
 
-    second_value = veh.order_control_earliest_arrival_timesteps["merge"]
-    assert second_value != first_value
+    assert veh.order_control_earliest_arrival_timesteps["merge"] == first_value
     link_entry = int(round(veh.link_arrival_time / W.DELTAT))
-    expected = expected_earliest_arrival_timestep(
+    expected_revisit = expected_earliest_arrival_timestep(
         link_entry, link2, W, W.order_control_batch_tau_timesteps
     )
-    assert second_value == expected
+    assert veh.order_control_current_visit["earliest_arrival_timestep"] == expected_revisit
+    assert expected_revisit != first_value
+    assert veh.get_order_control_batch_earliest_arrival_timestep(merge) == expected_revisit
 
 
 def test_legacy_record_method_does_not_touch_current_visit():
-    W = _build_corridor_world("current_visit_legacy_record_only")
-    link_o_m = W.get_link("o_m")
-    veh = W.addVehicle("o", "d", 0, name="veh_legacy_record_only")
-    veh.link = link_o_m
+    W = _build_merge_world("current_visit_legacy_record_only", order_control_type="batch")
+    link1 = W.get_link("link1")
+    veh = W.addVehicle("orig1", "dest", 0, name="veh_legacy_record_only")
+    veh.link = link1
     veh.link_arrival_time = 0.0
 
     assert veh.order_control_visit_id == 0
@@ -535,9 +532,9 @@ def test_legacy_record_method_does_not_touch_current_visit():
     assert veh.order_control_visit_id == 0
     _assert_current_visit_none(veh)
     expected = expected_earliest_arrival_timestep(
-        0, link_o_m, W, W.order_control_batch_tau_timesteps
+        0, link1, W, W.order_control_batch_tau_timesteps
     )
-    assert veh.order_control_earliest_arrival_timesteps["m"] == expected
+    assert veh.order_control_earliest_arrival_timesteps["merge"] == expected
 
 
 def test_incoming_vehicles_reregistration_does_not_increment_visit_id():
@@ -700,7 +697,7 @@ TESTS = [
     test_next_eligible_visit_after_ineligible_link,
     test_same_eligible_node_revisit_gets_new_visit_id,
     test_earliest_arrival_timestep_calculation,
-    test_legacy_earliest_dict_overwrites_on_revisit,
+    test_legacy_earliest_dict_preserves_first_visit_on_revisit,
     test_legacy_record_method_does_not_touch_current_visit,
     test_incoming_vehicles_reregistration_does_not_increment_visit_id,
     test_link_entry_via_node_generate,

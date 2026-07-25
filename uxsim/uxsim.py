@@ -2780,6 +2780,89 @@ class Vehicle:
             )
         return (arrival_time, arrival_tiebreaker, s.id)
 
+    def _require_order_control_current_visit_for_batch(s, node):
+        """
+        Return the current visit dict for BATCH formation reads at an order-control node.
+
+        Notes
+        -----
+        Internal helper for BATCH current-visit accessors. Raises ``ValueError`` when
+        ``order_control_current_visit`` is ``None`` or when the current visit's
+        ``node`` is not the given ``node``. Field-specific validation is performed by
+        the caller.
+        """
+        current_visit = s.order_control_current_visit
+        if current_visit is None:
+            raise ValueError(
+                f"Vehicle {s.name}: order_control_current_visit is None at "
+                f"order-control node {node.name}."
+            )
+        if current_visit["node"] is not node:
+            raise ValueError(
+                f"Vehicle {s.name}: order_control_current_visit node "
+                f"{current_visit['node'].name!r} does not match BATCH node "
+                f"{node.name!r}."
+            )
+        return current_visit
+
+    def get_order_control_batch_trigger_rank_key(s, node):
+        """
+        Return the BATCH trigger-candidate ordering key for this vehicle at a node.
+
+        Notes
+        -----
+        Returns ``(arrival_time, arrival_tiebreaker, veh.id)`` from
+        ``order_control_current_visit`` for arrived trigger candidates. Legacy
+        first-visit dictionaries keyed by node name
+        (``order_control_node_arrival_times`` /
+        ``order_control_node_arrival_tiebreakers``) are not consulted.
+
+        Raises
+        ------
+        ValueError
+            If ``order_control_current_visit`` is ``None``, if the current visit's
+            ``node`` is not the given ``node``, or if ``arrival_time`` and/or
+            ``arrival_tiebreaker`` are not both recorded (including when both are
+            ``None`` at BATCH trigger rank-read time).
+        """
+        current_visit = s._require_order_control_current_visit_for_batch(node)
+        arrival_time = current_visit["arrival_time"]
+        arrival_tiebreaker = current_visit["arrival_tiebreaker"]
+        if arrival_time is None or arrival_tiebreaker is None:
+            raise ValueError(
+                f"Vehicle {s.name}: incomplete arrival state at node {node.name}: "
+                f"arrival_time={arrival_time!r}, "
+                f"arrival_tiebreaker={arrival_tiebreaker!r}."
+            )
+        return (arrival_time, arrival_tiebreaker, s.id)
+
+    def get_order_control_batch_earliest_arrival_timestep(s, node):
+        """
+        Return the earliest arrival timestep for BATCH formation from the current visit.
+
+        Notes
+        -----
+        Reads ``order_control_current_visit["earliest_arrival_timestep"]``. The legacy
+        dictionary ``order_control_earliest_arrival_timesteps`` is not consulted.
+        For pre-arrival inlink candidates, ``arrival_time`` and ``arrival_tiebreaker``
+        may remain ``None``; only ``earliest_arrival_timestep`` must be recorded.
+
+        Raises
+        ------
+        ValueError
+            If ``order_control_current_visit`` is ``None``, if the current visit's
+            ``node`` is not the given ``node``, or if ``earliest_arrival_timestep`` is
+            ``None``.
+        """
+        current_visit = s._require_order_control_current_visit_for_batch(node)
+        earliest_arrival_timestep = current_visit["earliest_arrival_timestep"]
+        if earliest_arrival_timestep is None:
+            raise ValueError(
+                f"Vehicle {s.name}: earliest_arrival_timestep is None at node "
+                f"{node.name}."
+            )
+        return earliest_arrival_timestep
+
     def record_order_control_node_arrival(s, node):
         """
         Record arrival time and tiebreaker for the current visit at an order-control node.
@@ -2876,18 +2959,24 @@ class Vehicle:
         ``vehicle.link.end_node.name``. Timesteps are used throughout; convert to seconds
         with ``timestep * W.DELTAT`` only when needed for display.
 
-        This method records only the legacy earliest-arrival dictionary. It does not
-        update ``order_control_visit_id`` or ``order_control_current_visit``.
+        This method records only the legacy earliest-arrival dictionary on a vehicle's
+        first visit to an order-control target node. It does not overwrite an existing
+        entry on revisit. It does not update ``order_control_visit_id`` or
+        ``order_control_current_visit``.
         """
         if s.link is None:
+            return
+
+        node = s.link.end_node
+        if not node.order_control_eligible or node.order_control_type == "none":
+            return
+        if node.name in s.order_control_earliest_arrival_timesteps:
             return
 
         earliest_arrival_timestep = (
             s._compute_order_control_earliest_arrival_timestep_for_current_link()
         )
-        s.order_control_earliest_arrival_timesteps[s.link.end_node.name] = (
-            earliest_arrival_timestep
-        )
+        s.order_control_earliest_arrival_timesteps[node.name] = earliest_arrival_timestep
 
     def begin_order_control_visit_on_link_entry(s):
         """
@@ -2896,10 +2985,12 @@ class Vehicle:
         Notes
         -----
         Called once immediately after a vehicle enters a link and ``link_arrival_time``
-        is set. Always records the earliest arrival timestep in the legacy dictionary.
-        If the link's ``end_node`` is order-control eligible, increments
-        ``order_control_visit_id`` and creates ``order_control_current_visit``.
-        Otherwise clears ``order_control_current_visit`` without incrementing the visit id.
+        is set. On a vehicle's first visit to an order-control target node, records the
+        earliest arrival timestep in the legacy first-visit dictionary. On revisit, the
+        legacy dictionary is not modified. If the link's ``end_node`` is order-control
+        eligible, increments ``order_control_visit_id`` and creates
+        ``order_control_current_visit``. Otherwise clears ``order_control_current_visit``
+        without incrementing the visit id.
         """
         if s.link is None:
             return
@@ -2908,9 +2999,12 @@ class Vehicle:
             s._compute_order_control_earliest_arrival_timestep_for_current_link()
         )
         node = s.link.end_node
-        s.order_control_earliest_arrival_timesteps[node.name] = earliest_arrival_timestep
 
         if node.order_control_eligible and node.order_control_type != "none":
+            if node.name not in s.order_control_earliest_arrival_timesteps:
+                s.order_control_earliest_arrival_timesteps[node.name] = (
+                    earliest_arrival_timestep
+                )
             s.order_control_visit_id += 1
             s.order_control_current_visit = {
                 "visit_id": s.order_control_visit_id,
