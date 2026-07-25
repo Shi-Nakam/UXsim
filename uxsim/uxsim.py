@@ -2415,7 +2415,11 @@ class Vehicle:
             visit has started yet. Initialized to ``0``.
         order_control_current_visit : dict or None
             Current visit state for the order-control target node this vehicle is approaching, or ``None``
-            when not approaching such a node. Initialized to ``None``.
+            when not approaching such a node. Initialized to ``None``. When present, ``arrival_time`` holds
+            the simulation time in seconds when this visit was first registered in the node's
+            ``incoming_vehicles`` list; ``arrival_tiebreaker`` is a fixed uniform random value for this
+            visit (from ``W.rng`` on first visit to the node, or ``W.order_control_rng`` on revisit).
+            Both are ``None`` until link-end arrival registration.
         """
 
         s.W = W
@@ -2591,7 +2595,7 @@ class Vehicle:
                         s.route_next_link_choice()
                         node = s.link.end_node
                         node.incoming_vehicles.append(s)
-                        s.record_order_control_node_first_arrival(node)
+                        s.record_order_control_node_arrival(node)
 
                 elif len(s.link.end_node.outlinks.values()) == 0 and s.trip_abort == 1:
                     #prepare for trip abort due to dead end
@@ -2606,7 +2610,7 @@ class Vehicle:
                     s.route_next_link_choice()
                     node = s.link.end_node
                     node.incoming_vehicles.append(s)
-                    s.record_order_control_node_first_arrival(node)
+                    s.record_order_control_node_arrival(node)
         
         if s.state in ["end", "abort"] :
             #ended the trip
@@ -2744,6 +2748,67 @@ class Vehicle:
             return
         s.order_control_node_arrival_times[node.name] = s.W.T * s.W.DELTAT
         s.order_control_node_arrival_tiebreakers[node.name] = s.W.rng.random()
+
+    def record_order_control_node_arrival(s, node):
+        """
+        Record arrival time and tiebreaker for the current visit at an order-control node.
+
+        Notes
+        -----
+        Called when this vehicle is registered in ``node.incoming_vehicles`` at link end.
+        ``arrival_time`` is ``W.T * W.DELTAT`` (seconds). For the current visit, both
+        ``arrival_time`` and ``arrival_tiebreaker`` are set once per visit and are not
+        overwritten on re-registration within the same visit.
+
+        On a vehicle's first arrival at ``node``, the tiebreaker is drawn once from ``W.rng``
+        and stored in both the current visit and the legacy first-visit dictionaries
+        (``order_control_node_arrival_times`` / ``order_control_node_arrival_tiebreakers``).
+        On revisit, the tiebreaker is drawn once from ``W.order_control_rng`` and stored only
+        in the current visit; legacy first-visit dictionaries are not modified.
+
+        Only nodes with ``order_control_eligible=True`` and ``order_control_type != "none"``
+        are processed. Non-target nodes return immediately without side effects.
+        """
+        if not node.order_control_eligible:
+            return
+        if node.order_control_type == "none":
+            return
+
+        current_visit = s.order_control_current_visit
+        if current_visit is None:
+            raise ValueError(
+                f"Vehicle {s.name}: order_control_current_visit is None at "
+                f"order-control node {node.name}."
+            )
+        if current_visit["node"] is not node:
+            raise ValueError(
+                f"Vehicle {s.name}: order_control_current_visit node "
+                f"{current_visit['node'].name!r} does not match arrival node {node.name!r}."
+            )
+
+        current_arrival_time = current_visit["arrival_time"]
+        current_arrival_tiebreaker = current_visit["arrival_tiebreaker"]
+        if (current_arrival_time is None) != (current_arrival_tiebreaker is None):
+            raise ValueError(
+                f"Vehicle {s.name}: inconsistent arrival state at node {node.name}: "
+                f"arrival_time={current_arrival_time!r}, "
+                f"arrival_tiebreaker={current_arrival_tiebreaker!r}."
+            )
+
+        if current_arrival_time is not None:
+            return
+
+        arrival_time = s.W.T * s.W.DELTAT
+        if node.name not in s.order_control_node_arrival_times:
+            arrival_tiebreaker = s.W.rng.random()
+            current_visit["arrival_time"] = arrival_time
+            current_visit["arrival_tiebreaker"] = arrival_tiebreaker
+            s.order_control_node_arrival_times[node.name] = arrival_time
+            s.order_control_node_arrival_tiebreakers[node.name] = arrival_tiebreaker
+        else:
+            arrival_tiebreaker = s.W.order_control_rng.random()
+            current_visit["arrival_time"] = arrival_time
+            current_visit["arrival_tiebreaker"] = arrival_tiebreaker
 
     def _compute_order_control_earliest_arrival_timestep_for_current_link(s):
         """

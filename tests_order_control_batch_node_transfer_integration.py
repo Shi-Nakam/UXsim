@@ -88,6 +88,42 @@ def _setup_arrived_vehicle(
         merge.incoming_vehicles.append(veh)
 
 
+def _begin_arrived_current_visit_for_test(
+    veh,
+    merge,
+    link,
+    earliest,
+    arrival_time,
+    tiebreaker,
+):
+    assert veh.link is link
+    assert link.end_node is merge
+    assert merge.order_control_eligible is True
+    assert merge.order_control_type != "none"
+    assert veh.order_control_node_arrival_times[merge.name] == arrival_time
+    assert veh.order_control_node_arrival_tiebreakers[merge.name] == tiebreaker
+    assert veh.order_control_earliest_arrival_timesteps[merge.name] == earliest
+
+    veh.begin_order_control_visit_on_link_entry()
+
+    veh.order_control_earliest_arrival_timesteps[merge.name] = earliest
+    veh.order_control_current_visit["earliest_arrival_timestep"] = earliest
+    veh.order_control_current_visit["arrival_time"] = arrival_time
+    veh.order_control_current_visit["arrival_tiebreaker"] = tiebreaker
+
+    current_visit = veh.order_control_current_visit
+    assert current_visit is not None
+    assert current_visit["node"] is merge
+    assert current_visit["inlink"] is link
+    assert current_visit["visit_id"] == veh.order_control_visit_id
+    assert current_visit["earliest_arrival_timestep"] == earliest
+    assert current_visit["arrival_time"] == arrival_time
+    assert current_visit["arrival_tiebreaker"] == tiebreaker
+    assert current_visit["batch_assignment"] is None
+    assert veh.order_control_node_arrival_times[merge.name] == arrival_time
+    assert veh.order_control_node_arrival_tiebreakers[merge.name] == tiebreaker
+
+
 def _install_call_wrappers(merge):
     state = {
         "transfer_batch_calls": [],
@@ -298,6 +334,7 @@ def test_capacity_blocked_batch_vehicle_reregistration():
         200.0,
         move_remain=5.0,
     )
+    _begin_arrived_current_visit_for_test(veh, merge, link1, 0, 10.0, 0.1)
     out.capacity_in_remain = 0
 
     merge.transfer()
@@ -306,8 +343,18 @@ def test_capacity_blocked_batch_vehicle_reregistration():
     assert merge.order_control_batch_service_queue[0]["vehicles"] == [veh]
     assert veh not in merge.incoming_vehicles
 
+    visit_id_before = veh.order_control_current_visit["visit_id"]
+    arrival_time_before = veh.order_control_current_visit["arrival_time"]
+    arrival_tiebreaker_before = veh.order_control_current_visit["arrival_tiebreaker"]
+    first_hist_time_before = veh.order_control_node_arrival_times["merge"]
+    first_hist_tiebreaker_before = veh.order_control_node_arrival_tiebreakers["merge"]
     veh.carfollow()
     veh.update()
+    assert veh.order_control_current_visit["visit_id"] == visit_id_before
+    assert veh.order_control_current_visit["arrival_time"] == arrival_time_before
+    assert veh.order_control_current_visit["arrival_tiebreaker"] == arrival_tiebreaker_before
+    assert veh.order_control_node_arrival_times["merge"] == first_hist_time_before
+    assert veh.order_control_node_arrival_tiebreakers["merge"] == first_hist_tiebreaker_before
     assert veh in merge.incoming_vehicles
 
     out.capacity_in_remain = 1e6
@@ -338,6 +385,7 @@ def test_service_queue_stop_reregistration():
     b1 = _make_vehicle(W, "orig2", "B1")
     _setup_arrived_vehicle(merge, a1, link1, out, 0, 10.0, 0.1, 200.0)
     _setup_arrived_vehicle(merge, b1, link2, out, 0, 10.0, 0.2, 200.0, move_remain=5.0)
+    _begin_arrived_current_visit_for_test(b1, merge, link2, 0, 10.0, 0.2)
     a1.order_control_batch_assignments["merge"] = 0
     b1.order_control_batch_assignments["merge"] = 1
     merge.order_control_batch_service_queue.append(
@@ -374,6 +422,7 @@ def test_t_trigger_out_of_range_unbatched_carryover():
     late = _make_vehicle(W, "orig1", "A_late")
     _setup_arrived_vehicle(merge, trigger, link1, out, 5, 10.0, 0.1, 200.0, move_remain=5.0)
     _setup_arrived_vehicle(merge, late, link1, out, 20, 11.0, 0.2, 180.0)
+    _begin_arrived_current_visit_for_test(late, merge, link1, 20, 11.0, 0.2)
 
     t_trigger = merge.estimate_order_control_batch_t_trigger_level_0(trigger)
     assert late.order_control_earliest_arrival_timesteps["merge"] > t_trigger
@@ -413,6 +462,15 @@ def test_n_exceeded_unbatched_carryover():
         )
         vehicles.append(veh)
 
+    _begin_arrived_current_visit_for_test(
+        vehicles[2],
+        merge,
+        link1,
+        0,
+        vehicles[2].order_control_node_arrival_times["merge"],
+        vehicles[2].order_control_node_arrival_tiebreakers["merge"],
+    )
+
     out.capacity_in_remain = 0
     merge.transfer()
     registered = merge.order_control_batch_service_queue[0]["vehicles"]
@@ -443,6 +501,7 @@ def test_formation_cutoff_other_direction_unbatched():
     _setup_arrived_vehicle(merge, a1, link1, out, 0, 10.0, 0.1, 200.0, move_remain=5.0)
     _setup_arrived_vehicle(merge, a2, link1, out, 0, 10.1, 0.11, 180.0)
     _setup_arrived_vehicle(merge, b1, link2, out, 0, 10.0, 0.2, 200.0, move_remain=5.0)
+    _begin_arrived_current_visit_for_test(b1, merge, link2, 0, 10.0, 0.2)
 
     out.capacity_in_remain = 0
     merge.transfer()
@@ -518,6 +577,7 @@ def test_a1_b1_two_direction_level0_level1_trigger():
     b1 = _make_vehicle(W, "orig2", "B1")
     _setup_arrived_vehicle(merge, a1, link1, out, 0, 10.0, 0.1, 200.0, move_remain=5.0)
     _setup_arrived_vehicle(merge, b1, link2, out, 0, 10.0, 0.2, 200.0, move_remain=5.0)
+    _begin_arrived_current_visit_for_test(b1, merge, link2, 0, 10.0, 0.2)
 
     merge.transfer()
     assert a1.link is out
