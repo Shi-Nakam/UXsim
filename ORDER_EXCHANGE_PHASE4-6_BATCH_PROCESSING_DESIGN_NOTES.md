@@ -31,16 +31,17 @@ UXsim Order Exchange 改変作業における、phase 4-6：交差点BATCH処理
 | | phase 4-6N：診断スクリプトの通常回帰テストからの分離保存（0e35799） |
 | **診断スクリプト** | `diagnostics/order_control/`（4本＋README）。通常回帰テストから分離済み（`0e35799`）。詳細は `diagnostics/order_control/README.md` |
 | **BATCH形成〜シミュレーション接続まで完成** | trigger候補取得 → … → service queue登録（4-6I）→ 実通過（4-6K）→ 統括呼出し（4-6L）→ **`Node.transfer()` 接続（4-6M）** |
-| **現時点の主要課題** | Node端到着時の現在訪問状態への記録（**Phase 4-6P**。4-6O基盤は **§1H.18** で実装済み） |
+| **現時点の主要課題** | Phase 4-6Q：FCFSの参照先をcurrent visitへ変更（4-6P到着記録は **§1H.19** で実装済み） |
 | **未実装** | Level 2仮想サービス推定、Level 2 unresolved時のLevel 1 fallback接続 |
 | | trip-end VehicleのBATCH service unit対応 |
-| | Node訪問単位の制御状態（**§1H** 設計済み。**Phase 4-6O** 基盤実装済み・**§1H.18**。4-6P〜未実装） |
+| | FCFSの現在訪問参照（**Phase 4-6Q**。4-6O基盤・4-6P到着記録は実装済み・**§1H.18**・**§1H.19**） |
+| | BATCH形成の現在訪問参照（**Phase 4-6R**） |
 | | Time-value Transaction、比較対象Node共通管理、目的地自動検証、taxi mode向け動的dest検証 |
 | **当面の研究シナリオ前提** | 比較対象内部交差点Nodeを目的地としない端点間OD |
 | | 全比較方式で同一ネットワーク・同一OD需要 |
 | **研究基本設定（明示指定）** | 研究の通常方式は **Level 2**（未実装）。Level 2で解決不能時は **Level 1** へfallback、必要に応じて **Level 0** へfallback。 |
 | | 暫定比較では `batch_size=10`、`order_control_batch_t_trigger_level=1`（Level 1は最終基本設定ではない） |
-| **次工程候補** | Phase 4-6P実装（**§1H.19**・**§1H.17**） |
+| **次工程候補** | Phase 4-6Q実装（FCFS参照先変更。**§1H.17**）。その後 Phase 4-6R（BATCH形成の参照先変更） |
 
 ---
 
@@ -1802,8 +1803,8 @@ Phase 4-6Mではsnapshot estimated arrivalの計算を重複実装・重複テ�
 | **4-6N（一部）** | clearance=0比較テスト3本 | commit済み（`f339b88`） |
 | **4-6N（一部）** | 比較・Node再訪診断の正式記録 | commit済み（`c06936c`） |
 | **4-6N（診断）** | high-demand prefix violation再現・lifecycle診断・Node再訪診断 | commit済み（`0e35799`。`diagnostics/order_control/`） |
-| **4-6N（設計）** | Node訪問単位の共通状態設計 | **§1H** に記録済み（実装は未着手） |
-| **4-6N（未完了）** | Node訪問単位の制御状態実装・high-demand再実行 | **未着手** |
+| **4-6N（設計）** | Node訪問単位の共通状態設計 | **§1H** に記録済み。基盤（4-6O）・到着記録（4-6P）は実装済み |
+| **4-6N（未完了）** | FCFS参照先変更（Phase 4-6Q）、BATCH形成の参照先変更（Phase 4-6R）、high-demand再実行 |
 
 **ブランチ：** `feature/intersection-order-control`
 
@@ -2167,7 +2168,7 @@ Node再訪対応前に、以下を**取得済みと記載しない。**
 | 項目 | 値 |
 |------|-----|
 | ブランチ | `feature/intersection-order-control` |
-| 最新commit | `0e35799` |
+| §1G記録時点の最新commit | `0e35799` |
 | 直前commit | `c06936c` |
 | その前 | `f339b88` |
 | Phase 4-6M | `b03538c` |
@@ -2206,7 +2207,7 @@ Node再訪対応前に、以下を**取得済みと記載しない。**
 
 ## 1H. Node再訪に対応するFCFS・BATCH共通訪問状態設計
 
-本節は、§1Gで判明したNode名keyのみのorder-control状態設計の問題に対し、FCFS・BATCHで共通利用する**Node訪問単位の制御状態**をどう導入するかを記録する。§1Gの診断結果・根本原因の詳細は **§1G** を参照。本節は**設計記録**であり、**実装は未着手**である。
+本節は、§1Gで判明したNode名keyのみのorder-control状態設計の問題に対し、FCFS・BATCHで共通利用する**Node訪問単位の制御状態**をどう導入するかを記録する。§1Gの診断結果・根本原因の詳細は **§1G** を参照。本節は**設計記録**である。Phase 4-6O（基盤）・Phase 4-6P（到着記録）は **§1H.18**・**§1H.19.7** で実装済み。FCFSの参照先変更は Phase 4-6Q、BATCH形成の参照先変更は Phase 4-6R。
 
 ### 1H.1 設計目的と対象範囲
 
@@ -2440,7 +2441,7 @@ VehicleがNodeを実際に通過した場合、service unit側とVehicle側を**
 | Phase | 内容 |
 |-------|------|
 | **4-6O** | 現在訪問状態の共通基盤（**実装済み**。§1H.18） |
-| **4-6P** | Node端到着記録の訪問対応 |
+| **4-6P** | Node端到着記録の訪問対応（**実装済み**。§1H.19） |
 | **4-6Q** | FCFSの参照先変更 |
 | **4-6R** | BATCH形成の訪問対応（参照先を現在訪問状態へ切替。`order_control_earliest_arrival_timesteps` を初回分析履歴化） |
 | **4-6S** | service unit・実通過の訪問対応 |
@@ -2503,24 +2504,21 @@ VehicleがNodeを実際に通過した場合、service unit側とVehicle側を**
 | Step 1〜4 | 完了・commit済み（`05fa2d1`、`f339b88`、`c06936c`、`0e35799`） |
 | Step 5 | 設計記録完了（**§1H**） |
 | Phase 4-6O実装前調査 | 完了（§1H.3・§1H.4・§1H.5・§1H.6・§1H.13・§1H.14・§1H.16 反映） |
-| Phase 4-6O | **実装・専用テスト・回帰確認・commit・push済み**（**§1H.18**） |
-| Phase 4-6P | **実装前調査・乱数設計調査完了**（**§1H.19**）。本番実装は未着手 |
-| 実装 | Phase 4-6P〜未着手 |
-| 最新commit | `e3243e7` |
+| Phase 4-6O | **実装・専用テスト・回帰確認・commit・push済み**（**§1H.18**、`e3243e7`） |
+| Phase 4-6P | **実装・専用テスト・回帰確認・commit・push済み**（**§1H.19**、`b1b4d7f`・`b051c58`） |
+| 実装 | Phase 4-6Q〜未着手 |
+| 最新実装commit | `b051c58` |
 | high-demand BATCH比較 | 未完了（5,000台 c=0/1：prefix violation停止。10,000台：未実行） |
 
 **次工程：**
 
-1. **§1H.19** の実文レビュー
-2. Phase 4-6Pの実装指示作成
-3. Phase 4-6P実装・専用テスト
-4. 回帰確認
-5. 正式記録
-6. 独立commit・push
+1. Phase 4-6Q実装（FCFSの参照先をcurrent visitへ変更）
+2. Phase 4-6R実装（BATCH形成の参照先変更）
+3. 小規模再訪テスト・high-demand再実行（Phase 4-6T〜4-6U）
 
 **再開時に読むもの：**
 
-- 本メモ **§1H**（本設計）、**§1G**（診断・根本原因）、**§1H.19**（Phase 4-6P到着記録・乱数設計）
+- 本メモ **§1H**（本設計）、**§1G**（診断・根本原因）、**§1H.19**（Phase 4-6P到着記録・乱数設計・実装記録）
 - `diagnostics/order_control/README.md`
 - 現在訪問状態に関連するVehicle・Node実装
 - 既存FCFS・BATCHテスト
@@ -2642,7 +2640,7 @@ order-control対象Nodeへの訪問開始時の `order_control_current_visit` �
 
 ### 1H.19 Phase 4-6P実装前調査・到着記録と乱数設計
 
-**状態：** 実装前調査・乱数設計調査完了。本番実装は未着手。
+**状態：** 実装前調査・乱数設計調査完了（設計時点の記録）。**実装・専用テスト・回帰確認・commit・push済み**（`b1b4d7f`・`b051c58`）。実装結果は **§1H.19.7**。
 
 #### 1H.19.1 Node端到着処理の現行順序
 
@@ -2724,6 +2722,153 @@ Phase 4-6Pでは `Vehicle.record_order_control_node_arrival(node)` を追加す�
 変更しない：`route_next_link_choice()` の位置、`incoming_vehicles` 登録位置、`visit_id` 発行、Link進入時の現在訪問作成、earliest arrival 計算、既存 earliest 辞書の再訪時上書き、FCFS/BATCH 参照先、BATCH assignment、service unit、訪問終了、BATCH履歴、high-demand比較。FCFS の現在訪問参照は Phase 4-6Q。
 
 **専用テスト方針（`tests_order_control_current_visit_arrival.py`）：** 初回到着・`arrival_time` 式・初回 tiebreaker の `W.rng` 1回生成・両辞書への同値記録・同一訪問再登録での値維持と乱数非消費・再訪での新 `arrival_time` と `order_control_rng` tiebreaker・再訪での `W.rng` 非消費・初回履歴非上書き・`random_seed` 再現・`random_seed=None` 正常動作・片方のみ `None` の `ValueError`・対象Nodeで current visit なしの `ValueError`・対象外Nodeでの非要求。Node・inlink 不一致の改ざんテストは含めない。
+
+（設計時点の上記方針について：実装時には current visit の **Node** 不一致を重大な状態不整合として検出する仕様を確定し、Node不一致テストを `tests_order_control_current_visit_arrival.py` に追加した。**inlink** 不一致の到着記録テストは追加していない。詳細は **§1H.19.7.10**。）
+
+#### 1H.19.7 Phase 4-6P実装記録
+
+**状態：** 実装・専用テスト・回帰確認・commit・push済み。
+
+- Step 1（独立乱数生成器）：commit `b1b4d7f` — `phase 4-6P: add independent order-control random stream`
+- Step 2（到着記録・統合テスト修正）：commit `b051c58` — `phase 4-6P: record initial and revisit arrivals and update BATCH integration setup`
+- 設計記録commit（実装前）：`5846226` — `phase 4-6P: document current-visit arrival and tiebreaker random-stream design`
+- 直前Phase：Phase 4-6O（`e3243e7`）
+
+##### 1H.19.7.1 独立乱数生成器
+
+`World.__init__` に `W.order_control_rng` を追加した。既存の `W.rng` 初期化は変更していない。
+
+```python
+W.rng = np.random.default_rng(seed=random_seed)
+order_control_seed_sequence = np.random.SeedSequence(random_seed)
+order_control_child_seed_sequence = order_control_seed_sequence.spawn(1)[0]
+W.order_control_rng = np.random.default_rng(
+    order_control_child_seed_sequence
+)
+W.random_seed = random_seed
+```
+
+- `W.rng` の初期化式は変更していない
+- `W.order_control_rng` は `SeedSequence(random_seed).spawn(1)[0]` から派生する
+- `order_control_rng` の生成および消費は `W.rng` を消費しない
+- 同じ `random_seed` では `order_control_rng` の乱数列が再現する
+- `random_seed=None` でも両方の Generator を利用できる
+- 専用テスト：`tests_order_control_rng.py`
+
+（設計時点 **§1H.19.4** では `spawn(2)[1]` を候補としていたが、実装時に `spawn(1)[0]` を採用した。）
+
+##### 1H.19.7.2 current visit到着記録メソッド
+
+`Vehicle.record_order_control_node_arrival(node)` を追加した。VehicleがNodeの `incoming_vehicles` へ登録された直後に呼ばれ、現在訪問の到着情報を一元的に記録する。
+
+`Vehicle.update()` の次の2経路について、従来の `record_order_control_node_first_arrival(node)` 呼び出しを新メソッドへ変更した（順序は維持）：
+
+1. `node.incoming_vehicles.append(vehicle)`
+2. `vehicle.record_order_control_node_arrival(node)`
+
+対象経路：taxiモードでのリンク間移動要求、通常のリンク間移動要求。
+
+##### 1H.19.7.3 対象Nodeの条件
+
+`order_control_eligible is True` かつ `order_control_type != "none"` のNodeのみ処理する。対象外Nodeでは、current visitの検証・更新、初回履歴の更新、`W.rng`・`W.order_control_rng` の消費を行わずに return する。
+
+##### 1H.19.7.4 arrival_timeの確定仕様
+
+`arrival_time = W.T * W.DELTAT`（秒）。`link_arrival_time`・`earliest_arrival_timestep`・仮想到着時刻は使用しない。`arrival_time` は、その current visit でVehicleが対象Nodeの `incoming_vehicles` へ最初に登録された時刻である。
+
+##### 1H.19.7.5 初回訪問時の確定仕様
+
+VehicleがそのNodeへ初めて到着する場合（`node.name` が初回履歴辞書に未登録）：
+
+- `W.rng` から `arrival_tiebreaker` を1回だけ生成する
+- 同じ `arrival_time` を current visit と初回履歴（`order_control_node_arrival_times` / `order_control_node_arrival_tiebreakers`）へ保存する
+- 同じ `arrival_tiebreaker` を current visit と初回履歴へ保存する
+- `W.order_control_rng` は消費しない
+
+##### 1H.19.7.6 再訪時・同一訪問中の再登録
+
+**再訪**（新しい `visit_id` を持つ別の current visit。初回履歴に当該Node名が既に存在）：
+
+- `arrival_time` は再訪中の現在時刻 `W.T * W.DELTAT` から新規計算する
+- `arrival_tiebreaker` は `W.order_control_rng` から1回だけ生成する
+- 新しい到着情報は current visit のみへ保存する
+- 初回履歴は上書きしない
+- `W.rng` は消費しない
+
+**同一訪問中の再登録**（`visit_id`・current visit は同じ。`arrival_time` と `arrival_tiebreaker` がともに記録済み）：
+
+- 到着情報は上書きしない
+- 乱数は追加消費しない
+
+##### 1H.19.7.7 異常系
+
+order-control対象Nodeでは、検証は乱数生成より前に行われ、次を `ValueError` とする：
+
+- `order_control_current_visit` が存在しない
+- current visit の `node` が到着Nodeと一致しない
+- `arrival_time` だけが `None`、または `arrival_tiebreaker` だけが `None`
+
+`ValueError` 発生時には current visit・初回履歴・`W.rng`・`W.order_control_rng` の状態を変更しない。
+
+##### 1H.19.7.8 既存メソッドとの関係
+
+- `record_order_control_node_first_arrival(node)` は削除していない
+- 既存メソッドの実装自体も変更していない
+- 新メソッドから既存メソッドを呼ぶ構成にはしていない（初回訪問時に1回生成した同じ tiebreaker を current visit と初回履歴へ保存する必要があるため）
+- `Vehicle.update()` の実運用経路では `record_order_control_node_arrival(node)` を使用する
+
+##### 1H.19.7.9 BATCH統合テストの手動セットアップ更新
+
+`tests_order_control_batch_node_transfer_integration.py` の `_setup_arrived_vehicle()` は、inlink上のVehicle状態・`incoming_vehicles`・earliest arrival辞書・初回到着時刻辞書・初回tiebreaker辞書を手動設定していたが、`order_control_current_visit` を準備していなかった。手動到着状態から `veh.update()` を呼ぶ統合テストで `order_control_current_visit is None` の `ValueError` が発生した。
+
+対応としてテスト専用補助関数 `_begin_arrived_current_visit_for_test(...)` を追加した：
+
+- `begin_order_control_visit_on_link_entry()` で正式に current visit を開始する
+- テストが手動指定した `earliest_arrival_timestep` を復元する
+- current visit の `arrival_time` と `arrival_tiebreaker` を既存初回履歴と同値にする
+- 乱数は生成しない。`batch_assignment` は `None` のまま維持する
+
+適用範囲は、手動セットアップ後に `veh.update()` を呼ぶ6テスト・6車両のみ。共通の `_setup_arrived_vehicle()` は変更していない。`Node.transfer()` やBATCH単体メソッドだけを呼ぶVehicleには不要な current visit を追加していない。本体の `ValueError` 要件を緩和するものではなく、既存統合テストの手動状態を現在の正式な状態モデルへ更新するものである。
+
+##### 1H.19.7.10 新規テスト
+
+- `tests_order_control_rng.py`：`order_control_rng` の存在、`W.rng` との分離、同一seed再現性、異seed差異、相互非干渉、`random_seed=None` 対応
+- `tests_order_control_current_visit_arrival.py`：対象外Nodeの副作用なし、current visit欠如・**Node不一致**・片側 `None` の `ValueError`、初回訪問の同値保存、`W.rng` 使用、同一訪問再登録no-op、再訪時の current visit のみ更新・初回履歴維持、再訪再登録no-op、再訪tiebreaker再現、`Vehicle.update()` 統合（設計時点ではNode不一致テストを含めない方針だったが、実装時にNode不一致検出を確定しテストを追加。**§1H.19.6** 参照）
+
+##### 1H.19.7.11 回帰確認結果
+
+Phase 4-6P専用テスト、current visit・初回履歴の既存テスト、FCFS既存テスト、BATCH（状態・候補抽出・形成・登録・service queue・`Node.transfer()` 統合）、order-control設定、Vehicle属性、車両リスト読込み、baseline、example、中規模ネットワークsanity checkはいずれもPASS。診断スクリプト（`diagnostics/order_control/`）は通常回帰テストではないため実行していない。
+
+**baseline・example（既知値と一致）：**
+
+- baseline：48/48 trips、平均速度 16.5 m/s
+- example：735/810 trips、平均速度 11.7 m/s
+
+**中規模ネットワーク（性能優劣はPhase 4-6Pの合否基準ではない）：**
+
+FCFS対UXsim standard（500 Vehicle）：standard completed 383/500、FCFS 383/500、standard average travel time 140.8 s、FCFS 146.9 s、eligible FCFS nodes 10、既存sanity checkすべてPASS。
+
+BATCH・FCFS・UXsim standard：いずれも completed 383/500、standard 140.8 s、FCFS 146.9 s、BATCH 146.9 s、BATCH/FCFS average travel time ratio 1.0003（表示上BATCHはFCFSよりhigher）、FCFSとBATCHのeligible Nodeは各10件で一致、既存sanity checkすべてPASS。
+
+##### 1H.19.7.12 Phase 4-6P完了時点とPhase 4-6Q・4-6Rへの引き継ぎ
+
+**Phase 4-6P完了時点：**
+
+- current visitに現在訪問の `arrival_time` と `arrival_tiebreaker` が記録される
+- 初回履歴（`order_control_node_arrival_times` / `order_control_node_arrival_tiebreakers`）は互換用として維持される
+- 初回訪問では current visit と初回履歴が同値
+- 再訪では current visit のみが再訪値を持つ
+- FCFSとBATCHは、まだ既存のNode名キーの初回履歴を参照している
+
+**Phase 4-6Qで行うこと（未実装）：**
+
+- FCFSの到着順位参照先を current visit へ変更する
+- 再訪時に現在訪問の `arrival_time` と `arrival_tiebreaker` がFCFS制御へ使われるようにする
+
+**Phase 4-6Rで行うこと（未実装）：**
+
+- BATCHのtrigger候補順位および関連参照先を current visit へ変更する
+- `order_control_earliest_arrival_timesteps` の初回分析履歴化（**§1H.13**・**§1H.14**）
 
 ---
 
@@ -3489,9 +3634,9 @@ Phase 4-6Mで追加された `Node.transfer()` 接続統合テストは **§1F.1
 - `git log --oneline -20`。
 - **Phase 4-6A〜4-6M：** 実装・テスト・commit済み（4-6Mは `b03538c`）。
 - **Phase 4-6N（commit済み）：** route_next_link参照順修正（`05fa2d1`）、clearance=0比較テスト3本（`f339b88`）、正式記録（`c06936c`）、診断スクリプト分離（`0e35799`）。
-- **Phase 4-6N Step 5：** Node訪問単位の共通状態設計を **§1H** に記録済み（本Markdown更新時点では未commit）。**実装は未着手。**
-- **現時点の主要課題：** §1H設計の実装（Phase 4-6O〜）。
+- **Phase 4-6N Step 5：** Node訪問単位の共通状態設計を **§1H** に記録済み。基盤（4-6O）・到着記録（4-6P）は実装済み
+- **現時点の主要課題：** Phase 4-6Q（FCFSの参照先をcurrent visitへ変更）
 - **優先参照：** ORDER_EXCHANGE_PHASE4-6_BATCH_PROCESSING_DESIGN_NOTES.md の **§1H** を優先参照。診断・根本原因は **§1G**、`Node.transfer()` 接続は **§1F**。
-- **次工程（§1H.17）：** §1H設計レビュー → 実コード調査 → Phase 4-6O実装。
+- **次工程（§1H.17）：** Phase 4-6Q実装（FCFS参照先変更）。その後 Phase 4-6R（BATCH形成の参照先変更）
 - 目的地Vehicleは端点間OD前提で保留。比較対象Node共通管理・自動検証は将来課題。
 - 一時退避PDF `phase4-6A_batch_earliest_arrival_timestep_memo.pdf` はリポジトリ外。正式Markdownを優先参照。
