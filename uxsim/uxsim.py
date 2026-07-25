@@ -1466,19 +1466,14 @@ class Node:
         FCFS vehicle transfer at an order-control node (clearance-free).
 
         Retained for regression checks and debugging. Not the final FCFS model used for
-        research evaluation.
+        research evaluation. Candidates are ordered by current-visit arrival_time,
+        arrival_tiebreaker, and veh.id via ``Vehicle.get_order_control_fcfs_rank_key()``.
         """
         candidates = [
             veh for veh in s.incoming_vehicles
-            if veh.route_next_link != None and s.name in veh.order_control_node_arrival_times
+            if veh.route_next_link != None
         ]
-        candidates.sort(
-            key=lambda veh: (
-                veh.order_control_node_arrival_times[s.name],
-                veh.order_control_node_arrival_tiebreakers[s.name],
-                veh.id,
-            )
-        )
+        candidates.sort(key=lambda veh: veh.get_order_control_fcfs_rank_key(s))
 
         for veh in candidates:
             if veh not in s.incoming_vehicles:
@@ -1569,8 +1564,9 @@ class Node:
         """
         FCFS vehicle transfer at an order-control node with direction-change clearance.
 
-        Candidates are evaluated in order of (arrival_time, tiebreaker, veh.id).
-        A different inlink from the most recent entry is treated as a direction change.
+        Candidates are evaluated in order of current-visit (arrival_time, tiebreaker,
+        veh.id) via ``Vehicle.get_order_control_fcfs_rank_key()``. A different inlink
+        from the most recent entry is treated as a direction change.
         If direction change is required and clearance is not yet satisfied, evaluation stops
         before the clearance-free FCFS passability check (break). When clearance is not
         required, or when the required clearance has been satisfied, the same passability
@@ -1582,15 +1578,9 @@ class Node:
         """
         candidates = [
             veh for veh in s.incoming_vehicles
-            if veh.route_next_link != None and s.name in veh.order_control_node_arrival_times
+            if veh.route_next_link != None
         ]
-        candidates.sort(
-            key=lambda veh: (
-                veh.order_control_node_arrival_times[s.name],
-                veh.order_control_node_arrival_tiebreakers[s.name],
-                veh.id,
-            )
-        )
+        candidates.sort(key=lambda veh: veh.get_order_control_fcfs_rank_key(s))
 
         for veh in candidates:
             if veh not in s.incoming_vehicles:
@@ -2748,6 +2738,47 @@ class Vehicle:
             return
         s.order_control_node_arrival_times[node.name] = s.W.T * s.W.DELTAT
         s.order_control_node_arrival_tiebreakers[node.name] = s.W.rng.random()
+
+    def get_order_control_fcfs_rank_key(s, node):
+        """
+        Return the FCFS ordering key for this vehicle at an order-control node.
+
+        Notes
+        -----
+        Returns ``(arrival_time, arrival_tiebreaker, veh.id)`` from
+        ``order_control_current_visit``. Legacy first-visit dictionaries keyed by node
+        name (``order_control_node_arrival_times`` /
+        ``order_control_node_arrival_tiebreakers``) are not consulted.
+
+        Raises
+        ------
+        ValueError
+            If ``order_control_current_visit`` is ``None``, if the current visit's
+            ``node`` is not the given ``node``, or if ``arrival_time`` and/or
+            ``arrival_tiebreaker`` are not both recorded (including when both are
+            ``None`` at FCFS rank-read time).
+        """
+        current_visit = s.order_control_current_visit
+        if current_visit is None:
+            raise ValueError(
+                f"Vehicle {s.name}: order_control_current_visit is None at "
+                f"order-control node {node.name}."
+            )
+        if current_visit["node"] is not node:
+            raise ValueError(
+                f"Vehicle {s.name}: order_control_current_visit node "
+                f"{current_visit['node'].name!r} does not match FCFS node "
+                f"{node.name!r}."
+            )
+        arrival_time = current_visit["arrival_time"]
+        arrival_tiebreaker = current_visit["arrival_tiebreaker"]
+        if arrival_time is None or arrival_tiebreaker is None:
+            raise ValueError(
+                f"Vehicle {s.name}: incomplete arrival state at node {node.name}: "
+                f"arrival_time={arrival_time!r}, "
+                f"arrival_tiebreaker={arrival_tiebreaker!r}."
+            )
+        return (arrival_time, arrival_tiebreaker, s.id)
 
     def record_order_control_node_arrival(s, node):
         """

@@ -252,6 +252,19 @@ def _setup_arrived_vehicle(
         merge.incoming_vehicles.append(veh)
 
 
+def _sync_arrived_current_visit_for_test(veh, merge, link, *, earliest):
+    current_visit = veh.order_control_current_visit
+    assert current_visit is not None
+    assert current_visit["node"] is merge
+    assert current_visit["inlink"] is link
+    assert veh.link is link
+    arrival_time = veh.order_control_node_arrival_times[merge.name]
+    tiebreaker = veh.order_control_node_arrival_tiebreakers[merge.name]
+    current_visit["earliest_arrival_timestep"] = earliest
+    current_visit["arrival_time"] = arrival_time
+    current_visit["arrival_tiebreaker"] = tiebreaker
+
+
 def _assert_current_visit_none(veh):
     assert veh.order_control_current_visit is None
 
@@ -320,6 +333,12 @@ def test_eligible_to_ineligible_clears_current_visit():
         x=200.0,
         earliest=veh.order_control_current_visit["earliest_arrival_timestep"],
     )
+    _sync_arrived_current_visit_for_test(
+        veh,
+        merge,
+        W.get_link("link1"),
+        earliest=veh.order_control_current_visit["earliest_arrival_timestep"],
+    )
     merge.transfer_fcfs_clearance()
 
     assert veh.link.name == "out"
@@ -344,6 +363,12 @@ def test_next_eligible_visit_after_ineligible_link():
         W.get_link("link1"),
         mid_link,
         x=200.0,
+        earliest=veh.order_control_current_visit["earliest_arrival_timestep"],
+    )
+    _sync_arrived_current_visit_for_test(
+        veh,
+        merge1,
+        W.get_link("link1"),
         earliest=veh.order_control_current_visit["earliest_arrival_timestep"],
     )
     merge1.transfer_fcfs_clearance()
@@ -391,6 +416,12 @@ def test_same_eligible_node_revisit_gets_new_visit_id():
         link1,
         out,
         x=200.0,
+        earliest=veh.order_control_current_visit["earliest_arrival_timestep"],
+    )
+    _sync_arrived_current_visit_for_test(
+        veh,
+        merge,
+        link1,
         earliest=veh.order_control_current_visit["earliest_arrival_timestep"],
     )
     merge.transfer_fcfs_clearance()
@@ -459,6 +490,12 @@ def test_legacy_earliest_dict_overwrites_on_revisit():
         link1,
         out,
         x=200.0,
+        earliest=veh.order_control_current_visit["earliest_arrival_timestep"],
+    )
+    _sync_arrived_current_visit_for_test(
+        veh,
+        merge,
+        link1,
         earliest=veh.order_control_current_visit["earliest_arrival_timestep"],
     )
     merge.transfer_fcfs_clearance()
@@ -588,6 +625,12 @@ def test_link_entry_via_transfer_fcfs_no_clearance():
         x=200.0,
         earliest=veh.order_control_current_visit["earliest_arrival_timestep"],
     )
+    _sync_arrived_current_visit_for_test(
+        veh,
+        merge1,
+        link1,
+        earliest=veh.order_control_current_visit["earliest_arrival_timestep"],
+    )
     merge1.transfer_fcfs_no_clearance()
     _assert_eligible_visit_after_link_entry(veh, W, mid_merge2, visit_id_before)
 
@@ -606,6 +649,12 @@ def test_link_entry_via_transfer_fcfs_clearance():
         link1,
         mid_merge2,
         x=200.0,
+        earliest=veh.order_control_current_visit["earliest_arrival_timestep"],
+    )
+    _sync_arrived_current_visit_for_test(
+        veh,
+        merge1,
+        link1,
         earliest=veh.order_control_current_visit["earliest_arrival_timestep"],
     )
     merge1.transfer_fcfs_clearance()
