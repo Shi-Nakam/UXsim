@@ -31,17 +31,16 @@ UXsim Order Exchange 改変作業における、phase 4-6：交差点BATCH処理
 | | phase 4-6N：診断スクリプトの通常回帰テストからの分離保存（0e35799） |
 | **診断スクリプト** | `diagnostics/order_control/`（4本＋README）。通常回帰テストから分離済み（`0e35799`）。詳細は `diagnostics/order_control/README.md` |
 | **BATCH形成〜シミュレーション接続まで完成** | trigger候補取得 → … → service queue登録（4-6I）→ 実通過（4-6K）→ 統括呼出し（4-6L）→ **`Node.transfer()` 接続（4-6M）** |
-| **現時点の主要課題** | Phase 4-6Q：FCFSの参照先をcurrent visitへ変更（4-6P到着記録は **§1H.19** で実装済み） |
+| **現時点の主要課題** | Phase 4-6R：BATCH形成の参照先をcurrent visitへ変更（FCFS参照先変更は **§1H.20** で実装済み） |
 | **未実装** | Level 2仮想サービス推定、Level 2 unresolved時のLevel 1 fallback接続 |
 | | trip-end VehicleのBATCH service unit対応 |
-| | FCFSの現在訪問参照（**Phase 4-6Q**。4-6O基盤・4-6P到着記録は実装済み・**§1H.18**・**§1H.19**） |
 | | BATCH形成の現在訪問参照（**Phase 4-6R**） |
 | | Time-value Transaction、比較対象Node共通管理、目的地自動検証、taxi mode向け動的dest検証 |
 | **当面の研究シナリオ前提** | 比較対象内部交差点Nodeを目的地としない端点間OD |
 | | 全比較方式で同一ネットワーク・同一OD需要 |
 | **研究基本設定（明示指定）** | 研究の通常方式は **Level 2**（未実装）。Level 2で解決不能時は **Level 1** へfallback、必要に応じて **Level 0** へfallback。 |
 | | 暫定比較では `batch_size=10`、`order_control_batch_t_trigger_level=1`（Level 1は最終基本設定ではない） |
-| **次工程候補** | Phase 4-6Q実装（FCFS参照先変更。**§1H.17**）。その後 Phase 4-6R（BATCH形成の参照先変更） |
+| **次工程候補** | Phase 4-6R実装（BATCH形成の参照先変更。**§1H.17**・**§1H.20**） |
 
 ---
 
@@ -1804,7 +1803,7 @@ Phase 4-6Mではsnapshot estimated arrivalの計算を重複実装・重複テ�
 | **4-6N（一部）** | 比較・Node再訪診断の正式記録 | commit済み（`c06936c`） |
 | **4-6N（診断）** | high-demand prefix violation再現・lifecycle診断・Node再訪診断 | commit済み（`0e35799`。`diagnostics/order_control/`） |
 | **4-6N（設計）** | Node訪問単位の共通状態設計 | **§1H** に記録済み。基盤（4-6O）・到着記録（4-6P）は実装済み |
-| **4-6N（未完了）** | FCFS参照先変更（Phase 4-6Q）、BATCH形成の参照先変更（Phase 4-6R）、high-demand再実行 |
+| **4-6N（未完了）** | BATCH形成の参照先変更（Phase 4-6R）、high-demand再実行 |
 
 **ブランチ：** `feature/intersection-order-control`
 
@@ -2207,7 +2206,7 @@ Node再訪対応前に、以下を**取得済みと記載しない。**
 
 ## 1H. Node再訪に対応するFCFS・BATCH共通訪問状態設計
 
-本節は、§1Gで判明したNode名keyのみのorder-control状態設計の問題に対し、FCFS・BATCHで共通利用する**Node訪問単位の制御状態**をどう導入するかを記録する。§1Gの診断結果・根本原因の詳細は **§1G** を参照。本節は**設計記録**である。Phase 4-6O（基盤）・Phase 4-6P（到着記録）は **§1H.18**・**§1H.19.7** で実装済み。FCFSの参照先変更は Phase 4-6Q、BATCH形成の参照先変更は Phase 4-6R。
+本節は、§1Gで判明したNode名keyのみのorder-control状態設計の問題に対し、FCFS・BATCHで共通利用する**Node訪問単位の制御状態**をどう導入するかを記録する。§1Gの診断結果・根本原因の詳細は **§1G** を参照。本節は**設計記録**である。Phase 4-6O（基盤）・Phase 4-6P（到着記録）は **§1H.18**・**§1H.19.7** で実装済み。FCFSの参照先変更は Phase 4-6Q（**§1H.20** で実装済み）。BATCH形成の参照先変更は Phase 4-6R。
 
 ### 1H.1 設計目的と対象範囲
 
@@ -2442,7 +2441,7 @@ VehicleがNodeを実際に通過した場合、service unit側とVehicle側を**
 |-------|------|
 | **4-6O** | 現在訪問状態の共通基盤（**実装済み**。§1H.18） |
 | **4-6P** | Node端到着記録の訪問対応（**実装済み**。§1H.19） |
-| **4-6Q** | FCFSの参照先変更 |
+| **4-6Q** | FCFSの参照先変更（**実装済み**。§1H.20） |
 | **4-6R** | BATCH形成の訪問対応（参照先を現在訪問状態へ切替。`order_control_earliest_arrival_timesteps` を初回分析履歴化） |
 | **4-6S** | service unit・実通過の訪問対応 |
 | **4-6T** | 統合・小規模再訪テスト |
@@ -2506,22 +2505,22 @@ VehicleがNodeを実際に通過した場合、service unit側とVehicle側を**
 | Phase 4-6O実装前調査 | 完了（§1H.3・§1H.4・§1H.5・§1H.6・§1H.13・§1H.14・§1H.16 反映） |
 | Phase 4-6O | **実装・専用テスト・回帰確認・commit・push済み**（**§1H.18**、`e3243e7`） |
 | Phase 4-6P | **実装・専用テスト・回帰確認・commit・push済み**（**§1H.19**、`b1b4d7f`・`b051c58`） |
-| 実装 | Phase 4-6Q〜未着手 |
-| 最新実装commit | `b051c58` |
+| Phase 4-6Q | **実装・専用テスト・回帰確認・commit・push済み**（**§1H.20**、`7c3c6d3`・`9100803`） |
+| 実装 | Phase 4-6R〜未着手 |
+| 最新実装commit | `9100803` |
 | high-demand BATCH比較 | 未完了（5,000台 c=0/1：prefix violation停止。10,000台：未実行） |
 
 **次工程：**
 
-1. Phase 4-6Q実装（FCFSの参照先をcurrent visitへ変更）
-2. Phase 4-6R実装（BATCH形成の参照先変更）
-3. 小規模再訪テスト・high-demand再実行（Phase 4-6T〜4-6U）
+1. Phase 4-6R実装（BATCH形成の参照先変更）
+2. 小規模再訪テスト・high-demand再実行（Phase 4-6T〜4-6U）
 
 **再開時に読むもの：**
 
-- 本メモ **§1H**（本設計）、**§1G**（診断・根本原因）、**§1H.19**（Phase 4-6P到着記録・乱数設計・実装記録）
+- 本メモ **§1H**（本設計）、**§1G**（診断・根本原因）、**§1H.19**（Phase 4-6P到着記録・乱数設計・実装記録）、**§1H.20**（Phase 4-6Q FCFS参照先変更・実装記録）
 - `diagnostics/order_control/README.md`
-- 現在訪問状態に関連するVehicle・Node実装
-- 既存FCFS・BATCHテスト
+- 本体：`Vehicle.get_order_control_fcfs_rank_key()`、`Vehicle.record_order_control_node_arrival()`、`Vehicle.begin_order_control_visit_on_link_entry()`、`Node.get_order_control_batch_trigger_candidates()`、`Node._validate_order_control_batch_t_trigger_inputs()`、`Node.estimate_order_control_batch_t_trigger_level_0()`、`Node.estimate_order_control_batch_t_trigger_level_1()`、`Node.form_order_control_batch()`、`Vehicle.order_control_current_visit`
+- テスト：`tests_fcfs_order_control_revisit_ranking.py`、`tests_order_control_batch_trigger_candidates.py`、`tests_order_control_batch_t_trigger_estimation.py`、`tests_order_control_batch_candidate_group_ordering.py`、`tests_order_control_batch_formation_integration.py`、`tests_order_control_batch_node_transfer_integration.py`
 
 ### 1H.18 Phase 4-6O実装記録
 
@@ -2852,23 +2851,233 @@ BATCH・FCFS・UXsim standard：いずれも completed 383/500、standard 140.8 
 
 ##### 1H.19.7.12 Phase 4-6P完了時点とPhase 4-6Q・4-6Rへの引き継ぎ
 
-**Phase 4-6P完了時点：**
+**Phase 4-6P完了時点（当時）：**
 
 - current visitに現在訪問の `arrival_time` と `arrival_tiebreaker` が記録される
 - 初回履歴（`order_control_node_arrival_times` / `order_control_node_arrival_tiebreakers`）は互換用として維持される
 - 初回訪問では current visit と初回履歴が同値
 - 再訪では current visit のみが再訪値を持つ
-- FCFSとBATCHは、まだ既存のNode名キーの初回履歴を参照している
+- FCFSとBATCHは、当時はまだ既存のNode名キーの初回履歴を参照していた
 
-**Phase 4-6Qで行うこと（未実装）：**
+**Phase 4-6Qで行ったこと（実装済み。§1H.20）：**
 
-- FCFSの到着順位参照先を current visit へ変更する
-- 再訪時に現在訪問の `arrival_time` と `arrival_tiebreaker` がFCFS制御へ使われるようにする
+- FCFSの到着順位参照先を current visit へ変更した
+- 再訪時に現在訪問の `arrival_time` と `arrival_tiebreaker` がFCFS制御へ使われるようにした
 
 **Phase 4-6Rで行うこと（未実装）：**
 
 - BATCHのtrigger候補順位および関連参照先を current visit へ変更する
 - `order_control_earliest_arrival_timesteps` の初回分析履歴化（**§1H.13**・**§1H.14**）
+
+### 1H.20 Phase 4-6Q実装記録（FCFSのcurrent visit参照）
+
+**状態：** 実装・専用テスト・回帰確認・commit・push済み。
+
+**commit：**
+
+- 実装：`7c3c6d3` — `phase 4-6Q: rank FCFS by current visit and add revisit tests`
+- 手動FCFS到着テストセットアップ修正：`9100803` — `phase 4-6Q: add current visit to manual FCFS arrival test setup`
+
+**最新実装commit：** `9100803`
+
+**次工程：** Phase 4-6R（未着手）
+
+#### 1H.20.1 FCFS順位キー取得メソッド
+
+`Vehicle.get_order_control_fcfs_rank_key(node)` を追加した。
+
+返却値は current visit から次の順位キー（昇順）：
+
+```
+(arrival_time, arrival_tiebreaker, veh.id)
+```
+
+1. current visitの `arrival_time`
+2. current visitの `arrival_tiebreaker`
+3. `veh.id`
+
+このメソッドは次の初回履歴を参照しない：
+
+- `order_control_node_arrival_times`
+- `order_control_node_arrival_tiebreakers`
+
+#### 1H.20.2 FCFS順位読取時の異常系
+
+`get_order_control_fcfs_rank_key(node)` では、次を `ValueError` とする：
+
+- `order_control_current_visit` が存在しない
+- current visitの `node` がFCFS対象Nodeと一致しない
+- `arrival_time` または `arrival_tiebreaker` の少なくとも一方が `None`
+
+到着情報については、次のすべてが `ValueError` である：
+
+- `arrival_time` と `arrival_tiebreaker` が両方とも `None`
+- `arrival_time` だけが `None`
+- `arrival_tiebreaker` だけが `None`
+
+**`record_order_control_node_arrival(node)` との違い：**
+
+| 状況 | `record_order_control_node_arrival(node)` | `get_order_control_fcfs_rank_key(node)` |
+|------|-------------------------------------------|----------------------------------------|
+| 両方 `None` | これから到着情報を記録する正常な開始状態 | FCFS順位を読む時点では到着記録済みでなければならない重大不整合 |
+| 片側だけ `None` | 不整合（`ValueError`） | 不整合（`ValueError`） |
+
+登録時に保証済みの不変条件について、次の過剰な重複検証は追加していない：
+
+- `visit_id` の型や正値性
+- 到着値の数値型
+- tiebreakerの値域
+- current visitの `inlink` と `veh.link` の一致
+- 初回履歴との一致
+
+#### 1H.20.3 FCFS transferの変更
+
+次の2メソッドを、同じ current visit 順位仕様へ変更した：
+
+- `Node.transfer_fcfs_no_clearance()`
+- `Node.transfer_fcfs_clearance()`
+
+実運用経路は `transfer_fcfs_clearance()` である。回帰・デバッグ用の `transfer_fcfs_no_clearance()` も同じ順位仕様へ変更した。
+
+候補抽出条件は、`incoming_vehicles` 内のVehicleについて次のみ：
+
+```
+veh.route_next_link is not None
+```
+
+従来の次の候補条件は削除した：
+
+```
+node.name in veh.order_control_node_arrival_times
+```
+
+current visitが欠けているVehicleや到着情報未記録のVehicleを候補から黙って除外せず、順位キー取得時に `ValueError` とする。
+
+clearance判定、容量判定、物理先頭判定、リンク遷移、`incoming_vehicles` のclear処理など、順位参照以外のFCFS処理は変更していない。
+
+#### 1H.20.4 初回履歴の扱い
+
+次の初回履歴は削除・改名・更新停止していない：
+
+- `order_control_node_arrival_times`
+- `order_control_node_arrival_tiebreakers`
+
+Phase 4-6Q後の状態：
+
+- FCFSは current visit を参照する
+- BATCHは Phase 4-6R まで初回履歴を参照する
+- 初回履歴は分析・診断・互換のため維持する
+- 初回訪問時には Phase 4-6P の仕様どおり current visit と初回履歴へ同値保存する
+- 再訪時には初回履歴を上書きしない
+
+#### 1H.20.5 再訪順位の専用テスト
+
+新規ファイル `tests_fcfs_order_control_revisit_ranking.py`（13テスト）を追加した。少なくとも次を確認する：
+
+- 順位キーメソッドが current visit の値を返す
+- 初回履歴を参照しない
+- current visit欠如時の `ValueError`
+- current visitのNode不一致時の `ValueError`
+- `arrival_time` と `arrival_tiebreaker` が両方 `None` の場合の `ValueError`
+- `arrival_time` だけが `None` の場合の `ValueError`
+- `arrival_tiebreaker` だけが `None` の場合の `ValueError`
+- 再訪Vehicleと初回訪問Vehicleの順位
+- 再訪Vehicle同士の current visit tiebreaker順位
+- `arrival_time` と tiebreaker が同値の場合の `veh.id` fallback
+- 同一訪問中の再登録で順位キーが変わらない
+- transfer経由で current visit 欠如が黙って除外されず `ValueError` になる
+- transfer経由でNode不一致が `ValueError` になる
+- transfer経由で到着情報が両方 `None` の場合に `ValueError` になる
+
+同一訪問中の再登録テストでは、テスト側で `incoming_vehicles` へ事前 `append` せず、`veh.carfollow()` と `Vehicle.update()` による通常の再登録を使用し、同一Vehicleが1回だけ登録されることを確認した。
+
+#### 1H.20.6 tests_order_control_current_visit_state.pyの更新
+
+手動到着状態では初回履歴のみ設定され、current visitの `arrival_time` と `arrival_tiebreaker` が未設定だった。テスト専用補助関数 `_sync_arrived_current_visit_for_test(...)` を追加し、既存 current visit へ到着情報を同期した（`begin_order_control_visit_on_link_entry()` は再度呼ばず、`visit_id` を増やさない。乱数は生成しない）。
+
+適用した6テスト：
+
+- `test_eligible_to_ineligible_clears_current_visit`
+- `test_next_eligible_visit_after_ineligible_link`
+- `test_same_eligible_node_revisit_gets_new_visit_id`
+- `test_legacy_earliest_dict_overwrites_on_revisit`
+- `test_link_entry_via_transfer_fcfs_no_clearance`
+- `test_link_entry_via_transfer_fcfs_clearance`
+
+#### 1H.20.7 BATCH統合テスト内のFCFS手動状態更新
+
+回帰確認中、`tests_order_control_batch_node_transfer_integration.py` の `test_fcfs_node_calls_fcfs_once` が失敗した。
+
+**原因：** `_setup_arrived_vehicle()` でFCFS到着済み状態を手動作成していたが、初回履歴のみ存在し current visit が存在しなかった。Phase 4-6Q後の `get_order_control_fcfs_rank_key(merge)` で `ValueError` となった。
+
+**対応（commit `9100803`）：** 既存の `_begin_arrived_current_visit_for_test()` を `_setup_arrived_vehicle()` 直後に呼び、`arrival_time` と `arrival_tiebreaker` を初回履歴と同値に同期した。本体の `ValueError` 要件は緩和していない。BATCH本体も変更していない。
+
+#### 1H.20.8 回帰確認結果
+
+**Phase 4-6Q専用・小規模テスト（すべてPASS）：**
+
+- `tests_fcfs_order_control_revisit_ranking.py`
+- `tests_order_control_current_visit_state.py`
+- `tests_order_control_current_visit_arrival.py`
+- `tests_order_control_node_arrival_times.py`
+- `tests_order_control_rng.py`
+- `tests_fcfs_order_control_tiebreaker.py`
+- `tests_fcfs_order_control_behavior.py`
+- `tests_fcfs_order_control_transfer.py`
+- `tests_fcfs_order_control_clearance_0.py`
+- `tests_fcfs_order_control_clearance_1.py`
+- `tests_fcfs_order_control_clearance_xyz.py`
+
+**order-control設定・Vehicle周辺（すべてPASS）：**
+
+- `tests_order_control_clearance_settings.py`
+- `tests_order_control_eligibility.py`
+- `tests_node_order_control_attributes.py`
+- `tests_world_order_control_setters.py`
+- `tests_random_eligible_order_control.py`
+- `tests_vehicle_research_attributes.py`
+- `tests_load_vehicle_list_to_uxsim.py`
+
+**BATCH単体・統合（すべてPASS。BATCH本体は未変更、初回履歴参照のまま）：**
+
+- 状態コンテナ、earliest arrival、trigger候補、t_trigger推定、inlink別候補、候補グループ順序、max batch size、service unit登録、service queue transfer、BATCH形成統合、BATCH transfer、BATCH `Node.transfer()` 統合
+- `test_fcfs_node_calls_fcfs_once` は修正後PASS
+- `test_n1_batch_vs_fcfs_equivalence` はPASS
+
+**baseline・example（既知値と一致）：**
+
+| テスト | completed trips | average speed | total travel time | average travel time | average delay | total distance traveled |
+|--------|-----------------|---------------|-------------------|---------------------|---------------|-------------------------|
+| baseline | 48 / 48 | 16.5 m/s | 2928.0 s | 61.0 s | 1.0 s | 48000.0 m |
+| example | 735 / 810 | 11.7 m/s | 119475.0 s | 162.6 s | 62.6 s | 1632250.0 m |
+
+**中規模ネットワーク（500 Vehicle。性能優劣はPhase 4-6Qの合否基準ではない）：**
+
+FCFS対UXsim standard：completed 383/500（ratio 0.766）、standard total travel time 53941.0 s、FCFS 56257.0 s、standard average travel time 140.8 s、FCFS 146.9 s、standard average delay 11.2 s、FCFS 17.3 s、total distance traveled 両方992850.0 m、eligible FCFS Node数10、既存sanity checkすべてPASS。
+
+BATCH・FCFS・UXsim standard：completed 全方式383/500、standard total travel time 53941.0 s、FCFS 56257.0 s、BATCH 56276.0 s、standard average travel time 140.8 s、FCFS 146.9 s、BATCH 146.9 s、standard average delay 11.2 s、FCFS 17.3 s、BATCH 17.3 s、total distance traveled 全方式992850.0 m、BATCH/FCFS average travel time ratio 1.0003（表示上BATCHはFCFSよりhigher）、FCFS・BATCHのeligible Node数各10、eligible Node集合一致、既存sanity checkすべてPASS。
+
+**1,000台グリッドネットワーク（性能優劣はPhase 4-6Qの合否基準ではない）：**
+
+FCFS対UXsim standard：completed 1000/1000（ratio 1.000）、standard total travel time 165917.0 s、FCFS 167772.0 s、standard average travel time 165.9 s、FCFS 167.8 s、standard average delay 1.3 s、FCFS 3.2 s、total distance traveled 両方3292000.0 m、eligible FCFS Node数36、既存sanity checkすべてPASS。
+
+BATCH・FCFS・UXsim standard：completed 全方式1000/1000、standard total travel time 165917.0 s、FCFS 167772.0 s、BATCH 167872.0 s、standard average travel time 165.9 s、FCFS 167.8 s、BATCH 167.9 s、standard average delay 1.3 s、FCFS 3.2 s、BATCH 3.3 s、total distance traveled 全方式3292000.0 m、BATCH/FCFS average travel time ratio 1.0006、BATCH − FCFS average travel time差0.1 s（表示上BATCHはFCFSよりhigher）、FCFS・BATCHのeligible Node数各36、eligible Node集合一致、既存sanity checkすべてPASS。
+
+**実行しなかったもの（通常回帰では未実行）：**
+
+- 5,000台・10,000台のhigh-demand比較（Phase 4-6T〜4-6Uで予定）
+- signalized UXsimとのhigh-demand比較
+- `diagnostics/order_control/` 配下の診断スクリプト（Phase 4-6Nの修正前状態と既知prefix violationを保存するもの。通常回帰テストではない）
+
+#### 1H.20.9 Phase 4-6Q完了時点
+
+- FCFSは current visit の `arrival_time` と `arrival_tiebreaker` を参照する
+- 再訪Vehicleは現在訪問の到着情報でFCFS順位付けされる
+- 同一訪問中の再登録では順位キーは変化しない
+- 初回履歴は維持される
+- BATCHはまだ初回履歴を参照する
+- Phase 4-6Rは未着手
+- 現在の次工程は Phase 4-6R
 
 ---
 
@@ -3634,9 +3843,9 @@ Phase 4-6Mで追加された `Node.transfer()` 接続統合テストは **§1F.1
 - `git log --oneline -20`。
 - **Phase 4-6A〜4-6M：** 実装・テスト・commit済み（4-6Mは `b03538c`）。
 - **Phase 4-6N（commit済み）：** route_next_link参照順修正（`05fa2d1`）、clearance=0比較テスト3本（`f339b88`）、正式記録（`c06936c`）、診断スクリプト分離（`0e35799`）。
-- **Phase 4-6N Step 5：** Node訪問単位の共通状態設計を **§1H** に記録済み。基盤（4-6O）・到着記録（4-6P）は実装済み
-- **現時点の主要課題：** Phase 4-6Q（FCFSの参照先をcurrent visitへ変更）
-- **優先参照：** ORDER_EXCHANGE_PHASE4-6_BATCH_PROCESSING_DESIGN_NOTES.md の **§1H** を優先参照。診断・根本原因は **§1G**、`Node.transfer()` 接続は **§1F**。
-- **次工程（§1H.17）：** Phase 4-6Q実装（FCFS参照先変更）。その後 Phase 4-6R（BATCH形成の参照先変更）
+- **Phase 4-6N Step 5：** Node訪問単位の共通状態設計を **§1H** に記録済み。基盤（4-6O）・到着記録（4-6P）・FCFS参照先変更（4-6Q）は実装済み
+- **現時点の主要課題：** Phase 4-6R（BATCH形成の参照先をcurrent visitへ変更）
+- **優先参照：** ORDER_EXCHANGE_PHASE4-6_BATCH_PROCESSING_DESIGN_NOTES.md の **§1H** を優先参照。診断・根本原因は **§1G**、`Node.transfer()` 接続は **§1F**。Phase 4-6Q実装記録は **§1H.20**。
+- **次工程（§1H.17）：** Phase 4-6R実装（BATCH形成の参照先変更）
 - 目的地Vehicleは端点間OD前提で保留。比較対象Node共通管理・自動検証は将来課題。
 - 一時退避PDF `phase4-6A_batch_earliest_arrival_timestep_memo.pdf` はリポジトリ外。正式Markdownを優先参照。
