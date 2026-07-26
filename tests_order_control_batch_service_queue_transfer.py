@@ -686,7 +686,8 @@ def test_link_transition_updates():
     assert veh not in link1.vehicles
     assert veh not in merge.incoming_vehicles
     assert veh.move_remain == 0
-    assert out.end_node.name in veh.order_control_earliest_arrival_timesteps
+    assert out.end_node.name not in veh.order_control_earliest_arrival_timesteps
+    assert veh.order_control_current_visit is None
     assert merge.last_order_control_inlink is link1
     assert merge.last_order_control_entry_timestep == merge.W.T
 

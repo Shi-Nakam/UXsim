@@ -7,6 +7,8 @@
 
 import copy
 
+import pytest
+
 from uxsim import World
 
 
@@ -37,11 +39,41 @@ def _build_merge_world(name, merge_order_control_type="batch", merge_eligible=Tr
     return W
 
 
+def _sync_arrived_trigger_current_visit(
+    veh, merge, link, arrival_time, tiebreaker, earliest_arrival_timestep=0
+):
+    if veh.order_control_visit_id == 0:
+        veh.order_control_visit_id = 1
+    visit = veh.order_control_current_visit
+    if visit is None or visit.get("node") is not merge or visit.get("inlink") is not link:
+        veh.order_control_current_visit = {
+            "visit_id": veh.order_control_visit_id,
+            "node": merge,
+            "inlink": link,
+            "earliest_arrival_timestep": earliest_arrival_timestep,
+            "arrival_time": arrival_time,
+            "arrival_tiebreaker": tiebreaker,
+            "batch_assignment": None,
+        }
+    else:
+        visit["visit_id"] = veh.order_control_visit_id
+        visit["node"] = merge
+        visit["inlink"] = link
+        visit["earliest_arrival_timestep"] = earliest_arrival_timestep
+        visit["arrival_time"] = arrival_time
+        visit["arrival_tiebreaker"] = tiebreaker
+        visit["batch_assignment"] = None
+
+
 def _make_candidate_vehicle(W, name, departure_time, arrival_time, tiebreaker):
+    merge = W.get_node("merge")
+    link = W.get_link("link1")
     veh = W.addVehicle("orig1", "dest", departure_time, name=name)
+    veh.link = link
     veh.route_next_link = W.get_link("out")
     veh.order_control_node_arrival_times["merge"] = arrival_time
     veh.order_control_node_arrival_tiebreakers["merge"] = tiebreaker
+    _sync_arrived_trigger_current_visit(veh, merge, link, arrival_time, tiebreaker)
     return veh
 
 
@@ -201,30 +233,73 @@ def test_incoming_vehicle_storage_order_independence():
     assert merge.incoming_vehicles == [vehicle_b, vehicle_a]
 
 
-def test_missing_required_information_excluded_safely():
-    W = _build_merge_world("batch_trigger_missing_info")
+def test_vehicle_without_route_next_link_is_excluded():
+    W = _build_merge_world("batch_trigger_no_route")
     merge = W.get_node("merge")
-    outlink = W.get_link("out")
 
     veh_no_route = W.addVehicle("orig1", "dest", 0, name="veh_no_route")
     veh_no_route.route_next_link = None
     veh_no_route.order_control_node_arrival_times["merge"] = 10.0
     veh_no_route.order_control_node_arrival_tiebreakers["merge"] = 0.1
 
+    veh_valid = _make_candidate_vehicle(W, "veh_valid", 3, 11.0, 0.3)
+
+    merge.incoming_vehicles = [veh_no_route, veh_valid]
+    assert merge.get_order_control_batch_trigger_candidates() == [veh_valid]
+
+
+def test_candidate_with_missing_arrival_time_raises():
+    W = _build_merge_world("batch_trigger_missing_arrival_time")
+    merge = W.get_node("merge")
+    outlink = W.get_link("out")
+    link1 = W.get_link("link1")
+
     veh_no_arrival = W.addVehicle("orig1", "dest", 1, name="veh_no_arrival")
     veh_no_arrival.route_next_link = outlink
     veh_no_arrival.order_control_node_arrival_tiebreakers["merge"] = 0.2
+    veh_no_arrival.order_control_visit_id = 1
+    veh_no_arrival.order_control_current_visit = {
+        "visit_id": 1,
+        "node": merge,
+        "inlink": link1,
+        "earliest_arrival_timestep": 0,
+        "arrival_time": None,
+        "arrival_tiebreaker": 0.2,
+        "batch_assignment": None,
+    }
+    merge.incoming_vehicles = [veh_no_arrival]
+    with pytest.raises(ValueError, match="incomplete arrival state") as exc_info:
+        merge.get_order_control_batch_trigger_candidates()
+    message = str(exc_info.value)
+    assert veh_no_arrival.name in message
+    assert "arrival_time=None" in message
+
+
+def test_candidate_with_missing_arrival_tiebreaker_raises():
+    W = _build_merge_world("batch_trigger_missing_arrival_tiebreaker")
+    merge = W.get_node("merge")
+    outlink = W.get_link("out")
+    link1 = W.get_link("link1")
 
     veh_no_tiebreaker = W.addVehicle("orig1", "dest", 2, name="veh_no_tiebreaker")
     veh_no_tiebreaker.route_next_link = outlink
     veh_no_tiebreaker.order_control_node_arrival_times["merge"] = 12.0
-
-    veh_valid = _make_candidate_vehicle(W, "veh_valid", 3, 11.0, 0.3)
-
-    merge.incoming_vehicles = [veh_no_route, veh_no_arrival, veh_no_tiebreaker, veh_valid]
-    candidates = merge.get_order_control_batch_trigger_candidates()
-
-    assert candidates == [veh_valid]
+    veh_no_tiebreaker.order_control_visit_id = 1
+    veh_no_tiebreaker.order_control_current_visit = {
+        "visit_id": 1,
+        "node": merge,
+        "inlink": link1,
+        "earliest_arrival_timestep": 0,
+        "arrival_time": 12.0,
+        "arrival_tiebreaker": None,
+        "batch_assignment": None,
+    }
+    merge.incoming_vehicles = [veh_no_tiebreaker]
+    with pytest.raises(ValueError, match="incomplete arrival state") as exc_info:
+        merge.get_order_control_batch_trigger_candidates()
+    message = str(exc_info.value)
+    assert veh_no_tiebreaker.name in message
+    assert "arrival_tiebreaker=None" in message
 
 
 if __name__ == "__main__":
@@ -236,5 +311,7 @@ if __name__ == "__main__":
     test_node_specific_batch_assignment_exclusion()
     test_no_side_effects()
     test_incoming_vehicle_storage_order_independence()
-    test_missing_required_information_excluded_safely()
+    test_vehicle_without_route_next_link_is_excluded()
+    test_candidate_with_missing_arrival_time_raises()
+    test_candidate_with_missing_arrival_tiebreaker_raises()
     print("Order-control batch trigger candidates test passed.")

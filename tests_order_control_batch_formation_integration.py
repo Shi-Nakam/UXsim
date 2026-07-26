@@ -45,6 +45,29 @@ def _make_vehicle(W, orig_name, name):
     return W.addVehicle(orig_name, "dest", 0, name=name)
 
 
+def _sync_arrived_current_visit(veh, merge, link, earliest, arrival_time, tiebreaker):
+    if veh.order_control_visit_id == 0:
+        veh.order_control_visit_id = 1
+    visit = veh.order_control_current_visit
+    if visit is None or visit.get("node") is not merge or visit.get("inlink") is not link:
+        veh.order_control_current_visit = {
+            "visit_id": veh.order_control_visit_id,
+            "node": merge,
+            "inlink": link,
+            "earliest_arrival_timestep": earliest,
+            "arrival_time": arrival_time,
+            "arrival_tiebreaker": tiebreaker,
+            "batch_assignment": None,
+        }
+    else:
+        visit["visit_id"] = veh.order_control_visit_id
+        visit["node"] = merge
+        visit["inlink"] = link
+        visit["earliest_arrival_timestep"] = earliest
+        visit["arrival_time"] = arrival_time
+        visit["arrival_tiebreaker"] = tiebreaker
+        visit["batch_assignment"] = None
+
 def _setup_arrived_vehicle(
     merge,
     veh,
@@ -63,6 +86,9 @@ def _setup_arrived_vehicle(
     veh.order_control_earliest_arrival_timesteps["merge"] = earliest
     veh.order_control_node_arrival_times["merge"] = arrival_time
     veh.order_control_node_arrival_tiebreakers["merge"] = tiebreaker
+    _sync_arrived_current_visit(
+        veh, merge, link, earliest, arrival_time, tiebreaker
+    )
     if veh not in link.vehicles:
         link.vehicles.append(veh)
     if veh not in merge.incoming_vehicles:
@@ -397,6 +423,16 @@ def test_upstream_error_does_not_mutate_state():
     missing_earliest.state = "run"
     missing_earliest.x = 60.0
     missing_earliest.v = 20.0
+    missing_earliest.order_control_visit_id = 1
+    missing_earliest.order_control_current_visit = {
+        "visit_id": 1,
+        "node": merge,
+        "inlink": link1,
+        "earliest_arrival_timestep": None,
+        "arrival_time": None,
+        "arrival_tiebreaker": None,
+        "batch_assignment": None,
+    }
     link1.vehicles.append(missing_earliest)
 
     vehicles = [trigger, missing_earliest]
@@ -407,7 +443,7 @@ def test_upstream_error_does_not_mutate_state():
         assert False, "expected ValueError"
     except ValueError as exc:
         assert "A2" in str(exc)
-        assert "earliest arrival timestep" in str(exc)
+        assert "earliest_arrival_timestep" in str(exc)
 
     assert before == _snapshot_state(merge, vehicles)
 

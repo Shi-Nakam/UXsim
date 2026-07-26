@@ -46,12 +46,38 @@ def _make_vehicle(W, orig_name, name, departure_time=0):
     return W.addVehicle(orig_name, "dest", departure_time, name=name)
 
 
+def _sync_pre_arrival_current_visit(veh, merge, link, earliest):
+    if veh.order_control_visit_id == 0:
+        veh.order_control_visit_id = 1
+    visit = veh.order_control_current_visit
+    if visit is None or visit.get("node") is not merge or visit.get("inlink") is not link:
+        veh.order_control_current_visit = {
+            "visit_id": veh.order_control_visit_id,
+            "node": merge,
+            "inlink": link,
+            "earliest_arrival_timestep": earliest,
+            "arrival_time": None,
+            "arrival_tiebreaker": None,
+            "batch_assignment": None,
+        }
+    else:
+        visit["visit_id"] = veh.order_control_visit_id
+        visit["node"] = merge
+        visit["inlink"] = link
+        visit["earliest_arrival_timestep"] = earliest
+        visit["arrival_time"] = None
+        visit["arrival_tiebreaker"] = None
+        visit["batch_assignment"] = None
+
+
 def _place_on_inlink(veh, link, earliest, x=100.0, v=20.0, route_next_link=None):
+    merge = link.end_node
     veh.link = link
     veh.state = "run"
     veh.x = x
     veh.v = v
     veh.order_control_earliest_arrival_timesteps["merge"] = earliest
+    _sync_pre_arrival_current_visit(veh, merge, link, earliest)
     if route_next_link is not None:
         veh.route_next_link = route_next_link
     link.vehicles.append(veh)
@@ -201,6 +227,7 @@ def test_invalid_earliest_values_raise():
         veh = _make_vehicle(W, "orig1", "veh_invalid")
         _place_on_inlink(veh, link1, earliest=10)
         veh.order_control_earliest_arrival_timesteps["merge"] = invalid
+        veh.order_control_current_visit["earliest_arrival_timestep"] = invalid
         try:
             merge.get_order_control_batch_candidates_by_inlink(10)
             assert False, f"expected ValueError for earliest={invalid!r}"

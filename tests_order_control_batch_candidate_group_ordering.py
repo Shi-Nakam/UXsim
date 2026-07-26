@@ -43,18 +43,79 @@ def _make_vehicle(W, orig_name, name):
     return W.addVehicle(orig_name, "dest", 0, name=name)
 
 
+def _sync_pre_arrival_current_visit(veh, merge, link, earliest):
+    if veh.order_control_visit_id == 0:
+        veh.order_control_visit_id = 1
+    visit = veh.order_control_current_visit
+    if visit is None or visit.get("node") is not merge or visit.get("inlink") is not link:
+        veh.order_control_current_visit = {
+            "visit_id": veh.order_control_visit_id,
+            "node": merge,
+            "inlink": link,
+            "earliest_arrival_timestep": earliest,
+            "arrival_time": None,
+            "arrival_tiebreaker": None,
+            "batch_assignment": None,
+        }
+    else:
+        visit["visit_id"] = veh.order_control_visit_id
+        visit["node"] = merge
+        visit["inlink"] = link
+        visit["earliest_arrival_timestep"] = earliest
+        visit["arrival_time"] = None
+        visit["arrival_tiebreaker"] = None
+        visit["batch_assignment"] = None
+
+
+def _sync_arrived_trigger_current_visit(
+    veh, merge, link, earliest, arrival_time, tiebreaker
+):
+    if veh.order_control_visit_id == 0:
+        veh.order_control_visit_id = 1
+    visit = veh.order_control_current_visit
+    if visit is None or visit.get("node") is not merge or visit.get("inlink") is not link:
+        veh.order_control_current_visit = {
+            "visit_id": veh.order_control_visit_id,
+            "node": merge,
+            "inlink": link,
+            "earliest_arrival_timestep": earliest,
+            "arrival_time": arrival_time,
+            "arrival_tiebreaker": tiebreaker,
+            "batch_assignment": None,
+        }
+    else:
+        visit["visit_id"] = veh.order_control_visit_id
+        visit["node"] = merge
+        visit["inlink"] = link
+        visit["earliest_arrival_timestep"] = earliest
+        visit["arrival_time"] = arrival_time
+        visit["arrival_tiebreaker"] = tiebreaker
+        visit["batch_assignment"] = None
+
+
 def _place_on_inlink(veh, link, earliest, x, v=20.0):
+    merge = link.end_node
     veh.link = link
     veh.state = "run"
     veh.x = x
     veh.v = v
     veh.order_control_earliest_arrival_timesteps["merge"] = earliest
+    _sync_pre_arrival_current_visit(veh, merge, link, earliest)
     link.vehicles.append(veh)
 
 
 def _setup_trigger(merge, trigger_veh, arrival_time=10.0, tiebreaker=0.5):
     trigger_veh.order_control_node_arrival_times["merge"] = arrival_time
     trigger_veh.order_control_node_arrival_tiebreakers["merge"] = tiebreaker
+    earliest = trigger_veh.order_control_earliest_arrival_timesteps["merge"]
+    _sync_arrived_trigger_current_visit(
+        trigger_veh,
+        merge,
+        trigger_veh.link,
+        earliest,
+        arrival_time,
+        tiebreaker,
+    )
     if trigger_veh not in merge.incoming_vehicles:
         merge.incoming_vehicles.append(trigger_veh)
 
@@ -390,20 +451,24 @@ def test_trigger_vehicle_validation_errors():
     _setup_trigger(merge, trigger)
 
     del trigger.order_control_node_arrival_times["merge"]
+    trigger.order_control_current_visit["arrival_time"] = None
     _expect_value_error(
         lambda: merge.get_ordered_order_control_batch_candidates_by_inlink(
             base_candidates, trigger
         )
     )
     trigger.order_control_node_arrival_times["merge"] = 10.0
+    trigger.order_control_current_visit["arrival_time"] = 10.0
 
     del trigger.order_control_node_arrival_tiebreakers["merge"]
+    trigger.order_control_current_visit["arrival_tiebreaker"] = None
     _expect_value_error(
         lambda: merge.get_ordered_order_control_batch_candidates_by_inlink(
             base_candidates, trigger
         )
     )
     trigger.order_control_node_arrival_tiebreakers["merge"] = 0.5
+    trigger.order_control_current_visit["arrival_tiebreaker"] = 0.5
 
     trigger.order_control_batch_assignments["merge"] = 0
     _expect_value_error(
@@ -699,6 +764,7 @@ def test_trigger_arrival_validation():
 
     for invalid in (-1, True, "10", None, float("nan"), float("inf")):
         trigger.order_control_node_arrival_times["merge"] = invalid
+        trigger.order_control_current_visit["arrival_time"] = invalid
         _expect_value_error(
             lambda: merge.get_ordered_order_control_batch_candidates_by_inlink(
                 base, trigger
@@ -706,8 +772,10 @@ def test_trigger_arrival_validation():
         )
 
     trigger.order_control_node_arrival_times["merge"] = 10.0
+    trigger.order_control_current_visit["arrival_time"] = 10.0
     merge.get_ordered_order_control_batch_candidates_by_inlink(base, trigger)
     trigger.order_control_node_arrival_times["merge"] = 10.5
+    trigger.order_control_current_visit["arrival_time"] = 10.5
     merge.get_ordered_order_control_batch_candidates_by_inlink(base, trigger)
 
 

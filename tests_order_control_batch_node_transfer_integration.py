@@ -61,6 +61,29 @@ def _make_vehicle(W, orig_name, name, dest="dest", departure_time=0):
     return W.addVehicle(orig_name, dest, departure_time, name=name)
 
 
+def _sync_arrived_current_visit(veh, merge, link, earliest, arrival_time, tiebreaker):
+    if veh.order_control_visit_id == 0:
+        veh.order_control_visit_id = 1
+    visit = veh.order_control_current_visit
+    if visit is None or visit.get("node") is not merge or visit.get("inlink") is not link:
+        veh.order_control_current_visit = {
+            "visit_id": veh.order_control_visit_id,
+            "node": merge,
+            "inlink": link,
+            "earliest_arrival_timestep": earliest,
+            "arrival_time": arrival_time,
+            "arrival_tiebreaker": tiebreaker,
+            "batch_assignment": None,
+        }
+    else:
+        visit["visit_id"] = veh.order_control_visit_id
+        visit["node"] = merge
+        visit["inlink"] = link
+        visit["earliest_arrival_timestep"] = earliest
+        visit["arrival_time"] = arrival_time
+        visit["arrival_tiebreaker"] = tiebreaker
+        visit["batch_assignment"] = None
+
 def _setup_arrived_vehicle(
     merge,
     veh,
@@ -82,6 +105,9 @@ def _setup_arrived_vehicle(
     veh.order_control_earliest_arrival_timesteps[merge.name] = earliest
     veh.order_control_node_arrival_times[merge.name] = arrival_time
     veh.order_control_node_arrival_tiebreakers[merge.name] = tiebreaker
+    _sync_arrived_current_visit(
+        veh, merge, link, earliest, arrival_time, tiebreaker
+    )
     if veh not in link.vehicles:
         link.vehicles.append(veh)
     if veh not in merge.incoming_vehicles:
@@ -104,12 +130,7 @@ def _begin_arrived_current_visit_for_test(
     assert veh.order_control_node_arrival_tiebreakers[merge.name] == tiebreaker
     assert veh.order_control_earliest_arrival_timesteps[merge.name] == earliest
 
-    veh.begin_order_control_visit_on_link_entry()
-
-    veh.order_control_earliest_arrival_timesteps[merge.name] = earliest
-    veh.order_control_current_visit["earliest_arrival_timestep"] = earliest
-    veh.order_control_current_visit["arrival_time"] = arrival_time
-    veh.order_control_current_visit["arrival_tiebreaker"] = tiebreaker
+    _sync_arrived_current_visit(veh, merge, link, earliest, arrival_time, tiebreaker)
 
     current_visit = veh.order_control_current_visit
     assert current_visit is not None

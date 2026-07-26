@@ -37,6 +37,32 @@ def _build_merge_network(name="batch_t_trigger"):
     return W
 
 
+def _sync_arrived_trigger_current_visit(
+    veh, merge, link, earliest_arrival_timestep, arrival_time, tiebreaker
+):
+    if veh.order_control_visit_id == 0:
+        veh.order_control_visit_id = 1
+    visit = veh.order_control_current_visit
+    if visit is None or visit.get("node") is not merge or visit.get("inlink") is not link:
+        veh.order_control_current_visit = {
+            "visit_id": veh.order_control_visit_id,
+            "node": merge,
+            "inlink": link,
+            "earliest_arrival_timestep": earliest_arrival_timestep,
+            "arrival_time": arrival_time,
+            "arrival_tiebreaker": tiebreaker,
+            "batch_assignment": None,
+        }
+    else:
+        visit["visit_id"] = veh.order_control_visit_id
+        visit["node"] = merge
+        visit["inlink"] = link
+        visit["earliest_arrival_timestep"] = earliest_arrival_timestep
+        visit["arrival_time"] = arrival_time
+        visit["arrival_tiebreaker"] = tiebreaker
+        visit["batch_assignment"] = None
+
+
 def _make_trigger_vehicle(
     W=None,
     name="trigger",
@@ -57,6 +83,14 @@ def _make_trigger_vehicle(
     if batch_assignments is not None:
         veh.order_control_batch_assignments.update(batch_assignments)
     merge = W.get_node("merge")
+    _sync_arrived_trigger_current_visit(
+        veh,
+        merge,
+        veh.link,
+        earliest_arrival_timestep,
+        arrival_time,
+        tiebreaker,
+    )
     merge.incoming_vehicles = [veh]
     return veh, merge
 
@@ -240,18 +274,21 @@ def test_value_error_no_route_next_link():
 def test_value_error_missing_arrival_time():
     veh, merge = _make_trigger_vehicle()
     del veh.order_control_node_arrival_times["merge"]
+    veh.order_control_current_visit["arrival_time"] = None
     _expect_value_error(lambda: merge.estimate_order_control_batch_t_trigger_level_0(veh))
 
 
 def test_value_error_missing_tiebreaker():
     veh, merge = _make_trigger_vehicle()
     del veh.order_control_node_arrival_tiebreakers["merge"]
+    veh.order_control_current_visit["arrival_tiebreaker"] = None
     _expect_value_error(lambda: merge.estimate_order_control_batch_t_trigger_level_0(veh))
 
 
 def test_value_error_missing_earliest_arrival_timestep():
     veh, merge = _make_trigger_vehicle()
     del veh.order_control_earliest_arrival_timesteps["merge"]
+    veh.order_control_current_visit["earliest_arrival_timestep"] = None
     _expect_value_error(lambda: merge.estimate_order_control_batch_t_trigger_level_0(veh))
 
 
