@@ -405,17 +405,11 @@ class Node:
         candidates = [
             veh for veh in s.incoming_vehicles
             if veh.route_next_link is not None
-            and s.name in veh.order_control_node_arrival_times
-            and s.name in veh.order_control_node_arrival_tiebreakers
             and s.name not in veh.order_control_batch_assignments
         ]
         return sorted(
             candidates,
-            key=lambda veh: (
-                veh.order_control_node_arrival_times[s.name],
-                veh.order_control_node_arrival_tiebreakers[s.name],
-                veh.id,
-            ),
+            key=lambda veh: veh.get_order_control_batch_trigger_rank_key(s),
         )
 
     def _validate_order_control_batch_t_trigger_inputs(s, trigger_vehicle, require_link=False):
@@ -436,18 +430,8 @@ class Node:
             raise ValueError(
                 f"Vehicle {trigger_vehicle.name} has no route_next_link at node {s.name}."
             )
-        if s.name not in trigger_vehicle.order_control_node_arrival_times:
-            raise ValueError(
-                f"Vehicle {trigger_vehicle.name} has no arrival time recorded for node {s.name}."
-            )
-        if s.name not in trigger_vehicle.order_control_node_arrival_tiebreakers:
-            raise ValueError(
-                f"Vehicle {trigger_vehicle.name} has no arrival tiebreaker recorded for node {s.name}."
-            )
-        if s.name not in trigger_vehicle.order_control_earliest_arrival_timesteps:
-            raise ValueError(
-                f"Vehicle {trigger_vehicle.name} has no earliest arrival timestep recorded for node {s.name}."
-            )
+        trigger_vehicle.get_order_control_batch_trigger_rank_key(s)
+        trigger_vehicle.get_order_control_batch_earliest_arrival_timestep(s)
         if s.name in trigger_vehicle.order_control_batch_assignments:
             raise ValueError(
                 f"Vehicle {trigger_vehicle.name} is already assigned to a batch at node {s.name}."
@@ -467,14 +451,12 @@ class Node:
             )
 
     def _compute_order_control_batch_base_trigger_timestep(s, trigger_vehicle):
-        arrival_timestep = int(
-            round(
-                trigger_vehicle.order_control_node_arrival_times[s.name] / s.W.DELTAT
-            )
-        )
+        trigger_rank_key = trigger_vehicle.get_order_control_batch_trigger_rank_key(s)
+        trigger_arrival_time = trigger_rank_key[0]
+        arrival_timestep = int(round(trigger_arrival_time / s.W.DELTAT))
         first_transfer_timestep = arrival_timestep + 1
         trigger_earliest_arrival_timestep = (
-            trigger_vehicle.order_control_earliest_arrival_timesteps[s.name]
+            trigger_vehicle.get_order_control_batch_earliest_arrival_timestep(s)
         )
         return max(first_transfer_timestep, trigger_earliest_arrival_timestep)
 
@@ -580,13 +562,7 @@ class Node:
                         f"Vehicle {veh.name} on inlink {inlink.name} of node {s.name} "
                         f"has state={veh.state!r}; expected 'run'."
                     )
-                if s.name not in veh.order_control_earliest_arrival_timesteps:
-                    raise ValueError(
-                        f"Vehicle {veh.name} on inlink {inlink.name} of node {s.name} "
-                        f"has no earliest arrival timestep recorded for node {s.name}."
-                    )
-
-                earliest = veh.order_control_earliest_arrival_timesteps[s.name]
+                earliest = veh.get_order_control_batch_earliest_arrival_timestep(s)
                 if not isinstance(earliest, int) or isinstance(earliest, bool):
                     raise ValueError(
                         f"Vehicle {veh.name} on inlink {inlink.name} of node {s.name} "
@@ -622,7 +598,7 @@ class Node:
             for veh in vehicles:
                 if s.name in veh.order_control_batch_assignments:
                     continue
-                earliest = veh.order_control_earliest_arrival_timesteps[s.name]
+                earliest = veh.get_order_control_batch_earliest_arrival_timestep(s)
                 if earliest <= t_trigger:
                     candidates.append(veh)
                 else:
@@ -765,16 +741,6 @@ class Node:
                 f"trigger_vehicle {trigger_vehicle.name} is not in incoming_vehicles "
                 f"of node {s.name}."
             )
-        if s.name not in trigger_vehicle.order_control_node_arrival_times:
-            raise ValueError(
-                f"trigger_vehicle {trigger_vehicle.name} has no arrival time recorded "
-                f"for node {s.name}."
-            )
-        if s.name not in trigger_vehicle.order_control_node_arrival_tiebreakers:
-            raise ValueError(
-                f"trigger_vehicle {trigger_vehicle.name} has no arrival tiebreaker "
-                f"recorded for node {s.name}."
-            )
         if s.name in trigger_vehicle.order_control_batch_assignments:
             raise ValueError(
                 f"trigger_vehicle {trigger_vehicle.name} is already assigned to a "
@@ -800,7 +766,8 @@ class Node:
                 f"trigger inlink {trigger_inlink.name} at node {s.name}."
             )
 
-        arrival_seconds = trigger_vehicle.order_control_node_arrival_times[s.name]
+        trigger_rank_key = trigger_vehicle.get_order_control_batch_trigger_rank_key(s)
+        arrival_seconds = trigger_rank_key[0]
         if (
             not isinstance(arrival_seconds, (int, float))
             or isinstance(arrival_seconds, bool)
