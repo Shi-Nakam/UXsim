@@ -35,9 +35,10 @@ UXsim Order Exchange 改変作業における、phase 4-6：交差点BATCH処理
 | | phase 4-6R：BATCH形成のcurrent visit参照（cdd19be・30588a0・ae57e40） |
 | | phase 4-6S：BATCH assignmentの訪問対応・service unit visit_id・実通過照合（5e26bc9） |
 | | phase 4-6T：小規模BATCH再訪end-to-end統合（b7159f9） |
+| | phase 4-6U：high-demand再実行・検証完了（§1H.24。本体変更なし） |
 | **診断スクリプト** | `diagnostics/order_control/`（4本＋README）。通常回帰テストから分離済み（`0e35799`）。詳細は `diagnostics/order_control/README.md` |
 | **BATCH形成〜シミュレーション接続まで完成** | trigger候補取得 → … → service queue登録（4-6I）→ 実通過（4-6K）→ 統括呼出し（4-6L）→ **`Node.transfer()` 接続（4-6M）** → **BATCH形成のcurrent visit参照（4-6R）** → **BATCH assignmentの訪問対応（4-6S）** → **小規模BATCH再訪end-to-end統合（4-6T）** |
-| **現時点の主要課題** | Phase 4-6Uのhigh-demand再実行、既知prefix violationの実ネットワーク再確認、trip-end VehicleのBATCH service unit対応、stale service unit処理方針、assignment正式全訪問履歴 |
+| **現時点の主要課題** | trip-end VehicleのBATCH service unit対応、stale service unit処理方針、assignment正式全訪問履歴、Level 2仮想サービス推定、Level 2 unresolved時のLevel 1 fallback接続、Time-value Transaction |
 | **未実装** | Level 2仮想サービス推定、Level 2 unresolved時のLevel 1 fallback接続 |
 | | trip-end VehicleのBATCH service unit対応 |
 | | stale service unitの自動削除または回復方針 |
@@ -47,7 +48,7 @@ UXsim Order Exchange 改変作業における、phase 4-6：交差点BATCH処理
 | | 全比較方式で同一ネットワーク・同一OD需要 |
 | **研究基本設定（明示指定）** | 研究の通常方式は **Level 2**（未実装）。Level 2で解決不能時は **Level 1** へfallback、必要に応じて **Level 0** へfallback。 |
 | | 暫定比較では `batch_size=10`、`order_control_batch_t_trigger_level=1`（Level 1は最終基本設定ではない） |
-| **次工程候補** | Phase 4-6Uとしてhigh-demand再実行と既知prefix violationの実ネットワーク再確認（**§1H.17**・**§1H.23**）。trip-end・stale unitの工程位置確認 |
+| **次工程候補** | trip-end Vehicleとstale service unitの工程位置決定（**§1H.17**・**§1H.24**）。Level 2仮想サービス推定、Level 2 unresolved時のLevel 1 fallback接続。assignment全訪問履歴は分析項目明確化後に横断設計。Time-value Transaction本体 |
 
 ---
 
@@ -2452,7 +2453,7 @@ VehicleがNodeを実際に通過した場合、service unit側とVehicle側を**
 | **4-6R** | BATCH形成の訪問対応（参照先を現在訪問状態へ切替。`order_control_earliest_arrival_timesteps` を初回分析履歴化）（**実装済み**。§1H.21） |
 | **4-6S** | BATCH assignmentの訪問対応、service unit visit_id、実通過照合（**実装済み**。§1H.22） |
 | **4-6T** | 小規模BATCH再訪end-to-end統合テスト（**実装済み**。§1H.23。`b7159f9`） |
-| **4-6U** | high-demand再実行 |
+| **4-6U** | 5,000台clearance=0、5,000台clearance=1、10,000台clearance=1のhigh-demand再実行。既知prefix violation非再発、全ケース正常終了、sanity check PASS。**再実行・検証完了**（§1H.24。本体変更なし） |
 
 ### 1H.15 テスト方針
 
@@ -2516,21 +2517,23 @@ VehicleがNodeを実際に通過した場合、service unit側とVehicle側を**
 | Phase 4-6R | **実装・専用テスト・既存テスト更新・広い回帰確認・commit・push済み**（**§1H.21**、`cdd19be`・`30588a0`・`ae57e40`） |
 | Phase 4-6S | **実装・専用テスト・既存テスト更新・広い回帰確認・commit・push済み**（**§1H.22**、`5e26bc9`） |
 | Phase 4-6T | **実装・回帰確認・commit・push済み**（**§1H.23**、`b7159f9`） |
+| Phase 4-6U | **再実行・検証完了**（**§1H.24**。本体・テスト・診断Python変更なし。結果は§1H.24に記録する） |
 | 最新実装commit | `b7159f9` |
-| high-demand BATCH比較 | 未完了（5,000台 c=0/1：prefix violation停止。10,000台：未実行）。Phase 4-6Sでは広い通常回帰を実施済み。Phase 4-6Tでは小規模再訪統合テストとBATCH関連の限定回帰を実施した |
+| 直前の文書commit（Phase 4-6T） | `aca6ce9` |
+| high-demand BATCH比較 | **完了**（Phase 4-6U。5,000台・clearance=0、5,000台・clearance=1、10,000台・clearance=1の3ケース。U1〜U3すべてexit 0、prefix violationなし。§1H.24） |
 
 **次工程：**
 
-1. Phase 4-6Uとしてhigh-demandを再実行する
-2. high-demand実ネットワークで、既知prefix violationが再発しないことを確認する
-3. trip-end Vehicleとstale service unit処理の工程位置を決める（どの後続工程に含めるかは未確定）
+1. trip-end Vehicleとstale service unit処理の工程位置を決める（どの後続工程に含めるかは未確定）
+2. Level 2仮想サービス推定（研究の通常方式。未実装）
+3. Level 2 unresolved時のLevel 1 fallback接続（未実装）
 4. assignment正式全訪問履歴は分析項目が明確になった後に横断的に設計する
+5. Time-value Transaction本体（未実装）
 
 **再開時に読むもの：**
 
-- 本メモ **§1H**（本設計）、**§1G**（診断・根本原因）、**§1H.19**（Phase 4-6P到着記録・乱数設計・実装記録）、**§1H.20**（Phase 4-6Q FCFS参照先変更・実装記録）、**§1H.21**（Phase 4-6R BATCH参照先変更・実装記録）、**§1H.22**（Phase 4-6S BATCH assignment訪問対応・実装記録）、**§1H.23**（Phase 4-6T 小規模BATCH再訪end-to-end統合・実装記録）
-- `diagnostics/order_control/README.md`（診断スクリプトは通常回帰ではなく既知問題の再現・確認資料）
-- `diagnostics/order_control/batch_assignment_318_lifecycle_diagnostic.py`、`diagnostics/order_control/node_revisit_high_demand_5000_diagnostic.py`（Phase 4-6Uでhigh-demand再確認時に参照）
+- 本メモ **§1H**（本設計）、**§1G**（診断・根本原因）、**§1H.19**（Phase 4-6P到着記録・乱数設計・実装記録）、**§1H.20**（Phase 4-6Q FCFS参照先変更・実装記録）、**§1H.21**（Phase 4-6R BATCH参照先変更・実装記録）、**§1H.22**（Phase 4-6S BATCH assignment訪問対応・実装記録）、**§1H.23**（Phase 4-6T 小規模BATCH再訪end-to-end統合・実装記録）、**§1H.24**（Phase 4-6U high-demand再実行・検証記録）
+- `diagnostics/order_control/README.md`（診断スクリプトは通常回帰ではなく既知問題の再現・確認資料。Phase 4-6U後の比較診断2本の現在期待はexit 0）
 - 本体：`Vehicle.order_control_current_visit`、`current visit` の `batch_assignment`、`Vehicle.get_order_control_batch_assignment()`、`Vehicle.has_order_control_batch_assignment()`、`Vehicle.assign_order_control_batch_to_current_visit()`、`Vehicle.order_control_batch_assignments`、`Node.get_order_control_batch_trigger_candidates()`、`Node.get_order_control_batch_candidates_by_inlink()`、`Node.get_ordered_order_control_batch_candidates_by_inlink()`、`Node.register_order_control_batch_service_units()`、`Node.serve_order_control_batch_service_queue()`、`Node.transfer_batch()`、`Node.transfer()`
 - テスト：`tests_order_control_batch_revisit_integration.py`、`tests_order_control_batch_visit_assignment.py`、`tests_order_control_batch_revisit_ranking.py`、`tests_order_control_batch_service_unit_registration.py`、`tests_order_control_batch_service_queue_transfer.py`、`tests_order_control_batch_transfer.py`、`tests_order_control_batch_node_transfer_integration.py`
 
@@ -3085,7 +3088,7 @@ BATCH・FCFS・UXsim standard：completed 全方式1000/1000、standard total tr
 
 **実行しなかったもの（通常回帰では未実行）：**
 
-- 5,000台・10,000台のhigh-demand比較（Phase 4-6T〜4-6Uで予定）
+- 5,000台・10,000台のhigh-demand比較（Phase 4-6T〜4-6Uで予定。**その後Phase 4-6Uで5,000台・clearance=0、5,000台・clearance=1、10,000台・clearance=1の3ケースを実行・検証完了。§1H.24**。10,000台・clearance=0は未実行）
 - signalized UXsimとのhigh-demand比較
 - `diagnostics/order_control/` 配下の診断スクリプト（Phase 4-6Nの修正前状態と既知prefix violationを保存するもの。通常回帰テストではない）
 
@@ -3318,7 +3321,7 @@ Step 2後、次の7ファイルは手動Vehicle状態にcurrent visitがなく�
 
 **1,000台グリッド：** FCFS対standard — completed 1000/1000、standard 165917.0 s、FCFS 167772.0 s、eligible 36、sanity PASS。BATCH・FCFS・standard — completed 1000/1000、standard 165917.0 s、FCFS 167772.0 s、BATCH 167872.0 s、average travel time 165.9 / 167.8 / 167.9 s、BATCH/FCFS ratio 1.0006、差0.1 s、eligible各36・集合一致、sanity PASS。**性能優劣は合否基準ではない。**
 
-**未実行（通常回帰）：** 5,000台・10,000台high-demand比較、signalized UXsim high-demand比較、`diagnostics/order_control/` 診断スクリプト（Phase 4-6T〜4-6U予定。診断は既知prefix violation保存用。Phase 4-6R時点でもassignment visit対応は未実装）。
+**未実行（通常回帰）：** 5,000台・10,000台high-demand比較、signalized UXsim high-demand比較、`diagnostics/order_control/` 診断スクリプト（Phase 4-6T〜4-6U予定。**その後Phase 4-6Uで5,000台・clearance=0、5,000台・clearance=1、10,000台・clearance=1の3ケースを比較診断2本で実行・完了。§1H.24**。10,000台・clearance=0は未実行）
 
 #### 1H.21.14 Phase 4-6Sへ残るassignment問題
 
@@ -3713,7 +3716,7 @@ register直後の状態観測にはoutlink容量ブロックを使用した。�
 |-------|----------|
 | Phase 4-6S | 前方・後方配置によるprefix根本条件を候補抽出で確認（`test_d1_legacy_assignment_does_not_affect_prefix`） |
 | Phase 4-6T | 同一Vehicleの再訪を通常経路で形成・登録・実通過まで確認 |
-| Phase 4-6U | high-demand実ネットワークで再発しないことを確認（未実施） |
+| Phase 4-6U | high-demand実ネットワーク（U1〜U3）で既知assignment prefix violationは再発しなかった（§1H.24） |
 
 #### 1H.23.11 回帰結果
 
@@ -3751,7 +3754,183 @@ Phase 4-6T完了により、次はPhase 4-6Uとしてhigh-demand再実行と既�
 - BATCH関連19ファイル回帰PASS、本体変更なし
 - high-demand実ネットワークでの再確認はPhase 4-6Uで実施予定
 
+### 1H.24 Phase 4-6U実行記録（high-demand再実行・既知prefix violation非再発確認）
+
+**状態：** 再実行・検証完了。本体・テスト・診断Pythonコード変更なし。結果は本節に記録する。
+
+**位置づけ：** Phase 4-6Uは実行・検証フェーズである。新しい実装commitはない。**最新実装commit** は引き続き `b7159f9`（Phase 4-6T）。**直前の文書commit（Phase 4-6T）** は `aca6ce9`。文書更新前のHEADは `aca6ce9`。
+
+#### 1H.24.1 目的
+
+Phase 4-6S（current visit assignment対応）・Phase 4-6T（小規模再訪end-to-end統合）後、Node再訪・BATCH assignment対応がhigh-demand実ネットワークでも正常に動作し、Phase 4-6S以前のassignment由来既知prefix violationが再発しないことを確認する。
+
+性能上BATCHがFCFSまたはsignalized UXsimより優れることは合否条件ではない。
+
+#### 1H.24.2 実行条件（共通）
+
+- 6×6 grid、`random_seed=0`、`DEMAND_GEN_SEED=42`
+- BATCH Level 1、`batch_size=10`、`order_control_batch_t_trigger_level=1`
+- FCFS・BATCHのeligible Node：内部36 Node、集合一致
+- 比較診断は `diagnostics/order_control/` 配下（通常回帰テストではない）
+- 補助診断（lifecycle・node revisit）は今回未実行
+
+#### 1H.24.3 Case U1（5,000台・clearance=0）
+
+**実行ファイル：** `diagnostics/order_control/batch_clearance_zero_vs_fcfs_vs_signalized_uxsim_grid_high_demand_5000_diagnostic.py`
+
+**条件：** 5,000台、departure 0–500、tmax=30,000、FCFS clearance=0、BATCH clearance=0、signalized UXsim `signal=[60, 60]`。
+
+**実行結果：**
+
+- exit code：0
+- 実行時間：67秒
+- 最終成功メッセージ：`BATCH Level 1 vs FCFS clearance=0 vs signalized UXsim grid high-demand 5000 test passed.`
+- sanity check：全20項目PASS
+- assignment prefix violation：なし
+- visit_id mismatch：なし
+- batch_assignment mismatch：なし
+- service unit構造不正：なし
+
+| 方式 | completed | avg travel time | total travel time | avg delay | total distance | unfinished | last completed |
+|------|-----------|-----------------|-------------------|-----------|----------------|------------|----------------|
+| signalized UXsim | 5,000/5,000 (1.000) | 1,432.9 s | 7,164,538.0 s | 1,268.3 s | 23,185,600.0 m | 0 | 3,449.0 s |
+| FCFS c=0 | 5,000/5,000 (1.000) | 821.2 s | 4,106,096.0 s | 656.6 s | 18,424,000.0 m | 0 | 1,922.0 s |
+| BATCH L1 c=0 | 5,000/5,000 (1.000) | 1,027.3 s | 5,136,397.0 s | 862.7 s | 19,844,000.0 m | 0 | 2,525.0 s |
+
+**比較（観測値）：** BATCH/FCFS avg TT ratio 1.251、total TT ratio 1.251、distance ratio 1.077。BATCH/signalized avg TT ratio 0.717、total TT ratio 0.717、distance ratio 0.856。average speedは既存出力なし。
+
+**既知問題との比較（Phase 4-6S以前）：** W.T=605・Node `g_4_1`・inlink `v_5_4_1`・veh_1619（過去assignment batch 318）・前方veh_1651でassignment prefix violation停止していた。Case U1ではBATCHはlast completed trip time 2,525.0 sまで完走、5,000/5,000完了、prefix violationなし。同一条件のhigh-demand比較がprefix violationなしで完走し、既知停止地点を越えた。通常比較ログではveh_1619等の個別lifecycleは出力されていない。個別Vehicle lifecycle診断は今回実行しておらず、veh_1619の内部状態を個別には確認していない。
+
+#### 1H.24.4 Case U2（5,000台・clearance=1）
+
+**実行ファイル：** `diagnostics/order_control/batch_clearance_one_vs_fcfs_vs_signalized_uxsim_all_red_grid_high_demand_diagnostic.py`（Case U2とU3を連続実行）
+
+**条件：** 5,000台、departure 0–500、tmax=30,000、FCFS clearance=1、BATCH clearance=1、signalized UXsim all-red相当、`signal=[60, 1, 60, 1]`、staggered offset。
+
+**実行結果（Case U2部分）：**
+
+- スクリプト全体exit code：0（Case U2完了後Case U3へ進行）
+- スクリプト総実行時間：331秒（U2+U3合計）
+- sanity check：全24項目PASS
+- assignment prefix violation：なし
+- visit_id mismatch：なし
+- batch_assignment mismatch：なし
+- service unit構造不正：なし
+
+| 方式 | completed | avg travel time | total travel time | avg delay | total distance | unfinished | last completed |
+|------|-----------|-----------------|-------------------|-----------|----------------|------------|----------------|
+| signalized all-red | 5,000/5,000 (1.000) | 1,102.0 s | 5,510,114.0 s | 937.4 s | 20,188,000.0 m | 0 | 2,724.0 s |
+| FCFS c=1 | 5,000/5,000 (1.000) | 1,573.2 s | 7,866,209.0 s | 1,408.6 s | 19,571,200.0 m | 0 | 3,409.0 s |
+| BATCH L1 c=1 | 5,000/5,000 (1.000) | 1,147.1 s | 5,735,703.0 s | 982.5 s | 18,976,800.0 m | 0 | 2,348.0 s |
+
+**比較（観測値）：** BATCH/FCFS avg TT ratio 0.729、total TT ratio 0.729、distance ratio 0.970。BATCH/signalized avg TT ratio 1.041、total TT ratio 1.041、distance ratio 0.940。average speedは既存出力なし。
+
+**既知問題との比較（Phase 4-6S以前）：** 5,000台BATCH clearance=1でprefix violation（Node `g_5_4`、inlink `h_5_3_4`、Vehicle `veh_1952`）。BATCH停止により10,000台未到達。Case U2ではBATCHはlast completed trip time 2,348.0 sまで完走、5,000/5,000完了、prefix violationなし、Case U3へ進行。同一5,000台clearance=1比較条件は正常終了。過去の停止は再発しなかった。veh_1952の個別lifecycle追跡は今回行っていない。
+
+#### 1H.24.5 Case U3（10,000台・clearance=1）
+
+**条件：** 10,000台、departure 0–500、tmax=50,000、FCFS clearance=1、BATCH clearance=1、signalized UXsim all-red相当、`signal=[60, 1, 60, 1]`、staggered offset。
+
+**実行結果：**
+
+- 過去はCase U2でBATCH停止のため10,000台BATCHは未実行だった
+- Phase 4-6Uで初めて10,000台BATCHの結果出力まで到達
+- sanity check：全24項目PASS
+- assignment prefix violation：なし
+- visit_id mismatch：なし
+- batch_assignment mismatch：なし
+- service unit構造不正：なし
+
+| 方式 | completed | avg travel time | total travel time | avg delay | total distance | unfinished | last completed |
+|------|-----------|-----------------|-------------------|-----------|----------------|------------|----------------|
+| signalized all-red | 10,000/10,000 (1.000) | 2,699.0 s | 26,989,929.0 s | 2,534.1 s | 50,367,200.0 m | 0 | 5,703.0 s |
+| FCFS c=1 | 10,000/10,000 (1.000) | 3,329.3 s | 33,293,441.0 s | 3,164.4 s | 39,892,000.0 m | 0 | 6,492.0 s |
+| BATCH L1 c=1 | 10,000/10,000 (1.000) | 3,011.9 s | 30,119,206.0 s | 2,847.0 s | 40,996,000.0 m | 0 | 5,382.0 s |
+
+**比較（観測値）：** BATCH/FCFS avg TT ratio 0.905、total TT ratio 0.905、distance ratio 1.028。BATCH/signalized avg TT ratio 1.116、total TT ratio 1.116、distance ratio 0.814。average speedは既存出力なし。
+
+#### 1H.24.6 prefix violation・状態不整合の確認
+
+U1〜U3すべてで次を確認した。
+
+- assignment prefix violation：なし
+- visit_id mismatch：なし
+- batch_assignment mismatch：なし
+- service unit構造不正：なし
+- AssertionError・想定外例外：なし
+- FCFS・BATCH eligible Node各36、集合一致
+- Vehicle数・需要条件一致
+- 全方式completed ratio 1.000、unfinished 0
+
+Phase 4-6Sのcurrent visit assignment対応と、Phase 4-6Tの再訪end-to-end確認が、今回のhigh-demand条件でも正常に動作した。個別Vehicleのlifecycle診断は実行しておらず、今回の確認は全Vehicleの内部履歴を個別監査したものではない。
+
+Phase 4-6Uで実行したU1〜U3のhigh-demand条件では、既知assignment prefix violationは再発しなかった（他条件での非再発を一般化しない）。
+
+#### 1H.24.7 sanity check
+
+- Case U1：20項目すべてPASS
+- Case U2：24項目すべてPASS
+- Case U3：24項目すべてPASS
+
+#### 1H.24.8 性能値の位置付け
+
+性能値は観測結果として記録する。合否条件は正常終了・状態整合性・既知prefix violation非再発である。
+
+**観測された関係：**
+
+- Case U1：BATCHはFCFSよりaverage travel timeが長い。BATCHはsignalized UXsimより短い。
+- Case U2：BATCHはFCFSよりaverage travel timeが短い。BATCHはsignalized UXsimよりわずかに長い。
+- Case U3：BATCHはFCFSよりaverage travel timeが短い。BATCHはsignalized UXsimより長い。
+
+性能差は経路・総走行距離も方式間で異なるため、単純な制御方式だけの因果効果として断定しない。追加分析には経路差・距離差・再訪率等の検討が必要である。
+
+#### 1H.24.9 実行時間
+
+| ケース | 実行時間 |
+|--------|----------|
+| Case U1（単独スクリプト） | 67秒 |
+| Case U2+U3（同一スクリプト） | 331秒（合計） |
+
+#### 1H.24.10 補助診断の扱い
+
+今回未実行：
+
+- `diagnostics/order_control/batch_assignment_318_lifecycle_diagnostic.py`
+- `diagnostics/order_control/node_revisit_high_demand_5000_diagnostic.py`
+
+理由：U1〜U3がすべてexit 0、prefix violationが再発せず、追加の原因追跡が不要だった。診断Pythonファイル自体は変更・削除していない。
+
+#### 1H.24.11 未実行項目
+
+- 上記補助診断2本
+- FCFS high-demand単独比較テスト
+- baseline、example、中規模比較、1,000台通常グリッド比較
+- 10,000台clearance=0（既存BATCH 3方式比較ファイルなし。Phase 4-6U既定順にも含まれない）
+- Level 2、Time-value Transaction
+
+#### 1H.24.12 Phase 4-6U完了時点の状態
+
+- Phase 4-6Uは再実行・検証完了
+- U1〜U3すべて正常終了
+- 5,000台clearance=0：全方式5,000/5,000
+- 5,000台clearance=1：全方式5,000/5,000
+- 10,000台clearance=1：全方式10,000/10,000（10,000台BATCHは今回初到達）
+- 全方式completed ratio 1.000、unfinished 0
+- FCFS・BATCH eligible Node集合一致
+- 本体・テスト・診断Pythonコード変更なし
+- 最新実装commit：`b7159f9`
+- 結果は本節に記録する
+
+#### 1H.24.13 後続課題
+
+- trip-end Vehicleとstale service unitの工程位置決定
+- Level 2仮想サービス推定（研究の通常方式。未実装）
+- Level 2 unresolved時のLevel 1 fallback接続（未実装）
+- assignment正式全訪問履歴（分析項目明確化後に横断設計）
+- Time-value Transaction本体
+
 ---
+
 
 ## 2. 元論文BATCHとの関係
 
@@ -4515,9 +4694,9 @@ Phase 4-6Mで追加された `Node.transfer()` 接続統合テストは **§1F.1
 - `git log --oneline -20`。
 - **Phase 4-6A〜4-6M：** 実装・テスト・commit済み（4-6Mは `b03538c`）。
 - **Phase 4-6N（commit済み）：** route_next_link参照順修正（`05fa2d1`）、clearance=0比較テスト3本（`f339b88`）、正式記録（`c06936c`）、診断スクリプト分離（`0e35799`）。
-- **Phase 4-6N Step 5：** Node訪問単位の共通状態設計を **§1H** に記録済み。基盤（4-6O）・到着記録（4-6P）・FCFS参照先変更（4-6Q）・BATCH参照先変更（4-6R）・BATCH assignment訪問対応（4-6S）・小規模BATCH再訪end-to-end統合（4-6T）は実装済み
-- **現時点の主要課題：** Phase 4-6Uのhigh-demand再実行・既知prefix violationの実ネットワーク再確認、trip-end Vehicle・stale service unit・assignment全訪問履歴（設計メモ **§1H.22**・**§1H.23**）
-- **優先参照：** ORDER_EXCHANGE_PHASE4-6_BATCH_PROCESSING_DESIGN_NOTES.md の **§1H** を優先参照。診断・根本原因は **§1G**、`Node.transfer()` 接続は **§1F**。Phase 4-6Q実装記録は **§1H.20**、Phase 4-6R実装記録は **§1H.21**、Phase 4-6S実装記録は **§1H.22**、Phase 4-6T実装記録は **§1H.23**
-- **次工程（§1H.17）：** Phase 4-6U。high-demand再実行と、既知prefix violationが実ネットワークで再発しないことの確認。trip-end・stale unitの工程位置は未確定
+- **Phase 4-6N Step 5：** Node訪問単位の共通状態設計を **§1H** に記録済み。基盤（4-6O）・到着記録（4-6P）・FCFS参照先変更（4-6Q）・BATCH参照先変更（4-6R）・BATCH assignment訪問対応（4-6S）・小規模BATCH再訪end-to-end統合（4-6T）は実装済み。high-demand再実行・検証（4-6U）は5,000台・clearance=0、5,000台・clearance=1、10,000台・clearance=1の3ケースで完了（§1H.24）
+- **現時点の主要課題：** trip-end Vehicle・stale service unit・assignment全訪問履歴・Level 2・Time-value Transaction（設計メモ **§1H.22**・**§1H.24**）
+- **優先参照：** ORDER_EXCHANGE_PHASE4-6_BATCH_PROCESSING_DESIGN_NOTES.md の **§1H** を優先参照。診断・根本原因は **§1G**、`Node.transfer()` 接続は **§1F**。Phase 4-6Q実装記録は **§1H.20**、Phase 4-6R実装記録は **§1H.21**、Phase 4-6S実装記録は **§1H.22**、Phase 4-6T実装記録は **§1H.23**、Phase 4-6U実行記録は **§1H.24**
+- **次工程候補（§1H.17）：** trip-end Vehicleとstale service unitの工程位置決定。Level 2仮想サービス推定、Level 2 unresolved時のLevel 1 fallback接続。assignment全訪問履歴は分析項目明確化後に横断設計。Time-value Transaction本体
 - 目的地Vehicleは端点間OD前提で保留。比較対象Node共通管理・自動検証は将来課題。
 - 一時退避PDF `phase4-6A_batch_earliest_arrival_timestep_memo.pdf` はリポジトリ外。正式Markdownを優先参照。
