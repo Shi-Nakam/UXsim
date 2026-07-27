@@ -33,18 +33,20 @@ UXsim Order Exchange 改変作業における、phase 4-6：交差点BATCH処理
 | | phase 4-6P：Node端到着記録の訪問対応（b1b4d7f・b051c58） |
 | | phase 4-6Q：FCFSのcurrent visit参照（7c3c6d3・9100803） |
 | | phase 4-6R：BATCH形成のcurrent visit参照（cdd19be・30588a0・ae57e40） |
+| | phase 4-6S：BATCH assignmentの訪問対応・service unit visit_id・実通過照合（5e26bc9） |
 | **診断スクリプト** | `diagnostics/order_control/`（4本＋README）。通常回帰テストから分離済み（`0e35799`）。詳細は `diagnostics/order_control/README.md` |
-| **BATCH形成〜シミュレーション接続まで完成** | trigger候補取得 → … → service queue登録（4-6I）→ 実通過（4-6K）→ 統括呼出し（4-6L）→ **`Node.transfer()` 接続（4-6M）** → **BATCH形成のcurrent visit参照（4-6R）** |
-| **現時点の主要課題** | Phase 4-6S：BATCH assignmentのNode訪問対応、service unitへのvisit_id保存、実通過時の訪問照合 |
+| **BATCH形成〜シミュレーション接続まで完成** | trigger候補取得 → … → service queue登録（4-6I）→ 実通過（4-6K）→ 統括呼出し（4-6L）→ **`Node.transfer()` 接続（4-6M）** → **BATCH形成のcurrent visit参照（4-6R）** → **BATCH assignmentの訪問対応（4-6S）** |
+| **現時点の主要課題** | Phase 4-6T残作業確認、trip-end VehicleのBATCH service unit対応、stale service unit処理方針、assignment正式全訪問履歴 |
 | **未実装** | Level 2仮想サービス推定、Level 2 unresolved時のLevel 1 fallback接続 |
 | | trip-end VehicleのBATCH service unit対応 |
-| | BATCH assignmentの訪問対応・service unit visit_id・実通過照合（**Phase 4-6S**） |
+| | stale service unitの自動削除または回復方針 |
+| | assignmentの正式な全訪問履歴 |
 | | Time-value Transaction、比較対象Node共通管理、目的地自動検証、taxi mode向け動的dest検証 |
 | **当面の研究シナリオ前提** | 比較対象内部交差点Nodeを目的地としない端点間OD |
 | | 全比較方式で同一ネットワーク・同一OD需要 |
 | **研究基本設定（明示指定）** | 研究の通常方式は **Level 2**（未実装）。Level 2で解決不能時は **Level 1** へfallback、必要に応じて **Level 0** へfallback。 |
 | | 暫定比較では `batch_size=10`、`order_control_batch_t_trigger_level=1`（Level 1は最終基本設定ではない） |
-| **次工程候補** | Phase 4-6S実装（BATCH assignmentの訪問対応。**§1H.17**・**§1H.21**） |
+| **次工程候補** | Phase 4-6T残作業確認。Phase 4-6T完了後、Phase 4-6Uとしてhigh-demand再実行と既知prefix violationの実ネットワーク再確認（**§1H.17**・**§1H.22**）。trip-end・stale unitの工程位置確認 |
 
 ---
 
@@ -2425,7 +2427,7 @@ VehicleがNodeを実際に通過した場合、service unit側とVehicle側を**
 | `order_control_node_arrival_times` | 初回分析履歴として維持（上書きしない） |
 | `order_control_node_arrival_tiebreakers` | 同上 |
 | `order_control_earliest_arrival_timesteps` | 初回分析履歴として初回のみ記録（再訪時に上書きしない）。**Phase 4-6Oでは現行の上書き挙動を維持**し、Phase 4-6RでBATCH参照先切替と同時に初回履歴化へ変更 |
-| `order_control_batch_assignments`（Node名key） | 現在訪問へのassignmentと、過去の分析用batch情報へ分離 |
+| `order_control_batch_assignments`（Node名key） | 初回訪問時のbatch ID互換記録（legacy）。現在制御はcurrent visit `batch_assignment`（**Phase 4-6Sで実装。§1H.22**） |
 
 **移行順：**
 
@@ -2433,7 +2435,7 @@ VehicleがNodeを実際に通過した場合、service unit側とVehicle側を**
 2. Node端到着記録の訪問対応（Phase 4-6P）
 3. FCFSの参照先変更（Phase 4-6Q）
 4. BATCH形成の参照先変更（Phase 4-6R）— 現在訪問状態への参照切替と、`order_control_earliest_arrival_timesteps` の初回履歴化を同時実施
-5. service unit・実通過対応（Phase 4-6S）
+5. service unit・実通過対応（Phase 4-6S）— **実装済み（§1H.22）**
 
 移行完了後、FCFS・BATCHの現在制御が既存の初回履歴辞書を参照していないことを確認する。
 
@@ -2447,8 +2449,8 @@ VehicleがNodeを実際に通過した場合、service unit側とVehicle側を**
 | **4-6P** | Node端到着記録の訪問対応（**実装済み**。§1H.19） |
 | **4-6Q** | FCFSの参照先変更（**実装済み**。§1H.20） |
 | **4-6R** | BATCH形成の訪問対応（参照先を現在訪問状態へ切替。`order_control_earliest_arrival_timesteps` を初回分析履歴化）（**実装済み**。§1H.21） |
-| **4-6S** | service unit・実通過の訪問対応 |
-| **4-6T** | 統合・小規模再訪テスト |
+| **4-6S** | BATCH assignmentの訪問対応、service unit visit_id、実通過照合（**実装済み**。§1H.22） |
+| **4-6T** | 統合・小規模再訪テスト（一部は4-6S専用テストで実施済み。工程定義全体の完了は未確認） |
 | **4-6U** | high-demand再実行 |
 
 ### 1H.15 テスト方針
@@ -2511,21 +2513,26 @@ VehicleがNodeを実際に通過した場合、service unit側とVehicle側を**
 | Phase 4-6P | **実装・専用テスト・回帰確認・commit・push済み**（**§1H.19**、`b1b4d7f`・`b051c58`） |
 | Phase 4-6Q | **実装・専用テスト・回帰確認・commit・push済み**（**§1H.20**、`7c3c6d3`・`9100803`） |
 | Phase 4-6R | **実装・専用テスト・既存テスト更新・広い回帰確認・commit・push済み**（**§1H.21**、`cdd19be`・`30588a0`・`ae57e40`） |
-| 実装 | Phase 4-6S〜未着手 |
-| 最新実装commit | `ae57e40` |
-| high-demand BATCH比較 | 未完了（5,000台 c=0/1：prefix violation停止。10,000台：未実行） |
+| Phase 4-6S | **実装・専用テスト・既存テスト更新・広い回帰確認・commit・push済み**（**§1H.22**、`5e26bc9`） |
+| 実装 | Phase 4-6T以降は工程表を確認して残作業を設定 |
+| 最新実装commit | `5e26bc9` |
+| high-demand BATCH比較 | 未完了（5,000台 c=0/1：prefix violation停止。10,000台：未実行）。Phase 4-6Sでは通常回帰のみ実施 |
 
 **次工程：**
 
-1. Phase 4-6S実装（BATCH assignmentの訪問対応、service unit visit_id、実通過照合）
-2. 小規模再訪テスト・high-demand再実行（Phase 4-6T〜4-6U）
+1. Phase 4-6Tの定義と、Phase 4-6Sで実施済みのテスト範囲を照合する
+2. Phase 4-6Tに残作業があれば実施する
+3. Phase 4-6T完了後、Phase 4-6Uとしてhigh-demandを再実行する
+4. high-demand実ネットワークで、既知prefix violationが再発しないことを確認する
+5. trip-end Vehicleとstale service unit処理の工程位置を決める（Phase 4-6Tまたは別工程のどちらへ入れるかは未確定）
+6. assignment正式全訪問履歴は分析項目が明確になった後に横断的に設計する
 
 **再開時に読むもの：**
 
-- 本メモ **§1H**（本設計）、**§1G**（診断・根本原因）、**§1H.19**（Phase 4-6P到着記録・乱数設計・実装記録）、**§1H.20**（Phase 4-6Q FCFS参照先変更・実装記録）、**§1H.21**（Phase 4-6R BATCH参照先変更・実装記録）
+- 本メモ **§1H**（本設計）、**§1G**（診断・根本原因）、**§1H.19**（Phase 4-6P到着記録・乱数設計・実装記録）、**§1H.20**（Phase 4-6Q FCFS参照先変更・実装記録）、**§1H.21**（Phase 4-6R BATCH参照先変更・実装記録）、**§1H.22**（Phase 4-6S BATCH assignment訪問対応・実装記録）
 - `diagnostics/order_control/README.md`（診断スクリプトは通常回帰ではなく既知問題の再現・確認資料）
-- 本体：`Vehicle.order_control_current_visit`、`Vehicle.get_order_control_batch_trigger_rank_key()`、`Vehicle.get_order_control_batch_earliest_arrival_timestep()`、`Node.get_order_control_batch_trigger_candidates()`、`Node._validate_order_control_batch_t_trigger_inputs()`、`Node._compute_order_control_batch_base_trigger_timestep()`、`Node.estimate_order_control_batch_t_trigger_level_0()`、`Node.estimate_order_control_batch_t_trigger_level_1()`、`Node.get_order_control_batch_candidates_by_inlink()`、`Node.get_ordered_order_control_batch_candidates_by_inlink()`、`Node.form_order_control_batch()`、`Node.register_order_control_batch_service_units()`、`Node.serve_order_control_batch_service_queue()`、`Node.transfer_batch()`、`Node.transfer()`
-- テスト：`tests_order_control_batch_revisit_ranking.py`、`tests_order_control_batch_service_unit_registration.py`、`tests_order_control_batch_service_queue_transfer.py`、`tests_order_control_batch_transfer.py`、`tests_order_control_batch_node_transfer_integration.py`
+- 本体：`Vehicle.order_control_current_visit`、`current visit` の `batch_assignment`、`Vehicle.get_order_control_batch_assignment()`、`Vehicle.has_order_control_batch_assignment()`、`Vehicle.assign_order_control_batch_to_current_visit()`、`Vehicle.order_control_batch_assignments`、`Node.get_order_control_batch_trigger_candidates()`、`Node.get_order_control_batch_candidates_by_inlink()`、`Node.get_ordered_order_control_batch_candidates_by_inlink()`、`Node.register_order_control_batch_service_units()`、`Node.serve_order_control_batch_service_queue()`、`Node.transfer_batch()`、`Node.transfer()`
+- テスト：`tests_order_control_batch_visit_assignment.py`、`tests_order_control_batch_revisit_ranking.py`、`tests_order_control_batch_service_unit_registration.py`、`tests_order_control_batch_service_queue_transfer.py`、`tests_order_control_batch_transfer.py`、`tests_order_control_batch_node_transfer_integration.py`
 
 ### 1H.18 Phase 4-6O実装記録
 
@@ -2595,8 +2602,8 @@ order-control対象Nodeへの訪問開始時の `order_control_current_visit` �
 - 現在訪問への `arrival_time`・`arrival_tiebreaker` 記録（Phase 4-6P）
 - FCFSの参照先変更（Phase 4-6Q）
 - BATCH候補・形成の参照先変更（Phase 4-6R）— **実装済み（§1H.21）**
-- BATCH assignmentの現在訪問対応
-- service unitへの `visit_id` 追加・実通過照合（Phase 4-6S）
+- BATCH assignmentの現在訪問対応（Phase 4-6S）— **実装済み（§1H.22）**
+- service unitへの `visit_id` 追加・実通過照合（Phase 4-6S）— **実装済み（§1H.22）**
 - 訪問終了処理・BATCH履歴
 - high-demand比較の再実行
 
@@ -2874,11 +2881,11 @@ BATCH・FCFS・UXsim standard：いずれも completed 383/500、standard 140.8 
 - BATCHのtrigger候補順位および関連参照先を current visit へ変更した
 - `order_control_earliest_arrival_timesteps` の初回分析履歴化（**§1H.13**・**§1H.14**）を実施した
 
-**Phase 4-6Sで行うこと（未実装）：**
+**Phase 4-6Sで行ったこと（実装済み。§1H.22）：**
 
-- current visitの `batch_assignment` をBATCH本体へ接続する
-- service unitへの `visit_id` 保存と実通過照合
-- 過去訪問assignmentが再訪Vehicleを妨げない設計
+- current visitの `batch_assignment` をBATCH本体へ接続した
+- service unitへの `visit_id` 保存と実通過照合を実装した
+- 過去訪問assignmentが再訪Vehicleを妨げない設計へ変更した（legacy assignmentを現在制御から除外）
 
 ### 1H.20 Phase 4-6Q実装記録（FCFSのcurrent visit参照）
 
@@ -3103,7 +3110,7 @@ BATCH・FCFS・UXsim standard：completed 全方式1000/1000、standard total tr
 
 **最新実装commit：** `ae57e40`
 
-**次工程：** Phase 4-6S（未着手）
+**次工程（Phase 4-6R完了時点）：** Phase 4-6S（当時は未着手。**その後完了。§1H.22**）
 
 #### 1H.21.1 Step別の役割
 
@@ -3332,6 +3339,252 @@ Phase 4-6Sで検討・実装：`batch_assignment` のBATCH本体接続、service
 - assignmentはまだNode訪問対応していない
 - Phase 4-6Sは未着手
 - 次工程はPhase 4-6S
+
+### 1H.22 Phase 4-6S実装記録（BATCH assignmentの訪問対応）
+
+**状態：** 実装・専用テスト・既存テスト更新・広い回帰確認・commit・push済み。
+
+**実装commit：** `5e26bc9` — `phase 4-6S: move BATCH assignments to current visits and bind service units to per-vehicle visit IDs`
+
+**最新実装commit：** `5e26bc9`
+
+本体・専用テスト・既存テスト更新は1commitにまとめた。候補判定、assignment記録、service unit訪問記録、実通過照合が同じ状態モデルとして一体であるため。
+
+**次工程：** 文書内の既存工程表（**§1H.14**・**§1H.17**）と現在の残課題を確認して設定する。
+
+#### 1H.22.1 commitの役割
+
+`5e26bc9`：
+
+- BATCH assignmentの現在制御をcurrent visitへ移行
+- service unitへのVehicleごとの `visit_id` 追加
+- 実通過前の訪問・assignment照合
+- registerロールバックのcurrent visit対応
+- 専用テスト32件（`tests_order_control_batch_visit_assignment.py`）
+- 既存テスト9ファイル更新
+
+#### 1H.22.2 current visit assignmentの正式仕様
+
+現在BATCH制御のassignmentは `Vehicle.order_control_current_visit["batch_assignment"]` を使用する。
+
+| 値 | 意味 |
+|----|------|
+| `None` | 現在訪問では未割当。BATCH候補になり得る |
+| 非負整数の `batch_id` | 現在訪問でそのbatch IDのservice unitへ割当済み。同じ訪問では新しいBATCH候補にしない |
+
+追加したVehicleメソッド：
+
+| メソッド | 役割 |
+|----------|------|
+| `_validate_order_control_batch_assignment_field_value(batch_assignment, node)` | `batch_assignment` フィールドの型検証（内部） |
+| `get_order_control_batch_assignment(node)` | 現在訪問のassignmentを返す。`None` は未割当 |
+| `has_order_control_batch_assignment(node)` | `get_order_control_batch_assignment(node) is not None` |
+| `assign_order_control_batch_to_current_visit(node, batch_id)` | 現在訪問へbatch IDを設定。legacy辞書へは書き込まない |
+
+`get_order_control_batch_assignment(node)`：BATCH用current visit取得ヘルパーを使用。current visitの存在・Nodeオブジェクト一致を確認。legacy `order_control_batch_assignments` は参照しない。
+
+`has_order_control_batch_assignment(node)`：`ValueError` を握りつぶさない。
+
+`assign_order_control_batch_to_current_visit(node, batch_id)`：batch IDは非負整数（bool拒否）。既存assignmentの上書きを拒否。legacy互換記録は `Node.register_order_control_batch_service_units()` が担当。
+
+不正値（bool、負数、float、文字列、その他の型）は `ValueError`。
+
+#### 1H.22.3 候補判定・t_trigger・prefix・orderingの変更
+
+次の4メソッドでassignment参照をlegacy辞書からcurrent visitへ変更した。
+
+- `Node.get_order_control_batch_trigger_candidates()`
+- `Node._validate_order_control_batch_t_trigger_inputs()`
+- `Node.get_order_control_batch_candidates_by_inlink()`
+- `Node.get_ordered_order_control_batch_candidates_by_inlink()`
+
+**Trigger候補：** `route_next_link` が存在し、current visit `batch_assignment` が `None`。現在訪問で割当済みなら例外を出さず候補外。過去legacy assignmentだけでは候補外にしない。
+
+**t_trigger入力検証：** current visit `batch_assignment` が `None` なら正常。現在訪問で割当済みのVehicleがtriggerとして直接渡された場合は `ValueError`（通常経路ではtrigger候補取得時に除外されるため呼出し不整合）。
+
+**inlink候補・prefix：** assigned/unassignedをcurrent visit assignmentで判定。正常なprefixはassigned群の後ろにunassigned群。unassignedを見た後にassignedが現れた場合は `ValueError`。過去legacy assignmentはprefix判定へ影響させない。
+
+**candidate group ordering：** assignment prefix再検証、assignment済みVehicleの除外、trigger未割当検証をcurrent visit assignmentへ変更。
+
+**変更していないもの：** trigger順位、t_trigger Level 0・Level 1の数式、earliest包含条件、prefixの物理的意味、candidate group orderingのsnapshot式、group比較キー、max batch size。
+
+#### 1H.22.4 register処理
+
+`Node.register_order_control_batch_service_units()` の事前検証（状態変更なし）：order-control対象、batch type、入力コンテナ、inlink重複拒否、Vehicle重複拒否、`veh.link` と登録inlinkの一致、`veh.state`、current visitの存在・Node一致・inlink一致、`visit_id` が正の整数、current visit `batch_assignment` が `None`。
+
+登録時：inlinkグループごとにbatch IDを発行、current visitへbatch IDを設定、service unitへ `vehicles` と同順の `visit_ids` を保存、service queueへappend、batch next IDを更新。同じservice unit内のVehicleには同じbatch ID。別inlinkグループには別batch ID。
+
+#### 1H.22.5 legacy `order_control_batch_assignments` の現在仕様
+
+`veh.order_control_batch_assignments[node.name]`
+
+| 時期 | 役割 |
+|------|------|
+| Phase 4-6Sより前 | 現在BATCH制御のassignment参照先。Node名keyのため訪問を区別できず、通過後も残るため再訪時に過去assignmentが現在assignmentとして解釈された |
+| Phase 4-6S以降 | 初回訪問時のbatch IDを残すlegacy互換記録。同じNodeへの再訪時に初回値を上書きしない。候補判定、prefix、t_trigger入力検証、service実通過照合には使用しない。正式な全訪問assignment履歴ではない |
+
+初回訪問：`legacy[node.name] = batch_id`、`current_visit["batch_assignment"] = batch_id`
+
+再訪：`legacy[node.name]` は初回値のまま、`current_visit["batch_assignment"]` は再訪時の新batch_id
+
+#### 1H.22.6 service unitの確定構造
+
+```python
+{
+    "batch_id": int,
+    "inlink": Link,
+    "vehicles": list[Vehicle],
+    "visit_ids": list[int],
+}
+```
+
+`vehicles[i]` ↔ `visit_ids[i]`。`visit_ids[i]` は登録時点のVehicle current visit `visit_id`。Vehicleごとに発行。service unit全体に1つだけ保存しない。並列リスト方式で既存FIFO処理を維持。
+
+#### 1H.22.7 registerロールバック
+
+登録途中で例外が発生した場合、登録開始前へ戻す：
+
+- current visit `batch_assignment`（書き込み先visit辞書への参照を保存し旧値を書き戻す）
+- 今回新規追加したlegacyキーのみ削除（VehicleとNode名の組で記録。登録前から存在した初回値は変更しない）
+- 今回appendしたservice unit
+- `order_control_batch_next_id`
+
+全登録が成功するか、登録開始前の状態へ完全に戻るかのどちらか。
+
+#### 1H.22.8 service実通過前の検証
+
+`Node.serve_order_control_batch_service_queue()` 内を `_validate_service_unit_visit()` と `_validate_service_unit_arrived_vehicle()` に分離。
+
+`_validate_service_unit_visit()`（`incoming_vehicles` 確認より前）：
+
+1. service unit必須キー4件
+2. `batch_id` 取得
+3. `batch_id` が非負整数でboolではない
+4. `vehicles` と `visit_ids` がlist
+5. 長さ一致
+6. service中の `vehicles` が空でない
+7. `registered_visit_id` 取得
+8. `registered_visit_id` が正の整数でboolではない
+9. current visitの存在
+10. current visitのNode一致
+11. current visitの `visit_id` 一致
+12. current visit `batch_assignment` が `None` でない
+13. current visit `batch_assignment` とservice unit `batch_id` の一致
+
+構造不正・visit不一致・batch ID不一致は `ValueError`（待機しても解消しない重大不整合）。
+
+**実通過処理の順序：**
+
+1. service unit構造と現在訪問を照合
+2. `incoming_vehicles` 確認
+3. 未到着ならservice unitを維持して待機
+4. 到着済みなら `veh.link` とservice unit inlinkを照合
+5. 到着済みなら `route_next_link` を確認
+6. clearance・物理先頭・各容量・lane・move_remainを確認
+7. Link遷移
+
+| 状況 | 挙動 |
+|------|------|
+| 同じ訪問で未到着 | 待機 |
+| `route_next_link` 属性がない未到着Vehicle | 経路確認前に待機 |
+| `visit_id` 不一致 | `ValueError` |
+| batch ID不一致 | `ValueError` |
+| 到着済みで `route_next_link=None` | `ValueError` |
+| 到着済みだが交通条件不足 | 正常な待機または通過停止 |
+
+#### 1H.22.9 通過成功後の更新
+
+通過成功時に同時実行：
+
+```python
+service_unit["vehicles"].pop(0)
+service_unit["visit_ids"].pop(0)
+```
+
+空service unitは既存処理でqueueから除去。訪問不一致等の異常unitは自動削除せず `ValueError` で検出（stale unit自動削除とは区別）。
+
+**current visit：** 実通過前にvisit ID・batch IDを照合。通過元 `batch_assignment` を明示的に `None` へ戻さない。outlink進入で `begin_order_control_visit_on_link_entry()` を呼び、次Nodeがorder-control対象なら新current visitへ置換、対象外なら `None`。Link遷移後に通過元current visitへ書き込まない。Phase 4-6Sではassignment履歴を作らない。
+
+#### 1H.22.10 既知prefix violationへの対応
+
+Phase 4-6N診断の既知問題（例：Vehicle `veh_1619`、Node `g_4_1`、過去assignment batch 318、再訪時現在訪問は未割当、inlink前方に未割当 `veh_1651`、後方 `veh_1619` がlegacy assignmentによりassignedと誤認、prefix violation）について：
+
+| Phase | 状態 |
+|-------|------|
+| Phase 4-6R | arrival・earliest・trigger順位をcurrent visit対応。assignment問題は当時未解決 |
+| Phase 4-6S | assigned/unassignedをcurrent visit `batch_assignment` で判定。過去batch 318は現在prefixへ影響しない。再訪Vehicleが現在訪問では未割当ならunassignedとして扱う。assignment由来の根本原因へ対応し、通常回帰・縮小再現テストで問題が再現しないことを確認（high-demand実ネットワークでの再確認は未実施） |
+
+Phase 4-6Sではassignment由来の根本原因へ対応し、通常回帰・縮小再現テストで問題が再現しないことを確認した。high-demand診断スクリプト自体は今回実行していない。high-demand実ネットワークでの再確認は未実施である。
+
+#### 1H.22.11 新規専用テスト
+
+**ファイル：** `tests_order_control_batch_visit_assignment.py`（32件）
+
+| 分類 | 内容 |
+|------|------|
+| A | assignment accessor（未割当None、割当済み、current visit欠如、Node不一致、型不正） |
+| B | assignment設定（正常登録、二重拒否、batch ID型不正） |
+| C | trigger候補（legacy無影響、現在割当除外、t_trigger直接渡し `ValueError`） |
+| D | prefix（legacy無影響、current visit prefix違反） |
+| E | register（初回、再訪legacy維持、複数visit_ids、既存assignment拒否、ロールバック） |
+| F | 正常service（実通過、対象外Node遷移） |
+| G | service検証（current visit欠如、Node不一致、visit_id不一致、batch_assignment欠如、batch ID不一致、長さ不一致、batch_idキー欠如、batch_id型不正、registered visit_id型不正） |
+| H | 待機（正常未到着、visit_id不一致を未到着と誤認しない） |
+| I | 並列リスト同期（複数Vehicle通過時の同期削除） |
+
+#### 1H.22.12 既存テスト更新（9ファイル）
+
+- `tests_order_control_batch_candidate_group_ordering.py`
+- `tests_order_control_batch_candidates_by_inlink.py`
+- `tests_order_control_batch_node_transfer_integration.py`
+- `tests_order_control_batch_service_queue_transfer.py`
+- `tests_order_control_batch_service_unit_registration.py`
+- `tests_order_control_batch_t_trigger_estimation.py`
+- `tests_order_control_batch_transfer.py`
+- `tests_order_control_batch_trigger_candidates.py`
+- `tests_order_control_current_visit_state.py`
+
+registerテストは正式registerを使用。service・Link遷移テストはregisterを新たに呼ばず手動設定。候補・prefixテストはservice unitを作らずcurrent visit assignmentのみ。trigger順位、t_trigger数値、earliest包含、candidate group ordering、max batch size、batch ID発行順、service queue順、clearance、容量、lane、move_remain、Link遷移、N=1 BATCHとFCFS等価性の期待値は変更していない。
+
+#### 1H.22.13 回帰確認結果
+
+**BATCH限定：** Step 1専用・current visit基盤、BATCH候補・形成、service queue・実通過の全ファイルPASS。`test_fcfs_node_calls_fcfs_once` PASS、`test_n1_batch_vs_fcfs_equivalence` PASS。
+
+**FCFS回帰（6ファイル）・order-control共通（9ファイル）：** すべてPASS。
+
+**baseline：** completed 48/48、average speed 16.5 m/s、total travel time 2928.0 s、average travel time 61.0 s、average delay 1.0 s、total distance 48000.0 m（既知値一致）
+
+**example：** completed 735/810、average speed 11.7 m/s、total travel time 119475.0 s、average travel time 162.6 s、average delay 62.6 s、total distance 1632250.0 m（既知値一致）
+
+**中規模（500 Vehicle）：** 全方式 completed 383/500（ratio 0.766）。standard total travel time 53941.0 s、FCFS 56257.0 s、BATCH 56276.0 s。average travel time standard 140.8 s / FCFS 146.9 s / BATCH 146.9 s。BATCH/FCFS ratio 1.0003。eligible Node各10・集合一致。sanity check全9項目（FCFS対standard）・全16項目（3方式）PASS。Phase 4-6R参考値と完全一致。
+
+**1,000台グリッド：** 全方式 completed 1000/1000。standard 165917.0 s、FCFS 167772.0 s、BATCH 167872.0 s。average travel time 165.9 / 167.8 / 167.9 s。BATCH/FCFS ratio 1.0006、差0.1 s。eligible各36・集合一致。sanity check全9項目・全20項目PASS。Phase 4-6R参考値と完全一致。
+
+**性能優劣はPhase 4-6Sの合否基準ではない。**
+
+**未実行（通常回帰）：** 5,000台・10,000台high-demand比較、signalized UXsim high-demand比較、`diagnostics/order_control/` 診断スクリプト。
+
+#### 1H.22.14 後続工程へ残す課題
+
+**trip-end Vehicle：** `route_next_link=None` ならtrigger候補外だがinlink候補・service unit登録の可能性あり。到着済み実通過で `ValueError`。Phase 4-6Sでは変更していない。
+
+**stale service unit：** 正常完了unitは全Vehicle通過後にqueueから削除。異常unit（visit_id不一致、batch ID不一致、Vehicleが別訪問へ進行）は `ValueError` で検出し自動削除しない。
+
+**assignment履歴：** Phase 4-6Sで実装したのは現在制御のcurrent visit assignmentとlegacy初回互換記録のみ。全訪問履歴、assigned/served/cancelled時刻、取引履歴統合は未実装。正式履歴はUXsim標準・FCFS・BATCH・Time-value Transactionを横断して後続設計。
+
+#### 1H.22.15 Phase 4-6S完了時点の状態
+
+- FCFS順位はcurrent visit参照
+- BATCH arrival・earliest・trigger順位はcurrent visit参照
+- BATCH assignmentもcurrent visit参照
+- service unitはVehicleごとの `visit_id` を保持
+- 実通過前にservice unitとcurrent visitの訪問を照合
+- legacy arrival・earliest辞書は初回訪問履歴
+- legacy assignment辞書は初回batch IDの互換用記録（現在制御に使用しない）
+- 再訪Vehicleは現在訪問のassignmentで判定
+- 過去assignmentは現在prefixへ影響しない
+- assignment由来の既知prefix violationの根本原因へ対応し、通常回帰・縮小再現テストで問題が再現しないことを確認（high-demand実ネットワークでの再確認は未実施）
+- trip-end、stale unit自動処理、全訪問履歴は未実装
 
 ---
 
@@ -4097,9 +4350,9 @@ Phase 4-6Mで追加された `Node.transfer()` 接続統合テストは **§1F.1
 - `git log --oneline -20`。
 - **Phase 4-6A〜4-6M：** 実装・テスト・commit済み（4-6Mは `b03538c`）。
 - **Phase 4-6N（commit済み）：** route_next_link参照順修正（`05fa2d1`）、clearance=0比較テスト3本（`f339b88`）、正式記録（`c06936c`）、診断スクリプト分離（`0e35799`）。
-- **Phase 4-6N Step 5：** Node訪問単位の共通状態設計を **§1H** に記録済み。基盤（4-6O）・到着記録（4-6P）・FCFS参照先変更（4-6Q）・BATCH参照先変更（4-6R）は実装済み
-- **現時点の主要課題：** Phase 4-6S（BATCH assignmentの訪問対応。設計メモ **§1H.21**）
-- **優先参照：** ORDER_EXCHANGE_PHASE4-6_BATCH_PROCESSING_DESIGN_NOTES.md の **§1H** を優先参照。診断・根本原因は **§1G**、`Node.transfer()` 接続は **§1F**。Phase 4-6Q実装記録は **§1H.20**、Phase 4-6R実装記録は **§1H.21**
-- **次工程（§1H.17）：** Phase 4-6S実装（BATCH assignmentの訪問対応、service unit visit_id、実通過照合）
+- **Phase 4-6N Step 5：** Node訪問単位の共通状態設計を **§1H** に記録済み。基盤（4-6O）・到着記録（4-6P）・FCFS参照先変更（4-6Q）・BATCH参照先変更（4-6R）・BATCH assignment訪問対応（4-6S）は実装済み
+- **現時点の主要課題：** Phase 4-6T残作業確認、trip-end Vehicle・stale service unit・assignment全訪問履歴（設計メモ **§1H.22**）
+- **優先参照：** ORDER_EXCHANGE_PHASE4-6_BATCH_PROCESSING_DESIGN_NOTES.md の **§1H** を優先参照。診断・根本原因は **§1G**、`Node.transfer()` 接続は **§1F**。Phase 4-6Q実装記録は **§1H.20**、Phase 4-6R実装記録は **§1H.21**、Phase 4-6S実装記録は **§1H.22**
+- **次工程（§1H.17）：** Phase 4-6Tの残作業確認。Phase 4-6T完了後、Phase 4-6Uとしてhigh-demand再実行と既知prefix violationの実ネットワーク再確認を行う。trip-end・stale unitの工程位置は未確定
 - 目的地Vehicleは端点間OD前提で保留。比較対象Node共通管理・自動検証は将来課題。
 - 一時退避PDF `phase4-6A_batch_earliest_arrival_timestep_memo.pdf` はリポジトリ外。正式Markdownを優先参照。
