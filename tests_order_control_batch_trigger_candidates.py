@@ -40,7 +40,7 @@ def _build_merge_world(name, merge_order_control_type="batch", merge_eligible=Tr
 
 
 def _sync_arrived_trigger_current_visit(
-    veh, merge, link, arrival_time, tiebreaker, earliest_arrival_timestep=0
+    veh, merge, link, arrival_time, tiebreaker, earliest_arrival_timestep=0, batch_assignment=None
 ):
     if veh.order_control_visit_id == 0:
         veh.order_control_visit_id = 1
@@ -53,7 +53,7 @@ def _sync_arrived_trigger_current_visit(
             "earliest_arrival_timestep": earliest_arrival_timestep,
             "arrival_time": arrival_time,
             "arrival_tiebreaker": tiebreaker,
-            "batch_assignment": None,
+            "batch_assignment": batch_assignment,
         }
     else:
         visit["visit_id"] = veh.order_control_visit_id
@@ -62,7 +62,7 @@ def _sync_arrived_trigger_current_visit(
         visit["earliest_arrival_timestep"] = earliest_arrival_timestep
         visit["arrival_time"] = arrival_time
         visit["arrival_tiebreaker"] = tiebreaker
-        visit["batch_assignment"] = None
+        visit["batch_assignment"] = batch_assignment
 
 
 def _make_candidate_vehicle(W, name, departure_time, arrival_time, tiebreaker):
@@ -189,7 +189,7 @@ def test_node_specific_batch_assignment_exclusion():
     merge = W.get_node("merge")
 
     veh1 = _make_candidate_vehicle(W, "veh1", 0, 10.0, 0.1)
-    veh1.order_control_batch_assignments["merge"] = 0
+    veh1.order_control_current_visit["batch_assignment"] = 0
 
     veh2 = _make_candidate_vehicle(W, "veh2", 1, 11.0, 0.2)
 

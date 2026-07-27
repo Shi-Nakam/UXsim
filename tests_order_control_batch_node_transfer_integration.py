@@ -408,13 +408,27 @@ def test_service_queue_stop_reregistration():
     _setup_arrived_vehicle(merge, a1, link1, out, 0, 10.0, 0.1, 200.0)
     _setup_arrived_vehicle(merge, b1, link2, out, 0, 10.0, 0.2, 200.0, move_remain=5.0)
     _begin_arrived_current_visit_for_test(b1, merge, link2, 0, 10.0, 0.2)
-    a1.order_control_batch_assignments["merge"] = 0
-    b1.order_control_batch_assignments["merge"] = 1
+    batch_id_a = 0
+    batch_id_b = 1
+    a1.order_control_current_visit["batch_assignment"] = batch_id_a
+    b1.order_control_current_visit["batch_assignment"] = batch_id_b
+    a1.order_control_batch_assignments["merge"] = batch_id_a
+    b1.order_control_batch_assignments["merge"] = batch_id_b
     merge.order_control_batch_service_queue.append(
-        {"batch_id": 0, "inlink": link1, "vehicles": []}
+        {
+            "batch_id": batch_id_a,
+            "inlink": link1,
+            "vehicles": [],
+            "visit_ids": [],
+        }
     )
     merge.order_control_batch_service_queue.append(
-        {"batch_id": 1, "inlink": link2, "vehicles": [b1]}
+        {
+            "batch_id": batch_id_b,
+            "inlink": link2,
+            "vehicles": [b1],
+            "visit_ids": [b1.order_control_current_visit["visit_id"]],
+        }
     )
     merge.incoming_vehicles = [b1]
 

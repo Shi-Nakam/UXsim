@@ -111,13 +111,22 @@ def _setup_arrived_vehicle(
 
 
 def _register_service_unit(merge, batch_id, inlink, vehicles):
+    visit_ids = []
     for veh in vehicles:
-        veh.order_control_batch_assignments["merge"] = batch_id
+        visit = veh.order_control_current_visit
+        assert visit is not None
+        assert visit["node"] is merge
+        assert visit["inlink"] is inlink
+        visit["batch_assignment"] = batch_id
+        if merge.name not in veh.order_control_batch_assignments:
+            veh.order_control_batch_assignments[merge.name] = batch_id
+        visit_ids.append(visit["visit_id"])
     merge.order_control_batch_service_queue.append(
         {
             "batch_id": batch_id,
             "inlink": inlink,
             "vehicles": list(vehicles),
+            "visit_ids": visit_ids,
         }
     )
 
@@ -339,7 +348,6 @@ def test_no_trigger_transfers_from_existing_queue():
     out = W.get_link("out")
     batched = _make_vehicle(W, "orig1", "A1")
     _setup_arrived_vehicle(merge, batched, link1, out, 0, 10.0, 0.1, 200.0, move_remain=5.0)
-    batched.order_control_batch_assignments["merge"] = 0
     _register_service_unit(merge, 0, link1, [batched])
 
     result = merge.transfer_batch()
@@ -585,8 +593,6 @@ def test_existing_queue_plus_new_formation():
     b1 = _make_vehicle(W, "orig2", "B1")
     _setup_arrived_vehicle(merge, a1, link1, out, 0, 10.0, 0.1, 200.0)
     _setup_arrived_vehicle(merge, b1, link2, out, 0, 11.0, 0.2, 200.0)
-    a1.order_control_batch_assignments["merge"] = 0
-    b1.order_control_batch_assignments["merge"] = 1
     _register_service_unit(merge, 0, link1, [a1])
     _register_service_unit(merge, 1, link2, [b1])
     before_units = _queue_unit_names(merge)

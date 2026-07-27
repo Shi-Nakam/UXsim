@@ -678,8 +678,16 @@ def test_link_entry_via_batch_transfer_vehicle():
         earliest=veh.order_control_current_visit["earliest_arrival_timestep"],
     )
     veh.order_control_batch_assignments["merge1"] = 0
+    batch_id = 0
+    visit = veh.order_control_current_visit
+    visit["batch_assignment"] = batch_id
     merge1.order_control_batch_service_queue.append(
-        {"batch_id": 0, "inlink": link1, "vehicles": [veh]}
+        {
+            "batch_id": batch_id,
+            "inlink": link1,
+            "vehicles": [veh],
+            "visit_ids": [visit["visit_id"]],
+        }
     )
     mid_merge2.capacity_in_remain = 1e6
     link1.capacity_out_remain = 1e6

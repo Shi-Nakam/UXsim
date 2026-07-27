@@ -405,7 +405,7 @@ class Node:
         candidates = [
             veh for veh in s.incoming_vehicles
             if veh.route_next_link is not None
-            and s.name not in veh.order_control_batch_assignments
+            and not veh.has_order_control_batch_assignment(s)
         ]
         return sorted(
             candidates,
@@ -432,9 +432,11 @@ class Node:
             )
         trigger_vehicle.get_order_control_batch_trigger_rank_key(s)
         trigger_vehicle.get_order_control_batch_earliest_arrival_timestep(s)
-        if s.name in trigger_vehicle.order_control_batch_assignments:
+        current_batch_assignment = trigger_vehicle.get_order_control_batch_assignment(s)
+        if current_batch_assignment is not None:
             raise ValueError(
-                f"Vehicle {trigger_vehicle.name} is already assigned to a batch at node {s.name}."
+                f"Vehicle {trigger_vehicle.name} is already assigned to a batch at node "
+                f"{s.name} with current visit batch_assignment={current_batch_assignment}."
             )
         if require_link and trigger_vehicle.link is None:
             raise ValueError(
@@ -504,10 +506,11 @@ class Node:
         order of ``inlink.vehicles``. Raises ValueError when node configuration,
         timestep inputs, missing or invalid earliest-arrival records,
         non-decreasing earliest-arrival violations, or batch-assignment prefix
-        inconsistencies are detected. Batch assignment is evaluated per current
-        node name (``s.name in veh.order_control_batch_assignments``); assigned
-        vehicles must form a prefix of each inlink queue. Does not use current
-        speed ``veh.v`` or ``route_next_link`` as candidate filters.
+        inconsistencies are detected. Batch assignment is evaluated from the
+        current visit ``batch_assignment`` via
+        ``veh.has_order_control_batch_assignment(s)``; assigned vehicles must form
+        a prefix of each inlink queue. Does not use current speed ``veh.v`` or
+        ``route_next_link`` as candidate filters.
 
         Research scenario assumption: OD demand is between network endpoints;
         order-control nodes are not used as vehicle destinations; trip-end
@@ -584,7 +587,7 @@ class Node:
                     )
                 previous_earliest = earliest
 
-                is_assigned_at_node = s.name in veh.order_control_batch_assignments
+                is_assigned_at_node = veh.has_order_control_batch_assignment(s)
                 if in_unassigned_suffix and is_assigned_at_node:
                     raise ValueError(
                         f"Batch assignment prefix violation on inlink {inlink.name} "
@@ -596,7 +599,7 @@ class Node:
 
             candidates = []
             for veh in vehicles:
-                if s.name in veh.order_control_batch_assignments:
+                if veh.has_order_control_batch_assignment(s):
                     continue
                 earliest = veh.get_order_control_batch_earliest_arrival_timestep(s)
                 if earliest <= t_trigger:
@@ -667,7 +670,7 @@ class Node:
             unassigned_suffix = []
             unassigned_suffix_started = False
             for veh in inlink.vehicles:
-                is_assigned_at_node = s.name in veh.order_control_batch_assignments
+                is_assigned_at_node = veh.has_order_control_batch_assignment(s)
                 if not is_assigned_at_node:
                     unassigned_suffix_started = True
                     unassigned_suffix.append(veh)
@@ -708,7 +711,7 @@ class Node:
                         f"Candidate vehicle {veh.name} on inlink {inlink.name} at node "
                         f"{s.name} has state={veh.state!r}; expected 'run'."
                     )
-                if s.name in veh.order_control_batch_assignments:
+                if veh.has_order_control_batch_assignment(s):
                     raise ValueError(
                         f"Candidate vehicle {veh.name} is already assigned to a batch "
                         f"at node {s.name}."
@@ -741,7 +744,7 @@ class Node:
                 f"trigger_vehicle {trigger_vehicle.name} is not in incoming_vehicles "
                 f"of node {s.name}."
             )
-        if s.name in trigger_vehicle.order_control_batch_assignments:
+        if trigger_vehicle.has_order_control_batch_assignment(s):
             raise ValueError(
                 f"trigger_vehicle {trigger_vehicle.name} is already assigned to a "
                 f"batch at node {s.name}."
@@ -962,9 +965,11 @@ class Node:
         Register per-inlink direction batches as formal service units at this node.
 
         Takes an ordered list of ``(inlink, fifo_vehicle_list)`` tuples and, for each
-        group, issues a node-local batch ID, records ``vehicle.order_control_batch_assignments``
-        under this node's name, and appends one service-unit dict
-        ``{"batch_id", "inlink", "vehicles"}`` to ``order_control_batch_service_queue``.
+        group, issues a node-local batch ID, records the current visit
+        ``batch_assignment`` and a compatibility first-visit entry in
+        ``vehicle.order_control_batch_assignments`` when absent, and appends one
+        service-unit dict ``{"batch_id", "inlink", "vehicles", "visit_ids"}`` to
+        ``order_control_batch_service_queue``.
         Advances ``order_control_batch_next_id`` by the number of registered batches.
         Supports repeated calls on the same node with continuing IDs and queue state.
         Raises ``ValueError`` on invalid input without mutating state. Rolls back partial
@@ -1067,36 +1072,66 @@ class Node:
                         f"Vehicle {veh.name} on inlink {inlink.name} at node {s.name} "
                         f"has state={veh.state!r}; expected 'run'."
                     )
-                if s.name in veh.order_control_batch_assignments:
-                    existing_batch_id = veh.order_control_batch_assignments[s.name]
+                current_visit = veh._require_order_control_current_visit_for_batch(s)
+                if current_visit["inlink"] is not inlink:
+                    raise ValueError(
+                        f"Vehicle {veh.name} at node {s.name} has current visit inlink "
+                        f"{getattr(current_visit['inlink'], 'name', current_visit['inlink'])!r}, "
+                        f"not {inlink.name}."
+                    )
+                visit_id = current_visit["visit_id"]
+                if (
+                    not isinstance(visit_id, int)
+                    or isinstance(visit_id, bool)
+                    or visit_id < 1
+                ):
+                    raise ValueError(
+                        f"Vehicle {veh.name} at node {s.name} has invalid current visit "
+                        f"visit_id={visit_id!r}; expected a positive int."
+                    )
+                current_batch_assignment = veh.get_order_control_batch_assignment(s)
+                if current_batch_assignment is not None:
                     raise ValueError(
                         f"Vehicle {veh.name} is already assigned at node {s.name} "
-                        f"with batch_id={existing_batch_id}."
+                        f"with current visit batch_assignment={current_batch_assignment}."
                     )
 
             batch_id = initial_next_id + group_index
+            visit_ids = [
+                veh._require_order_control_current_visit_for_batch(s)["visit_id"]
+                for veh in vehicles
+            ]
             planned_service_units.append(
                 {
                     "batch_id": batch_id,
                     "inlink": inlink,
                     "vehicles": list(vehicles),
+                    "visit_ids": list(visit_ids),
                 }
             )
 
-        assigned_vehicles_added = []
+        assigned_states = []
+        legacy_keys_added = []
         appended_service_unit_count = 0
         try:
             for service_unit in planned_service_units:
                 batch_id = service_unit["batch_id"]
                 for veh in service_unit["vehicles"]:
-                    veh.order_control_batch_assignments[s.name] = batch_id
-                    assigned_vehicles_added.append(veh)
+                    visit = veh.order_control_current_visit
+                    previous_assignment = visit["batch_assignment"]
+                    assigned_states.append((veh, visit, previous_assignment))
+                    veh.assign_order_control_batch_to_current_visit(s, batch_id)
+                    if s.name not in veh.order_control_batch_assignments:
+                        veh.order_control_batch_assignments[s.name] = batch_id
+                        legacy_keys_added.append((veh, s.name))
                 s.order_control_batch_service_queue.append(service_unit)
                 appended_service_unit_count += 1
             s.order_control_batch_next_id = initial_next_id + len(planned_service_units)
         except Exception:
-            for veh in assigned_vehicles_added:
-                del veh.order_control_batch_assignments[s.name]
+            for veh, visit, previous_assignment in reversed(assigned_states):
+                visit["batch_assignment"] = previous_assignment
+            for veh, node_name in reversed(legacy_keys_added):
+                del veh.order_control_batch_assignments[node_name]
             for _ in range(appended_service_unit_count):
                 s.order_control_batch_service_queue.pop()
             s.order_control_batch_next_id = initial_next_id
@@ -1261,20 +1296,96 @@ class Node:
                 > s.order_control_clearance_timesteps
             )
 
-        def _validate_service_unit_vehicle(veh, service_unit):
+        def _validate_service_unit_visit(veh, service_unit):
+            for required_key in ("batch_id", "inlink", "vehicles", "visit_ids"):
+                if required_key not in service_unit:
+                    raise ValueError(
+                        f"Node {s.name}: service unit is missing required key "
+                        f"{required_key!r}."
+                    )
+            batch_id = service_unit["batch_id"]
+            if (
+                isinstance(batch_id, bool)
+                or not isinstance(batch_id, int)
+                or batch_id < 0
+            ):
+                raise ValueError(
+                    f"Node {s.name}: service unit has invalid batch_id={batch_id!r}; "
+                    "expected a non-negative int."
+                )
+            unit_vehicles = service_unit["vehicles"]
+            unit_visit_ids = service_unit["visit_ids"]
+            if not isinstance(unit_vehicles, list) or not isinstance(unit_visit_ids, list):
+                raise ValueError(
+                    f"Node {s.name}: service unit batch_id={batch_id} has invalid "
+                    f"vehicles={unit_vehicles!r} or visit_ids={unit_visit_ids!r}; "
+                    "expected lists."
+                )
+            if len(unit_vehicles) != len(unit_visit_ids):
+                raise ValueError(
+                    f"Node {s.name}: service unit batch_id={batch_id} has "
+                    f"len(vehicles)={len(unit_vehicles)} and "
+                    f"len(visit_ids)={len(unit_visit_ids)}; expected equal lengths."
+                )
+            if not unit_vehicles:
+                raise ValueError(
+                    f"Node {s.name}: service unit batch_id={batch_id} has an empty "
+                    "vehicles list during service."
+                )
+            registered_visit_id = unit_visit_ids[0]
+            if (
+                isinstance(registered_visit_id, bool)
+                or not isinstance(registered_visit_id, int)
+                or registered_visit_id < 1
+            ):
+                raise ValueError(
+                    f"Node {s.name}: service unit batch_id={batch_id} has invalid "
+                    f"registered_visit_id={registered_visit_id!r}; expected a positive int."
+                )
+            current_visit = veh.order_control_current_visit
+            if current_visit is None:
+                raise ValueError(
+                    f"Vehicle {veh.name} at node {s.name}: order_control_current_visit "
+                    f"is None for service unit batch_id={batch_id}, "
+                    f"registered visit_id={registered_visit_id}."
+                )
+            if current_visit["node"] is not s:
+                raise ValueError(
+                    f"Vehicle {veh.name} at node {s.name}: current visit node "
+                    f"{current_visit['node'].name!r} does not match service node "
+                    f"{s.name!r} for service unit batch_id={batch_id}, "
+                    f"registered visit_id={registered_visit_id}, "
+                    f"current visit_id={current_visit['visit_id']}."
+                )
+            current_visit_id = current_visit["visit_id"]
+            if current_visit_id != registered_visit_id:
+                raise ValueError(
+                    f"Vehicle {veh.name} at node {s.name}: visit_id mismatch for "
+                    f"service unit batch_id={batch_id}: registered visit_id="
+                    f"{registered_visit_id}, current visit_id={current_visit_id}, "
+                    f"current batch_assignment="
+                    f"{current_visit.get('batch_assignment')!r}."
+                )
+            current_batch_assignment = veh.get_order_control_batch_assignment(s)
+            if current_batch_assignment is None:
+                raise ValueError(
+                    f"Vehicle {veh.name} at node {s.name}: current visit "
+                    f"batch_assignment is None for service unit batch_id={batch_id}, "
+                    f"registered visit_id={registered_visit_id}, "
+                    f"current visit_id={current_visit_id}."
+                )
+            if current_batch_assignment != batch_id:
+                raise ValueError(
+                    f"Vehicle {veh.name} at node {s.name}: batch_assignment mismatch "
+                    f"for service unit batch_id={batch_id}: current "
+                    f"batch_assignment={current_batch_assignment}, registered "
+                    f"visit_id={registered_visit_id}, current visit_id="
+                    f"{current_visit_id}."
+                )
+
+        def _validate_service_unit_arrived_vehicle(veh, service_unit):
             batch_id = service_unit["batch_id"]
             inlink = service_unit["inlink"]
-            if s.name not in veh.order_control_batch_assignments:
-                raise ValueError(
-                    f"Vehicle {veh.name} at node {s.name} has no batch assignment "
-                    f"for service unit batch_id={batch_id}."
-                )
-            if veh.order_control_batch_assignments[s.name] != batch_id:
-                raise ValueError(
-                    f"Vehicle {veh.name} at node {s.name} has batch assignment "
-                    f"{veh.order_control_batch_assignments[s.name]!r}, expected "
-                    f"{batch_id} for service unit batch_id={batch_id}."
-                )
             if veh.link is not inlink:
                 raise ValueError(
                     f"Vehicle {veh.name} at node {s.name} has veh.link="
@@ -1374,11 +1485,13 @@ class Node:
             while service_unit["vehicles"]:
                 veh = service_unit["vehicles"][0]
 
+                _validate_service_unit_visit(veh, service_unit)
+
                 if veh not in s.incoming_vehicles:
                     _finalize_service_queue()
                     return transferred_vehicle_count
 
-                _validate_service_unit_vehicle(veh, service_unit)
+                _validate_service_unit_arrived_vehicle(veh, service_unit)
                 outlink = veh.route_next_link
 
                 if not _clearance_satisfied(inlink):
@@ -1394,6 +1507,7 @@ class Node:
 
                 _transfer_vehicle(veh, inlink, outlink)
                 service_unit["vehicles"].pop(0)
+                service_unit["visit_ids"].pop(0)
                 transferred_vehicle_count += 1
                 active_inlink = inlink
 
@@ -2364,9 +2478,14 @@ class Vehicle:
             BATCH research attribute mapping each downstream node name to the earliest arrival timestep
             (timestep units) estimated at link entry under free-flow conditions. Initialized to an empty dict.
         order_control_batch_assignments : dict
-            BATCH Processing control state mapping each order-control node name to the batch_id assigned
-            to this vehicle at that node. If a node name is absent, the vehicle is treated as unbatched at
-            that node. Initialized to an empty dict at this stage; no assignments are written yet.
+            Legacy compatibility record mapping each order-control node name to the batch_id
+            assigned on this vehicle's first visit at that node. On revisit to the same node,
+            the first-visit value in this dict is not overwritten. Not used for current BATCH
+            assignment control; candidate selection, prefix checks, t_trigger input validation,
+            and service-unit serving consult ``order_control_current_visit["batch_assignment"]``
+            instead. For the current visit, ``None`` means unassigned and a non-negative int means
+            an assigned batch_id. This dict is not a formal record of assignment across all visits.
+            Initialized to an empty dict at this stage; no entries are written yet.
         order_control_visit_id : int
             Last issued visit number for order-control target nodes on this vehicle. ``0`` means no such
             visit has started yet. Initialized to ``0``.
@@ -2829,6 +2948,91 @@ class Vehicle:
                 f"{node.name}."
             )
         return earliest_arrival_timestep
+
+    def _validate_order_control_batch_assignment_field_value(s, batch_assignment, node):
+        if batch_assignment is None:
+            return None
+        if (
+            isinstance(batch_assignment, bool)
+            or not isinstance(batch_assignment, int)
+            or batch_assignment < 0
+        ):
+            raise ValueError(
+                f"Vehicle {s.name}: invalid batch_assignment={batch_assignment!r} at node "
+                f"{node.name}; expected None or a non-negative int."
+            )
+        return batch_assignment
+
+    def get_order_control_batch_assignment(s, node):
+        """
+        Return the current visit BATCH assignment for an order-control node.
+
+        Notes
+        -----
+        Reads ``order_control_current_visit["batch_assignment"]`` for the current
+        visit at ``node``. Returns ``None`` when the current visit is unassigned.
+        Legacy ``order_control_batch_assignments`` is not consulted.
+
+        Raises
+        ------
+        ValueError
+            If ``order_control_current_visit`` is ``None``, if the current visit's
+            ``node`` is not the given ``node``, or if ``batch_assignment`` is an
+            invalid type.
+        """
+        current_visit = s._require_order_control_current_visit_for_batch(node)
+        return s._validate_order_control_batch_assignment_field_value(
+            current_visit["batch_assignment"], node
+        )
+
+    def has_order_control_batch_assignment(s, node):
+        """
+        Return whether the current visit has a BATCH assignment at an order-control node.
+
+        Notes
+        -----
+        Equivalent to ``get_order_control_batch_assignment(node) is not None``.
+        """
+        return s.get_order_control_batch_assignment(node) is not None
+
+    def assign_order_control_batch_to_current_visit(s, node, batch_id):
+        """
+        Assign a batch ID to the current visit at an order-control node.
+
+        Notes
+        -----
+        Sets ``order_control_current_visit["batch_assignment"]``. Does not write
+        legacy ``order_control_batch_assignments``; compatibility first-visit recording
+        is performed by ``Node.register_order_control_batch_service_units()``.
+
+        Raises
+        ------
+        ValueError
+            If ``batch_id`` is invalid, if ``order_control_current_visit`` is
+            ``None``, if the current visit's ``node`` is not the given ``node``,
+            if the current visit already has a ``batch_assignment``, or if the
+            existing ``batch_assignment`` value has an invalid type.
+        """
+        if (
+            isinstance(batch_id, bool)
+            or not isinstance(batch_id, int)
+            or batch_id < 0
+        ):
+            raise ValueError(
+                f"Vehicle {s.name}: invalid batch_id={batch_id!r} at node {node.name}; "
+                "expected a non-negative int."
+            )
+        current_visit = s._require_order_control_current_visit_for_batch(node)
+        existing_assignment = s._validate_order_control_batch_assignment_field_value(
+            current_visit["batch_assignment"], node
+        )
+        if existing_assignment is not None:
+            raise ValueError(
+                f"Vehicle {s.name} at node {node.name}: current visit already has "
+                f"batch_assignment={existing_assignment!r}; cannot assign "
+                f"batch_id={batch_id}."
+            )
+        current_visit["batch_assignment"] = batch_id
 
     def record_order_control_node_arrival(s, node):
         """

@@ -43,7 +43,7 @@ def _make_vehicle(W, orig_name, name):
     return W.addVehicle(orig_name, "dest", 0, name=name)
 
 
-def _sync_pre_arrival_current_visit(veh, merge, link, earliest):
+def _sync_pre_arrival_current_visit(veh, merge, link, earliest, batch_assignment=None):
     if veh.order_control_visit_id == 0:
         veh.order_control_visit_id = 1
     visit = veh.order_control_current_visit
@@ -55,7 +55,7 @@ def _sync_pre_arrival_current_visit(veh, merge, link, earliest):
             "earliest_arrival_timestep": earliest,
             "arrival_time": None,
             "arrival_tiebreaker": None,
-            "batch_assignment": None,
+            "batch_assignment": batch_assignment,
         }
     else:
         visit["visit_id"] = veh.order_control_visit_id
@@ -64,11 +64,11 @@ def _sync_pre_arrival_current_visit(veh, merge, link, earliest):
         visit["earliest_arrival_timestep"] = earliest
         visit["arrival_time"] = None
         visit["arrival_tiebreaker"] = None
-        visit["batch_assignment"] = None
+        visit["batch_assignment"] = batch_assignment
 
 
 def _sync_arrived_trigger_current_visit(
-    veh, merge, link, earliest, arrival_time, tiebreaker
+    veh, merge, link, earliest, arrival_time, tiebreaker, batch_assignment=None
 ):
     if veh.order_control_visit_id == 0:
         veh.order_control_visit_id = 1
@@ -81,7 +81,7 @@ def _sync_arrived_trigger_current_visit(
             "earliest_arrival_timestep": earliest,
             "arrival_time": arrival_time,
             "arrival_tiebreaker": tiebreaker,
-            "batch_assignment": None,
+            "batch_assignment": batch_assignment,
         }
     else:
         visit["visit_id"] = veh.order_control_visit_id
@@ -90,17 +90,17 @@ def _sync_arrived_trigger_current_visit(
         visit["earliest_arrival_timestep"] = earliest
         visit["arrival_time"] = arrival_time
         visit["arrival_tiebreaker"] = tiebreaker
-        visit["batch_assignment"] = None
+        visit["batch_assignment"] = batch_assignment
 
 
-def _place_on_inlink(veh, link, earliest, x, v=20.0):
+def _place_on_inlink(veh, link, earliest, x, v=20.0, batch_assignment=None):
     merge = link.end_node
     veh.link = link
     veh.state = "run"
     veh.x = x
     veh.v = v
     veh.order_control_earliest_arrival_timesteps["merge"] = earliest
-    _sync_pre_arrival_current_visit(veh, merge, link, earliest)
+    _sync_pre_arrival_current_visit(veh, merge, link, earliest, batch_assignment=batch_assignment)
     link.vehicles.append(veh)
 
 
@@ -139,6 +139,11 @@ def _snapshot_state(merge, candidates_by_inlink, vehicles):
         "vehicles": {
             veh.name: {
                 "batch_assignments": copy.copy(veh.order_control_batch_assignments),
+                "current_batch_assignment": (
+                    None
+                    if veh.order_control_current_visit is None
+                    else veh.order_control_current_visit.get("batch_assignment")
+                ),
                 "earliest": copy.copy(veh.order_control_earliest_arrival_timesteps),
                 "arrival_times": copy.copy(veh.order_control_node_arrival_times),
                 "tiebreakers": copy.copy(veh.order_control_node_arrival_tiebreakers),
@@ -470,7 +475,7 @@ def test_trigger_vehicle_validation_errors():
     trigger.order_control_node_arrival_tiebreakers["merge"] = 0.5
     trigger.order_control_current_visit["arrival_tiebreaker"] = 0.5
 
-    trigger.order_control_batch_assignments["merge"] = 0
+    trigger.order_control_current_visit["batch_assignment"] = 0
     _expect_value_error(
         lambda: merge.get_ordered_order_control_batch_candidates_by_inlink(
             base_candidates, trigger
@@ -629,7 +634,7 @@ def test_candidate_vehicle_state_errors():
     )
     head1.state = "run"
 
-    head1.order_control_batch_assignments["merge"] = 0
+    head1.order_control_current_visit["batch_assignment"] = 0
     _expect_value_error(
         lambda: merge.get_ordered_order_control_batch_candidates_by_inlink(
             {link1: [head1], link2: [trigger]}, trigger
@@ -655,11 +660,11 @@ def test_candidate_fifo_order_validation():
     merge.get_ordered_order_control_batch_candidates_by_inlink(
         {link1: [veh_a, veh_b], link2: [trigger]}, trigger
     )
-    veh_a.order_control_batch_assignments["merge"] = 0
+    veh_a.order_control_current_visit["batch_assignment"] = 0
     merge.get_ordered_order_control_batch_candidates_by_inlink(
         {link1: [veh_b, veh_c], link2: [trigger]}, trigger
     )
-    del veh_a.order_control_batch_assignments["merge"]
+    veh_a.order_control_current_visit["batch_assignment"] = None
 
     for bad in ([veh_b, veh_a], [veh_c, veh_b]):
         _expect_value_error(
@@ -680,13 +685,11 @@ def test_unassigned_suffix_continuity_validation():
     veh_d = _make_vehicle(W, "orig1", "veh_d")
     veh_e = _make_vehicle(W, "orig1", "veh_e")
     trigger = _make_vehicle(W, "orig2", "trigger")
-    _place_on_inlink(veh_a, link1, earliest=8, x=200.0)
-    _place_on_inlink(veh_b, link1, earliest=9, x=160.0)
+    _place_on_inlink(veh_a, link1, earliest=8, x=200.0, batch_assignment=0)
+    _place_on_inlink(veh_b, link1, earliest=9, x=160.0, batch_assignment=1)
     _place_on_inlink(veh_c, link1, earliest=10, x=120.0)
     _place_on_inlink(veh_d, link1, earliest=11, x=80.0)
     _place_on_inlink(veh_e, link1, earliest=12, x=40.0)
-    veh_a.order_control_batch_assignments["merge"] = 0
-    veh_b.order_control_batch_assignments["merge"] = 1
     _place_on_inlink(trigger, link2, earliest=10, x=200.0)
     _setup_trigger(merge, trigger, arrival_time=10.0)
 
@@ -713,9 +716,8 @@ def test_assignment_layout_unassigned_assigned_unassigned_raises():
     veh_c = _make_vehicle(W, "orig1", "veh_c")
     trigger = _make_vehicle(W, "orig2", "trigger")
     _place_on_inlink(veh_a, link1, earliest=10, x=180.0)
-    _place_on_inlink(veh_b, link1, earliest=11, x=120.0)
+    _place_on_inlink(veh_b, link1, earliest=11, x=120.0, batch_assignment=0)
     _place_on_inlink(veh_c, link1, earliest=12, x=60.0)
-    veh_b.order_control_batch_assignments["merge"] = 0
     _place_on_inlink(trigger, link2, earliest=10, x=200.0)
     _setup_trigger(merge, trigger, arrival_time=10.0)
 
@@ -735,11 +737,9 @@ def test_assignment_layout_assigned_unassigned_assigned_raises():
     veh_b = _make_vehicle(W, "orig1", "veh_b")
     veh_c = _make_vehicle(W, "orig1", "veh_c")
     trigger = _make_vehicle(W, "orig2", "trigger")
-    _place_on_inlink(veh_a, link1, earliest=10, x=180.0)
+    _place_on_inlink(veh_a, link1, earliest=10, x=180.0, batch_assignment=0)
     _place_on_inlink(veh_b, link1, earliest=11, x=120.0)
-    _place_on_inlink(veh_c, link1, earliest=12, x=60.0)
-    veh_a.order_control_batch_assignments["merge"] = 0
-    veh_c.order_control_batch_assignments["merge"] = 1
+    _place_on_inlink(veh_c, link1, earliest=12, x=60.0, batch_assignment=1)
     _place_on_inlink(trigger, link2, earliest=10, x=200.0)
     _setup_trigger(merge, trigger, arrival_time=10.0)
 

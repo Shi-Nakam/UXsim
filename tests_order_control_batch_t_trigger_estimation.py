@@ -38,7 +38,7 @@ def _build_merge_network(name="batch_t_trigger"):
 
 
 def _sync_arrived_trigger_current_visit(
-    veh, merge, link, earliest_arrival_timestep, arrival_time, tiebreaker
+    veh, merge, link, earliest_arrival_timestep, arrival_time, tiebreaker, batch_assignment=None
 ):
     if veh.order_control_visit_id == 0:
         veh.order_control_visit_id = 1
@@ -51,7 +51,7 @@ def _sync_arrived_trigger_current_visit(
             "earliest_arrival_timestep": earliest_arrival_timestep,
             "arrival_time": arrival_time,
             "arrival_tiebreaker": tiebreaker,
-            "batch_assignment": None,
+            "batch_assignment": batch_assignment,
         }
     else:
         visit["visit_id"] = veh.order_control_visit_id
@@ -60,7 +60,7 @@ def _sync_arrived_trigger_current_visit(
         visit["earliest_arrival_timestep"] = earliest_arrival_timestep
         visit["arrival_time"] = arrival_time
         visit["arrival_tiebreaker"] = tiebreaker
-        visit["batch_assignment"] = None
+        visit["batch_assignment"] = batch_assignment
 
 
 def _make_trigger_vehicle(
@@ -71,6 +71,7 @@ def _make_trigger_vehicle(
     tiebreaker=0.2,
     earliest_arrival_timestep=12,
     batch_assignments=None,
+    current_batch_assignment=None,
 ):
     if W is None:
         W = _build_merge_network()
@@ -90,6 +91,7 @@ def _make_trigger_vehicle(
         earliest_arrival_timestep,
         arrival_time,
         tiebreaker,
+        batch_assignment=current_batch_assignment,
     )
     merge.incoming_vehicles = [veh]
     return veh, merge
@@ -294,7 +296,7 @@ def test_value_error_missing_earliest_arrival_timestep():
 
 def test_value_error_already_batched_at_target_node():
     veh, merge = _make_trigger_vehicle(
-        batch_assignments={"merge": 0},
+        current_batch_assignment=0,
     )
     _expect_value_error(lambda: merge.estimate_order_control_batch_t_trigger_level_0(veh))
 

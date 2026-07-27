@@ -58,6 +58,57 @@ def _make_vehicle(W, orig_name, name, dest="dest"):
     return W.addVehicle(orig_name, dest, 0, name=name)
 
 
+def _sync_arrived_current_visit(veh, merge, link, earliest, arrival_time, tiebreaker, batch_assignment=None):
+    if veh.order_control_visit_id == 0:
+        veh.order_control_visit_id = 1
+    visit = veh.order_control_current_visit
+    if visit is None or visit.get("node") is not merge or visit.get("inlink") is not link:
+        veh.order_control_current_visit = {
+            "visit_id": veh.order_control_visit_id,
+            "node": merge,
+            "inlink": link,
+            "earliest_arrival_timestep": earliest,
+            "arrival_time": arrival_time,
+            "arrival_tiebreaker": tiebreaker,
+            "batch_assignment": batch_assignment,
+        }
+    else:
+        visit["visit_id"] = veh.order_control_visit_id
+        visit["node"] = merge
+        visit["inlink"] = link
+        visit["earliest_arrival_timestep"] = earliest
+        visit["arrival_time"] = arrival_time
+        visit["arrival_tiebreaker"] = tiebreaker
+        visit["batch_assignment"] = batch_assignment
+
+
+def _sync_service_vehicle_current_visit(veh, merge, inlink, *, batch_assignment=None):
+    if veh.order_control_visit_id == 0:
+        veh.order_control_visit_id = 1
+    earliest = veh.order_control_earliest_arrival_timesteps.get("merge", 0)
+    arrival_time = veh.order_control_node_arrival_times.get("merge")
+    tiebreaker = veh.order_control_node_arrival_tiebreakers.get("merge")
+    visit = veh.order_control_current_visit
+    if visit is None or visit.get("node") is not merge or visit.get("inlink") is not inlink:
+        veh.order_control_current_visit = {
+            "visit_id": veh.order_control_visit_id,
+            "node": merge,
+            "inlink": inlink,
+            "earliest_arrival_timestep": earliest,
+            "arrival_time": arrival_time,
+            "arrival_tiebreaker": tiebreaker,
+            "batch_assignment": batch_assignment,
+        }
+    else:
+        visit["visit_id"] = veh.order_control_visit_id
+        visit["node"] = merge
+        visit["inlink"] = inlink
+        visit["earliest_arrival_timestep"] = earliest
+        visit["arrival_time"] = arrival_time
+        visit["arrival_tiebreaker"] = tiebreaker
+        visit["batch_assignment"] = batch_assignment
+
+
 def _setup_arrived_vehicle(
     merge,
     veh,
@@ -81,6 +132,9 @@ def _setup_arrived_vehicle(
     veh.order_control_earliest_arrival_timesteps["merge"] = earliest
     veh.order_control_node_arrival_times["merge"] = arrival_time
     veh.order_control_node_arrival_tiebreakers["merge"] = tiebreaker
+    _sync_arrived_current_visit(
+        veh, merge, link, earliest, arrival_time, tiebreaker, batch_assignment=None
+    )
     if veh not in link.vehicles:
         link.vehicles.append(veh)
     if veh not in merge.incoming_vehicles:
@@ -88,13 +142,22 @@ def _setup_arrived_vehicle(
 
 
 def _register_service_unit(merge, batch_id, inlink, vehicles):
+    visit_ids = []
     for veh in vehicles:
-        veh.order_control_batch_assignments["merge"] = batch_id
+        visit = veh.order_control_current_visit
+        assert visit is not None
+        assert visit["node"] is merge
+        assert visit["inlink"] is inlink
+        visit["batch_assignment"] = batch_id
+        if merge.name not in veh.order_control_batch_assignments:
+            veh.order_control_batch_assignments[merge.name] = batch_id
+        visit_ids.append(visit["visit_id"])
     merge.order_control_batch_service_queue.append(
         {
             "batch_id": batch_id,
             "inlink": inlink,
             "vehicles": list(vehicles),
+            "visit_ids": visit_ids,
         }
     )
 
@@ -174,7 +237,7 @@ def test_not_arrived_waits():
     a1.state = "run"
     a1.x = 200.0
     a1.route_next_link = out
-    a1.order_control_batch_assignments["merge"] = 0
+    _sync_service_vehicle_current_visit(a1, merge, link1)
     link1.vehicles.append(a1)
     _register_service_unit(merge, 0, link1, [a1])
     _register_service_unit(merge, 1, link2, [b1])
@@ -207,18 +270,23 @@ def test_not_arrived_without_route_next_link_attribute():
     if hasattr(a1, "route_next_link"):
         delattr(a1, "route_next_link")
     assert not hasattr(a1, "route_next_link")
-    a1.order_control_batch_assignments["merge"] = 0
+    _sync_service_vehicle_current_visit(a1, merge, link1)
     link1.vehicles.append(a1)
     _register_service_unit(merge, 0, link1, [a1])
     _register_service_unit(merge, 1, link2, [b1])
     before = _queue_snapshot(merge)
+    before_a1_visit = dict(a1.order_control_current_visit)
+    before_unit0_vehicles = list(merge.order_control_batch_service_queue[0]["vehicles"])
+    before_unit0_visit_ids = list(merge.order_control_batch_service_queue[0]["visit_ids"])
     out_cum = out.cum_arrival[-1]
 
     count = merge.serve_order_control_batch_service_queue()
     assert count == 0
     assert _queue_snapshot(merge) == before
+    assert merge.order_control_batch_service_queue[0]["vehicles"] == before_unit0_vehicles
+    assert merge.order_control_batch_service_queue[0]["visit_ids"] == before_unit0_visit_ids
+    assert a1.order_control_current_visit == before_a1_visit
     assert a1 not in merge.incoming_vehicles
-    assert a1.order_control_batch_assignments.get("merge") == 0
     assert not hasattr(a1, "route_next_link")
     assert b1 in merge.incoming_vehicles
     assert b1.link is link2
@@ -559,7 +627,7 @@ def test_working_list_removes_completed_middle_unit():
     c1.state = "run"
     c1.x = 200.0
     c1.route_next_link = out
-    c1.order_control_batch_assignments["merge"] = 2
+    _sync_service_vehicle_current_visit(c1, merge, link2)
     link2.vehicles.append(c1)
     _register_service_unit(merge, 0, link1, [a1])
     _register_service_unit(merge, 1, link2, [b1])
@@ -595,7 +663,7 @@ def test_early_stop_removes_completed_unit():
     c1.state = "run"
     c1.x = 200.0
     c1.route_next_link = out
-    c1.order_control_batch_assignments["merge"] = 2
+    _sync_service_vehicle_current_visit(c1, merge, link2)
     link2.vehicles.append(c1)
     _register_service_unit(merge, 0, link1, [a1])
     _register_service_unit(merge, 1, link2, [b1])
@@ -742,12 +810,11 @@ def test_missing_assignment_value_error():
     out = W.get_link("out")
     veh = _make_vehicle(W, "orig1", "A1")
     _setup_arrived_vehicle(merge, veh, link1, out, 0, 10.0, 0.1, 200.0)
-    merge.order_control_batch_service_queue.append(
-        {"batch_id": 0, "inlink": link1, "vehicles": [veh]}
-    )
+    _register_service_unit(merge, 0, link1, [veh])
+    veh.order_control_current_visit["batch_assignment"] = None
     _expect_value_error(
         merge.serve_order_control_batch_service_queue,
-        ["no batch assignment", "A1"],
+        ["batch_assignment is None", "A1"],
     )
 
 
@@ -758,13 +825,11 @@ def test_mismatched_batch_id_value_error():
     out = W.get_link("out")
     veh = _make_vehicle(W, "orig1", "A1")
     _setup_arrived_vehicle(merge, veh, link1, out, 0, 10.0, 0.1, 200.0)
-    veh.order_control_batch_assignments["merge"] = 9
-    merge.order_control_batch_service_queue.append(
-        {"batch_id": 0, "inlink": link1, "vehicles": [veh]}
-    )
+    _register_service_unit(merge, 0, link1, [veh])
+    veh.order_control_current_visit["batch_assignment"] = 9
     _expect_value_error(
         merge.serve_order_control_batch_service_queue,
-        ["batch assignment", "A1"],
+        ["batch_assignment mismatch", "A1"],
     )
 
 
@@ -776,10 +841,8 @@ def test_vehicle_link_mismatch_value_error():
     out = W.get_link("out")
     veh = _make_vehicle(W, "orig1", "A1")
     _setup_arrived_vehicle(merge, veh, link1, out, 0, 10.0, 0.1, 200.0)
-    veh.order_control_batch_assignments["merge"] = 0
-    merge.order_control_batch_service_queue.append(
-        {"batch_id": 0, "inlink": link2, "vehicles": [veh]}
-    )
+    _register_service_unit(merge, 0, link1, [veh])
+    merge.order_control_batch_service_queue[0]["inlink"] = link2
     _expect_value_error(
         merge.serve_order_control_batch_service_queue,
         ["veh.link", "A1", "merge"],
@@ -795,12 +858,10 @@ def test_route_next_link_none_value_error():
     veh.state = "run"
     veh.x = 200.0
     veh.route_next_link = None
-    veh.order_control_batch_assignments["merge"] = 0
+    _sync_service_vehicle_current_visit(veh, merge, link1)
     link1.vehicles.append(veh)
     merge.incoming_vehicles.append(veh)
-    merge.order_control_batch_service_queue.append(
-        {"batch_id": 0, "inlink": link1, "vehicles": [veh]}
-    )
+    _register_service_unit(merge, 0, link1, [veh])
     _expect_value_error(
         merge.serve_order_control_batch_service_queue,
         ["route_next_link=None", "A1"],

@@ -47,11 +47,36 @@ def _vehicles(names, W, orig="orig1"):
     return [_make_vehicle(W, orig, name) for name in names]
 
 
+def _sync_pre_arrival_current_visit(veh, merge, link, batch_assignment=None):
+    if veh.order_control_visit_id == 0:
+        veh.order_control_visit_id = 1
+    visit = veh.order_control_current_visit
+    if visit is None or visit.get("node") is not merge or visit.get("inlink") is not link:
+        veh.order_control_current_visit = {
+            "visit_id": veh.order_control_visit_id,
+            "node": merge,
+            "inlink": link,
+            "earliest_arrival_timestep": veh.order_control_earliest_arrival_timesteps.get(
+                merge.name, 0
+            ),
+            "arrival_time": None,
+            "arrival_tiebreaker": None,
+            "batch_assignment": batch_assignment,
+        }
+    else:
+        visit["visit_id"] = veh.order_control_visit_id
+        visit["node"] = merge
+        visit["inlink"] = link
+        visit["batch_assignment"] = batch_assignment
+
+
 def _place_on_inlink(veh, link, x=100.0):
+    merge = link.end_node
     veh.link = link
     veh.state = "run"
     veh.x = x
     veh.v = 20.0
+    _sync_pre_arrival_current_visit(veh, merge, link, batch_assignment=None)
     link.vehicles.append(veh)
 
 
@@ -63,6 +88,7 @@ def _snapshot_service_queue(queue):
             "batch_id": unit["batch_id"],
             "inlink": unit["inlink"],
             "vehicles": list(unit["vehicles"]),
+            "visit_ids": list(unit["visit_ids"]),
         }
         for unit in queue
     ]
@@ -85,6 +111,11 @@ def _snapshot_registration_state(node, selected_groups, vehicles):
         "vehicles": {
             veh.name: {
                 "batch_assignments": copy.copy(veh.order_control_batch_assignments),
+                "current_batch_assignment": (
+                    None
+                    if veh.order_control_current_visit is None
+                    else veh.order_control_current_visit.get("batch_assignment")
+                ),
                 "earliest": copy.copy(veh.order_control_earliest_arrival_timesteps),
                 "arrival_times": copy.copy(veh.order_control_node_arrival_times),
                 "tiebreakers": copy.copy(veh.order_control_node_arrival_tiebreakers),
@@ -141,6 +172,9 @@ def test_basic_registration():
     assert b1.order_control_batch_assignments["merge"] == 0
     assert a1.order_control_batch_assignments["merge"] == 1
     assert a2.order_control_batch_assignments["merge"] == 1
+    assert b1.order_control_current_visit["batch_assignment"] == 0
+    assert a1.order_control_current_visit["batch_assignment"] == 1
+    assert a2.order_control_current_visit["batch_assignment"] == 1
     assert merge.order_control_batch_next_id == 2
 
     queue = list(merge.order_control_batch_service_queue)
@@ -148,9 +182,16 @@ def test_basic_registration():
     assert queue[0]["batch_id"] == 0
     assert queue[0]["inlink"] is link2
     assert queue[0]["vehicles"] == [b1]
+    assert queue[0]["visit_ids"] == [b1.order_control_current_visit["visit_id"]]
     assert queue[1]["batch_id"] == 1
     assert queue[1]["inlink"] is link1
     assert queue[1]["vehicles"] == [a1, a2]
+    assert queue[1]["visit_ids"] == [
+        a1.order_control_current_visit["visit_id"],
+        a2.order_control_current_visit["visit_id"],
+    ]
+    assert len(queue[0]["vehicles"]) == len(queue[0]["visit_ids"])
+    assert len(queue[1]["vehicles"]) == len(queue[1]["visit_ids"])
 
 
 def test_multiple_registrations_on_same_node():
@@ -288,8 +329,8 @@ def test_already_assigned_at_current_node_raises():
     merge = W.get_node("merge")
     link1 = W.get_link("link1")
     a1 = _vehicles(["A1"], W)[0]
-    a1.order_control_batch_assignments["merge"] = 99
     _place_on_inlink(a1, link1)
+    a1.order_control_current_visit["batch_assignment"] = 99
     vehicles = [a1]
     before = _snapshot_registration_state(merge, [(link1, [a1])], vehicles)
 
@@ -520,7 +561,7 @@ def test_pre_change_validation_blocks_partial_registration():
     a1 = _vehicles(["A1"], W)[0]
     _place_on_inlink(b1, link2)
     _place_on_inlink(a1, link1)
-    a1.order_control_batch_assignments["merge"] = 5
+    a1.order_control_current_visit["batch_assignment"] = 5
     vehicles = [b1, a1]
     before = _snapshot_registration_state(merge, [(link2, [b1]), (link1, [a1])], vehicles)
 
@@ -544,10 +585,14 @@ def test_rollback_on_mid_update_exception():
     _place_on_inlink(b1, link2)
     _place_on_inlink(a1, link1, x=120.0)
     _place_on_inlink(a2, link1, x=60.0)
+    old_vehicle = _vehicles(["OLD"], W)[0]
+    _place_on_inlink(old_vehicle, link1)
+    old_vehicle.order_control_current_visit["batch_assignment"] = 99
     existing_unit = {
         "batch_id": 99,
         "inlink": link1,
-        "vehicles": [_vehicles(["OLD"], W)[0]],
+        "vehicles": [old_vehicle],
+        "visit_ids": [old_vehicle.order_control_current_visit["visit_id"]],
     }
     merge.order_control_batch_service_queue = _FailOnNthAppendDeque(
         [existing_unit], fail_on_append_n=2

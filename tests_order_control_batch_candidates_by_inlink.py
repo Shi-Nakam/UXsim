@@ -46,7 +46,7 @@ def _make_vehicle(W, orig_name, name, departure_time=0):
     return W.addVehicle(orig_name, "dest", departure_time, name=name)
 
 
-def _sync_pre_arrival_current_visit(veh, merge, link, earliest):
+def _sync_pre_arrival_current_visit(veh, merge, link, earliest, batch_assignment=None):
     if veh.order_control_visit_id == 0:
         veh.order_control_visit_id = 1
     visit = veh.order_control_current_visit
@@ -58,7 +58,7 @@ def _sync_pre_arrival_current_visit(veh, merge, link, earliest):
             "earliest_arrival_timestep": earliest,
             "arrival_time": None,
             "arrival_tiebreaker": None,
-            "batch_assignment": None,
+            "batch_assignment": batch_assignment,
         }
     else:
         visit["visit_id"] = veh.order_control_visit_id
@@ -67,17 +67,17 @@ def _sync_pre_arrival_current_visit(veh, merge, link, earliest):
         visit["earliest_arrival_timestep"] = earliest
         visit["arrival_time"] = None
         visit["arrival_tiebreaker"] = None
-        visit["batch_assignment"] = None
+        visit["batch_assignment"] = batch_assignment
 
 
-def _place_on_inlink(veh, link, earliest, x=100.0, v=20.0, route_next_link=None):
+def _place_on_inlink(veh, link, earliest, x=100.0, v=20.0, route_next_link=None, batch_assignment=None):
     merge = link.end_node
     veh.link = link
     veh.state = "run"
     veh.x = x
     veh.v = v
     veh.order_control_earliest_arrival_timesteps["merge"] = earliest
-    _sync_pre_arrival_current_visit(veh, merge, link, earliest)
+    _sync_pre_arrival_current_visit(veh, merge, link, earliest, batch_assignment=batch_assignment)
     if route_next_link is not None:
         veh.route_next_link = route_next_link
     link.vehicles.append(veh)
@@ -244,12 +244,10 @@ def test_assigned_prefix_valid_candidates():
     veh_b = _make_vehicle(W, "orig1", "veh_b")
     veh_c = _make_vehicle(W, "orig1", "veh_c")
     veh_d = _make_vehicle(W, "orig1", "veh_d")
-    _place_on_inlink(veh_a, link1, earliest=8, x=160.0)
-    _place_on_inlink(veh_b, link1, earliest=9, x=120.0)
+    _place_on_inlink(veh_a, link1, earliest=8, x=160.0, batch_assignment=0)
+    _place_on_inlink(veh_b, link1, earliest=9, x=120.0, batch_assignment=1)
     _place_on_inlink(veh_c, link1, earliest=10, x=80.0)
     _place_on_inlink(veh_d, link1, earliest=11, x=40.0)
-    veh_a.order_control_batch_assignments["merge"] = 0
-    veh_b.order_control_batch_assignments["merge"] = 1
 
     result = merge.get_order_control_batch_candidates_by_inlink(12)
     assert result[link1] == [veh_c, veh_d]
@@ -270,9 +268,7 @@ def test_assigned_prefix_violations_raise():
       link1 = W.get_link("link1")
       for idx, (veh_name, assigned) in enumerate(zip(names, assigned_flags)):
           veh = _make_vehicle(W, "orig1", veh_name)
-          _place_on_inlink(veh, link1, earliest=10 + idx, x=50.0 * (3 - idx))
-          if assigned:
-              veh.order_control_batch_assignments["merge"] = idx
+          _place_on_inlink(veh, link1, earliest=10 + idx, x=50.0 * (3 - idx), batch_assignment=idx if assigned else None)
       try:
           merge.get_order_control_batch_candidates_by_inlink(20)
           assert False, f"expected ValueError for assignment pattern {assigned_flags}"
@@ -302,11 +298,10 @@ def test_continuous_unassigned_suffix_candidates():
     veh_b = _make_vehicle(W, "orig1", "veh_b")
     veh_c = _make_vehicle(W, "orig1", "veh_c")
     veh_d = _make_vehicle(W, "orig1", "veh_d")
-    _place_on_inlink(veh_a, link1, earliest=8, x=160.0)
+    _place_on_inlink(veh_a, link1, earliest=8, x=160.0, batch_assignment=0)
     _place_on_inlink(veh_b, link1, earliest=10, x=120.0)
     _place_on_inlink(veh_c, link1, earliest=12, x=80.0)
     _place_on_inlink(veh_d, link1, earliest=15, x=40.0)
-    veh_a.order_control_batch_assignments["merge"] = 0
 
     result = merge.get_order_control_batch_candidates_by_inlink(12)
     assert result[link1] == [veh_b, veh_c]
