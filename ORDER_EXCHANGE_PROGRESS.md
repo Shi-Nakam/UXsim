@@ -2673,14 +2673,15 @@ if s.order_control_eligible and s.order_control_type == "batch":
 - Phase 4-6Nのclearance=0比較テスト3本は commit `f339b88` 済み
 - Phase 4-6Nの比較・Node再訪診断の正式記録は commit `c06936c` 済み
 - Phase 4-6Nの診断スクリプト分離は commit `0e35799` 済み
-- **最新実装commit：** `5e26bc9`（Phase 4-6S BATCH assignmentの訪問対応）
+- **最新実装commit：** `b7159f9`（Phase 4-6T 小規模BATCH再訪end-to-end統合）
 - Phase 4-6N Step 5：Node訪問単位の共通状態設計を設計メモ **§1H** に記録済み
 - Phase 4-6O：commit `e3243e7` で完了（設計メモ **§1H.18**）
 - Phase 4-6P：commit `b1b4d7f`（Step 1）・`b051c58`（Step 2）で完了（設計メモ **§1H.19**）
 - Phase 4-6Q：commit `7c3c6d3`（Step 1）・`9100803`（Step 2）で完了（設計メモ **§1H.20**）
 - Phase 4-6R：commit `cdd19be`（Step 1）・`30588a0`（Step 2）・`ae57e40`（Step 3）で完了（設計メモ **§1H.21**）
 - Phase 4-6S：commit `5e26bc9` で完了（設計メモ **§1H.22**）
-- **次工程：** Phase 4-6Tの残作業確認。Phase 4-6T完了後、Phase 4-6Uとしてhigh-demand再実行と既知prefix violationの実ネットワーク再確認を行う（設計メモ **§1H.17**・**§1H.22**）
+- Phase 4-6T：commit `b7159f9` で完了（設計メモ **§1H.23**）
+- **次工程：** Phase 4-6U。high-demand再実行と、既知prefix violationが実ネットワークで再発しないことの確認（設計メモ **§1H.17**・**§1H.23**）
 
 詳細設計・判断経緯は ORDER_EXCHANGE_PHASE4-6_BATCH_PROCESSING_DESIGN_NOTES.md **§1F**（接続）、**§1G**（診断）、**§1H**（訪問状態設計）を参照。
 
@@ -2977,7 +2978,7 @@ Phase 4-6Sとして、BATCH assignment・service unit・実通過照合をNode�
 
 **後続工程へ残す課題：** trip-end VehicleのBATCH service unit対応、stale service unitの自動削除または回復方針、assignmentの正式な全訪問履歴、Level 2、Time-value Transaction
 
-**次工程：** Phase 4-6Tの残作業確認。Phase 4-6T完了後、Phase 4-6Uとしてhigh-demand再実行と既知prefix violationの実ネットワーク再確認を行う。trip-end Vehicleとstale service unit処理の工程位置は未確定。assignment全訪問履歴は分析項目が明確になった後に横断的に設計する（設計メモ **§1H.17**）
+**次工程：** Phase 4-6U。high-demand再実行と、既知prefix violationが実ネットワークで再発しないことの確認。trip-end Vehicleとstale service unit処理の工程位置は未確定。assignment全訪問履歴は分析項目が明確になった後に横断的に設計する（設計メモ **§1H.17**・**§1H.23**）
 
 #### 実装前の設計目標（過去記録）
 
@@ -2989,6 +2990,50 @@ Phase 4-6Sとして、BATCH assignment・service unit・実通過照合をNode�
 - service unitとVehicle current visitの訪問一致を確認
 - 過去訪問assignmentが現在訪問を妨げない設計
 - BATCH実通過・service queue完了時の訪問状態更新
+
+### フェーズ4-6T：小規模BATCH再訪end-to-end統合（実装済み）
+
+Phase 4-6Tとして、同一Vehicleが同じBATCH Nodeを二回訪問し、初回・再訪とも `Node.transfer()` 経由でBATCH形成・登録・実通過を完了する小規模end-to-end統合テストを追加し、BATCH関連回帰を確認した。詳細は設計メモ **§1H.23** を参照。
+
+**状態：** 実装・回帰確認・commit・push済み。
+
+**実装commit：** `b7159f9` — `phase 4-6T: verify initial and repeat BATCH service at the same node through Node.transfer`
+
+**最新実装commit：** `b7159f9`
+
+**新規テスト：**
+
+- `tests_order_control_batch_revisit_integration.py`
+- `test_same_vehicle_revisits_batch_node_and_completes_both_service_units`
+
+**確認内容：**
+
+- 同一Vehicle（`veh_revisit_batch`）がmergeを二回通過
+- 初回・再訪とも `Node.transfer()` 経由（`transfer_batch()` → 形成・登録・service）
+- `visit_id`：1 → 2
+- batch ID：0 → 1（Node-local連続発行）
+- legacy assignment：0を再訪後も維持
+- service unit `visit_ids`：初回 `[1]`、再訪 `[2]`
+- 初回・再訪とも実通過後にservice queueが空
+- prefix `ValueError` は発生せず
+- 本体変更なし
+
+**回帰確認（19ファイル、すべてPASS）：**
+
+- 再訪・current visit関連7ファイル
+- BATCH候補・形成8ファイル
+- BATCH service・統合3ファイル（`test_fcfs_node_calls_fcfs_once`、`test_n1_batch_vs_fcfs_equivalence` 含む）
+- FCFS再訪1ファイル（`tests_fcfs_order_control_revisit_ranking.py`）
+
+**実行しなかったもの（通常回帰）：** baseline、example、中規模比較、1,000台グリッド比較、5,000台・10,000台high-demand、signalized UXsim high-demand、`diagnostics/order_control/` 診断スクリプト
+
+**後続工程へ残す課題：** trip-end VehicleのBATCH service unit対応、stale service unitの自動削除または回復方針、assignmentの正式な全訪問履歴、Level 2、Time-value Transaction
+
+**次工程：** Phase 4-6U。high-demand再実行と、既知prefix violationが実ネットワークで再発しないことの確認。
+
+#### 実装前の調査記録（過去記録）
+
+Phase 4-6S完了時点では、再訪関連の単体・手動テストは実施済みだったが、同一Vehicleの初回から再訪二回目実通過までを通常 `Node.transfer()` 経路で一続きに確認する統合テストはなかった。その後Phase 4-6Tで完了した。
 
 ### フェーズ4-6R設計目標（実装前・設計時点の記録）
 
@@ -3307,7 +3352,8 @@ Nodeへの追加メソッド（Phase 4-6関連）：
 - **phase 4-6Q：** FCFSのcurrent visit参照（`7c3c6d3`・`9100803`）
 - **phase 4-6R：** BATCH形成のcurrent visit参照（`cdd19be`・`30588a0`・`ae57e40`）
 - **phase 4-6S：** BATCH assignmentの訪問対応（`5e26bc9`）
-- **現時点の主要課題：** Phase 4-6T残作業確認、trip-end Vehicle・stale service unit・assignment全訪問履歴（設計メモ **§1H.22**）
+- **phase 4-6T：** 小規模BATCH再訪end-to-end統合（`b7159f9`）
+- **現時点の主要課題：** Phase 4-6Uのhigh-demand再実行・既知prefix violationの実ネットワーク再確認、trip-end Vehicle・stale service unit・assignment全訪問履歴（設計メモ **§1H.22**・**§1H.23**）
 - Level 2、trip-end Vehicle対応、Time-value Transactionは未実装
 - `earliest_arrival_timestep` はリンク進入時に記録し、候補包含条件に使用する（実装済み）
 - `t_trigger` Level 0/1推定は参照専用ヘルパーとして実装済み。計算式に `W.T` は含めない
@@ -3318,7 +3364,7 @@ Nodeへの追加メソッド（Phase 4-6関連）：
 - **現時点の暫定比較設定：** `order_control_batch_t_trigger_level=1`（Level 2実装前。clearance=0比較テスト3本などで使用）
 - 当面の研究シナリオでは、比較対象内部交差点Nodeを目的地としない端点間ODを使用する
 - 比較対象Node共通管理・目的地自動検証は将来課題として保留
-- 次工程：**Phase 4-6Tの残作業確認**。Phase 4-6T完了後、**Phase 4-6Uとしてhigh-demand再実行**と既知prefix violationの実ネットワーク再確認を行う（設計メモ **§1H.17**・**§1H.22**）
+- 次工程：**Phase 4-6U**。high-demand再実行と、既知prefix violationが実ネットワークで再発しないことの確認（設計メモ **§1H.17**・**§1H.23**）
 - 詳細設計・判断経緯は ORDER_EXCHANGE_PHASE4-6_BATCH_PROCESSING_DESIGN_NOTES.md **§1C**（形成・登録）、**§1D**（実通過）、**§1E**（統括）、**§1F**（`Node.transfer()` 接続）、**§1G**（比較・診断）、**§1H**（訪問状態設計）を参照
 
 ### テスト追加方針
@@ -3350,6 +3396,7 @@ Nodeへの追加メソッド（Phase 4-6関連）：
 - Phase 4-6Q：commit `7c3c6d3`・`9100803` で完了
 - Phase 4-6R：commit `cdd19be`・`30588a0`・`ae57e40` で完了
 - Phase 4-6S：commit `5e26bc9` で完了
+- Phase 4-6T：commit `b7159f9` で完了
 
 次工程（設計メモ **§1H.17**）：
 
@@ -3365,7 +3412,7 @@ Nodeへの追加メソッド（Phase 4-6関連）：
 10. FCFSの参照先変更（Phase 4-6Q） — **完了**（`7c3c6d3`・`9100803`）
 11. BATCH形成の参照先変更（Phase 4-6R） — **完了**（`cdd19be`・`30588a0`・`ae57e40`）
 12. BATCH assignmentの訪問対応（Phase 4-6S） — **完了**（`5e26bc9`）
-13. Phase 4-6Tの残作業確認（小規模再訪の一部は4-6S専用テストで実施済み。工程定義全体の完了は未確認）
+13. 小規模BATCH再訪end-to-end統合（Phase 4-6T） — **完了**（`b7159f9`）
 14. Phase 4-6Uとしてhigh-demand再実行・既知prefix violationの実ネットワーク再確認
 
 その後の後続フェーズ候補：
@@ -3424,14 +3471,15 @@ Nodeへの追加メソッド（Phase 4-6関連）：
 - Phase 4-6Q：`7c3c6d3`・`9100803` 完了
 - Phase 4-6R：`cdd19be`・`30588a0`・`ae57e40` 完了
 - Phase 4-6S：`5e26bc9` 完了
-- **最新実装commit：** `5e26bc9`
-- **現時点の主要課題：** Phase 4-6T残作業確認、trip-end Vehicle・stale service unit・assignment全訪問履歴
+- Phase 4-6T：`b7159f9` 完了
+- **最新実装commit：** `b7159f9`
+- **現時点の主要課題：** Phase 4-6Uのhigh-demand再実行・既知prefix violationの実ネットワーク再確認、trip-end Vehicle・stale service unit・assignment全訪問履歴
 - Node再訪はBATCH固有ではない（signalized全期間42.7%、FCFS 23.0%）
-- high-demand BATCH性能比較は未完了（Phase 4-6Sでは通常回帰のみ実施。prefix violationの実ネットワーク再確認はPhase 4-6Uで予定）
-- 次工程：**Phase 4-6Tの残作業確認**。Phase 4-6T完了後、**Phase 4-6Uとしてhigh-demand再実行**と既知prefix violationの実ネットワーク再確認を行う。trip-end Vehicleとstale service unit処理の工程位置は未確定（設計メモ **§1H.17**・**§1H.22**）
-- ORDER_EXCHANGE_PHASE4-6_BATCH_PROCESSING_DESIGN_NOTES.md の **§1H** を優先参照。Phase 4-6Q実装記録は **§1H.20**、Phase 4-6R実装記録は **§1H.21**、Phase 4-6S実装記録は **§1H.22**
+- high-demand BATCH性能比較は未完了（Phase 4-6Sでは広い通常回帰を実施済み。Phase 4-6Tでは小規模再訪統合テストとBATCH関連の限定回帰を実施した。prefix violationの実ネットワーク再確認はPhase 4-6Uで予定）
+- 次工程：**Phase 4-6U**。high-demand再実行と、既知prefix violationが実ネットワークで再発しないことの確認。trip-end Vehicleとstale service unit処理の工程位置は未確定（設計メモ **§1H.17**・**§1H.23**）
+- ORDER_EXCHANGE_PHASE4-6_BATCH_PROCESSING_DESIGN_NOTES.md の **§1H** を優先参照。Phase 4-6Q実装記録は **§1H.20**、Phase 4-6R実装記録は **§1H.21**、Phase 4-6S実装記録は **§1H.22**、Phase 4-6T実装記録は **§1H.23**
 - 次に読む実装：`Vehicle.order_control_current_visit`、`current visit` の `batch_assignment`、`Vehicle.get_order_control_batch_assignment()`、`Vehicle.has_order_control_batch_assignment()`、`Vehicle.assign_order_control_batch_to_current_visit()`、`Vehicle.order_control_batch_assignments`、`Node.get_order_control_batch_trigger_candidates()`、`Node.get_order_control_batch_candidates_by_inlink()`、`Node.register_order_control_batch_service_units()`、`Node.serve_order_control_batch_service_queue()`、`Node.transfer_batch()`、`Node.transfer()`
-- 次に読むテスト：`tests_order_control_batch_visit_assignment.py`、`tests_order_control_batch_revisit_ranking.py`、`tests_order_control_batch_service_unit_registration.py`、`tests_order_control_batch_service_queue_transfer.py`、`tests_order_control_batch_transfer.py`、`tests_order_control_batch_node_transfer_integration.py`
+- 次に読むテスト：`tests_order_control_batch_revisit_integration.py`、`tests_order_control_batch_visit_assignment.py`、`tests_order_control_batch_revisit_ranking.py`、`tests_order_control_batch_service_unit_registration.py`、`tests_order_control_batch_service_queue_transfer.py`、`tests_order_control_batch_transfer.py`、`tests_order_control_batch_node_transfer_integration.py`
 - 診断スクリプト（`diagnostics/order_control/batch_assignment_318_lifecycle_diagnostic.py`、`diagnostics/order_control/node_revisit_high_demand_5000_diagnostic.py`、`diagnostics/order_control/README.md`）は通常回帰ではなくhigh-demandでの既知問題の再確認資料として参照
 - 目的地Vehicleの扱いは端点間OD前提で保留。比較対象Node共通管理・目的地自動検証は将来課題
 - 一時退避PDF `phase4-6A_batch_earliest_arrival_timestep_memo.pdf` はリポジトリ外。正式Markdownを優先参照
