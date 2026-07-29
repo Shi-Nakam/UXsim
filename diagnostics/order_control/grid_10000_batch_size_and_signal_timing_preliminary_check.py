@@ -148,6 +148,18 @@ SIGNAL_OFFSET_STRATEGY = (
     "cycle-length-based staggered offsets (not tuned for asymmetric green times)"
 )
 
+# Corrected signal setting for intended effective green 60 s / all-red 1 timestep.
+# Under current UXsim discrete signal_control() (> comparison, update before transfer),
+# setting [59,0,59,0] yields steady transfer phase lengths 60/1/60/1 (cycle 122 timesteps).
+CORRECTED_SIGNAL_SETTING = [59, 0, 59, 0]
+CORRECTED_SIGNAL_EFFECTIVE_PHASE_LENGTHS = [60, 1, 60, 1]
+CORRECTED_SIGNAL_EFFECTIVE_TRANSFER_CYCLE = 122
+CORRECTED_SIGNAL_CASE_NAME = "S_CORRECTED_SIGNAL_EFFECTIVE_60_1_60_1"
+BATCH_N10_POST_FIX_AVG_DELAY_DISPLAY = 2613.4
+OLD_SIGNAL_PRECISE_AVERAGE_TRAVEL_TIME = (
+    REFERENCE_SIGNAL_60_1_60_1["total_travel_time"] / NUM_VEHICLES
+)
+
 
 def _grid_node_name(row, column):
     return f"g_{row}_{column}"
@@ -283,6 +295,18 @@ def _compute_signal_params(W, green_ew, green_ns):
         "cycle_length": cycle_length,
         "green_ew": green_ew,
         "green_ns": green_ns,
+    }
+
+
+def _compute_explicit_signal_params(W, signal_setting):
+    signal_setting = list(signal_setting)
+    cycle_length = sum(signal_setting)
+    return {
+        "deltat": W.DELTAT,
+        "signal_setting": signal_setting,
+        "cycle_length": cycle_length,
+        "green_ew": signal_setting[0],
+        "green_ns": signal_setting[2],
     }
 
 
@@ -646,6 +670,744 @@ def build_signalized_world(vehicle_plans, tmax, green_ew, green_ns):
 
     W.exec_simulation()
     return W, signal_params
+
+
+def build_corrected_signalized_world(vehicle_plans, tmax, signal_setting):
+    W = World(
+        name="preliminary_corrected_signal",
+        deltan=1,
+        tmax=tmax,
+        print_mode=0,
+        save_mode=0,
+        show_mode=0,
+        random_seed=RANDOM_SEED,
+    )
+    signal_params = _compute_explicit_signal_params(W, signal_setting)
+    _add_grid_network(W, signal_params=signal_params)
+    _add_vehicles(W, vehicle_plans)
+    W.exec_simulation()
+    return W, signal_params
+
+
+def _build_signalized_network_only(signal_setting):
+    W = World(
+        name="signal_network_sanity",
+        deltan=1,
+        tmax=100,
+        print_mode=0,
+        save_mode=0,
+        show_mode=0,
+        random_seed=RANDOM_SEED,
+    )
+    signal_params = _compute_explicit_signal_params(W, signal_setting)
+    _add_grid_network(W, signal_params=signal_params)
+    return W, signal_params
+
+
+def _build_single_signal_node_world(signal_setting, signal_offset):
+    W = World(
+        name="signal_timing_sanity",
+        deltan=1,
+        tmax=500,
+        print_mode=0,
+        save_mode=0,
+        show_mode=0,
+        random_seed=RANDOM_SEED,
+    )
+    node = W.addNode(
+        "g_timing",
+        0.0,
+        0.0,
+        signal=list(signal_setting),
+        signal_offset=signal_offset,
+    )
+    return W, node
+
+
+def _measure_real_node_transfer_phase_runs(node, max_steps=500):
+    runs = []
+    timeline = []
+    current_phase = None
+    current_length = 0
+    for w_t in range(max_steps):
+        pre_phase = node.signal_phase
+        pre_t = node.signal_t
+        node.update()
+        post_phase = node.signal_phase
+        post_t = node.signal_t
+        transfer_phase = post_phase
+        timeline.append((w_t, pre_phase, pre_t, post_phase, post_t, transfer_phase))
+        if transfer_phase != current_phase:
+            if current_phase is not None:
+                runs.append((current_phase, current_length))
+            current_phase = transfer_phase
+            current_length = 1
+        else:
+            current_length += 1
+    if current_phase is not None:
+        runs.append((current_phase, current_length))
+    return runs, timeline
+
+
+def _steady_real_node_phase_run_lengths(signal_setting, signal_offset=0.0, max_steps=500):
+    _world, node = _build_single_signal_node_world(signal_setting, signal_offset)
+    runs, _timeline = _measure_real_node_transfer_phase_runs(node, max_steps=max_steps)
+    start_index = None
+    for index in range(len(runs) - 3):
+        window = runs[index : index + 4]
+        lengths = [length for _phase, length in window]
+        phases = [phase for phase, _length in window]
+        if (
+            phases == [0, 1, 2, 3]
+            and lengths == CORRECTED_SIGNAL_EFFECTIVE_PHASE_LENGTHS
+        ):
+            start_index = index
+            break
+    if start_index is None:
+        raise AssertionError(
+            f"real Node: could not find steady 60/1/60/1 transfer cycle for "
+            f"signal={signal_setting}, offset={signal_offset}; observed runs={runs[:12]}"
+        )
+    return runs[start_index : start_index + 4]
+
+
+def _direction_change_timeline_from_transfer_history(timeline):
+    last_green = None
+    first_all_red = None
+    first_new_green = None
+    for w_t, _pre_p, _pre_t, _post_p, _post_t, xfer in timeline:
+        if xfer == 0:
+            last_green = w_t
+        if last_green is not None and xfer == 1 and first_all_red is None:
+            first_all_red = w_t
+        if first_all_red is not None and xfer == 2 and first_new_green is None:
+            first_new_green = w_t
+    if last_green is None or first_all_red is None or first_new_green is None:
+        raise AssertionError("could not derive direction-change timeline")
+    if first_all_red != last_green + 1:
+        raise AssertionError(
+            f"expected all-red at T+1 after last green; "
+            f"last_green={last_green}, first_all_red={first_all_red}"
+        )
+    if first_new_green != last_green + 2:
+        raise AssertionError(
+            f"expected new green at T+2 after last green; "
+            f"last_green={last_green}, first_new_green={first_new_green}"
+        )
+    return {
+        "last_old_direction_green_transfer": last_green,
+        "first_all_red_transfer": first_all_red,
+        "first_new_direction_green_transfer": first_new_green,
+    }
+
+
+def _verify_vehicle_plan_invariants(vehicle_plans):
+    if len(vehicle_plans) != NUM_VEHICLES:
+        raise AssertionError(
+            f"expected {NUM_VEHICLES} vehicle plans, got {len(vehicle_plans)}"
+        )
+
+    expected_names = [f"veh_{index}" for index in range(NUM_VEHICLES)]
+    actual_names = [plan["name"] for plan in vehicle_plans]
+    if actual_names != expected_names:
+        raise AssertionError("vehicle names are not veh_0..veh_9999 without gaps")
+    if len(set(actual_names)) != NUM_VEHICLES:
+        raise AssertionError("duplicate vehicle names in generated plans")
+
+    departure_times = []
+    manhattan_distances = []
+    for index, plan in enumerate(vehicle_plans):
+        if plan["origin"] == plan["destination"]:
+            raise AssertionError(f"{plan['name']}: origin equals destination")
+        if plan["manhattan_distance"] < MIN_OD_MANHATTAN_DISTANCE:
+            raise AssertionError(
+                f"{plan['name']}: manhattan distance {plan['manhattan_distance']} "
+                f"< {MIN_OD_MANHATTAN_DISTANCE}"
+            )
+        expected_departure = DEPARTURE_START + (
+            (DEPARTURE_END - DEPARTURE_START) * index / max(NUM_VEHICLES - 1, 1)
+        )
+        if plan["departure_time"] != expected_departure:
+            raise AssertionError(
+                f"{plan['name']}: departure_time {plan['departure_time']} "
+                f"!= expected {expected_departure}"
+            )
+        departure_times.append(plan["departure_time"])
+        manhattan_distances.append(plan["manhattan_distance"])
+
+    if departure_times[0] != float(DEPARTURE_START):
+        raise AssertionError(f"first departure must be {DEPARTURE_START}")
+    if departure_times[-1] != float(DEPARTURE_END):
+        raise AssertionError(f"last departure must be {DEPARTURE_END}")
+
+    minimum_distance = min(manhattan_distances)
+    if minimum_distance != MIN_OD_MANHATTAN_DISTANCE:
+        raise AssertionError(
+            f"minimum OD Manhattan distance must be {MIN_OD_MANHATTAN_DISTANCE}, "
+            f"got {minimum_distance}"
+        )
+
+    return {
+        "total_vehicles": len(vehicle_plans),
+        "first_departure_time": departure_times[0],
+        "last_departure_time": departure_times[-1],
+        "minimum_od_manhattan_distance": minimum_distance,
+        "average_od_manhattan_distance": sum(manhattan_distances) / len(
+            manhattan_distances
+        ),
+    }
+
+
+def _init_signal_probe_state(signal_setting, signal_offset, deltat):
+    cycle_length = sum(signal_setting)
+    signal_phase = 0
+    signal_t = 0
+    offset = cycle_length - signal_offset
+    if signal_setting != [0]:
+        phase_index = 0
+        while True:
+            if offset < signal_setting[phase_index]:
+                signal_phase = phase_index
+                signal_t = offset
+                break
+            offset -= signal_setting[phase_index]
+            phase_index += 1
+            if phase_index >= len(signal_setting):
+                phase_index = 0
+    return {
+        "signal": list(signal_setting),
+        "deltat": deltat,
+        "signal_phase": signal_phase,
+        "signal_t": signal_t,
+    }
+
+
+def _signal_control_probe_step(probe):
+    pre_phase = probe["signal_phase"]
+    pre_t = probe["signal_t"]
+    signal = probe["signal"]
+    deltat = probe["deltat"]
+    if probe["signal_t"] > signal[probe["signal_phase"]]:
+        probe["signal_phase"] += 1
+        probe["signal_t"] = 0
+        if probe["signal_phase"] >= len(signal):
+            probe["signal_phase"] = 0
+    probe["signal_t"] += deltat
+    return pre_phase, pre_t, probe["signal_phase"], probe["signal_t"], probe["signal_phase"]
+
+
+def _verify_corrected_signal_timing_sanity():
+    signal_setting = CORRECTED_SIGNAL_SETTING
+    deltat = 1.0
+    signal_offset = 0.0
+
+    real_runs = _steady_real_node_phase_run_lengths(
+        signal_setting, signal_offset=signal_offset
+    )
+    lengths = [length for _phase, length in real_runs]
+    phases = [phase for phase, _length in real_runs]
+    if phases != [0, 1, 2, 3]:
+        raise AssertionError(f"real Node: unexpected steady phases: {phases}")
+    if lengths != CORRECTED_SIGNAL_EFFECTIVE_PHASE_LENGTHS:
+        raise AssertionError(
+            f"real Node: unexpected steady transfer lengths: {lengths}, "
+            f"expected {CORRECTED_SIGNAL_EFFECTIVE_PHASE_LENGTHS}"
+        )
+    cycle_length = sum(lengths)
+    if cycle_length != CORRECTED_SIGNAL_EFFECTIVE_TRANSFER_CYCLE:
+        raise AssertionError(
+            f"real Node: unexpected effective transfer cycle: {cycle_length}, "
+            f"expected {CORRECTED_SIGNAL_EFFECTIVE_TRANSFER_CYCLE}"
+        )
+
+    _world, node = _build_single_signal_node_world(signal_setting, signal_offset)
+    _runs, real_timeline = _measure_real_node_transfer_phase_runs(node, max_steps=70)
+    direction_timeline = _direction_change_timeline_from_transfer_history(real_timeline)
+
+    probe = _init_signal_probe_state(signal_setting, signal_offset, deltat)
+    probe_timeline = []
+    for w_t in range(70):
+        pre_p, pre_t, post_p, post_t, xfer = _signal_control_probe_step(probe)
+        probe_timeline.append((w_t, pre_p, pre_t, post_p, post_t, xfer))
+
+    return {
+        "signal_setting": signal_setting,
+        "signal_offset": signal_offset,
+        "deltat": deltat,
+        "steady_phase_lengths": lengths,
+        "effective_transfer_cycle": cycle_length,
+        "direction_change_timeline": direction_timeline,
+        "timeline_sample": real_timeline[55:64],
+        "probe_timeline_sample": probe_timeline[55:64],
+        "verification_source": "real Node.update()",
+    }
+
+
+def _expected_offset_values(cycle_length):
+    step = cycle_length / 4
+    return {round(group * step, 1) for group in range(4)}
+
+
+def _verify_corrected_signal_offset_sanity():
+    signal_setting = CORRECTED_SIGNAL_SETTING
+    W, signal_params = _build_signalized_network_only(signal_setting)
+    cycle_length = signal_params["cycle_length"]
+    offset_step = cycle_length / 4
+    expected_offsets = _expected_offset_values(cycle_length)
+
+    offsets_by_node = {}
+    group_mismatches = []
+    for row in range(GRID_SIZE):
+        for column in range(GRID_SIZE):
+            node_name = _grid_node_name(row, column)
+            node = W.NODES_NAME_DICT[node_name]
+            offset = getattr(node, "signal_offset", None)
+            offsets_by_node[node_name] = offset
+            expected_group = (row + column) % 4
+            expected_offset = round(expected_group * offset_step, 1)
+            if offset != expected_offset:
+                group_mismatches.append(
+                    (node_name, row, column, expected_group, expected_offset, offset)
+                )
+
+    control_summary = _collect_signalized_control_summary(W, signal_params)
+    signal_group_counts = _count_links_by_signal_group(W)
+
+    if len(offsets_by_node) != INTERNAL_GRID_NODE_COUNT:
+        raise AssertionError("internal node offset map incomplete")
+    observed_offsets = {round(value, 1) for value in offsets_by_node.values()}
+    if observed_offsets != expected_offsets:
+        raise AssertionError(
+            f"unexpected offset set: {sorted(observed_offsets)}, "
+            f"expected {sorted(expected_offsets)}"
+        )
+    if group_mismatches:
+        raise AssertionError(f"offset group mismatches: {group_mismatches[:5]}")
+    if control_summary["signal_group_1_link_count"] != 0:
+        raise AssertionError("phase 1 links must be zero")
+    if control_summary["signal_group_3_link_count"] != 0:
+        raise AssertionError("phase 3 links must be zero")
+    if signal_group_counts.get(0, 0) == 0 or signal_group_counts.get(2, 0) == 0:
+        raise AssertionError("east-west / north-south signal groups must be non-zero")
+
+    steady_lengths_by_offset = {}
+    for offset_value in sorted(expected_offsets):
+        steady_runs = _steady_real_node_phase_run_lengths(
+            signal_setting, signal_offset=offset_value
+        )
+        steady_lengths = [length for _phase, length in steady_runs]
+        if steady_lengths != CORRECTED_SIGNAL_EFFECTIVE_PHASE_LENGTHS:
+            raise AssertionError(
+                f"real Node offset={offset_value}: steady lengths {steady_lengths}, "
+                f"expected {CORRECTED_SIGNAL_EFFECTIVE_PHASE_LENGTHS}"
+            )
+        steady_lengths_by_offset[offset_value] = steady_lengths
+
+    return {
+        "cycle_length": cycle_length,
+        "offset_step": offset_step,
+        "expected_offsets": sorted(expected_offsets),
+        "signal_group_counts": signal_group_counts,
+        "control_summary": control_summary,
+        "steady_lengths_by_offset": steady_lengths_by_offset,
+        "steady_lengths_offset_zero": steady_lengths_by_offset[0.0],
+        "steady_lengths_offset_nonzero": steady_lengths_by_offset[29.5],
+        "non_zero_offset_checked": 29.5,
+    }
+
+
+def _run_corrected_signal_case(case_name, vehicle_plans):
+    started = time.perf_counter()
+    W, signal_params = build_corrected_signalized_world(
+        vehicle_plans, TMAX, CORRECTED_SIGNAL_SETTING
+    )
+    elapsed = time.perf_counter() - started
+
+    control_summary = _collect_signalized_control_summary(W, signal_params)
+    results = _collect_traffic_results(W)
+    completion = _collect_completion_time_summary(W, TMAX)
+    demand_summary = _demand_summary(vehicle_plans, case_name, TMAX)
+
+    sanity = {}
+    sanity["total vehicles == 10000"] = (
+        "pass" if results["total_vehicles"] == NUM_VEHICLES else "fail"
+    )
+    sanity["completed trips == 10000"] = (
+        "pass" if results["completed_trips"] == NUM_VEHICLES else "fail"
+    )
+    sanity["completed ratio == 1.0"] = (
+        "pass" if results["completed_ratio"] == 1.0 else "fail"
+    )
+    sanity["unfinished == 0"] = (
+        "pass"
+        if results["total_vehicles"] - results["completed_trips"] == 0
+        else "fail"
+    )
+    sanity["signalized internal node count == 36"] = (
+        "pass"
+        if control_summary["signalized_internal_grid_node_count"]
+        == INTERNAL_GRID_NODE_COUNT
+        else "fail"
+    )
+    sanity["signal_group 1 link count == 0"] = (
+        "pass" if control_summary["signal_group_1_link_count"] == 0 else "fail"
+    )
+    sanity["signal_group 3 link count == 0"] = (
+        "pass" if control_summary["signal_group_3_link_count"] == 0 else "fail"
+    )
+    sanity["signal setting == [59,0,59,0]"] = (
+        "pass" if signal_params["signal_setting"] == CORRECTED_SIGNAL_SETTING else "fail"
+    )
+    sanity["configured cycle length == 118"] = (
+        "pass" if signal_params["cycle_length"] == 118 else "fail"
+    )
+    try:
+        _verify_vehicle_plan_invariants(vehicle_plans)
+        sanity["demand plan invariant checks"] = "pass"
+    except AssertionError:
+        sanity["demand plan invariant checks"] = "fail"
+    expected_offsets = _expected_offset_values(signal_params["cycle_length"])
+    observed_offsets = {
+        round(value, 1) for value in control_summary["signal_offsets"].values()
+    }
+    sanity["offset set == {0.0,29.5,59.0,88.5}"] = (
+        "pass" if observed_offsets == expected_offsets else "fail"
+    )
+
+    for label, status in sanity.items():
+        if status != "pass":
+            raise AssertionError(f"{case_name}: sanity check failed: {label} = {status}")
+
+    return {
+        "case_name": case_name,
+        "mode": "signalized UXsim (corrected setting)",
+        "batch_size": None,
+        "signal_setting": signal_params["signal_setting"],
+        "cycle_length": signal_params["cycle_length"],
+        "effective_phase_lengths": CORRECTED_SIGNAL_EFFECTIVE_PHASE_LENGTHS,
+        "effective_transfer_cycle": CORRECTED_SIGNAL_EFFECTIVE_TRANSFER_CYCLE,
+        "green_ew": signal_params["green_ew"],
+        "green_ns": signal_params["green_ns"],
+        "results": results,
+        "completion": completion,
+        "elapsed_seconds": elapsed,
+        "sanity_checks": sanity,
+        "control_summary": control_summary,
+        "demand_summary": demand_summary,
+        "offset_step": signal_params["cycle_length"] / 4,
+        "offset_values": sorted(expected_offsets),
+    }
+
+
+def _format_metric_delta(label, corrected_value, reference_value):
+    difference = corrected_value - reference_value
+    ratio = _safe_ratio(corrected_value, reference_value)
+    percent_change = None
+    if reference_value not in (None, 0):
+        percent_change = 100.0 * difference / reference_value
+    return {
+        "label": label,
+        "corrected": corrected_value,
+        "reference": reference_value,
+        "difference": difference,
+        "ratio": ratio,
+        "percent_change": percent_change,
+    }
+
+
+def _print_metric_delta_block(title, metric):
+    print(f"\n{title}")
+    print(f"  corrected: {metric['corrected']}")
+    print(f"  reference: {metric['reference']}")
+    print(f"  difference: {metric['difference']}")
+    if metric["ratio"] is not None:
+        print(f"  ratio (corrected / reference): {metric['ratio']:.6f}")
+    if metric["percent_change"] is not None:
+        print(f"  percent change: {metric['percent_change']:.4f}%")
+
+
+def _compare_average_travel_time_gap(batch_avg_tt, signal_avg_tt):
+    difference = batch_avg_tt - signal_avg_tt
+    ratio = _safe_ratio(batch_avg_tt, signal_avg_tt)
+    percent_difference = None
+    if signal_avg_tt not in (None, 0):
+        percent_difference = 100.0 * difference / signal_avg_tt
+    return {
+        "difference_seconds": difference,
+        "ratio": ratio,
+        "percent_difference": percent_difference,
+    }
+
+
+def main_corrected_signal_baseline_only():
+    print("=" * 72)
+    print("Corrected signal baseline only: S_CORRECTED_SIGNAL_EFFECTIVE_60_1_60_1")
+    print("=" * 72)
+    print(
+        "\nDoes NOT run FCFS, BATCH, P1–P4, or other simulations.\n"
+        f"Corrected signal setting: {CORRECTED_SIGNAL_SETTING}\n"
+        f"Offset strategy: {SIGNAL_OFFSET_STRATEGY}\n"
+    )
+
+    print("Running corrected-signal timing sanity check (offset=0, real Node)...")
+    timing_sanity = _verify_corrected_signal_timing_sanity()
+    print(f"  PASS ({timing_sanity['verification_source']})")
+    print(
+        f"  steady transfer phase lengths: {timing_sanity['steady_phase_lengths']}"
+    )
+    print(
+        f"  effective transfer cycle: {timing_sanity['effective_transfer_cycle']} timesteps"
+    )
+    direction_timeline = timing_sanity["direction_change_timeline"]
+    print(
+        "  direction-change timeline (real Node, offset=0): "
+        f"T={direction_timeline['last_old_direction_green_transfer']} old green, "
+        f"T+1={direction_timeline['first_all_red_transfer']} all-red, "
+        f"T+2={direction_timeline['first_new_direction_green_transfer']} new green"
+    )
+    print("  sample timeline W.T=55..63 (real Node):")
+    for row in timing_sanity["timeline_sample"]:
+        print(
+            f"    W.T={row[0]} pre_phase={row[1]} pre_t={row[2]} "
+            f"post_phase={row[3]} post_t={row[4]} transfer_phase={row[5]}"
+        )
+
+    print("\nRunning corrected-signal offset sanity check...")
+    offset_sanity = _verify_corrected_signal_offset_sanity()
+    print("  PASS")
+    print(f"  configured cycle length: {offset_sanity['cycle_length']} s")
+    print(f"  offset step: {offset_sanity['offset_step']} s")
+    print(f"  offset values: {offset_sanity['expected_offsets']}")
+    print(f"  signal group link counts: {offset_sanity['signal_group_counts']}")
+    print(
+        f"  steady lengths offset=0: {offset_sanity['steady_lengths_offset_zero']}"
+    )
+    print(
+        f"  steady lengths offset={offset_sanity['non_zero_offset_checked']}: "
+        f"{offset_sanity['steady_lengths_offset_nonzero']}"
+    )
+    print("  steady lengths by offset (real Node):")
+    for offset_value, lengths in offset_sanity["steady_lengths_by_offset"].items():
+        print(f"    offset={offset_value}: {lengths}")
+
+    vehicle_plans = _generate_vehicle_plans(
+        NUM_VEHICLES, DEPARTURE_START, DEPARTURE_END
+    )
+    demand_invariants = _verify_vehicle_plan_invariants(vehicle_plans)
+    print("\nDemand plan invariant checks: PASS")
+    print(f"  total plans: {demand_invariants['total_vehicles']}")
+    print(
+        f"  first departure: {demand_invariants['first_departure_time']}, "
+        f"last departure: {demand_invariants['last_departure_time']}"
+    )
+    print(
+        f"  minimum OD Manhattan distance: "
+        f"{demand_invariants['minimum_od_manhattan_distance']}"
+    )
+    print(
+        f"  average OD Manhattan distance (generator full precision): "
+        f"{demand_invariants['average_od_manhattan_distance']}"
+    )
+
+    case_result = _run_corrected_signal_case(
+        CORRECTED_SIGNAL_CASE_NAME,
+        vehicle_plans,
+    )
+    print("\n" + _format_case_report(case_result))
+    print(
+        f"  effective transfer phase lengths: "
+        f"{case_result['effective_phase_lengths']}"
+    )
+    print(
+        f"  effective transfer cycle: "
+        f"{case_result['effective_transfer_cycle']} timesteps"
+    )
+    print(f"  offset step: {case_result['offset_step']} s")
+    print(f"  offset values: {case_result['offset_values']}")
+    print(
+        "  signalized internal nodes: "
+        f"{sorted(case_result['control_summary']['signal_offsets'].keys())}"
+    )
+
+    corrected_results = case_result["results"]
+    corrected_completion = case_result["completion"]
+    batch_ref = REFERENCE_BATCH_N10_POST_ZERO_SERVICE_FIX
+    old_signal_ref = REFERENCE_SIGNAL_60_1_60_1
+
+    batch_vs_corrected = {
+        "total_travel_time": _format_metric_delta(
+            "total travel time",
+            corrected_results["total_travel_time"],
+            batch_ref["total_travel_time"],
+        ),
+        "average_travel_time": _format_metric_delta(
+            "average travel time",
+            corrected_results["average_travel_time"],
+            batch_ref["average_travel_time"],
+        ),
+        "total_distance_traveled": _format_metric_delta(
+            "total distance traveled",
+            corrected_results["total_distance_traveled"],
+            batch_ref["total_distance_traveled"],
+        ),
+        "last_completed_trip_time": _format_metric_delta(
+            "last completed trip time",
+            corrected_completion["last_completed_trip_time"],
+            batch_ref["last_completed_trip_time"],
+        ),
+    }
+
+    print("\nCorrected signal vs post-fix BATCH N=10:")
+    for key, metric in batch_vs_corrected.items():
+        _print_metric_delta_block(key, metric)
+
+    avg_tt_gap = _compare_average_travel_time_gap(
+        batch_ref["average_travel_time"], corrected_results["average_travel_time"]
+    )
+    print("\nBATCH N=10 vs corrected signal (average travel time):")
+    print(f"  BATCH - corrected difference: {avg_tt_gap['difference_seconds']:.4f} s")
+    print(f"  BATCH / corrected ratio: {avg_tt_gap['ratio']:.6f}")
+    print(
+        f"  BATCH excess percent over corrected signal: "
+        f"{avg_tt_gap['percent_difference']:.4f}%"
+    )
+
+    print(
+        "\nAverage delay reference comparison (display-precision approximation only):"
+    )
+    print(
+        f"  corrected signal average delay (full precision): "
+        f"{corrected_results['average_delay']}"
+    )
+    print(
+        f"  BATCH N=10 average delay display value: {BATCH_N10_POST_FIX_AVG_DELAY_DISPLAY}"
+    )
+    delay_display_ratio = _safe_ratio(
+        BATCH_N10_POST_FIX_AVG_DELAY_DISPLAY, corrected_results["average_delay"]
+    )
+    if delay_display_ratio is not None:
+        print(
+            f"  BATCH display / corrected full ratio "
+            f"(display-precision approximation): {delay_display_ratio:.6f}"
+        )
+
+    print("\nRanking (lower is better for time metrics):")
+    rankings = {
+        "average_travel_time": (
+            "BATCH N=10"
+            if batch_ref["average_travel_time"]
+            < corrected_results["average_travel_time"]
+            else "corrected signal"
+        ),
+        "average_delay": (
+            "BATCH N=10"
+            if BATCH_N10_POST_FIX_AVG_DELAY_DISPLAY
+            < corrected_results["average_delay"]
+            else "corrected signal"
+        ),
+        "total_distance_traveled": (
+            "BATCH N=10"
+            if batch_ref["total_distance_traveled"]
+            < corrected_results["total_distance_traveled"]
+            else "corrected signal"
+        ),
+        "last_completed_trip_time": (
+            "BATCH N=10"
+            if batch_ref["last_completed_trip_time"]
+            < corrected_completion["last_completed_trip_time"]
+            else "corrected signal"
+        ),
+    }
+    for metric_name, winner in rankings.items():
+        print(f"  {metric_name}: {winner}")
+
+    old_vs_corrected = {
+        "total_travel_time": _format_metric_delta(
+            "total travel time",
+            corrected_results["total_travel_time"],
+            old_signal_ref["total_travel_time"],
+        ),
+        "average_travel_time": _format_metric_delta(
+            "average travel time",
+            corrected_results["average_travel_time"],
+            OLD_SIGNAL_PRECISE_AVERAGE_TRAVEL_TIME,
+        ),
+        "average_delay": _format_metric_delta(
+            "average delay",
+            corrected_results["average_delay"],
+            old_signal_ref["average_delay"],
+        ),
+        "total_distance_traveled": _format_metric_delta(
+            "total distance traveled",
+            corrected_results["total_distance_traveled"],
+            old_signal_ref["total_distance_traveled"],
+        ),
+        "last_completed_trip_time": _format_metric_delta(
+            "last completed trip time",
+            corrected_completion["last_completed_trip_time"],
+            old_signal_ref["last_completed_trip_time"],
+        ),
+    }
+
+    print(
+        "\nHistorical old signal [60,1,60,1] vs corrected signal "
+        "(old signal is NOT a fair clearance baseline):"
+    )
+    for metric in old_vs_corrected.values():
+        _print_metric_delta_block(metric["label"], metric)
+
+    old_batch_gap = _compare_average_travel_time_gap(
+        batch_ref["average_travel_time"], OLD_SIGNAL_PRECISE_AVERAGE_TRAVEL_TIME
+    )
+    corrected_batch_gap = _compare_average_travel_time_gap(
+        batch_ref["average_travel_time"], corrected_results["average_travel_time"]
+    )
+    old_excess_pp = old_batch_gap["percent_difference"]
+    corrected_excess_pp = corrected_batch_gap["percent_difference"]
+    pp_change = None
+    if old_excess_pp is not None and corrected_excess_pp is not None:
+        pp_change = corrected_excess_pp - old_excess_pp
+
+    print("\nBATCH vs signal average travel time gap comparison:")
+    print(
+        f"  old signal precise average travel time: "
+        f"{OLD_SIGNAL_PRECISE_AVERAGE_TRAVEL_TIME}"
+    )
+    print(
+        f"  old signal gap (BATCH - old signal): "
+        f"{old_batch_gap['difference_seconds']:.4f} s "
+        f"({old_excess_pp:.4f}% over old signal)"
+    )
+    print(
+        f"  corrected signal gap (BATCH - corrected signal): "
+        f"{corrected_batch_gap['difference_seconds']:.4f} s "
+        f"({corrected_excess_pp:.4f}% over corrected signal)"
+    )
+    if pp_change is not None:
+        if abs(pp_change) < 0.05:
+            change_label = "approximately unchanged"
+        elif pp_change > 0:
+            change_label = "expanded"
+        else:
+            change_label = "shrunk"
+        print(
+            f"  BATCH relative lag vs signal: {change_label} "
+            f"({pp_change:+.4f} percentage points vs old-signal comparison)"
+        )
+
+    print(
+        "\nInterpretation notes:\n"
+        "  - same offset formula as before; cycle length and offset values changed only "
+        "because the corrected signal setting changed\n"
+        "  - corrected setting targets effective green 60 timesteps / all-red 1 timestep\n"
+        "  - old signal [60,1,60,1] is a historical condition, not a fair clearance baseline\n"
+        "  - exploratory result for fixed demand, one seed, free routing\n"
+        "  - do not attribute network-wide differences to a single factor\n"
+    )
+    print(
+        "\nGrid 10000 corrected signal baseline check passed "
+        f"({CORRECTED_SIGNAL_CASE_NAME})."
+    )
 
 
 def _safe_ratio(numerator, denominator):
@@ -3415,6 +4177,15 @@ if __name__ == "__main__":
         description="10,000-vehicle grid preliminary checks"
     )
     parser.add_argument(
+        "--corrected-signal-baseline-only",
+        action="store_true",
+        help=(
+            "Run only S_CORRECTED_SIGNAL_EFFECTIVE_60_1_60_1 with signal=[59,0,59,0] "
+            "and cycle-length-based staggered offsets. Does not run FCFS, BATCH, "
+            "or P1–P4."
+        ),
+    )
+    parser.add_argument(
         "--batch-size-recheck-after-zero-service-fix-only",
         action="store_true",
         help=(
@@ -3459,7 +4230,9 @@ if __name__ == "__main__":
         ),
     )
     args = parser.parse_args()
-    if args.batch_size_recheck_after_zero_service_fix_only:
+    if args.corrected_signal_baseline_only:
+        main_corrected_signal_baseline_only()
+    elif args.batch_size_recheck_after_zero_service_fix_only:
         main_batch_size_recheck_after_zero_service_fix_only()
     elif args.n1_first_local_difference_only:
         main_n1_first_local_difference_only()

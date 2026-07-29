@@ -8,7 +8,7 @@ UXsim Order Exchange 改変作業における、phase 4-6：交差点BATCH処理
 
 ## 1A. 実装状況サマリ（phase 4-6A〜4-6M）
 
-進捗の詳細・コミットID・回帰結果は [ORDER_EXCHANGE_PROGRESS.md](ORDER_EXCHANGE_PROGRESS.md) を参照。Phase 4-6E〜4-6Jの設計・判断経緯の詳細は **§1C**、Phase 4-6Kの実装記録は **§1D**、Phase 4-6Lの統括メソッド記録は **§1E**、Phase 4-6Mの `Node.transfer()` 接続記録は **§1F**、Phase 4-6Nの比較・診断記録は **§1G**、Node訪問単位の共通状態設計は **§1H** を参照。
+進捗の詳細・コミットID・回帰結果は [ORDER_EXCHANGE_PROGRESS.md](ORDER_EXCHANGE_PROGRESS.md) を参照。Phase 4-6E〜4-6Jの設計・判断経緯の詳細は **§1C**、Phase 4-6Kの実装記録は **§1D**、Phase 4-6Lの統括メソッド記録は **§1E**、Phase 4-6Mの `Node.transfer()` 接続記録は **§1F**、Phase 4-6Nの比較・診断記録は **§1G**、Node訪問単位の共通状態設計は **§1H**（zero-service追加形成・size-one BATCHとFCFS等価性は **§1H.25**）を参照。
 
 | 区分 | 内容 |
 |------|------|
@@ -36,7 +36,9 @@ UXsim Order Exchange 改変作業における、phase 4-6：交差点BATCH処理
 | | phase 4-6S：BATCH assignmentの訪問対応・service unit visit_id・実通過照合（5e26bc9） |
 | | phase 4-6T：小規模BATCH再訪end-to-end統合（b7159f9） |
 | | phase 4-6U：high-demand再実行・検証完了（§1H.24。本体変更なし） |
-| **診断スクリプト** | `diagnostics/order_control/`（4本＋README）。通常回帰テストから分離済み（`0e35799`）。詳細は `diagnostics/order_control/README.md` |
+| | phase 4-6V：zero-service追加形成修正・size-one BATCHとFCFSの等価性回復（2b10b08） |
+| | phase 4-6V診断：size-one BATCH対FCFS等価性・batch size予備比較（fe9e53e。§1H.25） |
+| **診断スクリプト** | `diagnostics/order_control/`（6本＋README）。通常回帰テストから分離済み（`0e35799`）。詳細は `diagnostics/order_control/README.md` |
 | **BATCH形成〜シミュレーション接続まで完成** | trigger候補取得 → … → service queue登録（4-6I）→ 実通過（4-6K）→ 統括呼出し（4-6L）→ **`Node.transfer()` 接続（4-6M）** → **BATCH形成のcurrent visit参照（4-6R）** → **BATCH assignmentの訪問対応（4-6S）** → **小規模BATCH再訪end-to-end統合（4-6T）** |
 | **現時点の主要課題** | trip-end VehicleのBATCH service unit対応、stale service unit処理方針、assignment正式全訪問履歴、Level 2仮想サービス推定、Level 2 unresolved時のLevel 1 fallback接続、Time-value Transaction |
 | **未実装** | Level 2仮想サービス推定、Level 2 unresolved時のLevel 1 fallback接続 |
@@ -48,7 +50,7 @@ UXsim Order Exchange 改変作業における、phase 4-6：交差点BATCH処理
 | | 全比較方式で同一ネットワーク・同一OD需要 |
 | **研究基本設定（明示指定）** | 研究の通常方式は **Level 2**（未実装）。Level 2で解決不能時は **Level 1** へfallback、必要に応じて **Level 0** へfallback。 |
 | | 暫定比較では `batch_size=10`、`order_control_batch_t_trigger_level=1`（Level 1は最終基本設定ではない） |
-| **次工程候補** | trip-end Vehicleとstale service unitの工程位置決定（**§1H.17**・**§1H.24**）。Level 2仮想サービス推定、Level 2 unresolved時のLevel 1 fallback接続。assignment全訪問履歴は分析項目明確化後に横断設計。Time-value Transaction本体 |
+| **次工程候補** | Level 2仮想サービス推定の設計調査（**§1H.25**）。Level 2 unresolved時のLevel 1 fallback接続。必要に応じてLevel 0 fallback。trip-end Vehicleは研究対象外。stale service unit回復は必要性が低ければ保留。assignment全訪問履歴は後回し。Time-value Transaction本体 |
 
 ---
 
@@ -2454,6 +2456,8 @@ VehicleがNodeを実際に通過した場合、service unit側とVehicle側を**
 | **4-6S** | BATCH assignmentの訪問対応、service unit visit_id、実通過照合（**実装済み**。§1H.22） |
 | **4-6T** | 小規模BATCH再訪end-to-end統合テスト（**実装済み**。§1H.23。`b7159f9`） |
 | **4-6U** | 5,000台clearance=0、5,000台clearance=1、10,000台clearance=1のhigh-demand再実行。既知prefix violation非再発、全ケース正常終了、sanity check PASS。**再実行・検証完了**（§1H.24。本体変更なし） |
+| **4-6V** | zero-service追加形成修正、size-one BATCHとFCFSの等価性回復、正式テスト（**§1H.25**。`2b10b08`） |
+| **4-6V診断** | size-one BATCH対FCFS等価性・batch size予備比較診断スクリプト（**§1H.25**。`fe9e53e`） |
 
 ### 1H.15 テスト方針
 
@@ -2467,7 +2471,11 @@ VehicleがNodeを実際に通過した場合、service unit側とVehicle側を**
 
 **high-demand再実行順：** 5,000台・clearance=0 → 5,000台・clearance=1 → 10,000台・clearance=1
 
-`diagnostics/order_control/` 配下は修正前状態の診断資料として保持し、修正後の通常回帰テストへ転用しない。
+`diagnostics/order_control/` 配下は、用途ごとに次の3区分で扱う。いずれも repository root の `tests_*.py` による通常自動回帰には含めない。
+
+- **Phase 4-6N legacy診断4本：** 修正前不具合の再現・原因調査資料（prefix violation等のhistorical record）
+- **Phase 4-6V post-fix診断2本：** 修正後の探索的・手動回帰診断（`grid_n1_fcfs_route_fixed_small_check.py`、`grid_10000_batch_size_and_signal_timing_preliminary_check.py`）
+- 補正signal baselineモード（`--corrected-signal-baseline-only`）も上記10,000台診断スクリプト内の探索的診断である
 
 ### 1H.16 決定済み・要確認・保留事項
 
@@ -2518,21 +2526,33 @@ VehicleがNodeを実際に通過した場合、service unit側とVehicle側を**
 | Phase 4-6S | **実装・専用テスト・既存テスト更新・広い回帰確認・commit・push済み**（**§1H.22**、`5e26bc9`） |
 | Phase 4-6T | **実装・回帰確認・commit・push済み**（**§1H.23**、`b7159f9`） |
 | Phase 4-6U | **再実行・検証完了**（**§1H.24**。本体・テスト・診断Python変更なし。結果は§1H.24に記録する） |
-| 最新実装commit | `b7159f9` |
-| 直前の文書commit（Phase 4-6T） | `aca6ce9` |
+| Phase 4-6V | **実装・専用テスト・限定回帰・commit・push済み**（**§1H.25**、`2b10b08`） |
+| Phase 4-6V診断 | **診断スクリプト追加・commit・push済み**（**§1H.25**、`fe9e53e`） |
+| 最新実装commit | `2b10b08` |
+| 直前の文書commit（Phase 4-6U） | `aca6ce9`（文書更新前HEAD。Phase 4-6V本体は `2b10b08`、診断は `fe9e53e`） |
 | high-demand BATCH比較 | **完了**（Phase 4-6U。5,000台・clearance=0、5,000台・clearance=1、10,000台・clearance=1の3ケース。U1〜U3すべてexit 0、prefix violationなし。§1H.24） |
+| size-one BATCHとFCFSの等価性 | **修正後コードで確認済み**（200台固定route・10,000台自由経路。§1H.25） |
+| batch size探索 | **ここで終了**（修正後N=10・N=20予備比較のみ。§1H.25） |
 
 **次工程：**
 
-1. trip-end Vehicleとstale service unit処理の工程位置を決める（どの後続工程に含めるかは未確定）
-2. Level 2仮想サービス推定（研究の通常方式。未実装）
-3. Level 2 unresolved時のLevel 1 fallback接続（未実装）
-4. assignment正式全訪問履歴は分析項目が明確になった後に横断的に設計する
-5. Time-value Transaction本体（未実装）
+1. Level 2仮想サービス推定の設計調査（未実装）
+2. Level 2 unresolved時のLevel 1 fallback接続（未実装）
+3. 必要に応じてLevel 0 fallback（未実装）
+4. trip-end Vehicleは研究対象外
+5. stale service unit回復は必要性が低ければ保留
+6. assignment正式全訪問履歴は後回し
+7. Time-value Transaction本体（未実装）
+
+**終了した工程：**
+
+- 追加のbatch size探索（§1H.25）
+
+**補正signal settingによるP2〜P4：** 未実行。追加実行の要否と時期は別途判断する（§1H.25.13）。
 
 **再開時に読むもの：**
 
-- 本メモ **§1H**（本設計）、**§1G**（診断・根本原因）、**§1H.19**（Phase 4-6P到着記録・乱数設計・実装記録）、**§1H.20**（Phase 4-6Q FCFS参照先変更・実装記録）、**§1H.21**（Phase 4-6R BATCH参照先変更・実装記録）、**§1H.22**（Phase 4-6S BATCH assignment訪問対応・実装記録）、**§1H.23**（Phase 4-6T 小規模BATCH再訪end-to-end統合・実装記録）、**§1H.24**（Phase 4-6U high-demand再実行・検証記録）
+- 本メモ **§1H**（本設計）、**§1G**（診断・根本原因）、**§1H.19**（Phase 4-6P到着記録・乱数設計・実装記録）、**§1H.20**（Phase 4-6Q FCFS参照先変更・実装記録）、**§1H.21**（Phase 4-6R BATCH参照先変更・実装記録）、**§1H.22**（Phase 4-6S BATCH assignment訪問対応・実装記録）、**§1H.23**（Phase 4-6T 小規模BATCH再訪end-to-end統合・実装記録）、**§1H.24**（Phase 4-6U high-demand再実行・検証記録）、**§1H.25**（Phase 4-6V zero-service追加形成・size-one BATCHとFCFS等価性・batch size予備比較）
 - `diagnostics/order_control/README.md`（診断スクリプトは通常回帰ではなく既知問題の再現・確認資料。Phase 4-6U後の比較診断2本の現在期待はexit 0）
 - 本体：`Vehicle.order_control_current_visit`、`current visit` の `batch_assignment`、`Vehicle.get_order_control_batch_assignment()`、`Vehicle.has_order_control_batch_assignment()`、`Vehicle.assign_order_control_batch_to_current_visit()`、`Vehicle.order_control_batch_assignments`、`Node.get_order_control_batch_trigger_candidates()`、`Node.get_order_control_batch_candidates_by_inlink()`、`Node.get_ordered_order_control_batch_candidates_by_inlink()`、`Node.register_order_control_batch_service_units()`、`Node.serve_order_control_batch_service_queue()`、`Node.transfer_batch()`、`Node.transfer()`
 - テスト：`tests_order_control_batch_revisit_integration.py`、`tests_order_control_batch_visit_assignment.py`、`tests_order_control_batch_revisit_ranking.py`、`tests_order_control_batch_service_unit_registration.py`、`tests_order_control_batch_service_queue_transfer.py`、`tests_order_control_batch_transfer.py`、`tests_order_control_batch_node_transfer_integration.py`
@@ -3929,6 +3949,262 @@ Phase 4-6Uで実行したU1〜U3のhigh-demand条件では、既知assignment pr
 - assignment正式全訪問履歴（分析項目明確化後に横断設計）
 - Time-value Transaction本体
 
+### 1H.25 Phase 4-6V：zero-service追加形成・size-one BATCHとFCFSの等価性・batch size予備比較
+
+**状態：** Phase 4-6V本体修正・正式テストは `2b10b08` でpush済み。既存診断2本の初期版は `fe9e53e` でpush済み。補正signal baselineモード（`--corrected-signal-baseline-only`）と本節の補足記録は、その後の比較条件訂正に伴う後続更新として追加した。
+
+**本体修正・正式テストcommit：** `2b10b08` — `phase 4-6 fix: reform BATCH after zero service and restore size-one BATCH equivalence with FCFS`
+
+**診断スクリプトcommit（初期版）：** `fe9e53e` — `phase 4-6 diagnostics: verify size-one BATCH equivalence with FCFS and recheck N=10 vs N=20`
+
+**最新実装commit：** `2b10b08`
+
+進捗の詳細・診断数値は [ORDER_EXCHANGE_PROGRESS.md](ORDER_EXCHANGE_PROGRESS.md) のフェーズ4-6V節を参照。診断スクリプトの実行方法は `diagnostics/order_control/README.md` を参照。
+
+#### 1H.25.1 size-one BATCHとFCFSの確認対象となる不変条件
+
+同じclearance、同じ候補順位、Level 1条件において、size-one BATCH（`batch_size=1`）はFCFSと確認対象の交通結果が一致することを目標とする。
+
+これは確認済みnetwork・需要・seed・制御条件における実装不変条件であり、全条件に対する一般的理論証明とは書かない。
+
+#### 1H.25.2 修正前の構造差
+
+**FCFS：**
+
+- blocked候補をcontinueで飛ばす
+- 同一timestep内で次候補を評価する
+
+**旧BATCH：**
+
+- 一回だけformする
+- 一回だけregisterする
+- 一回だけserveする
+- zero-serviceでも次候補を形成しない
+
+#### 1H.25.3 修正後の反復
+
+概念的な処理：
+
+1. `Node.transfer()` / `transfer_batch()` 開始時のtrigger snapshotを固定
+2. form
+3. register
+4. serve
+5. zero-serviceかつ停止理由なしなら、次の未割当trigger候補を検討
+6. 必要に応じてform・register・serveを反復
+7. 一台以上通過、clearance停止、arrival wait、候補枯渇等で終了
+
+#### 1H.25.4 trigger snapshot
+
+- `transfer_batch()` 開始時に一度だけ作成
+- キーは `(vehicle.id, visit_id)`
+- same-node revisitの別visitを区別
+- 反復中に拡張しない
+- batch member候補全体を `incoming_vehicles` だけへ限定するものではない
+- `t_trigger` に基づく既存batch member候補取得は維持
+
+#### 1H.25.5 blocked inlinkの意味
+
+clearance以外の通過不能条件により、その `transfer_batch()` 呼出し内で追加形成対象から一時的に除外するinlink：
+
+- outlink空間不足
+- inlink流出容量不足
+- outlink流入容量不足
+- Node容量不足
+- inlinkの先頭Vehicleが通過できない等
+
+**`blocked_inlinks`：**
+
+- 同一 `transfer_batch()` 呼出し内で共有するset
+- 次timestepへ持ち越さない
+- blocked service unitはqueueへ保持
+- assignment・batch ID・visit IDを維持
+- 次timestepでは再評価可能
+- same-inlink FIFO上、先頭Vehicleを追い越して後続Vehicleを処理しない
+
+#### 1H.25.6 clearance停止との違い
+
+- clearance未充足はFCFSと同様に候補走査を停止する
+- clearance未充足のinlinkを `blocked_inlinks` へ追加しない
+- clearance未充足の候補を飛ばして別方向へ進まない
+- 次timestepで再評価する
+
+#### 1H.25.7 arrival wait停止
+
+- queue先頭service unitの先頭VehicleがNode端へ未到着
+- Vehicleが `incoming_vehicles` へ未登録
+- queue順を維持する
+- 後続service unitを評価しない
+- 同一 `transfer_batch()` 呼出し内で追加batchを形成しない
+- `blocked_inlinks` へ追加しない
+- 次timestepで再評価する
+
+#### 1H.25.8 一台以上通過後
+
+- 一度のserve処理内では通過可能なVehicleを複数台処理できる
+- 最初の一台が通過した時点でserve自体を打ち切らない
+- 一台以上通過した場合に終了するのは、次の追加形成反復
+- 部分通過後に別batchを追加形成しない
+
+#### 1H.25.9 N>=1への一般化
+
+- size-one専用hackではない
+- N>1のzero-serviceにも適用する
+- N上限到達・未到達を追加形成条件に使用しない
+- triggerが変われば `t_trigger` も変わり得る
+- 最初のtriggerでは候補外だったVehicleが、次のtriggerでは候補になり得る
+
+#### 1H.25.10 Link容量・Node容量の技術前提
+
+今回のgrid条件：
+
+- `free_flow_speed`=20 m/s
+- `jam_density`=0.2 veh/m
+- `number_of_lanes`=1
+- `reaction_time`=1 s
+- `DELTAN`=1
+- `DELTAT`=1 s
+
+UXsim既定式によるLink基礎容量：0.8 veh/s
+
+未指定時：
+
+- `capacity_out`=基礎容量×2=1.6 veh/s
+- `capacity_in`=基礎容量×2=1.6 veh/s
+
+Node：
+
+- `flow_capacity`=`None`
+- 実質無制限
+
+実通過判定で使用：
+
+- `inlink.capacity_out_remain`
+- `outlink.capacity_in_remain`
+- `node.flow_capacity_remain`
+
+#### 1H.25.11 UXsim signal制御の離散実装と補正signal setting
+
+**UXsim本体は変更していない。** 今回行ったのは、現行UXsim実装を前提とした比較用signal settingの補正である。
+
+**`signal_control()` の境界条件（現行実装）：**
+
+- phase切替条件：`signal_t > signal[signal_phase]`（`>=` ではない）
+- 各 `Node.update()` 内で `signal_control()` が実行され、その後 `Node.transfer()` が参照する
+- `exec_simulation()` の順序：Link.update → Node.generate → **Node.update** → **Node.transfer**
+
+**off-by-one挙動（`DELTAT`=1秒）：**
+
+- 設定値59 → transfer判定上 **60 timesteps**
+- 設定値1 → transfer判定上 **2 timesteps**
+- 設定値0 → transfer判定上 **1 timestep**（zero-duration phase）
+
+**旧signal `[60,1,60,1]`（historical condition）：**
+
+- 設定意図：green 60秒、all-red 1秒、green 60秒、all-red 1秒
+- 実効完全phase長：**[61, 2, 61, 2]** timesteps、実効cycle **126** timesteps
+- 設定cycle length：122秒、offset step：30.5秒、offset値：{0.0, 30.5, 61.0, 91.5}
+- 意図した実効60/1/60/1を実現していない。現行の公平なFCFS/BATCH対signal baselineには使用しない
+
+**補正signal `[59,0,59,0]`（corrected comparison setting）：**
+
+- 設定値：**[59, 0, 59, 0]**
+- 実効完全phase長：**[60, 1, 60, 1]** timesteps、実効cycle **122** timesteps
+- 設定cycle length：118秒、offset step：29.5秒、offset値：{0.0, 29.5, 59.0, 88.5}
+- offset計算式は旧signalと同じ：`((row + column) % 4) * (sum(signal_setting) / 4)`
+
+**実Node確認（`Node.update()`、PASS判定の根拠）：**
+
+- offset 0.0、29.5、59.0、88.5 の全4値で、初回不完全cycle後の定常完全phase長が60/1/60/1
+- 方向変更時系列（offset=0）：T=旧方向green、T+1=all-red相当、T+2=新方向green
+
+**order-control clearance=1との対応（補正signal条件）：**
+
+- FCFS/BATCH：T=旧方向通過、T+1=別方向禁止、T+2=別方向可能
+- 補正signal：T=旧方向green、T+1=all-red、T+2=新方向green
+- **方向変更1回あたりの実効通過禁止timestep数は一致する**
+- ただし発生契機・頻度・green継続・需要応答性は異なり、制御方式全体が同一ではない
+
+**旧signal `[60,1,60,1]` では** 実効all-red 2 timestepsのため、上記の局所時系列対応は成立しない。
+
+#### 1H.25.12 補正signal対修正後BATCH N=10（現行比較）
+
+**Case：** `S_CORRECTED_SIGNAL_EFFECTIVE_60_1_60_1`
+
+**補正signal（10,000台・確定結果）：**
+
+- `signal=[59,0,59,0]`
+- total travel time：28,535,318.0秒
+- average travel time：2,853.5318秒
+- average delay：2,688.6358秒
+- total distance traveled：49,528,800.0m
+- last completed trip time：5,900
+
+**修正後BATCH N=10：**
+
+- total travel time：27,782,978.0秒
+- average travel time：2,778.2978秒
+- average delay：表示値約2,613.4秒（完全精度未保存）
+- total distance traveled：39,962,400.0m
+- last completed trip time：4,971
+
+**補正signal / BATCH N=10：**
+
+- total travel time：約1.027079
+- average travel time：約1.027079
+- total distance traveled：約1.239385
+- last completed trip time：約1.186884
+
+**BATCH N=10の平均旅行時間は、補正signalより75.2340秒、約2.64%短い。**
+
+固定需要・1 seed・自由経路の探索的結果であり、一般的優位とは書かない。
+
+#### 1H.25.13 旧signal historical noteと順位反転
+
+**旧signal `[60,1,60,1]` 保存値（historical exploratory result）：**
+
+- total travel time：26,989,929.0秒
+- 正確なaverage travel time：26,989,929.0 / 10,000 = **2,698.9929秒**
+- average delay表示値：約2,534.1秒
+- total distance traveled：50,367,200.0m
+- last completed trip time：5,703
+
+**旧BATCH N=10対旧signal（精密比較、historical）：**
+
+- 差：+79.3049秒、BATCH / 旧signal ≈ 1.029383、BATCHが約2.9383%長い
+
+**補正後BATCH N=10対補正signal：**
+
+- 差：−75.2340秒、BATCH / 補正signal ≈ 0.973635、BATCHが約2.6365%短い
+
+旧signal比較ではBATCHが長かったが、補正signal比較ではBATCHが短くなり **順位が反転した**（約−5.5748 percentage points）。
+
+旧signalから補正signalへの変化は、all-red短縮だけの因果効果とは書かない。green実効長・all-red実効長・設定cycle length・offset具体値・network混雑・route choiceも連動して変化した。
+
+旧P2〜P4は旧signal builder（all-red設定値1、実効2 timesteps）によるhistorical exploratory results。意図した実効all-red 1 timestep条件ではない。現行の正式signal timing感度分析には使用しない。補正signal settingによるP2〜P4は未実行であり、追加実行の要否と時期は別途判断する。
+
+#### 1H.25.14 FCFS参考比較（保存値・再実行なし）
+
+FCFS clearance=1保存値：total travel time 33,293,441.0秒、average travel time 3,329.3441秒、average delay 3,164.4481秒、total distance traveled 39,892,000.0m、last completed trip time 6,492
+
+- 補正signal / FCFS average travel time：2,853.5318 / 3,329.3441 ≈ **0.8571**
+- BATCH N=10 / FCFS average travel time：2,778.2978 / 3,329.3441 ≈ **0.8345**
+
+FCFS clearance=1と補正signalは、方向変更1回あたりの実効通過禁止timestep数（T/T+1/T+2）の意味では対応するが、制御方式全体は異なる。
+
+#### 1H.25.15 Level 2との関係
+
+- zero-service追加形成の反復制御は `t_trigger` Level 1固有ではない
+- Level 2 estimatorも既存のform・register・serve経路へ接続可能（**Level 2は未実装。設計対象**）
+- Level 2 unresolved時にはLevel 1へfallbackする（未実装）
+- 必要に応じてLevel 0へfallbackする（未実装）
+- trigger snapshot・`blocked_inlinks`・clearance停止・arrival wait停止の意味はLevel 2でも維持する
+- Level 2の実装により、今回確定したservice queue・assignment・visit IDの意味を変更しない
+- trip-end Vehicleは研究対象外とする
+- stale service unit回復は必要性が低ければ保留する
+- assignmentの全訪問履歴対応は後回しとする
+
+これらは現在実装と確認済み範囲の技術記録として記述し、一般的な理論証明として書かない。
+
 ---
 
 
@@ -4694,9 +4970,9 @@ Phase 4-6Mで追加された `Node.transfer()` 接続統合テストは **§1F.1
 - `git log --oneline -20`。
 - **Phase 4-6A〜4-6M：** 実装・テスト・commit済み（4-6Mは `b03538c`）。
 - **Phase 4-6N（commit済み）：** route_next_link参照順修正（`05fa2d1`）、clearance=0比較テスト3本（`f339b88`）、正式記録（`c06936c`）、診断スクリプト分離（`0e35799`）。
-- **Phase 4-6N Step 5：** Node訪問単位の共通状態設計を **§1H** に記録済み。基盤（4-6O）・到着記録（4-6P）・FCFS参照先変更（4-6Q）・BATCH参照先変更（4-6R）・BATCH assignment訪問対応（4-6S）・小規模BATCH再訪end-to-end統合（4-6T）は実装済み。high-demand再実行・検証（4-6U）は5,000台・clearance=0、5,000台・clearance=1、10,000台・clearance=1の3ケースで完了（§1H.24）
-- **現時点の主要課題：** trip-end Vehicle・stale service unit・assignment全訪問履歴・Level 2・Time-value Transaction（設計メモ **§1H.22**・**§1H.24**）
-- **優先参照：** ORDER_EXCHANGE_PHASE4-6_BATCH_PROCESSING_DESIGN_NOTES.md の **§1H** を優先参照。診断・根本原因は **§1G**、`Node.transfer()` 接続は **§1F**。Phase 4-6Q実装記録は **§1H.20**、Phase 4-6R実装記録は **§1H.21**、Phase 4-6S実装記録は **§1H.22**、Phase 4-6T実装記録は **§1H.23**、Phase 4-6U実行記録は **§1H.24**
-- **次工程候補（§1H.17）：** trip-end Vehicleとstale service unitの工程位置決定。Level 2仮想サービス推定、Level 2 unresolved時のLevel 1 fallback接続。assignment全訪問履歴は分析項目明確化後に横断設計。Time-value Transaction本体
+- **Phase 4-6N Step 5：** Node訪問単位の共通状態設計を **§1H** に記録済み。基盤（4-6O）・到着記録（4-6P）・FCFS参照先変更（4-6Q）・BATCH参照先変更（4-6R）・BATCH assignment訪問対応（4-6S）・小規模BATCH再訪end-to-end統合（4-6T）は実装済み。high-demand再実行・検証（4-6U）は5,000台・clearance=0、5,000台・clearance=1、10,000台・clearance=1の3ケースで完了（§1H.24）。zero-service追加形成修正（4-6V）は完了（§1H.25、`2b10b08`）。診断スクリプト（`fe9e53e`）は§1H.25
+- **現時点の主要課題：** Level 2仮想サービス推定・Level 2 unresolved時のLevel 1 fallback接続・Time-value Transaction（設計メモ **§1H.25**）
+- **優先参照：** ORDER_EXCHANGE_PHASE4-6_BATCH_PROCESSING_DESIGN_NOTES.md の **§1H** を優先参照。診断・根本原因は **§1G**、`Node.transfer()` 接続は **§1F**。Phase 4-6Q実装記録は **§1H.20**、Phase 4-6R実装記録は **§1H.21**、Phase 4-6S実装記録は **§1H.22**、Phase 4-6T実装記録は **§1H.23**、Phase 4-6U実行記録は **§1H.24**、Phase 4-6V zero-service追加形成・等価性・batch size予備比較は **§1H.25**
+- **次工程候補（§1H.17・§1H.25）：** Level 2仮想サービス推定の設計調査。Level 2 unresolved時のLevel 1 fallback接続。必要に応じてLevel 0 fallback。trip-end Vehicleは研究対象外。stale service unit回復は必要性が低ければ保留。assignment全訪問履歴は後回し。Time-value Transaction本体
 - 目的地Vehicleは端点間OD前提で保留。比較対象Node共通管理・自動検証は将来課題。
 - 一時退避PDF `phase4-6A_batch_earliest_arrival_timestep_memo.pdf` はリポジトリ外。正式Markdownを優先参照。

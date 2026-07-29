@@ -1,21 +1,25 @@
-# Order-control diagnostics (Phase 4-6N)
+# Order-control diagnostics (Phase 4-6N / 4-6V)
 
 ## Purpose
 
-This directory holds **diagnostic scripts** for Phase 4-6N: reproducing and
-investigating BATCH prefix violations and Node revisit behavior under
-high-demand conditions. These scripts record **pre–node-revisit-fix** state.
-
+This directory holds **diagnostic scripts** for order-control investigation.
 They are **not** part of the normal regression test suite. Do not add them to
 automated test discovery (`tests_*.py` at the repository root).
+
+**Diagnostic categories:**
+
+- **Phase 4-6N legacy (4 scripts):** pre-fix bug reproduction and root-cause investigation
+- **Phase 4-6V post-fix (2 scripts):** exploratory manual regression after zero-service reformation fix
+- Neither category is included in repository-root `tests_*.py` automated regression
 
 ## Formal record
 
 Detailed results, timelines, and design conclusions are in:
 
-`ORDER_EXCHANGE_PHASE4-6_BATCH_PROCESSING_DESIGN_NOTES.md` **§1G**
+- `ORDER_EXCHANGE_PROGRESS.md` — Phase 4-6V (zero-service reformation, equivalence, batch-size exploration, corrected signal baseline)
+- `ORDER_EXCHANGE_PHASE4-6_BATCH_PROCESSING_DESIGN_NOTES.md` — **§1G** (prefix violations), **§1H.24** (Phase 4-6U high-demand), **§1H.25** (zero-service reformation design, corrected signal setting)
 
-Phase 4-6U high-demand re-run results are in **§1H.24**.
+Do not duplicate capacity tables or N=10 vs signal ratio tables here.
 
 ## Scripts
 
@@ -25,6 +29,85 @@ Phase 4-6U high-demand re-run results are in **§1H.24**.
 | `batch_clearance_one_vs_fcfs_vs_signalized_uxsim_all_red_grid_high_demand_diagnostic.py` | 5,000- and 10,000-vehicle comparison: signalized all-red UXsim vs FCFS (clearance=1) vs BATCH (clearance=1). **Before Phase 4-6S:** BATCH failed at 5,000 vehicles with a known prefix violation. **After Phase 4-6U:** both cases complete with exit code 0 (see below). |
 | `batch_clearance_zero_vs_fcfs_vs_signalized_uxsim_grid_high_demand_5000_diagnostic.py` | 5,000-vehicle comparison with clearance=0. **Before Phase 4-6S:** prefix violation at W.T=605. **After Phase 4-6U:** completes with exit code 0 (see below). |
 | `node_revisit_high_demand_5000_diagnostic.py` | Compares Node revisit rates across signalized UXsim, FCFS, and BATCH on the same demand. **Before Phase 4-6S:** BATCH stopped at W.T=605 with the known prefix violation. |
+| `grid_n1_fcfs_route_fixed_small_check.py` | 200 vehicles, 6×6 grid, horizontal-first fixed Manhattan route. FCFS clearance=1 vs size-one BATCH Level 1 clearance=1 on identical vehicle plans. Strict aggregate and per-vehicle comparison (state, arrival_time, travel_time, traveled route, `log_t_link`). Fast independent regression without dynamic route choice. **Not** a general proof for all networks/demands. |
+| `grid_10000_batch_size_and_signal_timing_preliminary_check.py` | 10,000 vehicles, 6×6 grid, free routing. Exploratory pre–Level 2 diagnostic. Default run: P1–P4. Modes for size-one BATCH vs FCFS, post-fix strict equivalence, N=10 vs N=20 recheck, and legacy pre-fix investigation. **Not** a formal sensitivity analysis. |
+
+## Phase 4-6V scripts (zero-service reformation)
+
+### `grid_n1_fcfs_route_fixed_small_check.py`
+
+- 200 vehicles, 6×6 grid, horizontal-first fixed Manhattan route
+- FCFS clearance=1 vs size-one BATCH Level 1 clearance=1, same vehicle plans
+- Strict aggregate and per-vehicle checks (state, arrival_time, travel_time, traveled route, `log_t_link`)
+- Excludes dynamic route-choice effects for a fast independent regression check
+- Not a general theoretical proof for all networks/demands
+
+```bash
+python diagnostics/order_control/grid_n1_fcfs_route_fixed_small_check.py
+```
+
+### `grid_10000_batch_size_and_signal_timing_preliminary_check.py`
+
+Default (P1–P4):
+
+```bash
+python diagnostics/order_control/grid_10000_batch_size_and_signal_timing_preliminary_check.py
+```
+
+Lightweight size-one BATCH vs FCFS check:
+
+```bash
+python diagnostics/order_control/grid_10000_batch_size_and_signal_timing_preliminary_check.py \
+  --n1-equivalence-only
+```
+
+Post-fix strict size-one BATCH vs FCFS equivalence:
+
+```bash
+python diagnostics/order_control/grid_10000_batch_size_and_signal_timing_preliminary_check.py \
+  --n1-equivalence-after-reformation-fix-only
+```
+
+Post-fix N=10 vs N=20 recheck:
+
+```bash
+python diagnostics/order_control/grid_10000_batch_size_and_signal_timing_preliminary_check.py \
+  --batch-size-recheck-after-zero-service-fix-only
+```
+
+Corrected signal baseline only (exploratory diagnostic; **not** a formal signal timing sensitivity analysis):
+
+```bash
+python diagnostics/order_control/grid_10000_batch_size_and_signal_timing_preliminary_check.py \
+  --corrected-signal-baseline-only
+```
+
+- `signal=[59,0,59,0]` — effective 60/1/60/1 transfer timesteps under current UXsim discrete implementation
+- Same cycle-length-based offset formula as before; offset values 0.0 / 29.5 / 59.0 / 88.5
+- Runs only the corrected-signal 10,000-vehicle case (`S_CORRECTED_SIGNAL_EFFECTIVE_60_1_60_1`)
+- Does **not** run FCFS, BATCH, or P1–P4
+- Includes real-Node timing sanity check and vehicle plan invariant check
+- Full results: `ORDER_EXCHANGE_PROGRESS.md` and design notes **§1H.25**
+
+**Default P1–P4 (old signal builder):**
+
+- Uses `signal=[60,1,60,1]` with all-red setting value 1
+- Under current discrete implementation, setting value 1 acts as **2 transfer timesteps** (effective [61,2,61,2])
+- P2–P4 are **historical exploratory results** from pre-correction conditions
+- Do **not** use for current fair signal timing sensitivity analysis; corrected P2–P4 not yet run
+- Whether to run corrected-signal P2–P4 later (before Level 2, after Level 2, or not at all) is undecided
+
+**Legacy pre-fix modes** (commit `2b10b08` and earlier bug investigation only; do not use as normal regression on current code):
+
+```bash
+python diagnostics/order_control/grid_10000_batch_size_and_signal_timing_preliminary_check.py \
+  --n1-first-link-difference-only
+
+python diagnostics/order_control/grid_10000_batch_size_and_signal_timing_preliminary_check.py \
+  --n1-first-local-difference-only
+```
+
+Legacy modes reproduce the pre-fix mismatch only when checked out at a pre-fix commit. On current post-fix code they do not match old expectations and are not for routine regression.
 
 ## Known prefix violations (historical — Phase 4-6N, before Phase 4-6S)
 
@@ -96,7 +179,13 @@ python diagnostics/order_control/batch_clearance_one_vs_fcfs_vs_signalized_uxsim
 python diagnostics/order_control/batch_clearance_zero_vs_fcfs_vs_signalized_uxsim_grid_high_demand_5000_diagnostic.py
 
 python diagnostics/order_control/node_revisit_high_demand_5000_diagnostic.py
+
+python diagnostics/order_control/grid_n1_fcfs_route_fixed_small_check.py
+
+python diagnostics/order_control/grid_10000_batch_size_and_signal_timing_preliminary_check.py
 ```
+
+See **Phase 4-6V scripts** above for `grid_10000_batch_size_and_signal_timing_preliminary_check.py` CLI modes.
 
 Some runs take several minutes (5,000-vehicle grid; 10,000-vehicle longer).
 

@@ -3105,6 +3105,466 @@ Phase 4-6Uとして、Phase 4-6S・4-6T後のNode再訪・BATCH assignment対応
 
 Phase 4-6T完了時点の次工程はPhase 4-6Uであった。その後Phase 4-6Uで完了した。
 
+### フェーズ4-6V：zero-service追加形成修正とsize-one BATCHとFCFSの等価性回復
+
+Phase 4-6Vとして、zero-service batch形成後に同一timestep内で追加batchを形成できない不具合を修正し、size-one BATCH（`batch_size=1`）とFCFSの交通結果一致を回復した。続けて診断スクリプトで等価性・batch size予備比較を確認した。技術設計の詳細は設計メモ **§1H.25** を参照。
+
+**状態：** 本体修正・正式テスト・診断スクリプトともcommit・push済み。
+
+**本体修正・正式テストcommit：** `2b10b08` — `phase 4-6 fix: reform BATCH after zero service and restore size-one BATCH equivalence with FCFS`
+
+**診断スクリプトcommit：** `fe9e53e` — `phase 4-6 diagnostics: verify size-one BATCH equivalence with FCFS and recheck N=10 vs N=20`
+
+**最新実装commit：** `2b10b08`
+
+#### 発見されたsize-one BATCHとFCFSの不一致
+
+size-one BATCH、すなわち `batch_size=1` のBATCHとFCFSについて、10,000台・自由経路・6×6 gridにおける時間的に最初の差を特定した。
+
+**対象：**
+
+- Vehicle：`veh_3573`
+- Node：`g_3_4`
+- inlink：`h_3_3_4`
+- outlink：`h_3_4_5`
+- FCFS：T=1103に `h_3_4_5` へ進入
+- 修正前size-one BATCH：T=1104に `h_3_4_5` へ進入
+
+**T=1103における確認結果：**
+
+- FCFSとBATCHで到着状態は同一
+- `incoming_vehicles` への登録状態は同一
+- clearance状態は同一
+- `veh_3573` のinlink先頭条件・capacity条件・outlink受入条件は同一
+- 順位0の `veh_3551` はoutlink空間不足で通過不能
+- 順位1の `veh_3573` は同一timestepに通過可能
+
+**FCFS：**
+
+- `veh_3551` を通過不能としてcontinueで飛ばす
+- 同じT=1103に `veh_3573` を評価する
+- `veh_3573` が通過する
+
+**修正前size-one BATCH：**
+
+- `veh_3551` だけをbatchとして形成・登録する
+- `veh_3551` のservice unitはzero-serviceとなる
+- `veh_3573` は形成・登録されない
+- `veh_3573` は次のT=1104まで待機する
+
+#### 直接原因
+
+形成・登録したservice unitから実通過が0台だった場合でも、同一 `Node.transfer()` 呼出し・同一timestep内で、別inlinkに残る未割当trigger候補から追加batchを形成する処理がなかった。
+
+#### 実装したzero-service追加形成の原則
+
+N>=1のBATCHについて、次を満たす場合に、同一 `Node.transfer()` 呼出し・同一timestep内で追加batchを形成・登録・serveする処理を実装した。
+
+- 直前のserve結果が0台
+- clearance未充足による停止ではない
+- queue先頭service Vehicleの未到着待ちではない
+- 同一呼出し内でblockedと判定されたinlink以外のinlinkに、開始時snapshot内の未割当trigger候補が残る
+
+**実装上の要点：**
+
+- trigger候補snapshotは `transfer_batch()` 開始時に一度だけ固定する
+- snapshotキーは `(vehicle.id, visit_id)` とする
+- snapshotは同一 `transfer_batch()` 呼出し中に拡張しない
+- `blocked_inlinks` は同一 `transfer_batch()` 呼出し内だけで保持する
+- `blocked_inlinks` は次timestepへ持ち越さない
+- clearance未充足は `blocked_inlinks` へ追加しない
+- queue先頭service Vehicleが未到着の場合は `arrival_wait_stop` として追加形成を停止する
+- blocked service unitをservice queueへ保持する
+- blocked service unitのassignment・batch ID・visit IDを維持する
+- 一度のserve処理内では、既存仕様どおり通過可能なVehicleを複数台処理できる
+- serveで一台以上が実通過した場合、終了するのは次のform・register・serve追加反復であり、serveを最初の一台で打ち切るものではない
+- 部分通過後に別batchを追加形成しない
+- N上限へ到達したか、N上限未到達だったかは、追加形成の継続・終了条件に使用しない
+
+**N上限を反復条件に使用しない理由：**
+
+- triggerが変われば `t_trigger` も変わり得る
+- 最初のtriggerでは候補外だったVehicleが、次のtriggerによる形成では候補になり得る
+- N上限未到達だけでは、同一timestep内に新たに形成可能なVehicleが存在しないことを保証できない
+
+#### 正式テスト
+
+少なくとも次を記録する。
+
+- size-one BATCHで順位0のblocked候補の後に順位1候補をFCFSと同一timestepに処理するテスト
+- N>1で、最初のbatchがzero-serviceとなった後に別inlinkから追加batchを形成するテスト
+- 一台以上が実通過した後は追加形成しないテスト
+- clearance未充足時には追加形成しないテスト
+- queue先頭service Vehicleが未到着の場合には追加形成しないテスト
+- blocked service unit・assignment・batch ID・visit IDを維持するテスト
+- 重複assignment・重複service unitが発生しないことの確認
+- 限定回帰12ファイルがすべてPASS
+
+#### size-one BATCHとFCFSの修正後診断
+
+**200台固定route：**
+
+- 6×6 grid
+- horizontal-first fixed Manhattan route
+- FCFS clearance=1
+- size-one BATCH、Level 1、clearance=1
+- completed：200/200
+- completed ratio：1.0
+- total travel time：33,613.0
+- average travel time：168.065
+- average delay：8.365
+- total distance traveled：638,800.0
+- unfinished：0
+- last completed trip time：278
+- eligible Node：36
+- Vehicle別state・arrival_time・travel_time・traveled route・`log_t_link` が厳密一致
+
+**10,000台自由経路：**
+
+- 6×6 grid
+- 同一vehicle plans
+- FCFS clearance=1
+- size-one BATCH、Level 1、clearance=1
+- completed：10,000/10,000
+- completed ratio：1.0
+- total travel time：33,293,441.0
+- average travel time：3,329.3441
+- average delay：3,164.4481
+- total distance traveled：39,892,000.0
+- unfinished：0
+- last completed trip time：6,492
+- eligible Node：36
+- 全10,000台のstate・arrival_time・travel_time・traveled route・`log_t_link` が厳密一致
+- `veh_3573` はFCFS・size-one BATCHの両方で `h_3_4_5` へT=1103に進入
+- 修正前のT=1103対T=1104の差は解消
+
+これらは確認したnetwork・需要・seed・制御条件における完全一致であり、全ネットワーク・全需要に対する一般的理論証明とは表現しない。
+
+#### 修正後N=10・N=20予備比較
+
+**共通条件：**
+
+- 10,000台
+- 6×6 grid
+- 自由経路
+- signalなし
+- clearance=1
+- t_trigger Level 1
+- World `random_seed=0`
+- `DEMAND_GEN_SEED=42`
+- 同一vehicle plans
+- eligible Node=36
+- 全10,000台完了
+
+**修正後N=10：**
+
+- total travel time：27,782,978.0
+- average travel time：2,778.2978
+- average delay：保存された完全精度値なし
+- average delayの表示値：約2,613.4
+- total distance traveled：39,962,400.0
+- last completed trip time：4,971
+
+**修正後N=20：**
+
+- total travel time：35,221,107.0
+- average travel time：約3,522.1
+- average delay：約3,357.2
+- total distance traveled：46,560,000.0
+- last completed trip time：6,258
+
+**修正後N=20 / N=10：**
+
+- total travel time：約1.268
+- average travel time：約1.268
+- total distance traveled：約1.165
+- last completed trip time：約1.259
+- average delay比は、修正後N=10の完全精度値を保存していないため、厳密値として記録しない
+
+以前報告したN=20 / N=10の約1.169は、zero-service修正前N=10を分母とした旧比較である。現行コードのN=20 / N=10比較では、average travel time比は約1.268である。
+
+**修正前N=10：**
+
+- total travel time：30,119,206.0
+- average travel time：約3,011.9
+- average delay：約2,847.0
+- total distance traveled：40,996,000.0
+- last completed trip time：5,382
+
+修正前N=10値は、zero-service追加形成を行わない旧実装による履歴値であり、現行baselineとして使用しない。
+
+N=20は、今回の固定需要・seed条件では修正前後でnetwork-wide集計値が一致した。これは次を証明するものではない。
+
+- zero-service追加形成修正がN=20に適用されなかった
+- N=20ではzero-service追加形成が一度も発生しなかった
+
+正確には、「今回の固定需要・seed条件では、N=20について修正前後のnetwork-wide集計値の変化が観測されなかった」と記載する。
+
+#### 旧signal設定（historical condition）
+
+**設定：** `signal=[60,1,60,1]`
+
+**設定時の意図：** green 60秒、all-red 1秒、green 60秒、all-red 1秒
+
+**実際のtransfer判定上の完全phase長（現行UXsim離散実装、`DELTAT`=1秒）：**
+
+- green：61 timesteps
+- all-red相当：2 timesteps
+- green：61 timesteps
+- all-red相当：2 timesteps
+- 実効transfer cycle：126 timesteps
+
+**原因（UXsim本体は変更していない）：**
+
+- `signal_control()` のphase切替条件が `signal_t > duration`（`>=` ではない）
+- `Node.update()` でsignal phaseを更新した後に `Node.transfer()` が実行される
+- 設定時間より1 transfer timestep長く作用するoff-by-one挙動
+
+**offset（旧設定）：**
+
+- 設定cycle length：122秒
+- offset step：30.5秒
+- offset値集合：{0.0, 30.5, 61.0, 91.5}
+- 計算式は補正signalと同じ（cycle-length-based staggered offset）
+
+**旧signal保存値（10,000台・同一需要・seed。historical exploratory result）：**
+
+- total travel time：26,989,929.0秒
+- 正確なaverage travel time：26,989,929.0 / 10,000 = **2,698.9929秒**
+- average delay表示値：約2,534.1秒
+- total distance traveled：50,367,200.0m
+- last completed trip time：5,703
+- completed：10,000/10,000
+
+旧signal結果は削除しない。ただし、意図した実効60/1/60/1を実現していない **historical condition** として位置付け、現行の公平なFCFS/BATCH対signal比較baselineには使用しない。旧P2〜P4も補正前条件の探索履歴である。
+
+#### 補正signal setting（corrected comparison setting）
+
+**Case：** `S_CORRECTED_SIGNAL_EFFECTIVE_60_1_60_1`
+
+**診断スクリプト：** 診断スクリプトへ `--corrected-signal-baseline-only` を後続追加（比較条件訂正に伴う更新）
+
+**設定：** `signal=[59,0,59,0]`（UXsim本体は変更せず、比較用signal settingを補正）
+
+**signal group：**
+
+- phase 0：east-west links
+- phase 1：Link割当なし、all-red相当
+- phase 2：north-south links
+- phase 3：Link割当なし、all-red相当
+
+**設定cycle length：** 118秒
+
+**実効transfer phase長（実Nodeの `Node.update()` で確認）：**
+
+- phase 0：60 timesteps
+- phase 1：1 timestep
+- phase 2：60 timesteps
+- phase 3：1 timestep
+- 実効transfer cycle：122 timesteps
+
+**補正の根拠：** 現行UXsim実装では設定値59がtransfer判定上60 timesteps、設定値0が1 timestepとして作用する。意図した実効green 60秒・all-red 1 timestepを実現するため、API上は `[59,0,59,0]` を使用した。
+
+**offset（補正signal。設計ルールは旧signalと同じ）：**
+
+```
+signal_offset = ((row + column) % 4) * (sum(signal_setting) / 4)
+```
+
+- offset step：29.5秒
+- offset値集合：{0.0, 29.5, 59.0, 88.5}
+- 全4 offset値について、実Nodeで定常完全phase長60/1/60/1を確認済み
+
+**timing sanity check：**
+
+- 実Nodeの `Node.update()` を使用
+- zero-duration phase（設定0）は各1 timestep、phase skipなし
+
+**Vehicle plan確認：** `_verify_vehicle_plan_invariants(vehicle_plans)` により、deterministic generator条件（`DEMAND_GEN_SEED=42`、10,000 plans、`veh_0`〜`veh_9999`、departure 0〜500、Manhattan distance ≥ 5）を検証
+
+**共通simulation条件：**
+
+- 10,000台、6×6 grid、自由経路、departure 0〜500、`TMAX`=50,000
+- World `random_seed=0`、`DEMAND_GEN_SEED=42`
+- `DELTAN`=1、`DELTAT`=1秒、単車線、internal signalized Node=36
+- `free_flow_speed`=20 m/s、`jam_density`=0.2 veh/m
+- `capacity_out`・`capacity_in`・Node `flow_capacity` 未指定
+
+**補正signal確定結果：**
+
+- exit code：0
+- total travel time：28,535,318.0秒
+- average travel time：2,853.5318秒
+- average delay：2,688.6358秒
+- total distance traveled：49,528,800.0m
+- last completed trip time：5,900
+- completed：10,000/10,000、unfinished：0
+- simulation elapsed：約58.8秒、wall clock：約87秒
+
+#### 修正後BATCH N=10対補正signal
+
+**修正後BATCH N=10：**
+
+- total travel time：27,782,978.0秒
+- average travel time：2,778.2978秒
+- average delay：完全精度値未保存（表示値約2,613.4秒）
+- total distance traveled：39,962,400.0m
+- last completed trip time：4,971
+- completed：10,000/10,000
+
+**補正signal / 修正後BATCH N=10：**
+
+- total travel time：約1.027079
+- average travel time：約1.027079
+- total distance traveled：約1.239385
+- last completed trip time：約1.186884
+
+**BATCH N=10の平均旅行時間は、補正signalより75.2340秒、約2.64%短い。**
+
+- average travel time差：2,853.5318 − 2,778.2978 = +75.2340秒（補正signalの方が長い）
+- total distance：BATCH N=10の方が9,566,400m小さい
+- last completed：BATCH N=10の方が929小さい
+- average delay：補正signal 2,688.6358秒、BATCH N=10表示値約2,613.4秒（表示精度値比較。厳密比として扱わない）
+
+今回の固定需要・1 seed条件では、average travel time・average delay表示値・total distance traveled・last completed trip timeのいずれでもBATCH N=10が小さい。一般的優位とは書かない。
+
+#### 旧signalから補正signalへの変化（historical note）
+
+| 指標 | 旧 [60,1,60,1] | 補正 [59,0,59,0] | 変化 |
+|------|----------------|------------------|------|
+| total travel time | 26,989,929.0 | 28,535,318.0 | +1,545,389.0（約+5.73%） |
+| average travel time | 2,698.9929 | 2,853.5318 | +154.5389（約+5.73%） |
+| average delay | 表示値約2,534.1 | 2,688.6358 | 表示精度比較で約+6.10% |
+| total distance | 50,367,200.0 | 49,528,800.0 | −838,400.0（約−1.66%） |
+| last completed | 5,703 | 5,900 | +197（約+3.45%） |
+
+all-red短縮だけの因果効果とは書かない。green実効長・all-red実効長・設定cycle length・offset具体値・混雑・route choiceが連動して変化する。
+
+#### BATCH対signalの順位反転
+
+**旧signal（historical。公平baselineではない）：**
+
+- BATCH N=10 average travel time：2,778.2978秒
+- 旧signal正確average travel time：2,698.9929秒
+- 差：+79.3049秒（BATCHが約2.9383%長い）
+
+**補正signal：**
+
+- BATCH N=10 average travel time：2,778.2978秒
+- 補正signal average travel time：2,853.5318秒
+- 差：−75.2340秒（BATCHが約2.6365%短い）
+
+旧signalとの比較ではBATCH N=10が平均旅行時間で約2.94%長かったが、補正signalとの比較ではBATCH N=10が約2.64%短くなり、**順位が反転した**。相対差の変化は約−5.5748 percentage points。
+
+#### FCFS参考比較（再実行なし・保存値）
+
+FCFS clearance=1保存値（同一需要・seed。今回再実行していない）：
+
+- total travel time：33,293,441.0秒
+- average travel time：3,329.3441秒
+- total distance traveled：39,892,000.0m
+- last completed trip time：6,492
+
+**補正signal / FCFS：**
+
+- total travel time：28,535,318.0 / 33,293,441.0 ≈ 0.8571
+- average travel time：2,853.5318 / 3,329.3441 ≈ 0.8571
+
+**BATCH N=10 / FCFS：**
+
+- total travel time：27,782,978.0 / 33,293,441.0 ≈ 0.8345
+- average travel time：2,778.2978 / 3,329.3441 ≈ 0.8345
+
+#### 旧signal比較のhistorical記録（現行baselineではない）
+
+旧条件 `signal=[60,1,60,1]` に対する修正後N=10 BATCH比較（Phase 4-6U保存reference。historical exploratory result）：
+
+- 修正後N=10 BATCH / 旧signal total travel time：約1.0294
+- 旧signalの平均旅行時間は修正後N=10 BATCHより約2.9%短かった（表示値ベースの旧記録）
+- この比較は意図した実効60/1/60/1を実現していない旧signalを用いるため、現行baselineではない
+
+#### order-control clearance=1と補正signal all-red
+
+**方向変更1回あたりの実効通過禁止timestep数（`DELTAT`=1秒）：**
+
+| 方式 | T | T+1 | T+2 |
+|------|---|-----|-----|
+| FCFS/BATCH `order_control_clearance_timesteps=1` | 旧方向通過 | 別方向通過禁止 | 別方向通過可能 |
+| 補正signal `[59,0,59,0]` | 旧方向green | all-red相当 | 新方向green |
+
+補正signal条件では、order-control clearance=1と方向変更1回あたりの実効通過禁止timestep数が一致する。
+
+ただし次は異なる：order-controlは実通過方向変更時にclearanceが発生する。signalは固定周期でall-red相当phaseが発生する。green継続時間、発生頻度、需要応答性、制御方式全体の動作は異なる。制御方式全体が同一とは書かない。
+
+**旧signal `[60,1,60,1]` について：** 設定上all-red 1秒だが、実効2 timesteps。order-controlとの局所時系列対応は補正signalでは成立するが、旧signalでは成立しない（実効[61,2,61,2]）。
+
+#### P2〜P4の扱い
+
+- 旧default P1〜P4のP2〜P4は、旧signal builder（all-red設定値 `W.DELTAT`=1）により実行された **historical exploratory results**
+- 意図した実効all-red 1 timestep条件ではない（現行離散実装では設定値1は実効2 timestepsとして作用する）
+- 現行の正式signal timing感度分析には使用しない
+- 今回は補正signal baseline 1ケース（`S_CORRECTED_SIGNAL_EFFECTIVE_60_1_60_1`）のみ取得
+- 補正signal settingによるP2〜P4は未実行であり、追加実行の要否と時期は別途判断する（Level 2設計前・Level 2後・実行しないかは未決定）
+
+#### 解釈上の制約
+
+今回の比較は、10,000台・1需要・1 seed・6×6 grid・自由経路・単車線・全内部Node同一signal setting・cycle-length-based staggered offsetにおける探索的結果である。
+
+次を断定しない：
+
+- BATCHまたはsignalの一般的優位
+- 最適batch size、最適signal timing、最適offset
+- Level 2の性能、時間価値取引の有効性
+- 旧signalと補正signalの差の単一原因、all-red短縮だけの因果効果
+
+#### 次の工程
+
+- 追加のbatch size探索はここで終了
+- 次はLevel 2仮想サービス推定の設計調査（**未実装**）
+- Level 2 unresolved時はLevel 1 fallback
+- 必要に応じてLevel 0 fallback
+- trip-end Vehicleは研究対象外
+- stale service unit回復は必要性が低ければ保留
+- assignment全訪問履歴は後回し
+
+#### 共通のLink容量・Node容量
+
+今回のgridシミュレーションでは、Link作成時に `capacity_out` と `capacity_in` を明示指定していない。
+
+**共通条件：**
+
+- `free_flow_speed`：20 m/s
+- `jam_density`：0.2 veh/m
+- `number_of_lanes`：1
+- `reaction_time`：1 s
+- `DELTAN`：1
+- `DELTAT`：`reaction_time`×`DELTAN`=1 s
+
+UXsimの既定式によるLink基礎容量：
+
+- 0.8 veh/s
+
+`capacity_out`・`capacity_in` の未指定時既定値：
+
+- inlink `capacity_out`：基礎容量の2倍、すなわち1.6 veh/s
+- outlink `capacity_in`：基礎容量の2倍、すなわち1.6 veh/s
+
+Nodeについては `flow_capacity` を明示指定していない。したがって：
+
+- Node `flow_capacity`：`None`
+- Node容量は実質的に無制限
+- 今回のシミュレーションではNode容量は実効的な制約にならない
+
+通過判定で実際に使用されるのは、各時点の次の残存容量である。
+
+- `inlink.capacity_out_remain`
+- `outlink.capacity_in_remain`
+- `node.flow_capacity_remain`
+
+Vehicle通過時には `DELTAN=1` が残存容量から差し引かれ、時間更新時に容量が補充される。
+
+この容量設定はFCFS・BATCH・signalizedケースで共通である。
+
 ### フェーズ4-6R設計目標（実装前・設計時点の記録）
 
 （設計時点の目標。実装は上記フェーズ4-6R節・設計メモ **§1H.21** を参照。）
