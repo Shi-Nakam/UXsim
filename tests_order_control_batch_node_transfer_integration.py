@@ -524,7 +524,7 @@ def test_n_exceeded_unbatched_carryover():
     assert "merge" not in vehicles[2].order_control_batch_assignments
 
 
-def test_formation_cutoff_other_direction_unbatched():
+def test_zero_service_reforms_other_direction_after_initial_formation_cutoff():
     W = _build_merge_network("int_cutoff", batch_size=2, t_trigger_level=0)
     merge = W.get_node("merge")
     link1 = W.get_link("link1")
@@ -539,18 +539,81 @@ def test_formation_cutoff_other_direction_unbatched():
     _setup_arrived_vehicle(merge, b1, link2, out, 0, 10.0, 0.2, 200.0, move_remain=5.0)
     _begin_arrived_current_visit_for_test(b1, merge, link2, 0, 10.0, 0.2)
 
-    out.capacity_in_remain = 0
-    merge.transfer()
-    assert len(merge.order_control_batch_service_queue) == 1
-    assert merge.order_control_batch_service_queue[0]["vehicles"] == [a1, a2]
-    assert "merge" not in b1.order_control_batch_assignments
+    a1_visit_id = a1.order_control_current_visit["visit_id"]
+    a2_visit_id = a2.order_control_current_visit["visit_id"]
+    b1_visit_id = b1.order_control_current_visit["visit_id"]
+
+    form_snapshots = []
+    orig_form = merge.form_order_control_batch
+
+    def wrap_form(t_trigger_level, max_batch_size, **kwargs):
+        result = orig_form(
+            t_trigger_level,
+            max_batch_size,
+            blocked_inlinks=kwargs.get("blocked_inlinks"),
+            trigger_snapshot_keys=kwargs.get("trigger_snapshot_keys"),
+        )
+        form_snapshots.append(
+            {
+                "result": result,
+                "b1_assigned": b1.has_order_control_batch_assignment(merge),
+                "queue_vehicle_names": [
+                    [veh.name for veh in unit["vehicles"]]
+                    for unit in merge.order_control_batch_service_queue
+                ],
+            }
+        )
+        return result
+
+    merge.form_order_control_batch = wrap_form
+    try:
+        out.capacity_in_remain = 0
+        merge.transfer()
+    finally:
+        merge.form_order_control_batch = orig_form
+
+    assert len(form_snapshots) == 2
+    assert form_snapshots[0]["result"] == "batch_formed"
+    assert form_snapshots[0]["b1_assigned"] is False
+    assert form_snapshots[0]["queue_vehicle_names"] == [["A1", "A2"]]
+    assert form_snapshots[1]["result"] == "batch_formed"
+    assert form_snapshots[1]["b1_assigned"] is True
+    assert form_snapshots[1]["queue_vehicle_names"] == [["A1", "A2"], ["B1"]]
+
+    assert len(merge.order_control_batch_service_queue) == 2
+    link1_unit = merge.order_control_batch_service_queue[0]
+    link2_unit = merge.order_control_batch_service_queue[1]
+    assert link1_unit["inlink"].name == "link1"
+    assert link2_unit["inlink"].name == "link2"
+    assert [veh.name for veh in link1_unit["vehicles"]] == ["A1", "A2"]
+    assert [veh.name for veh in link2_unit["vehicles"]] == ["B1"]
+    assert link1_unit["visit_ids"] == [a1_visit_id, a2_visit_id]
+    assert link2_unit["visit_ids"] == [b1_visit_id]
+
+    assert a1.has_order_control_batch_assignment(merge)
+    assert a2.has_order_control_batch_assignment(merge)
+    assert b1.has_order_control_batch_assignment(merge)
+    assert a1.order_control_current_visit["visit_id"] == a1_visit_id
+    assert a2.order_control_current_visit["visit_id"] == a2_visit_id
+    assert b1.order_control_current_visit["visit_id"] == b1_visit_id
+
+    batch_ids = [unit["batch_id"] for unit in merge.order_control_batch_service_queue]
+    assert len(set(batch_ids)) == 2
+    queued_vehicles = [
+        veh
+        for unit in merge.order_control_batch_service_queue
+        for veh in unit["vehicles"]
+    ]
+    assert len(queued_vehicles) == len({veh.id for veh in queued_vehicles})
+
+    assert a1.get_order_control_batch_assignment(merge) == link1_unit["batch_id"]
+    assert a2.get_order_control_batch_assignment(merge) == link1_unit["batch_id"]
+    assert b1.get_order_control_batch_assignment(merge) == link2_unit["batch_id"]
+
+    assert a1.link.name == "link1"
+    assert a2.link.name == "link1"
     assert b1.link.name == "link2"
     assert b1 not in merge.incoming_vehicles
-
-    b1.carfollow()
-    b1.update()
-    assert b1 in merge.incoming_vehicles
-    assert "merge" not in b1.order_control_batch_assignments
 
 
 def test_three_direction_simultaneous_arrival():
@@ -573,26 +636,126 @@ def test_three_direction_simultaneous_arrival():
     _setup_arrived_vehicle(merge, b1, link2, out, 0, 10.0, 0.2, 200.0, move_remain=5.0)
     _setup_arrived_vehicle(merge, c1, link3, out, 0, 10.0, 0.3, 200.0, move_remain=5.0)
 
-    form_calls = []
-    orig_form = merge.form_order_control_batch
+    trigger_candidates = merge.get_order_control_batch_trigger_candidates()
+    assert [veh.name for veh in trigger_candidates] == ["A1", "B1", "C1"]
 
-    def wrap_form(t_trigger_level, max_batch_size):
-        form_calls.append(1)
-        return orig_form(t_trigger_level, max_batch_size)
+    a1_visit_id = a1.order_control_current_visit["visit_id"]
+    b1_visit_id = b1.order_control_current_visit["visit_id"]
+    c1_visit_id = c1.order_control_current_visit["visit_id"]
+
+    form_snapshots = []
+    serve_snapshots = []
+    orig_form = merge.form_order_control_batch
+    orig_serve = merge._serve_order_control_batch_service_queue_internal
+
+    def wrap_form(t_trigger_level, max_batch_size, **kwargs):
+        result = orig_form(t_trigger_level, max_batch_size, **kwargs)
+        form_snapshots.append(
+            {
+                "result": result,
+                "assigned": {
+                    veh.name: veh.has_order_control_batch_assignment(merge)
+                    for veh in (a1, b1, c1)
+                },
+                "queue_vehicle_names": [
+                    [veh.name for veh in unit["vehicles"]]
+                    for unit in merge.order_control_batch_service_queue
+                ],
+            }
+        )
+        return result
+
+    def wrap_serve(shared_blocked_inlinks):
+        result = orig_serve(shared_blocked_inlinks)
+        serve_snapshots.append(
+            {
+                "transferred_vehicle_count": result["transferred_vehicle_count"],
+                "clearance_stop": result["clearance_stop"],
+                "arrival_wait_stop": result["arrival_wait_stop"],
+                "blocked_inlinks": {
+                    inlink.name for inlink in result["blocked_inlinks"]
+                },
+            }
+        )
+        return result
 
     merge.form_order_control_batch = wrap_form
+    merge._serve_order_control_batch_service_queue_internal = wrap_serve
     try:
-        assert merge.get_order_control_batch_trigger_candidates()[0] is a1
         out.capacity_in_remain = 0
         merge.transfer()
     finally:
         merge.form_order_control_batch = orig_form
+        merge._serve_order_control_batch_service_queue_internal = orig_serve
 
-    assert form_calls == [1]
-    assert a1.order_control_batch_assignments.get("merge") == 0
-    assert "merge" not in b1.order_control_batch_assignments
-    assert "merge" not in c1.order_control_batch_assignments
+    assert form_snapshots == [
+        {
+            "result": "batch_formed",
+            "assigned": {"A1": True, "B1": False, "C1": False},
+            "queue_vehicle_names": [["A1"]],
+        },
+        {
+            "result": "batch_formed",
+            "assigned": {"A1": True, "B1": True, "C1": False},
+            "queue_vehicle_names": [["A1"], ["B1"]],
+        },
+        {
+            "result": "batch_formed",
+            "assigned": {"A1": True, "B1": True, "C1": True},
+            "queue_vehicle_names": [["A1"], ["B1"], ["C1"]],
+        },
+    ]
+    assert len(form_snapshots) == 3
+
+    assert len(serve_snapshots) == 3
+    assert all(
+        snapshot["transferred_vehicle_count"] == 0 for snapshot in serve_snapshots
+    )
+    assert all(not snapshot["clearance_stop"] for snapshot in serve_snapshots)
+    assert all(not snapshot["arrival_wait_stop"] for snapshot in serve_snapshots)
+    assert serve_snapshots[0]["blocked_inlinks"] == {"link1"}
+    assert serve_snapshots[1]["blocked_inlinks"] == {"link1", "link2"}
+    assert serve_snapshots[2]["blocked_inlinks"] == {"link1", "link2", "link3"}
+
+    assert len(merge.order_control_batch_service_queue) == 3
+    link1_unit, link2_unit, link3_unit = merge.order_control_batch_service_queue
+    assert link1_unit["inlink"].name == "link1"
+    assert link2_unit["inlink"].name == "link2"
+    assert link3_unit["inlink"].name == "link3"
+    assert [veh.name for veh in link1_unit["vehicles"]] == ["A1"]
+    assert [veh.name for veh in link2_unit["vehicles"]] == ["B1"]
+    assert [veh.name for veh in link3_unit["vehicles"]] == ["C1"]
+    assert link1_unit["visit_ids"] == [a1_visit_id]
+    assert link2_unit["visit_ids"] == [b1_visit_id]
+    assert link3_unit["visit_ids"] == [c1_visit_id]
+
+    assert a1.has_order_control_batch_assignment(merge)
+    assert b1.has_order_control_batch_assignment(merge)
+    assert c1.has_order_control_batch_assignment(merge)
+    assert a1.order_control_current_visit["visit_id"] == a1_visit_id
+    assert b1.order_control_current_visit["visit_id"] == b1_visit_id
+    assert c1.order_control_current_visit["visit_id"] == c1_visit_id
+
+    batch_ids = [unit["batch_id"] for unit in merge.order_control_batch_service_queue]
+    assert batch_ids == [0, 1, 2]
+    assert len(set(batch_ids)) == 3
+
+    queued_vehicles = [
+        veh
+        for unit in merge.order_control_batch_service_queue
+        for veh in unit["vehicles"]
+    ]
+    assert len(queued_vehicles) == len({veh.id for veh in queued_vehicles})
+
+    assert a1.get_order_control_batch_assignment(merge) == link1_unit["batch_id"]
+    assert b1.get_order_control_batch_assignment(merge) == link2_unit["batch_id"]
+    assert c1.get_order_control_batch_assignment(merge) == link3_unit["batch_id"]
+
+    assert a1.link.name == "link1"
+    assert b1.link.name == "link2"
     assert c1.link.name == "link3"
+    assert a1 not in merge.incoming_vehicles
+    assert b1 not in merge.incoming_vehicles
     assert c1 not in merge.incoming_vehicles
 
 
@@ -963,7 +1126,7 @@ TESTS = [
     test_service_queue_stop_reregistration,
     test_t_trigger_out_of_range_unbatched_carryover,
     test_n_exceeded_unbatched_carryover,
-    test_formation_cutoff_other_direction_unbatched,
+    test_zero_service_reforms_other_direction_after_initial_formation_cutoff,
     test_three_direction_simultaneous_arrival,
     test_a1_b1_two_direction_level0_level1_trigger,
     test_n1_batch_vs_fcfs_equivalence,

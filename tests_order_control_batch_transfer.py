@@ -143,26 +143,62 @@ def _install_wrappers(merge):
         "calls": [],
         "orig_form": merge.form_order_control_batch,
         "orig_serve": merge.serve_order_control_batch_service_queue,
+        "orig_serve_internal": merge._serve_order_control_batch_service_queue_internal,
     }
 
-    def wrap_form(t_trigger_level, max_batch_size):
+    def wrap_form(t_trigger_level, max_batch_size, **kwargs):
+        blocked_inlinks = kwargs.get("blocked_inlinks")
+        trigger_snapshot_keys = kwargs.get("trigger_snapshot_keys")
         state["calls"].append(
-            ("form", t_trigger_level, max_batch_size)
+            (
+                "form",
+                t_trigger_level,
+                max_batch_size,
+                blocked_inlinks,
+                trigger_snapshot_keys,
+            )
         )
-        return state["orig_form"](t_trigger_level, max_batch_size)
+        return state["orig_form"](
+            t_trigger_level,
+            max_batch_size,
+            **kwargs,
+        )
 
     def wrap_serve():
         state["calls"].append(("serve",))
         return state["orig_serve"]()
 
+    def wrap_serve_internal(shared_blocked_inlinks):
+        state["calls"].append(("serve",))
+        return state["orig_serve_internal"](shared_blocked_inlinks)
+
     merge.form_order_control_batch = wrap_form
     merge.serve_order_control_batch_service_queue = wrap_serve
+    merge._serve_order_control_batch_service_queue_internal = wrap_serve_internal
     return state
 
 
 def _restore_wrappers(merge, state):
     merge.form_order_control_batch = state["orig_form"]
     merge.serve_order_control_batch_service_queue = state["orig_serve"]
+    merge._serve_order_control_batch_service_queue_internal = state[
+        "orig_serve_internal"
+    ]
+
+
+def _internal_serve_result(
+    transferred_vehicle_count,
+    *,
+    clearance_stop=False,
+    arrival_wait_stop=False,
+    blocked_inlinks=None,
+):
+    return {
+        "transferred_vehicle_count": transferred_vehicle_count,
+        "clearance_stop": clearance_stop,
+        "arrival_wait_stop": arrival_wait_stop,
+        "blocked_inlinks": set() if blocked_inlinks is None else set(blocked_inlinks),
+    }
 
 
 def test_call_order_count_and_arguments():
@@ -172,6 +208,7 @@ def test_call_order_count_and_arguments():
     out = W.get_link("out")
     veh = _make_vehicle(W, "orig1", "A1")
     _setup_arrived_vehicle(merge, veh, link1, out, 0, 10.0, 0.1, 200.0, move_remain=5.0)
+    expected_snapshot_key = (veh.id, veh.order_control_current_visit["visit_id"])
 
     state = _install_wrappers(merge)
     try:
@@ -179,49 +216,112 @@ def test_call_order_count_and_arguments():
     finally:
         _restore_wrappers(merge, state)
 
-    assert state["calls"] == [("form", 0, 3), ("serve",)]
+    assert len(state["calls"]) == 2
+    form_call = state["calls"][0]
+    assert form_call[0] == "form"
+    assert form_call[1] == 0
+    assert form_call[2] == 3
+    blocked_inlinks = form_call[3]
+    trigger_snapshot_keys = form_call[4]
+    assert isinstance(blocked_inlinks, set)
+    assert blocked_inlinks == set()
+    assert isinstance(trigger_snapshot_keys, set)
+    assert expected_snapshot_key in trigger_snapshot_keys
+    assert all(
+        isinstance(key, tuple)
+        and len(key) == 2
+        and isinstance(key[0], int)
+        and not isinstance(key[0], bool)
+        and isinstance(key[1], int)
+        and not isinstance(key[1], bool)
+        for key in trigger_snapshot_keys
+    )
+    assert state["calls"][1] == ("serve",)
     assert result["formation_result"] == "batch_formed"
     assert result["transferred_vehicle_count"] == 1
 
 
-def test_serve_called_once_even_when_zero_transfers():
-    W = _build_network("bt_serve_once")
+def test_serve_not_called_when_no_trigger_and_service_queue_empty():
+    W = _build_network("bt_serve_empty_queue")
     merge = W.get_node("merge")
-    serve_calls = []
-    orig_serve = merge.serve_order_control_batch_service_queue
 
-    def wrap_serve():
-        serve_calls.append(True)
-        return 0
+    assert merge.get_order_control_batch_trigger_candidates() == []
+    assert len(merge.order_control_batch_service_queue) == 0
 
-    merge.serve_order_control_batch_service_queue = wrap_serve
+    form_calls = []
+    internal_serve_calls = []
+    public_serve_calls = []
+    orig_form = merge.form_order_control_batch
+    orig_internal = merge._serve_order_control_batch_service_queue_internal
+    orig_public = merge.serve_order_control_batch_service_queue
+
+    def wrap_form(t_trigger_level, max_batch_size, **kwargs):
+        form_calls.append(True)
+        return orig_form(t_trigger_level, max_batch_size, **kwargs)
+
+    def wrap_internal(shared_blocked_inlinks):
+        internal_serve_calls.append(True)
+        return orig_internal(shared_blocked_inlinks)
+
+    def wrap_public():
+        public_serve_calls.append(True)
+        return orig_public()
+
+    merge.form_order_control_batch = wrap_form
+    merge._serve_order_control_batch_service_queue_internal = wrap_internal
+    merge.serve_order_control_batch_service_queue = wrap_public
     try:
         result = merge.transfer_batch()
     finally:
-        merge.serve_order_control_batch_service_queue = orig_serve
+        merge.form_order_control_batch = orig_form
+        merge._serve_order_control_batch_service_queue_internal = orig_internal
+        merge.serve_order_control_batch_service_queue = orig_public
 
-    assert len(serve_calls) == 1
+    assert len(form_calls) == 0
+    assert len(internal_serve_calls) == 0
+    assert len(public_serve_calls) == 0
     assert result == {
         "formation_result": "no_trigger_candidate",
         "transferred_vehicle_count": 0,
     }
+    assert len(merge.order_control_batch_service_queue) == 0
 
 
 def test_return_no_trigger_zero_transfer():
     W = _build_network("bt_ret_nt0")
     merge = W.get_node("merge")
+    link1 = W.get_link("link1")
+    out = W.get_link("out")
+    batched = _make_vehicle(W, "orig1", "A1")
+    _setup_arrived_vehicle(merge, batched, link1, out, 0, 10.0, 0.1, 200.0, move_remain=5.0)
+    _register_service_unit(merge, 0, link1, [batched])
+
+    assert merge.get_order_control_batch_trigger_candidates() == []
+    assert len(merge.order_control_batch_service_queue) == 1
+
+    form_calls = []
+    internal_serve_calls = []
     orig_form = merge.form_order_control_batch
-    orig_serve = merge.serve_order_control_batch_service_queue
-    merge.form_order_control_batch = (
-        lambda t_trigger_level, max_batch_size: "no_trigger_candidate"
-    )
-    merge.serve_order_control_batch_service_queue = lambda: 0
+    orig_internal = merge._serve_order_control_batch_service_queue_internal
+
+    def wrap_form(t_trigger_level, max_batch_size, **kwargs):
+        form_calls.append(True)
+        return orig_form(t_trigger_level, max_batch_size, **kwargs)
+
+    def wrap_internal(shared_blocked_inlinks):
+        internal_serve_calls.append(True)
+        return _internal_serve_result(0, blocked_inlinks=shared_blocked_inlinks)
+
+    merge.form_order_control_batch = wrap_form
+    merge._serve_order_control_batch_service_queue_internal = wrap_internal
     try:
         result = merge.transfer_batch()
     finally:
         merge.form_order_control_batch = orig_form
-        merge.serve_order_control_batch_service_queue = orig_serve
+        merge._serve_order_control_batch_service_queue_internal = orig_internal
 
+    assert len(form_calls) == 0
+    assert len(internal_serve_calls) == 1
     assert result == {
         "formation_result": "no_trigger_candidate",
         "transferred_vehicle_count": 0,
@@ -231,18 +331,39 @@ def test_return_no_trigger_zero_transfer():
 def test_return_no_trigger_nonzero_transfer():
     W = _build_network("bt_ret_nt2")
     merge = W.get_node("merge")
+    link1 = W.get_link("link1")
+    out = W.get_link("out")
+    batched = _make_vehicle(W, "orig1", "A1")
+    _setup_arrived_vehicle(merge, batched, link1, out, 0, 10.0, 0.1, 200.0, move_remain=5.0)
+    _register_service_unit(merge, 0, link1, [batched])
+
+    assert merge.get_order_control_batch_trigger_candidates() == []
+    assert len(merge.order_control_batch_service_queue) == 1
+
+    form_calls = []
+    internal_serve_calls = []
     orig_form = merge.form_order_control_batch
-    orig_serve = merge.serve_order_control_batch_service_queue
-    merge.form_order_control_batch = (
-        lambda t_trigger_level, max_batch_size: "no_trigger_candidate"
-    )
-    merge.serve_order_control_batch_service_queue = lambda: 2
+    orig_internal = merge._serve_order_control_batch_service_queue_internal
+
+    def wrap_form(t_trigger_level, max_batch_size, **kwargs):
+        form_calls.append(True)
+        return orig_form(t_trigger_level, max_batch_size, **kwargs)
+
+    def wrap_internal(shared_blocked_inlinks):
+        internal_serve_calls.append(shared_blocked_inlinks)
+        return _internal_serve_result(2, blocked_inlinks=shared_blocked_inlinks)
+
+    merge.form_order_control_batch = wrap_form
+    merge._serve_order_control_batch_service_queue_internal = wrap_internal
     try:
         result = merge.transfer_batch()
     finally:
         merge.form_order_control_batch = orig_form
-        merge.serve_order_control_batch_service_queue = orig_serve
+        merge._serve_order_control_batch_service_queue_internal = orig_internal
 
+    assert len(form_calls) == 0
+    assert len(internal_serve_calls) == 1
+    assert isinstance(internal_serve_calls[0], set)
     assert result == {
         "formation_result": "no_trigger_candidate",
         "transferred_vehicle_count": 2,
@@ -252,18 +373,25 @@ def test_return_no_trigger_nonzero_transfer():
 def test_return_batch_formed_zero_transfer():
     W = _build_network("bt_ret_bf0")
     merge = W.get_node("merge")
-    orig_form = merge.form_order_control_batch
-    orig_serve = merge.serve_order_control_batch_service_queue
-    merge.form_order_control_batch = (
-        lambda t_trigger_level, max_batch_size: "batch_formed"
-    )
-    merge.serve_order_control_batch_service_queue = lambda: 0
+    link1 = W.get_link("link1")
+    out = W.get_link("out")
+    veh = _make_vehicle(W, "orig1", "A1")
+    _setup_arrived_vehicle(merge, veh, link1, out, 0, 10.0, 0.1, 200.0, move_remain=5.0)
+
+    internal_serve_calls = []
+    orig_internal = merge._serve_order_control_batch_service_queue_internal
+
+    def wrap_internal(shared_blocked_inlinks):
+        internal_serve_calls.append(True)
+        return _internal_serve_result(0, blocked_inlinks=shared_blocked_inlinks)
+
+    merge._serve_order_control_batch_service_queue_internal = wrap_internal
     try:
         result = merge.transfer_batch()
     finally:
-        merge.form_order_control_batch = orig_form
-        merge.serve_order_control_batch_service_queue = orig_serve
+        merge._serve_order_control_batch_service_queue_internal = orig_internal
 
+    assert len(internal_serve_calls) == 1
     assert result == {
         "formation_result": "batch_formed",
         "transferred_vehicle_count": 0,
@@ -273,72 +401,124 @@ def test_return_batch_formed_zero_transfer():
 def test_return_batch_formed_nonzero_transfer():
     W = _build_network("bt_ret_bf3")
     merge = W.get_node("merge")
-    orig_form = merge.form_order_control_batch
-    orig_serve = merge.serve_order_control_batch_service_queue
-    merge.form_order_control_batch = (
-        lambda t_trigger_level, max_batch_size: "batch_formed"
-    )
-    merge.serve_order_control_batch_service_queue = lambda: 3
+    link1 = W.get_link("link1")
+    out = W.get_link("out")
+    veh = _make_vehicle(W, "orig1", "A1")
+    _setup_arrived_vehicle(merge, veh, link1, out, 0, 10.0, 0.1, 200.0, move_remain=5.0)
+
+    internal_serve_calls = []
+    orig_internal = merge._serve_order_control_batch_service_queue_internal
+
+    def wrap_internal(shared_blocked_inlinks):
+        internal_serve_calls.append(True)
+        return _internal_serve_result(3, blocked_inlinks=shared_blocked_inlinks)
+
+    merge._serve_order_control_batch_service_queue_internal = wrap_internal
     try:
         result = merge.transfer_batch()
     finally:
-        merge.form_order_control_batch = orig_form
-        merge.serve_order_control_batch_service_queue = orig_serve
+        merge._serve_order_control_batch_service_queue_internal = orig_internal
 
+    assert len(internal_serve_calls) == 1
     assert result == {
         "formation_result": "batch_formed",
         "transferred_vehicle_count": 3,
     }
 
 
+def test_serve_wrapper_returns_internal_transferred_vehicle_count():
+    W = _build_network("bt_serve_wrapper")
+    merge = W.get_node("merge")
+    link1 = W.get_link("link1")
+    out = W.get_link("out")
+    veh = _make_vehicle(W, "orig1", "A1")
+    _setup_arrived_vehicle(merge, veh, link1, out, 0, 10.0, 0.1, 200.0, move_remain=5.0)
+    _register_service_unit(merge, 0, link1, [veh])
+
+    captured_details = {}
+    orig_internal = merge._serve_order_control_batch_service_queue_internal
+
+    def wrap_internal(shared_blocked_inlinks):
+        details = _internal_serve_result(
+            2,
+            clearance_stop=True,
+            blocked_inlinks={link1},
+        )
+        captured_details["result"] = details
+        return details
+
+    merge._serve_order_control_batch_service_queue_internal = wrap_internal
+    try:
+        count = merge.serve_order_control_batch_service_queue()
+    finally:
+        merge._serve_order_control_batch_service_queue_internal = orig_internal
+
+    assert count == 2
+    assert isinstance(count, int)
+    assert captured_details["result"]["transferred_vehicle_count"] == 2
+    assert captured_details["result"]["clearance_stop"] is True
+    assert link1 in captured_details["result"]["blocked_inlinks"]
+
+
 def test_serve_called_when_no_trigger_candidate():
     W = _build_network("bt_serve_nt")
     merge = W.get_node("merge")
-    serve_calls = []
-    orig_form = merge.form_order_control_batch
-    orig_serve = merge.serve_order_control_batch_service_queue
+    link1 = W.get_link("link1")
+    out = W.get_link("out")
+    batched = _make_vehicle(W, "orig1", "A1")
+    _setup_arrived_vehicle(merge, batched, link1, out, 0, 10.0, 0.1, 200.0, move_remain=5.0)
+    _register_service_unit(merge, 0, link1, [batched])
 
-    def wrap_form(t_trigger_level, max_batch_size):
+    assert merge.get_order_control_batch_trigger_candidates() == []
+    assert len(merge.order_control_batch_service_queue) == 1
+
+    form_calls = []
+    internal_serve_calls = []
+    orig_form = merge.form_order_control_batch
+    orig_internal = merge._serve_order_control_batch_service_queue_internal
+
+    def wrap_form(t_trigger_level, max_batch_size, **kwargs):
+        form_calls.append(True)
         return "no_trigger_candidate"
 
-    def wrap_serve():
-        serve_calls.append(True)
-        return 0
+    def wrap_internal(shared_blocked_inlinks):
+        internal_serve_calls.append(True)
+        return _internal_serve_result(0, blocked_inlinks=shared_blocked_inlinks)
 
     merge.form_order_control_batch = wrap_form
-    merge.serve_order_control_batch_service_queue = wrap_serve
+    merge._serve_order_control_batch_service_queue_internal = wrap_internal
     try:
         merge.transfer_batch()
     finally:
         merge.form_order_control_batch = orig_form
-        merge.serve_order_control_batch_service_queue = orig_serve
+        merge._serve_order_control_batch_service_queue_internal = orig_internal
 
-    assert len(serve_calls) == 1
+    assert len(form_calls) == 0
+    assert len(internal_serve_calls) == 1
 
 
 def test_serve_called_when_batch_formed():
     W = _build_network("bt_serve_bf")
     merge = W.get_node("merge")
-    serve_calls = []
-    orig_form = merge.form_order_control_batch
-    orig_serve = merge.serve_order_control_batch_service_queue
+    link1 = W.get_link("link1")
+    out = W.get_link("out")
+    veh = _make_vehicle(W, "orig1", "A1")
+    _setup_arrived_vehicle(merge, veh, link1, out, 0, 10.0, 0.1, 200.0, move_remain=5.0)
 
-    def wrap_form(t_trigger_level, max_batch_size):
-        return "batch_formed"
+    internal_serve_calls = []
+    orig_internal = merge._serve_order_control_batch_service_queue_internal
 
-    def wrap_serve():
-        serve_calls.append(True)
-        return 0
+    def wrap_internal(shared_blocked_inlinks):
+        internal_serve_calls.append(True)
+        return orig_internal(shared_blocked_inlinks)
 
-    merge.form_order_control_batch = wrap_form
-    merge.serve_order_control_batch_service_queue = wrap_serve
+    merge._serve_order_control_batch_service_queue_internal = wrap_internal
     try:
         merge.transfer_batch()
     finally:
-        merge.form_order_control_batch = orig_form
-        merge.serve_order_control_batch_service_queue = orig_serve
+        merge._serve_order_control_batch_service_queue_internal = orig_internal
 
-    assert len(serve_calls) == 1
+    assert len(internal_serve_calls) == 1
 
 
 def test_no_trigger_transfers_from_existing_queue():
@@ -425,19 +605,19 @@ def test_formation_exception_no_serve_no_clear():
     _setup_arrived_vehicle(merge, veh, link1, out, 0, 10.0, 0.1, 200.0)
     before_incoming = list(merge.incoming_vehicles)
     expected_error = ValueError("formation test")
-    serve_calls = []
+    internal_serve_calls = []
     orig_form = merge.form_order_control_batch
-    orig_serve = merge.serve_order_control_batch_service_queue
+    orig_internal = merge._serve_order_control_batch_service_queue_internal
 
-    def wrap_form(t_trigger_level, max_batch_size):
+    def wrap_form(t_trigger_level, max_batch_size, **kwargs):
         raise expected_error
 
-    def wrap_serve():
-        serve_calls.append(True)
-        return 0
+    def wrap_internal(shared_blocked_inlinks):
+        internal_serve_calls.append(True)
+        return _internal_serve_result(0, blocked_inlinks=shared_blocked_inlinks)
 
     merge.form_order_control_batch = wrap_form
-    merge.serve_order_control_batch_service_queue = wrap_serve
+    merge._serve_order_control_batch_service_queue_internal = wrap_internal
     try:
         try:
             merge.transfer_batch()
@@ -446,9 +626,9 @@ def test_formation_exception_no_serve_no_clear():
             assert exc is expected_error
     finally:
         merge.form_order_control_batch = orig_form
-        merge.serve_order_control_batch_service_queue = orig_serve
+        merge._serve_order_control_batch_service_queue_internal = orig_internal
 
-    assert serve_calls == []
+    assert internal_serve_calls == []
     assert merge.incoming_vehicles == before_incoming
 
 
@@ -461,12 +641,12 @@ def test_serve_exception_no_clear():
     _setup_arrived_vehicle(merge, veh, link1, out, 0, 10.0, 0.1, 200.0)
     before_incoming = list(merge.incoming_vehicles)
     expected_error = RuntimeError("serve test")
-    orig_serve = merge.serve_order_control_batch_service_queue
+    orig_internal = merge._serve_order_control_batch_service_queue_internal
 
-    def wrap_serve():
+    def wrap_internal(shared_blocked_inlinks):
         raise expected_error
 
-    merge.serve_order_control_batch_service_queue = wrap_serve
+    merge._serve_order_control_batch_service_queue_internal = wrap_internal
     try:
         try:
             merge.transfer_batch()
@@ -474,7 +654,7 @@ def test_serve_exception_no_clear():
         except RuntimeError as exc:
             assert exc is expected_error
     finally:
-        merge.serve_order_control_batch_service_queue = orig_serve
+        merge._serve_order_control_batch_service_queue_internal = orig_internal
 
     assert merge.incoming_vehicles == before_incoming
 
@@ -615,11 +795,12 @@ def test_existing_queue_plus_new_formation():
 
 TESTS = [
     test_call_order_count_and_arguments,
-    test_serve_called_once_even_when_zero_transfers,
+    test_serve_not_called_when_no_trigger_and_service_queue_empty,
     test_return_no_trigger_zero_transfer,
     test_return_no_trigger_nonzero_transfer,
     test_return_batch_formed_zero_transfer,
     test_return_batch_formed_nonzero_transfer,
+    test_serve_wrapper_returns_internal_transferred_vehicle_count,
     test_serve_called_when_no_trigger_candidate,
     test_serve_called_when_batch_formed,
     test_no_trigger_transfers_from_existing_queue,

@@ -1137,7 +1137,93 @@ class Node:
             s.order_control_batch_next_id = initial_next_id
             raise
 
-    def form_order_control_batch(s, t_trigger_level, max_batch_size):
+    def _build_batch_trigger_snapshot_keys(s):
+        snapshot_keys = set()
+        for veh in s.incoming_vehicles:
+            if veh.route_next_link is None:
+                continue
+            if veh.has_order_control_batch_assignment(s):
+                continue
+            current_visit = veh.order_control_current_visit
+            if current_visit is None:
+                continue
+            if current_visit["node"] is not s:
+                continue
+            if current_visit["inlink"] is not veh.link:
+                continue
+            snapshot_keys.add((veh.id, current_visit["visit_id"]))
+        return snapshot_keys
+
+    def _filter_batch_trigger_candidates_for_reformation(
+        s, trigger_candidates, trigger_snapshot_keys=None, blocked_inlinks=None
+    ):
+        filtered = []
+        for veh in trigger_candidates:
+            current_visit = veh.order_control_current_visit
+            if trigger_snapshot_keys is not None:
+                if current_visit is None:
+                    continue
+                snapshot_key = (veh.id, current_visit["visit_id"])
+                if snapshot_key not in trigger_snapshot_keys:
+                    continue
+            if blocked_inlinks and veh.link in blocked_inlinks:
+                continue
+            filtered.append(veh)
+        return filtered
+
+    def _get_reformation_eligible_trigger_candidates(
+        s, trigger_snapshot_keys, blocked_inlinks
+    ):
+        return s._filter_batch_trigger_candidates_for_reformation(
+            s.get_order_control_batch_trigger_candidates(),
+            trigger_snapshot_keys,
+            blocked_inlinks,
+        )
+
+    def _batch_reformation_clearance_stop(s, trigger_snapshot_keys, blocked_inlinks):
+        eligible = s._get_reformation_eligible_trigger_candidates(
+            trigger_snapshot_keys, blocked_inlinks
+        )
+        if not eligible:
+            return False
+        trigger_vehicle = eligible[0]
+        current_inlink = trigger_vehicle.link
+        if current_inlink is None:
+            return False
+        clearance_required = (
+            s.last_order_control_inlink is not None
+            and current_inlink != s.last_order_control_inlink
+        )
+        if not clearance_required:
+            return False
+        if s.last_order_control_entry_timestep is None:
+            return True
+        return not (
+            s.W.T - s.last_order_control_entry_timestep
+            > s.order_control_clearance_timesteps
+        )
+
+    def _count_snapshot_batch_assignments(s, trigger_snapshot_keys):
+        assignment_count = 0
+        for veh in s.incoming_vehicles:
+            current_visit = veh.order_control_current_visit
+            if current_visit is None:
+                continue
+            snapshot_key = (veh.id, current_visit["visit_id"])
+            if snapshot_key not in trigger_snapshot_keys:
+                continue
+            if veh.has_order_control_batch_assignment(s):
+                assignment_count += 1
+        return assignment_count
+
+    def form_order_control_batch(
+        s,
+        t_trigger_level,
+        max_batch_size,
+        *,
+        blocked_inlinks=None,
+        trigger_snapshot_keys=None,
+    ):
         """
         Run one BATCH formation and formal registration cycle at this node.
 
@@ -1182,6 +1268,12 @@ class Node:
             )
 
         trigger_candidates = s.get_order_control_batch_trigger_candidates()
+        if blocked_inlinks is not None or trigger_snapshot_keys is not None:
+            trigger_candidates = s._filter_batch_trigger_candidates_for_reformation(
+                trigger_candidates,
+                trigger_snapshot_keys,
+                blocked_inlinks,
+            )
         if not trigger_candidates:
             return "no_trigger_candidate"
 
@@ -1220,45 +1312,14 @@ class Node:
         s.register_order_control_batch_service_units(selected_groups_by_inlink)
         return "batch_formed"
 
-    def serve_order_control_batch_service_queue(s) -> int:
+    def _serve_order_control_batch_service_queue_internal(s, shared_blocked_inlinks):
         """
-        Transfer vehicles through registered BATCH service units at this node.
+        Internal BATCH service-queue transfer with detailed results.
 
-        Processes the formal ``order_control_batch_service_queue`` in order using a
-        working list snapshot. Returns the number of Vehicle objects that completed an
-        inlink-to-outlink transfer during this call.
-
-        If the head vehicle of a service unit has not yet arrived at the node
-        (``vehicle not in incoming_vehicles``), no vehicle is transferred, later
-        service units are not evaluated, and the unfinished unit remains in the queue.
-
-        If clearance is required but not yet satisfied, the method waits in the same
-        way: no transfer, no later service units, queue order preserved.
-
-        When no vehicle has been transferred yet in this call and the head vehicle
-        has arrived and clearance is satisfied but downstream space and capacity
-        conditions are not met, the blocked service unit stays at its original queue
-        position, same-inlink later service units are skipped, and different-inlink
-        later service units are evaluated in order using the same arrival, clearance,
-        and capacity checks.
-
-        After the first vehicle transfers in this call, vehicles in the same inlink
-        direction are processed FIFO for as long as arrival, clearance, and downstream
-        space and capacity allow. Consecutive same-inlink service units are processed
-        in the same timestep without a fixed count limit; the total vehicles served
-        across multiple units may exceed ``batch_size``.
-
-        If a later vehicle cannot transfer after one or more vehicles have already
-        transferred in this call, processing stops for the entire timestep because
-        same-inlink followers cannot overtake and different-inlink units cannot satisfy
-        direction-change clearance in the same timestep.
-
-        Reaching a different-inlink service unit after at least one transfer in this
-        call also ends processing for the timestep.
-
-        Completed service units (empty ``vehicles`` lists) are removed from the formal
-        queue when the method returns, including when processing ends early. Unfinished
-        units keep their original relative order.
+        ``shared_blocked_inlinks`` is updated in place when a service unit is
+        blocked by non-clearance transfer conditions with zero transfers so far in
+        this call. The same set is shared across multiple serve calls within one
+        ``transfer_batch()`` invocation.
         """
         if (s.last_order_control_inlink is None) != (
             s.last_order_control_entry_timestep is None
@@ -1271,11 +1332,16 @@ class Node:
             )
 
         if not s.order_control_batch_service_queue:
-            return 0
+            return {
+                "transferred_vehicle_count": 0,
+                "clearance_stop": False,
+                "arrival_wait_stop": False,
+                "blocked_inlinks": set(shared_blocked_inlinks),
+            }
 
         service_units_to_check = list(s.order_control_batch_service_queue)
         transferred_vehicle_count = 0
-        blocked_inlinks = set()
+        clearance_stop = False
         active_inlink = None
 
         def _finalize_service_queue():
@@ -1472,7 +1538,7 @@ class Node:
         for service_unit in service_units_to_check:
             inlink = service_unit["inlink"]
 
-            if transferred_vehicle_count == 0 and inlink in blocked_inlinks:
+            if transferred_vehicle_count == 0 and inlink in shared_blocked_inlinks:
                 continue
 
             if (
@@ -1489,21 +1555,37 @@ class Node:
 
                 if veh not in s.incoming_vehicles:
                     _finalize_service_queue()
-                    return transferred_vehicle_count
+                    return {
+                        "transferred_vehicle_count": transferred_vehicle_count,
+                        "clearance_stop": False,
+                        "arrival_wait_stop": True,
+                        "blocked_inlinks": set(shared_blocked_inlinks),
+                    }
 
                 _validate_service_unit_arrived_vehicle(veh, service_unit)
                 outlink = veh.route_next_link
 
                 if not _clearance_satisfied(inlink):
+                    clearance_stop = True
                     _finalize_service_queue()
-                    return transferred_vehicle_count
+                    return {
+                        "transferred_vehicle_count": transferred_vehicle_count,
+                        "clearance_stop": clearance_stop,
+                        "arrival_wait_stop": False,
+                        "blocked_inlinks": set(shared_blocked_inlinks),
+                    }
 
                 if not _can_transfer(veh, inlink, outlink):
                     if transferred_vehicle_count == 0:
-                        blocked_inlinks.add(inlink)
+                        shared_blocked_inlinks.add(inlink)
                         break
                     _finalize_service_queue()
-                    return transferred_vehicle_count
+                    return {
+                        "transferred_vehicle_count": transferred_vehicle_count,
+                        "clearance_stop": clearance_stop,
+                        "arrival_wait_stop": False,
+                        "blocked_inlinks": set(shared_blocked_inlinks),
+                    }
 
                 _transfer_vehicle(veh, inlink, outlink)
                 service_unit["vehicles"].pop(0)
@@ -1512,28 +1594,152 @@ class Node:
                 active_inlink = inlink
 
         _finalize_service_queue()
-        return transferred_vehicle_count
+        return {
+            "transferred_vehicle_count": transferred_vehicle_count,
+            "clearance_stop": clearance_stop,
+            "arrival_wait_stop": False,
+            "blocked_inlinks": set(shared_blocked_inlinks),
+        }
+
+    def serve_order_control_batch_service_queue(s) -> int:
+        """
+        Transfer vehicles through registered BATCH service units at this node.
+
+        Processes the formal ``order_control_batch_service_queue`` in order using a
+        working list snapshot. Returns the number of Vehicle objects that completed an
+        inlink-to-outlink transfer during this call.
+
+        If the head vehicle of a service unit has not yet arrived at the node
+        (``vehicle not in incoming_vehicles``), no vehicle is transferred, later
+        service units are not evaluated, and the unfinished unit remains in the queue.
+
+        If clearance is required but not yet satisfied, the method waits in the same
+        way: no transfer, no later service units, queue order preserved.
+
+        When no vehicle has been transferred yet in this call and the head vehicle
+        has arrived and clearance is satisfied but downstream space and capacity
+        conditions are not met, the blocked service unit stays at its original queue
+        position, same-inlink later service units are skipped, and different-inlink
+        later service units are evaluated in order using the same arrival, clearance,
+        and capacity checks.
+
+        After the first vehicle transfers in this call, vehicles in the same inlink
+        direction are processed FIFO for as long as arrival, clearance, and downstream
+        space and capacity allow. Consecutive same-inlink service units are processed
+        in the same timestep without a fixed count limit; the total vehicles served
+        across multiple units may exceed ``batch_size``.
+
+        If a later vehicle cannot transfer after one or more vehicles have already
+        transferred in this call, processing stops for the entire timestep because
+        same-inlink followers cannot overtake and different-inlink units cannot satisfy
+        direction-change clearance in the same timestep.
+
+        Reaching a different-inlink service unit after at least one transfer in this
+        call also ends processing for the timestep.
+
+        Completed service units (empty ``vehicles`` lists) are removed from the formal
+        queue when the method returns, including when processing ends early. Unfinished
+        units keep their original relative order.
+        """
+        serve_details = s._serve_order_control_batch_service_queue_internal(set())
+        return serve_details["transferred_vehicle_count"]
 
     def transfer_batch(s) -> dict:
         """
-        Run one BATCH formation attempt and one service-queue transfer at this node.
+        Run BATCH formation and service-queue transfer at this node.
 
-        Calls ``form_order_control_batch()`` exactly once using this node's
-        ``order_control_batch_t_trigger_level`` and ``batch_size``, then calls
-        ``serve_order_control_batch_service_queue()`` exactly once regardless of
-        whether a new BATCH was formed. On normal completion, clears
-        ``incoming_vehicles``. If either step raises, ``incoming_vehicles`` is left
-        unchanged and the exception propagates unchanged.
+        Performs one or more formation-and-serve cycles within a single call when
+        service produces zero transfers, clearance does not stop evaluation, and
+        unassigned trigger candidates from the start-of-call snapshot remain on
+        non-blocked inlinks. On normal completion, clears ``incoming_vehicles``.
+        If either step raises, ``incoming_vehicles`` is left unchanged and the
+        exception propagates unchanged.
 
         Returns a dict with ``formation_result`` (``"batch_formed"`` or
-        ``"no_trigger_candidate"``) and ``transferred_vehicle_count`` (the number of
-        vehicles that completed an inlink-to-outlink transfer in this call).
+        ``"no_trigger_candidate"``) and ``transferred_vehicle_count`` (the total
+        number of vehicles that completed an inlink-to-outlink transfer in this call).
         """
-        formation_result = s.form_order_control_batch(
-            t_trigger_level=s.order_control_batch_t_trigger_level,
-            max_batch_size=s.batch_size,
-        )
-        transferred_vehicle_count = s.serve_order_control_batch_service_queue()
+        trigger_snapshot_keys = s._build_batch_trigger_snapshot_keys()
+        blocked_inlinks = set()
+        max_form_iterations = len(trigger_snapshot_keys)
+        form_iterations = 0
+        transferred_vehicle_count = 0
+        formation_result = "no_trigger_candidate"
+        served_this_call = False
+
+        while True:
+            eligible_for_form = bool(
+                s._get_reformation_eligible_trigger_candidates(
+                    trigger_snapshot_keys, blocked_inlinks
+                )
+            )
+            clearance_blocks_additional_form = served_this_call and (
+                s._batch_reformation_clearance_stop(
+                    trigger_snapshot_keys, blocked_inlinks
+                )
+            )
+            head_arrival_wait = False
+            if s.order_control_batch_service_queue:
+                head_vehicles = s.order_control_batch_service_queue[0]["vehicles"]
+                if head_vehicles and head_vehicles[0] not in s.incoming_vehicles:
+                    head_arrival_wait = True
+            should_form = (
+                eligible_for_form
+                and form_iterations < max_form_iterations
+                and not clearance_blocks_additional_form
+                and not head_arrival_wait
+            )
+
+            if should_form:
+                assignments_before = s._count_snapshot_batch_assignments(
+                    trigger_snapshot_keys
+                )
+                formation_result = s.form_order_control_batch(
+                    t_trigger_level=s.order_control_batch_t_trigger_level,
+                    max_batch_size=s.batch_size,
+                    blocked_inlinks=blocked_inlinks,
+                    trigger_snapshot_keys=trigger_snapshot_keys,
+                )
+                form_iterations += 1
+                if formation_result == "no_trigger_candidate":
+                    break
+                assignments_after = s._count_snapshot_batch_assignments(
+                    trigger_snapshot_keys
+                )
+                if assignments_after <= assignments_before:
+                    raise ValueError(
+                        f"Node {s.name}: BATCH reformation formed a batch without "
+                        "registering a new snapshot assignment."
+                    )
+            elif served_this_call:
+                break
+            elif not s.order_control_batch_service_queue:
+                break
+
+            serve_details = s._serve_order_control_batch_service_queue_internal(
+                blocked_inlinks
+            )
+            served_this_call = True
+            transferred_vehicle_count += serve_details["transferred_vehicle_count"]
+
+            if serve_details["clearance_stop"]:
+                break
+            if serve_details["arrival_wait_stop"]:
+                break
+            if serve_details["transferred_vehicle_count"] > 0:
+                break
+            if not eligible_for_form:
+                break
+            if form_iterations >= max_form_iterations:
+                if s._get_reformation_eligible_trigger_candidates(
+                    trigger_snapshot_keys, blocked_inlinks
+                ):
+                    raise ValueError(
+                        f"Node {s.name}: BATCH reformation exceeded the snapshot "
+                        "iteration limit with remaining eligible trigger candidates."
+                    )
+                break
+
         s.incoming_vehicles = []
         return {
             "formation_result": formation_result,
