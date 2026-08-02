@@ -3565,6 +3565,117 @@ Vehicle通過時には `DELTAN=1` が残存容量から差し引かれ、時間�
 
 この容量設定はFCFS・BATCH・signalizedケースで共通である。
 
+### フェーズ4-6W：模倣World型Level 2 t_trigger参照モデル
+
+**位置付け：** Level 2 t_trigger estimatorの**本体実装ではない**。本体接続前に用いる、**模倣World型Level 2 t_trigger最小参照モデル**を確立した。Level 2の本体有効化・`form_order_control_batch()` への接続は**未実施**。
+
+**目的：**
+
+- Level 2の意味を小規模条件で固定する
+- UXsim既存のBATCH serve規則（`_serve_order_control_batch_service_queue_internal()`）を再利用する
+- capacity、clearance、outlink空間回復を含む仮想処理を確認する
+- trigger Vehicle自身の仮想通過timestep（`t_virtual_trigger`）を得る
+- 将来の本体用Level 2 estimatorまたはlocal virtual clock実装の比較基準を作る
+
+**新規ファイル（本体未接続）：**
+
+| 種別 | パス |
+|------|------|
+| 参照モデル | `diagnostics/order_control/level2_virtual_world_reference.py` |
+| 専用テスト | `tests_order_control_batch_t_trigger_level_2_reference.py` |
+
+**API：** `estimate_order_control_batch_t_trigger_level_2_reference(real_node, real_trigger_vehicle, t_level_1, virtual_horizon, *, mimic_random_seed=0)`
+
+**暫定候補式（参照モデルで確認。本体未接続）：**
+
+- 仮想計算成功時：`t_level_2_candidate = max(t_level_1, t_virtual_trigger)`
+- 通常非適用時：`resolved=False`、`t_virtual_trigger=None`、`t_level_2_candidate=t_level_1`、`reason` 明示
+- 重大不整合時：`ValueError` 等で停止（Level 1値へ代替しない）
+
+**mimic World構造：**
+
+```
+dummy upstream Nodes → mimic inlinks → mimic order-control Node → mimic outlinks → sink Nodes
+```
+
+**real→mimic写像：** real Node / inlink / outlink / Vehicle を対応するmimicオブジェクトへ明示的に写像。service unitの所属inlink、`last_order_control_inlink`、capacity残量、FIFO順、clearance状態を再構築する。
+
+**triggerの扱い：**
+
+- triggerは現行trigger rank key（`arrival_time`・`arrival_tiebreaker`・Vehicle ID）で**選択済みの1台**を引数で受け取る（参照モデルは選び直さない）
+- trigger後方の未assignment Vehicleはmimic Worldへ含めない
+- triggerはreal Worldではbatch化しない。mimic World内だけでtrigger単独の疑似service unitをqueue末尾へ追加する
+
+**route_next_link：** snapshot時点の値へ固定。仮想計算中は `route_next_link_choice()`・route search・DUO更新を行わない。意味は「trigger選択時点のroute_next_linkを固定した条件付き仮想サービス時刻」。実networkでは待機中にroute再選択され得る差異があるが、初期参照モデルでは予測条件を明確にするため固定している。
+
+**capacity補充境界：**
+
+- snapshot W.Tでは、当該timestepのLink.update()・Node.update()による補充済み残量をコピーし、**offset=0では再補充しない**
+- offset≥1で新しいW.Tへ進み、UXsim既存式でLink・Node flow capacityを補充してからserveする
+
+**outlink空間回復：**
+
+- 関連outlink上の全Vehicleをmimic Worldへ複製し、car-followingで前進
+- 入口空間回復（blocker x=0→前進→T=11でtrigger流入）とsink標準end-trip（T=10で到達・除去）を**分離して**確認
+
+**virtual horizon：** triggerがhorizon内に通過しない場合は正常な非適用（`reason="virtual_horizon_exceeded"`）。研究上の正式値は未決定。
+
+**診断trace：** `vehicle_transfer_timesteps`、`sink_end_trip_trace`（`outlink_removal_timestep`は`end_trip()`後の実除去確認後に記録）。
+
+#### Phase名称管理上の失敗と再発防止規則
+
+通常工程ではMarkdown上のPhase記号とコミット件名の `phase 4-6X:` 形式を対応させていた。修正期間中はコミット件名にPhase記号を使わない方針とした一方、Markdown内部ではPhase 4-6U・4-6Vを消費し、Gitコミット件名とMarkdown内部Phase連番の対応が失われた。これは工程名称管理上の失敗である。既存のpush済みコミット名・過去MarkdownのPhase名は変更しない。
+
+**今後の規則：**
+
+- Markdown上で正式Phase記号を使う通常工程では、関連コミット件名にも同じPhase記号を使う（Phase 4-6W関連は `phase 4-6W:`）
+- コミット件名にPhase記号を使わない修正作業では、Markdown内部でも新しいPhase記号を消費しない
+- Phase 4-6Wから通常運用へ復帰する
+
+**状態：** 参照モデル・専用テストは実装・独立レビュー完了。本体Level 2へは未接続。関連コミット件名は `phase 4-6W:` を使用する（commit IDはGit履歴参照）。
+
+#### テスト結果
+
+**専用テスト：** 18/18 PASS（`tests_order_control_batch_t_trigger_level_2_reference.py`）
+
+**基本4ケース（snapshot W.T=10）：**
+
+| Case | 構成 | clearance | t_virtual_trigger |
+|------|------|-----------|-------------------|
+| 1 | service unit 1個 + trigger | 0 | 11 |
+| 2 | service unit 1個 + trigger | 1 | 12 |
+| 3 | 異inlink service unit 2個 + trigger | 0 | 12 |
+| 4 | 異inlink service unit 2個 + trigger | 1 | 14 |
+
+**その他確認：** offset=0でのcapacity非再補充、次timestepでの補充、同一timestep同一inlink複数台通過（A1・A2ともT=10）、outlink前進による入口空間回復、sink標準end-trip、trigger後方Vehicle除外、同時到着trigger rank key、virtual horizon到達、visit_id/assignment/inlink/prefix不一致、real World不変、real RNG不変、決定論性。
+
+**限定既存テスト（5ファイル）：** すべてPASS。全テスト一括実行・10,000台/200台diagnosticは未実施。
+
+**小規模fixture実行時間：** World構築を含む参照モデル1回あたり約9.69 ms（W.T=10、TMAX=200、少数Node・Link・Vehicle、virtual horizon=20）。大規模利用時間の確定値ではない。
+
+#### 未解決事項
+
+- 本体Level 2へ未接続
+- Level 0・Level 1は未変更
+- inlink未到着Vehicleの模倣は未対応
+- 組合せ探索なし
+- route_next_linkはsnapshot固定
+- virtual horizon正式値未決定
+- 大規模性能未評価
+- signal制御との統合未評価
+- local virtual clock未実装
+
+#### 次工程候補（断定しない）
+
+1. Phase 4-6W参照モデルの適用範囲と性能測定計画を確定
+2. 模倣Worldを本体で直接使うか、local virtual clockへ移植するかを比較
+3. 本体Level 2接続仕様を確定
+4. virtual horizonの扱いを決定
+5. inlink未到着Vehicleへの対応要否を判断
+6. 通常非適用時にLevel 1値を採用する処理を、本体接続時にどこへ置くか決定（参照モデルでは `t_level_2_candidate=t_level_1`。重大不整合はValueErrorで隠さない）
+
+技術詳細は設計メモ **§1H.26** を参照。
+
 ### フェーズ4-6R設計目標（実装前・設計時点の記録）
 
 （設計時点の目標。実装は上記フェーズ4-6R節・設計メモ **§1H.21** を参照。）
@@ -3884,18 +3995,19 @@ Nodeへの追加メソッド（Phase 4-6関連）：
 - **phase 4-6S：** BATCH assignmentの訪問対応（`5e26bc9`）
 - **phase 4-6T：** 小規模BATCH再訪end-to-end統合（`b7159f9`）
 - **phase 4-6U：** high-demand再実行・検証完了（§1H.24。本体変更なし）
-- **現時点の主要課題：** trip-end Vehicle・stale service unit・assignment全訪問履歴・Level 2・Time-value Transaction（設計メモ **§1H.22**・**§1H.24**）
-- Level 2、trip-end Vehicle対応、Time-value Transactionは未実装
+- **phase 4-6W：** 模倣World型Level 2 t_trigger参照モデル確立（**§1H.26**。参照モデル・専用テスト実装・独立レビュー完了。本体未接続。`uxsim/uxsim.py` 未変更。commit IDはGit履歴参照）
+- **現時点の主要課題：** trip-end Vehicle・stale service unit・assignment全訪問履歴・Level 2本体接続・Time-value Transaction（設計メモ **§1H.22**・**§1H.24**・**§1H.26**）
+- Level 2本体接続、trip-end Vehicle対応、Time-value Transactionは未実装
 - `earliest_arrival_timestep` はリンク進入時に記録し、候補包含条件に使用する（実装済み）
 - `t_trigger` Level 0/1推定は参照専用ヘルパーとして実装済み。計算式に `W.T` は含めない
-- Level 2は研究上の通常推定方式として将来使用予定。現時点では未実装（設定・形成とも専用ValueError）
+- Level 2は研究上の通常推定方式として将来使用予定。**Phase 4-6Wで模倣World型参照モデルを確立（§1H.26）。本体接続・有効化は未実施**
 - snapshot estimated arrivalによるinlink別batch間順序決定は phase 4-6F で実装済み
 - **batch_sizeの基本値：** 10（`set_order_control_for_nodes()` で明示指定。Node既定値は1）
 - **t_trigger推定の研究基本設計：** 通常方式はLevel 2。Level 2でunresolvedの場合はLevel 1へfallback。必要に応じてLevel 0へfallback。Level 2は未実装
 - **現時点の暫定比較設定：** `order_control_batch_t_trigger_level=1`（Level 2実装前。clearance=0比較テスト3本などで使用）
 - 当面の研究シナリオでは、比較対象内部交差点Nodeを目的地としない端点間ODを使用する
 - 比較対象Node共通管理・目的地自動検証は将来課題として保留
-- 次工程候補：trip-end Vehicleとstale service unitの工程位置決定、Level 2仮想サービス推定、Time-value Transaction等（設計メモ **§1H.17**・**§1H.24**）
+- 次工程候補：Phase 4-6W参照モデルの適用範囲と性能測定計画を確定、模倣World直接利用 vs local virtual clock移植の比較、本体Level 2接続仕様を確定、virtual horizonの扱いを決定、inlink未到着Vehicle対応要否、通常非適用時のLevel 1値採用処理の本体配置、trip-end Vehicleとstale service unitの工程位置決定、Time-value Transaction等（設計メモ **§1H.17**・**§1H.24**・**§1H.26**）
 - 詳細設計・判断経緯は ORDER_EXCHANGE_PHASE4-6_BATCH_PROCESSING_DESIGN_NOTES.md **§1C**（形成・登録）、**§1D**（実通過）、**§1E**（統括）、**§1F**（`Node.transfer()` 接続）、**§1G**（比較・診断）、**§1H**（訪問状態設計）を参照
 
 ### テスト追加方針
@@ -3948,7 +4060,12 @@ Nodeへの追加メソッド（Phase 4-6関連）：
 
 その後の後続フェーズ候補：
 
-- Level 2仮想サービス計算・Level 2 unresolved時のLevel 1 fallback
+- Phase 4-6W参照モデルの適用範囲と性能測定計画を確定
+- 模倣Worldを本体で直接使うか、local virtual clockへ移植するかを比較
+- 本体Level 2接続仕様を確定
+- virtual horizonの扱いを決定
+- inlink未到着Vehicleへの対応要否を判断
+- 通常非適用時にLevel 1値を採用する処理の本体配置（参照モデルでは `t_level_2_candidate=t_level_1`。重大不整合はValueError）
 - Time-value Transaction接続
 - trip-end VehicleのBATCH service unit対応
 - Nとt_trigger levelの感度分析設計
@@ -4004,13 +4121,13 @@ Nodeへの追加メソッド（Phase 4-6関連）：
 - Phase 4-6S：`5e26bc9` 完了
 - Phase 4-6T：`b7159f9` 完了
 - Phase 4-6U：high-demand再実行・検証完了（§1H.24）
-- **最新実装commit：** `b7159f9`
-- **直前の文書commit（Phase 4-6T）：** `aca6ce9`
-- **現時点の主要課題：** trip-end Vehicle・stale service unit・assignment全訪問履歴・Level 2・Time-value Transaction
+- Phase 4-6W：模倣World型Level 2 t_trigger参照モデル確立（**§1H.26**。参照モデル・専用テスト実装・独立レビュー完了。本体未接続。`uxsim/uxsim.py` 未変更）
+- **最新のUXsim本体実装commit：** `2b10b08`（Phase 4-6Wは `uxsim/uxsim.py` 未変更）
+- **現時点の主要課題：** trip-end Vehicle・stale service unit・assignment全訪問履歴・Level 2本体接続・Time-value Transaction
 - Node再訪はBATCH固有ではない（signalized全期間42.7%、FCFS 23.0%）
 - high-demand BATCH比較は、5,000台・clearance=0、5,000台・clearance=1、10,000台・clearance=1の3ケースをPhase 4-6Uで実行・検証完了（U1〜U3すべてexit 0、prefix violationなし。10,000台・clearance=0は未実行）
-- 次工程候補：trip-end Vehicleとstale service unitの工程位置決定、Level 2仮想サービス推定、Time-value Transaction等（設計メモ **§1H.17**・**§1H.24**）
-- ORDER_EXCHANGE_PHASE4-6_BATCH_PROCESSING_DESIGN_NOTES.md の **§1H** を優先参照。Phase 4-6Q実装記録は **§1H.20**、Phase 4-6R実装記録は **§1H.21**、Phase 4-6S実装記録は **§1H.22**、Phase 4-6T実装記録は **§1H.23**、Phase 4-6U実行記録は **§1H.24**
+- 次工程候補：Phase 4-6W参照モデルの適用範囲と性能測定計画を確定、模倣World直接利用 vs local virtual clock移植の比較、本体Level 2接続仕様を確定、virtual horizonの扱いを決定、inlink未到着Vehicle対応要否、通常非適用時のLevel 1値採用処理の本体配置、trip-end Vehicleとstale service unitの工程位置決定、Time-value Transaction等（設計メモ **§1H.17**・**§1H.24**・**§1H.26**）
+- ORDER_EXCHANGE_PHASE4-6_BATCH_PROCESSING_DESIGN_NOTES.md の **§1H** を優先参照。Phase 4-6Q実装記録は **§1H.20**、Phase 4-6R実装記録は **§1H.21**、Phase 4-6S実装記録は **§1H.22**、Phase 4-6T実装記録は **§1H.23**、Phase 4-6U実行記録は **§1H.24**、Phase 4-6W参照モデル記録は **§1H.26**
 - 次に読む実装：`Vehicle.order_control_current_visit`、`current visit` の `batch_assignment`、`Vehicle.get_order_control_batch_assignment()`、`Vehicle.has_order_control_batch_assignment()`、`Vehicle.assign_order_control_batch_to_current_visit()`、`Vehicle.order_control_batch_assignments`、`Node.get_order_control_batch_trigger_candidates()`、`Node.get_order_control_batch_candidates_by_inlink()`、`Node.register_order_control_batch_service_units()`、`Node.serve_order_control_batch_service_queue()`、`Node.transfer_batch()`、`Node.transfer()`
 - 次に読むテスト：`tests_order_control_batch_revisit_integration.py`、`tests_order_control_batch_visit_assignment.py`、`tests_order_control_batch_revisit_ranking.py`、`tests_order_control_batch_service_unit_registration.py`、`tests_order_control_batch_service_queue_transfer.py`、`tests_order_control_batch_transfer.py`、`tests_order_control_batch_node_transfer_integration.py`
 - 診断スクリプト（`diagnostics/order_control/batch_assignment_318_lifecycle_diagnostic.py`、`diagnostics/order_control/node_revisit_high_demand_5000_diagnostic.py`、`diagnostics/order_control/README.md`）は通常回帰ではなくhigh-demandでの既知問題の再確認資料として参照

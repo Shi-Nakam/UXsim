@@ -1,4 +1,4 @@
-# Order-control diagnostics (Phase 4-6N / 4-6V)
+# Order-control diagnostics (Phase 4-6N / 4-6V / 4-6W)
 
 ## Purpose
 
@@ -10,14 +10,22 @@ automated test discovery (`tests_*.py` at the repository root).
 
 - **Phase 4-6N legacy (4 scripts):** pre-fix bug reproduction and root-cause investigation
 - **Phase 4-6V post-fix (2 scripts):** exploratory manual regression after zero-service reformation fix
-- Neither category is included in repository-root `tests_*.py` automated regression
+- **Phase 4-6W reference model (1 module):** mimic-World Level 2 `t_trigger` reference estimator (not connected to UXsim body)
+
+Modules and scripts under `diagnostics/order_control/` are **not** discovered by repository-root `tests_*.py` automated test discovery.
+
+Phase 4-6W has a **dedicated test at the repository root** (separate from the diagnostic scripts above):
+
+- `tests_order_control_batch_t_trigger_level_2_reference.py`
+
+That file is a standalone reference-model test, not a normal diagnostic script and not part of the automated regression suite unless run explicitly.
 
 ## Formal record
 
 Detailed results, timelines, and design conclusions are in:
 
-- `ORDER_EXCHANGE_PROGRESS.md` — Phase 4-6V (zero-service reformation, equivalence, batch-size exploration, corrected signal baseline)
-- `ORDER_EXCHANGE_PHASE4-6_BATCH_PROCESSING_DESIGN_NOTES.md` — **§1G** (prefix violations), **§1H.24** (Phase 4-6U high-demand), **§1H.25** (zero-service reformation design, corrected signal setting)
+- `ORDER_EXCHANGE_PROGRESS.md` — Phase 4-6V (zero-service reformation, equivalence, batch-size exploration, corrected signal baseline); Phase 4-6W (mimic-World Level 2 `t_trigger` reference model)
+- `ORDER_EXCHANGE_PHASE4-6_BATCH_PROCESSING_DESIGN_NOTES.md` — **§1G** (prefix violations), **§1H.24** (Phase 4-6U high-demand), **§1H.25** (zero-service reformation design, corrected signal setting), **§1H.26** (Phase 4-6W reference model)
 
 Do not duplicate capacity tables or N=10 vs signal ratio tables here.
 
@@ -31,6 +39,27 @@ Do not duplicate capacity tables or N=10 vs signal ratio tables here.
 | `node_revisit_high_demand_5000_diagnostic.py` | Compares Node revisit rates across signalized UXsim, FCFS, and BATCH on the same demand. **Before Phase 4-6S:** BATCH stopped at W.T=605 with the known prefix violation. |
 | `grid_n1_fcfs_route_fixed_small_check.py` | 200 vehicles, 6×6 grid, horizontal-first fixed Manhattan route. FCFS clearance=1 vs size-one BATCH Level 1 clearance=1 on identical vehicle plans. Strict aggregate and per-vehicle comparison (state, arrival_time, travel_time, traveled route, `log_t_link`). Fast independent regression without dynamic route choice. **Not** a general proof for all networks/demands. |
 | `grid_10000_batch_size_and_signal_timing_preliminary_check.py` | 10,000 vehicles, 6×6 grid, free routing. Exploratory pre–Level 2 diagnostic. Default run: P1–P4. Modes for size-one BATCH vs FCFS, post-fix strict equivalence, N=10 vs N=20 recheck, and legacy pre-fix investigation. **Not** a formal sensitivity analysis. |
+| `level2_virtual_world_reference.py` | Phase 4-6W mimic-World Level 2 `t_trigger` reference model. Builds a local mimic World from a real snapshot, rebuilds the service queue plus a trigger-only pseudo unit, runs virtual BATCH serve, and returns `t_virtual_trigger` / `t_level_2_candidate`. **Not** the body Level 2 implementation; **not** connected to `form_order_control_batch()`. Does not modify the real World. |
+
+## Phase 4-6W reference model (`level2_virtual_world_reference.py`)
+
+**Role:** diagnostic / design baseline for Level 2 semantics before body connection.
+
+- Builds a local mimic World from a real World snapshot at W.T
+- Rebuilds existing service units and appends a trigger-only pseudo service unit (trigger is **not** formally batched in the real World)
+- Fixes `route_next_link` at the snapshot value
+- Copies capacity and clearance state; refills capacity only from virtual offset ≥ 1
+- Replicates outlink vehicles and advances them with standard car-following; uses standard sink `end_trip()`
+- Returns the trigger’s virtual pass timestep (`t_virtual_trigger`) and a provisional candidate `max(t_level_1, t_virtual_trigger)` when resolved
+- Excludes unassigned vehicles behind the trigger from the mimic World
+
+**Dedicated test (repository root, not under `diagnostics/`):**
+
+```bash
+python tests_order_control_batch_t_trigger_level_2_reference.py
+```
+
+Full design, test matrix, and open issues: `ORDER_EXCHANGE_PROGRESS.md` (Phase 4-6W) and design notes **§1H.26**. Do not treat this module as “Level 2 complete” or as enabled in the UXsim body.
 
 ## Phase 4-6V scripts (zero-service reformation)
 
