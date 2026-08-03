@@ -4443,6 +4443,701 @@ horizon内にtriggerが通過しない場合：`resolved=False`、`t_virtual_tri
 5. inlink未到着Vehicleへの対応要否を判断
 6. 通常非適用時にLevel 1値を採用する処理を、本体接続時にどこへ置くか決定（参照モデルでは `t_level_2_candidate=t_level_1`。重大不整合はValueErrorで隠さない）
 
+### 1H.27 Phase 4-6X：未到着service-unit Vehicle対応と参照モデル専用service処理の実装前確定設計
+
+#### 1H.27.1 位置付け
+
+Phase 4-6Xは、Phase 4-6W模倣World型Level 2 t_trigger参照モデルを拡張するための**実装前確定設計**である。
+
+**今回の位置付け：**
+
+- 未到着service-unit Vehicle対応および参照モデル専用service処理の**実装前設計を確定した**
+- Python実装・専用テスト・performance benchmark・UXsim本体Level 2接続・t_trigger level 2有効化・virtual horizon正式値の決定は**未着手**
+
+**避ける表現：** Phase 4-6X実装済み、未到着Vehicle対応済み、Level 2完成、最適outlinkを選ぶ、負荷を均等化する、実際のroute_next_linkを予測する、traffic performanceを改善する。
+
+**優先する表現：** 実装前確定設計、楽観的な仮想流入先、決定論的な分散、acceptable_outlinksへの剰余選択、参照モデル専用service処理、本体未接続、実装・テスト未着手、最適負荷分散は保証しない。
+
+Phase 4-6XでもLevel 2はUXsim本体へ接続しない。`uxsim/uxsim.py`は変更しない。
+
+#### 1H.27.2 問題の発見経緯（Phase 4-6W制約）
+
+Phase 4-6W参照モデルは、snapshot時点でNode端へ到着済みのservice-unit Vehicleを中心に検証した。
+
+一方、現行BATCH形成では次が成立する。
+
+- candidateは`inlink.vehicles`から抽出される
+- candidate条件に`incoming_vehicles`所属は含まれない
+- `earliest_arrival_timestep <= t_trigger`であれば、Node端未到着Vehicleもservice unitへ登録され得る
+
+Phase 4-6W参照モデルでは、inlink上のVehicleに通常の`Vehicle.update()`を呼ばず、inlink Vehicleを前進させていない。
+
+そのため、service unitの先頭Vehicleがsnapshot時点で未到着の場合、次が起こり得る。
+
+- Vehicleの位置が進まない
+- `incoming_vehicles`へ登録されない
+- arrival waitが解消しない
+- 実networkでは後に通過できる状態でも、参照モデルではvirtual horizon超過となり得る
+
+Phase 4-6W参照モデルは到着済みVehicleの小規模基準モデルとしては有効である。参照モデルによって**次の未対応範囲を具体的に特定できた**と位置付ける。Phase 4-6Wの価値を否定するものではない。
+
+#### 1H.27.3 Phase 4-6Xの目的
+
+1. 既存service queueに登録済みでNode端へ未到着のVehicleを、mimic World内で仮想前進させる
+2. VehicleをNode端へ仮想到着させる
+3. snapshot時点で`route_next_link`が確定済みのVehicleと未確定のVehicleを区別する
+4. 出口未確定Vehicleについて、実networkの将来routeを予測せず、仮想transfer時点で楽観的な仮想outlinkを選ぶ
+5. Vehicleを1台ずつ最新状態で評価する、参照モデル専用service処理を設計する
+6. 同一virtual timestep内で複数Vehicleを逐次transferできるようにする
+7. 通過不能理由ごとに、queue全体停止、inlink単位停止、通過後停止、重大不整合を区別する
+
+**今回の目的ではないもの：** 本体Level 2の接続・有効化、network-wide simulation、performance benchmark、local virtual clock、組合せ探索、最適なoutlink負荷分散。
+
+#### 1H.27.4 研究対象外条件
+
+BATCHプロセスでは次を**一切扱わない**（Phase 4-6Xだけの初期スコープ外ではなく、研究対象外の前提条件。将来対応事項としても記載しない）。
+
+- `specified_route`
+- BATCH対象Nodeでのtrip-end
+- taxi mode
+- signal統合
+
+**研究条件：**
+
+- 単車線
+- BATCH対象NodeはVehicleのdestinationではない
+- snapshot時点で出口未確定のVehicleについて、対象Nodeの全物理outlinkを楽観的な仮想流入先候補にできる
+
+#### 1H.27.5 用語の正式定義
+
+**参照モデル専用service処理：** mimic World内でservice queueを処理し、Vehicleをinlinkからoutlinkへ仮想transferする処理。通常の`Node.transfer()`全体ではない。Vehicle生成、通常のroute choice、signal処理等は行わない。
+
+**Type A Vehicle：** snapshot時点で、対象Node通過後のoutlinkが`route_next_link`として確定済みのVehicle。条件：`route_next_link`が対象Nodeの`outlinks`に含まれる。Type Aはsnapshotの`route_next_link`を固定し、別outlinkへ変更しない。
+
+**Type B Vehicle：** snapshot時点で、対象Node通過後のoutlinkが未確定のVehicle。条件：`route_next_link is None`、または`route_next_link is veh.link`。後者は、現在のinlinkへ進入する際に使用されたLink参照が残っており、対象Node通過後のoutlinkがまだ選択されていない状態を意味する。
+
+**acceptable_outlinks：** 現在評価中のVehicleについて、現在のvirtual W.Tで次の条件を**両方**満たす、対象Nodeの物理outlinkの集合。
+
+- `outlink.capacity_in_remain >= DELTAN`
+- outlink入口に必要な空間がある
+
+各Vehicleの評価時に、その時点の最新状態から作り直す。
+
+**blocked_inlinks：** 同一virtual timestepのservice処理中に、BLOCK_INLINKと判定されたinlinkの集合。service処理開始時は空集合。BLOCK_INLINK発生時に対象inlinkを追加する。
+
+**SKIP_INLINK：** `blocked_inlinks`に含まれるinlinkのservice unitが、queue走査の後方で再び現れた場合、そのunitを評価せず飛ばす処理。新しい通過不能理由ではなく、同じinlinkを同一service処理内で再評価しないための処理。
+
+**active_inlink：** 同一virtual timestep内で、直近にVehicleを正常transferしたinlink。service処理開始時は`None`。TRANSFER_OKごとに、transferしたVehicleのinlinkを設定する。1台以上transfer後は異なるinlinkへ切り替えないため、同一virtual timestep内では結果として最初にtransferしたinlinkと同じままとなる。
+
+**virtual_node_arrival_timesteps：** mimic Vehicleがmimic Node端へ仮想到着したvirtual W.Tを、Vehicle名をキーとして保持する診断記録。例：`virtual_node_arrival_timesteps["A1"] = 10`。service順、outlink選択、通過可否を決める状態ではない。
+
+#### 1H.27.6 snapshot時点
+
+Level 2は将来、`Node.transfer()`内のBATCH形成処理から呼ばれる想定である。
+
+**同一W.TのLevel 2呼出し時点で完了済み：**
+
+- Link capacity補充
+- Node flow capacity補充
+- Node update
+- 直前timestep末までのVehicle位置更新
+
+**同一W.TのLevel 2呼出し後に行われる処理：**
+
+- 当該BATCHのservice処理
+- `Vehicle.carfollow()`
+- Vehicle位置更新
+- Node端への到着登録
+
+したがって、snapshotのVehicle位置は、当該W.TのVehicle前進前の位置である。
+
+#### 1H.27.7 virtual timestep全体の正式フロー
+
+**10.1 offset=0（正式テキストフロー）**
+
+```
+snapshot W.Tから開始
+    ↓
+capacityは再補充しない
+    ↓
+snapshot位置とsnapshot capacity残量で
+参照モデル専用service処理を実行
+    ↓
+triggerが通過したか
+    ├─ YES
+    │    ↓
+    │  t_virtual_triggerを記録
+    │    ↓
+    │  その時点で仮想計算を終了
+    │
+    └─ NO
+         ↓
+       既存service queueに登録された
+       inlink Vehicleを仮想前進
+         ↓
+       関連outlink上のVehicleを仮想前進
+         ↓
+       inlink終端へ到達したVehicleを
+       mimic Node.incoming_vehiclesへ登録
+         ↓
+       virtual_node_arrival_timestepsへ記録
+         ↓
+       sink処理
+         ↓
+       virtual horizon判定
+         ↓
+       horizon未到達なら次のvirtual W.Tへ（§10.2 offset>=1の処理へ）
+```
+
+**10.2 offset>=1（正式テキストフロー）**
+
+```
+mimic WorldのW.Tを1進める
+    ↓
+Link capacityとNode flow capacityを補充
+    ↓
+参照モデル専用service処理を実行
+    ↓
+triggerが通過したか
+    ├─ YES
+    │    ↓
+    │  t_virtual_triggerを記録
+    │    ↓
+    │  その時点で仮想計算を終了
+    │
+    └─ NO
+         ↓
+       既存service queueに登録された
+       inlink Vehicleを仮想前進
+         ↓
+       関連outlink上のVehicleを仮想前進
+         ↓
+       inlink終端へ到達したVehicleを
+       mimic Node.incoming_vehiclesへ登録
+         ↓
+       virtual_node_arrival_timestepsへ記録
+         ↓
+       sink処理
+         ↓
+       virtual horizon判定
+         ↓
+       horizon未到達なら次のvirtual W.Tへ
+```
+
+**重要点：**
+
+- offset=0のservice処理**前**にVehicleを動かさない
+- offset=0のservice処理**後**に最初のVehicle前進を行う
+- offset=0でもhorizon未到達ならW.Tを1進めてoffset>=1の処理へ進む
+- service後に仮想到着したVehicleは**次のvirtual W.T**からservice対象
+- trigger通過後は、そのoffset内の前進、到着登録、sink、horizon判定を行わず終了
+
+**Mermaid補助図（virtual timestep全体）：**
+
+```mermaid
+flowchart TD
+    START0([offset=0: snapshot W.T])
+    NOREFILL[capacity再補充しない]
+    SERVE[参照モデル専用service処理]
+    TRIG{trigger通過?}
+    RECORD[t_virtual_trigger記録して終了]
+    ADV[inlink Vehicle仮想前進]
+    ADV2[関連outlink Vehicle仮想前進]
+    ARRIVE[incoming_vehicles登録]
+    TRACE[virtual_node_arrival_timesteps記録]
+    SINK[sink処理]
+    HORIZON{virtual horizonへ到達したか}
+    UNRESOLVED([unresolved結果で終了])
+    WTP1[mimic WorldのW.Tを1進める]
+    REFILL[Link capacityとNode flow capacity補充]
+
+    START0 --> NOREFILL
+    NOREFILL --> SERVE
+    SERVE --> TRIG
+    TRIG -->|YES| RECORD
+    TRIG -->|NO| ADV
+    ADV --> ADV2
+    ADV2 --> ARRIVE
+    ARRIVE --> TRACE
+    TRACE --> SINK
+    SINK --> HORIZON
+    HORIZON -->|YES| UNRESOLVED
+    HORIZON -->|NO| WTP1
+    WTP1 --> REFILL
+    REFILL --> SERVE
+```
+
+#### 1H.27.8 未到着Vehicleの仮想前進
+
+**inlink側の仮想前進対象：**
+
+- 既存service queueに登録済み
+- snapshot時点でmimic Node.`incoming_vehicles`に未登録
+- mimic inlink上に存在
+
+mimic inlink内のFIFOとleader・followerを維持する。
+
+**位置更新順：**
+
+```
+carfollow()
+    ↓
+v = (x_next - x) / DELTAT
+    ↓
+x_old = x
+    ↓
+x = x_next
+    ↓
+必要に応じてxをinlink.lengthへ固定
+```
+
+通常の`Vehicle.update()`全体は呼ばない。理由：`route_next_link_choice()`を呼ばない。mimic World固有の状態から実networkの将来routeを予測しない。
+
+**Node端到達時：**
+
+- `x`を`inlink.length`へ固定
+- `incoming_vehicles`へ重複なく追加
+- `virtual_node_arrival_timesteps`へvirtual W.Tを記録
+
+**仮想到着時に変更しないもの：** current visitの`arrival_time`・`arrival_tiebreaker`、`earliest_arrival_timestep`、batch assignment、service unit。
+
+**呼ばないもの：** `record_order_control_node_arrival()`、実WorldのRNG。
+
+#### 1H.27.9 route状態分類
+
+各Vehicleについて、**交通上の停止条件より先に**route状態を分類する。
+
+**Type A：** `route_next_link`が対象Nodeの`outlinks`に含まれる。
+
+**Type B：** `route_next_link is None`、または`route_next_link is veh.link`。
+
+**異常route：** `route_next_link`が非Noneであり、`veh.link`でも対象Nodeのoutlinkでもない。Type Bへ変換せず、**VALUE_ERROR**。
+
+#### 1H.27.10 acceptable_outlinksの作成
+
+各Vehicle評価時に**一度だけ**作る。対象Nodeの全物理outlinkのうち、次を両方満たすものを収集する。
+
+- `outlink.capacity_in_remain >= DELTAN`
+- UXsim既存式による入口空間条件を満たす
+
+単車線条件では概念的に次。
+
+- `outlink.vehicles`が空
+- または最後尾Vehicleの`x`が必要車間距離より大きい
+
+`acceptable_outlinks`が空：全物理outlink受入不能 → **STOP_QUEUE**。
+
+先行Vehicleのtransfer後は状態が変わるため、次Vehicleでは**新しく作り直す**。
+
+#### 1H.27.11 Type Bのoutlink選択（正式規則）
+
+`acceptable_outlinks`が空でない場合のみ実行する。
+
+```
+acceptable_outlinksをoutlink.id昇順に並べる
+    ↓
+mimic Vehicleに対応するreal Vehicleを取得
+    ↓
+real_vehicle_id = real Vehicle.id
+    ↓
+selection_index = real_vehicle_id % len(acceptable_outlinks)
+    ↓
+chosen_outlink = acceptable_outlinks[selection_index]
+    ↓
+chosen_outlinkへ同じ処理内で直ちにtransfer
+```
+
+`mimic Vehicle.id`は変更しない。逆写像 `mimic Vehicle → real Vehicle` を使用する。
+
+**撤回した旧方式：** 全物理outlink数に対して剰余を取り、受入不能outlinkを飛ばして循環探索する方式。
+
+**撤回理由：** 受入不能outlinkの次に位置するoutlinkへ偏り得る。`acceptable_outlinks`への剰余選択の方が単純で、決定論的に分散しやすい。
+
+**注意：** 最適負荷分散を保証するものではない。乱数を使わない。IDの小さいoutlinkへの固定的集中を抑える。同一入力で同一結果を得ることが目的。
+
+#### 1H.27.12 Type Aの固定outlink判定
+
+`acceptable_outlinks`が空でないことを確認した後、固定outlinkが集合に含まれるか確認する。
+
+**含まれる：** 固定outlinkへtransfer → **TRANSFER_OK**。
+
+**含まれない：** Type Aは別outlinkへ変更しない。`acceptable_outlinks`自体は空ではない（Node全体が通過不能ではない。固定outlinkだけが現在受入不能）。
+
+- まだ同一virtual timestepで1台もtransferしていない → **BLOCK_INLINK**、当該inlinkを`blocked_inlinks`へ追加、異なるinlinkの後続unitを評価可能
+- 同じ`active_inlink`から1台以上transfer済み → **STOP_AFTER_TRANSFER**、当該service処理を終了
+
+#### 1H.27.13 Vehicle単位の正式フロー
+
+```
+service unitの先頭Vehicleを取得
+    ↓
+service unit・visit・assignment・inlinkの整合を検証
+    ├─ 不整合 → VALUE_ERROR
+    └─ 正常
+         ↓
+       route状態を分類
+         ├─ 想定外route → VALUE_ERROR
+         ├─ Type A
+         └─ Type B
+              ↓
+       incoming_vehiclesに存在するか
+         ├─ NO → STOP_QUEUE (arrival wait)
+         └─ YES
+              ↓
+       clearanceを満たすか
+         ├─ NO → STOP_QUEUE
+         └─ YES
+              ↓
+       inlink FIFO先頭か
+         ├─ NO → VALUE_ERROR
+         └─ YES
+              ↓
+       Node flow capacityは十分か
+         ├─ NO → STOP_QUEUE
+         └─ YES
+              ↓
+       acceptable_outlinksを作成
+         ↓
+       acceptable_outlinksは空か
+         ├─ YES → STOP_QUEUE
+         └─ NO
+              ↓
+       inlink capacity-outは十分か
+         ├─ NO
+         │    ├─ transferred_vehicle_count == 0 → BLOCK_INLINK
+         │    └─ transferred_vehicle_count >= 1 → STOP_AFTER_TRANSFER
+         └─ YES
+              ↓
+       Type A / Type B分岐
+```
+
+**Type A分岐：**
+
+```
+Type A
+    ↓
+固定outlinkはacceptable_outlinksに含まれるか
+    ├─ YES → 固定outlinkへtransfer → TRANSFER_OK
+    └─ NO
+         ↓
+       別outlinkへは変更しない
+         ↓
+       transferred_vehicle_count == 0か
+         ├─ YES → BLOCK_INLINK
+         └─ NO → STOP_AFTER_TRANSFER
+```
+
+**Type B分岐：**
+
+```
+Type B
+    ↓
+acceptable_outlinksをoutlink.id昇順に並べる
+    ↓
+real Vehicle.idを取得
+    ↓
+selection_index = real_vehicle_id % len(acceptable_outlinks)
+    ↓
+acceptable_outlinks[selection_index]へ同じ処理内で直ちにtransfer
+```
+
+Type A・Type B分岐後にcapacity-inと入口空間を**再計算しない**（`acceptable_outlinks`作成時点で確定）。
+
+**Mermaid補助図（Vehicle単位・queue走査の統合概要）：**
+
+```mermaid
+flowchart TD
+    QSTART[service queue先頭から走査]
+    SKIP{inlink in blocked_inlinks<br/>かつ transferred==0?}
+    SKIP -->|YES| SKIPUNIT[SKIP_INLINK]
+    SKIP -->|NO| SWITCH{transferred>=1 かつ<br/>inlink != active_inlink?}
+    SWITCH -->|YES| QEND[service処理終了]
+    SWITCH -->|NO| VSTART[Vehicle単位フロー]
+    VSTART --> ROUTE[route分類]
+    ROUTE --> CHECKS[arrival/clearance/FIFO/<br/>node cap/acceptable_outlinks/<br/>inlink cap-out]
+    CHECKS --> BRANCH{Type A or B}
+    BRANCH -->|A| FIX[固定outlink判定]
+    BRANCH -->|B| MOD[acceptable_outlinks剰余選択]
+    FIX --> RESULT{結果}
+    MOD --> RESULT
+    RESULT -->|TRANSFER_OK| UPDATE[状態更新・transferred++]
+    UPDATE --> VSTART
+    RESULT -->|BLOCK_INLINK| BLK[blocked_inlinks追加]
+    BLK --> QSTART
+    RESULT -->|STOP_*| QEND
+    SKIPUNIT --> QSTART
+```
+
+#### 1H.27.14 service queue走査の正式フロー
+
+**初期状態：**
+
+```
+transferred_vehicle_count = 0
+active_inlink = None
+blocked_inlinks = 空集合
+```
+
+**正式テキストフロー：**
+
+```
+service queueを先頭から順に走査
+    ↓
+transferred_vehicle_count == 0
+かつ
+現在unitのinlinkがblocked_inlinksに含まれるか
+    ├─ YES → SKIP_INLINK → queue上の次unitへ
+    └─ NO
+         ↓
+       transferred_vehicle_count >= 1か
+         ├─ NO → 現在unitを評価
+         └─ YES
+              ↓
+            現在unitのinlinkはactive_inlinkと同じか
+              ├─ NO → 当該virtual timestepのservice処理を終了
+              └─ YES → 現在unitを評価
+```
+
+**unitのVehicle処理：**
+
+```
+unitの先頭VehicleをVehicle単位フローで評価
+    ↓
+結果は何か
+    ├─ TRANSFER_OK
+    │    ↓
+    │  transfer後の状態を即時更新
+    │    ↓
+    │  transferred_vehicle_countを1増やす
+    │    ↓
+    │  active_inlinkを今回のinlinkへ設定
+    │    ↓
+    │  unitに次Vehicleがあるか
+    │    ├─ YES → 同じunitの次Vehicleを評価
+    │    └─ NO → queue上の次unitへ
+    │
+    ├─ BLOCK_INLINK
+    │    ↓
+    │  当該inlinkをblocked_inlinksへ追加
+    │    ↓
+    │  queue上の次unitへ
+    │
+    ├─ STOP_AFTER_TRANSFER → 当該service処理を終了
+    ├─ STOP_QUEUE → 当該service処理を終了
+    └─ VALUE_ERROR → 例外で停止
+```
+
+**重要：**
+
+- queue後方にある同じinlinkのunitを検索して先に処理しない
+- 現在unitが空になった後、queue上で次に評価されるべきunitが同じ`active_inlink`なら継続可能
+- `transferred_vehicle_count == 0`かつ`blocked_inlinks`に含まれるinlinkの後続unitはSKIP_INLINK
+- `transferred_vehicle_count >= 1`で異なるinlinkのunitへ到達した時点で、当該virtual timestepのservice処理を終了する（SKIPして走査を継続しない）
+
+#### 1H.27.15 A1・B1・A2の具体例
+
+**service queue：**
+
+1. unit A1、inlink A
+2. unit B1、inlink B
+3. unit A2、inlink A
+
+**A1がBLOCK_INLINK：**
+
+```
+blocked_inlinks = {inlink A}
+transferred_vehicle_count = 0
+    ↓
+B1を評価可能
+```
+
+**B1でclearance未充足：**
+
+```
+STOP_QUEUE
+    ↓
+A2へは進まない
+```
+
+**B1でclearance充足済みだがBLOCK_INLINK：**
+
+```
+blocked_inlinks = {inlink A, inlink B}
+transferred_vehicle_count = 0
+    ↓
+queue走査はA2まで進む
+```
+
+**A2：**
+
+```
+inlink Aはblocked_inlinksに含まれる
+    ↓
+SKIP_INLINK
+    ↓
+A2は再評価しない
+```
+
+A2は同じtimestep中に新しく形成されたunitではなく、service処理開始時からqueue後方に存在していたunitである。
+
+#### 1H.27.16 transfer後の即時更新
+
+Vehicleのtransfer成功直後に、既存serveの意味と一致させて、少なくとも次を更新する設計である。
+
+- `inlink.capacity_out_remain`
+- `outlink.capacity_in_remain`
+- `node.flow_capacity_remain`
+- `inlink.vehicles`
+- `outlink.vehicles`
+- `incoming_vehicles`
+- `last_order_control_inlink`
+- `last_order_control_entry_timestep`
+- service unitの`vehicles`
+- service unitの`visit_ids`
+- Link累積流入・流出台数
+- `Vehicle.link`
+- Vehicle位置、lane、leader、follower
+- assignment完了
+- current visit完了
+
+更新後の状態で、同一virtual W.T内の次Vehicleを評価する。VehicleごとにW.Tは進めない。
+
+#### 1H.27.17 clearance履歴
+
+Vehicleがmimic Nodeを正常に通過した場合：
+
+```
+last_order_control_inlink = 今回Vehicleが来たmimic inlink
+last_order_control_entry_timestep = 今回Vehicleが通過したvirtual W.T
+```
+
+次のservice unitが異なるinlinkの場合、この2値とclearance設定を使ってclearance充足を判定する。
+
+#### 1H.27.18 停止理由の正式定義
+
+**STOP_QUEUE：** arrival wait、clearance未充足、Node flow capacity不足、`acceptable_outlinks`が空。
+
+**BLOCK_INLINK：** inlink capacity-out不足、Type Aの固定outlinkが`acceptable_outlinks`に含まれない（`transferred_vehicle_count == 0`の場合に使用）。
+
+**STOP_AFTER_TRANSFER：** 同じ`active_inlink`から1台以上transfer済み。そのinlinkの次VehicleがSTOP_QUEUEまたはVALUE_ERROR以外の通常理由で通過不能。
+
+**SKIP_INLINK：** `blocked_inlinks`に含まれるinlinkの後続service unitを評価せず飛ばす処理。
+
+**VALUE_ERROR：** service unit・visit・assignment・inlink不整合、FIFO不整合、想定外の非None `route_next_link`、Phase 4-6Wと同型のその他重大不整合。
+
+**TRANSFER_OK：** Vehicleの仮想transfer成功。
+
+#### 1H.27.19 同一virtual timestep内の継続規則
+
+**まだ1台もtransferしていない場合：**
+
+| 結果 | 継続 |
+|------|------|
+| STOP_QUEUE | queue全体を終了 |
+| BLOCK_INLINK | 当該inlinkをblockedにする。異なるinlinkの後続unitを評価 |
+| SKIP_INLINK | 当該unitを飛ばして後続unitを評価 |
+| VALUE_ERROR | 即時停止 |
+| TRANSFER_OK | 次Vehicleまたは次service unitを評価 |
+
+**すでに1台以上transferしている場合：**
+
+- 同じ`active_inlink`の次Vehicleを評価できる
+- 同じ`active_inlink`の次service unitも評価できる
+- 異なるinlinkのservice unitは評価せず終了する
+- 同じ`active_inlink`の次Vehicleが通常理由で通過不能ならSTOP_AFTER_TRANSFER
+- STOP_QUEUE理由ならqueue全体を終了
+- VALUE_ERRORなら即時停止
+
+#### 1H.27.20 実装時の責務分割候補
+
+実装前設計として、次の小さな責務に分ける候補を記録する（関数名は仮。実装段階で既存コードとの整合を確認し、必要なら変更できる）。
+
+- `validate_service_unit_vehicle()`
+- `classify_route_state()`
+- `check_arrival()`
+- `check_clearance()`
+- `check_fifo()`
+- `check_node_capacity()`
+- `check_inlink_capacity()`
+- `get_acceptable_outlinks()`
+- `choose_outlink_by_vehicle_id()`
+- `transfer_vehicle_reference()`
+- `serve_reference_batch_queue()`
+
+既存serve全体の無秩序なコピーを避け、処理順、停止理由、Type Bのoutlink選択を明示することが目的である。
+
+#### 1H.27.21 Phase 4-6Wから維持する仕様
+
+次は変更しない。
+
+- 実Worldを変更しない
+- 実World RNGを変更しない
+- triggerは選択済み1台
+- triggerのsnapshot `route_next_link`を固定
+- trigger後方Vehicleを含めない
+- triggerはmimic World内の単独疑似service unit
+- capacity snapshotを継続
+- offset=0ではcapacityを再補充しない
+- 関連outlink上の全Vehicleを前進
+- sinkで標準end-trip
+- `t_level_2_candidate = max(t_level_1, t_virtual_trigger)`
+- virtual horizon超過は通常非適用
+- 重大不整合はValueError
+- `uxsim/uxsim.py`を変更しない
+- 本体Level 2へ接続しない
+
+#### 1H.27.22 実装前のテスト計画
+
+今回テストは作成しない。実装時に必要なテスト計画を記録する。
+
+1. offset=0ではservice前にVehicleが動かず、service後に1回だけ前進する
+2. 未到着service-unit Vehicleが仮想前進する
+3. Node端到着後、`incoming_vehicles`へ登録される
+4. `virtual_node_arrival_timesteps`へ正しい時刻を記録する
+5. 仮想到着したVehicleは次のvirtual W.Tからservice対象になる
+6. Type Aはsnapshot固定outlinkを維持する
+7. Type Bは`acceptable_outlinks`からVehicle IDの剰余で決定論的に選ぶ
+8. 受入可能outlinkが2本、3本の場合の剰余選択
+9. `acceptable_outlinks`が空ならSTOP_QUEUE
+10. Type Aの固定outlinkだけが受入不能ならBLOCK_INLINK
+11. Node flow capacity不足ならSTOP_QUEUE
+12. inlink capacity-out不足ならBLOCK_INLINK
+13. 同一unit内の複数Vehicleを同一W.Tで逐次transferする
+14. 先行Vehicleのtransfer後のcapacityと入口状態を後続Vehicleが使用する
+15. 同じ`active_inlink`の次unitを継続評価する
+16. 異なるinlinkの次unitへ切り替えない
+17. A1・B1・A2によるSKIP_INLINK
+18. FIFO不整合はVALUE_ERROR
+19. 想定外routeはVALUE_ERROR
+20. real World不変
+21. real World RNG不変
+22. 決定論性
+23. Phase 4-6Wの既存18テストを維持
+24. 到着済み・Type Aだけのケースで、Phase 4-6W既存serve結果と参照モデル専用service結果が一致する
+
+#### 1H.27.23 実装時に変更し得る設計
+
+実装中に、既存UXsim内部状態との整合上、上記設計を変更する必要が判明した場合：
+
+- 勝手に設計を変更しない
+- 変更候補と理由を報告する
+- 実装前設計との差分を明示する
+- ユーザー確認前に本体仕様へ反映しない
+
+実装後は本節（§1H.27）へ次を追記する予定である。
+
+- 実装時に変更した設計
+- 変更理由
+- 最終実装仕様
+- テスト結果
+- 限定回帰結果
+- performance予備評価
+- 残る未解決事項
+
+#### 1H.27.24 次工程
+
+Phase 4-6Xの**最小実装**と**専用テスト**作成。実装前設計から変更が生じた場合は、理由を本節（§1H.27）へ追記する。
+
 ---
 
 

@@ -3676,6 +3676,25 @@ dummy upstream Nodes → mimic inlinks → mimic order-control Node → mimic ou
 
 技術詳細は設計メモ **§1H.26** を参照。
 
+### フェーズ4-6X：未到着service-unit Vehicle対応の実装前設計
+
+**位置付け：** Phase 4-6W模倣World型Level 2 t_trigger参照モデルを拡張するための**実装前確定設計**。未到着service-unit Vehicle対応および参照モデル専用service処理について、設計・フローチャート・停止規則を一本化して文書化した。**実装・テストは未着手**。UXsim本体Level 2は**未接続**。`uxsim/uxsim.py`は変更しない。
+
+**Phase 4-6Wで判明した制約：** Phase 4-6W参照モデルはsnapshot時点でNode端到着済みのservice-unit Vehicleを中心に検証した。現行BATCH形成では`earliest_arrival_timestep <= t_trigger`によりNode端未到着Vehicleもservice unitへ登録され得るが、Phase 4-6Wではinlink Vehicleを前進させないため、未到着の先頭Vehicleではarrival waitが解消せずvirtual horizon超過となり得る。参照モデルによって次の未対応範囲を具体的に特定できた（Phase 4-6Wの価値を否定するものではない）。
+
+**Phase 4-6Xの目的（概要）：**
+
+1. 未到着service-unit Vehicleのinlink上仮想前進とNode端仮想到着登録
+2. snapshot時点の`route_next_link`確定（Type A）・未確定（Type B）の区別
+3. Type Bについて、仮想transfer時点での楽観的仮想outlink選択（`acceptable_outlinks`へのVehicle ID剰余選択。全物理outlink循環探索方式は撤回）
+4. 参照モデル専用service処理（停止理由の明示分類、`active_inlink`・`blocked_inlinks`・SKIP_INLINK）
+
+**状態：** 実装前設計を確定・文書化済み。Python実装・専用テスト・benchmark・本体Level 2接続・t_trigger level 2有効化・virtual horizon正式値の決定は未着手。
+
+**次工程：** Phase 4-6X最小実装と専用テスト。実装前設計から変更が生じた場合は、理由を設計メモ **§1H.27** へ追記する。
+
+技術詳細・正式テキストフロー・停止規則・テスト計画は設計メモ **§1H.27** を参照。
+
 ### フェーズ4-6R設計目標（実装前・設計時点の記録）
 
 （設計時点の目標。実装は上記フェーズ4-6R節・設計メモ **§1H.21** を参照。）
