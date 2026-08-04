@@ -1,12 +1,19 @@
-# Phase 4-6W: mimic-World Level 2 t_trigger reference model (not connected to UXsim body).
+# Phase 4-6W/4-6X: mimic-World Level 2 t_trigger reference model (not connected to UXsim body).
 #
-# Run via tests_order_control_batch_t_trigger_level_2_reference.py from repository root.
+# Run via tests_order_control_batch_t_trigger_level_2_reference.py and
+# tests_order_control_batch_t_trigger_level_2_unarrived_reference.py from repository root.
 
 from __future__ import annotations
 
 from collections import deque
 
 from uxsim import World
+
+TRANSFER_OK = "transfer_ok"
+STOP_QUEUE = "stop_queue"
+BLOCK_INLINK = "block_inlink"
+STOP_AFTER_TRANSFER = "stop_after_transfer"
+SKIP_INLINK = "skip_inlink"
 
 
 def estimate_order_control_batch_t_trigger_level_2_reference(
@@ -45,11 +52,16 @@ def estimate_order_control_batch_t_trigger_level_2_reference(
         mimic_node,
         mimic_trigger,
         virtual_horizon,
+        snapshot_route_states=mimic_bundle["snapshot_route_states"],
+        mimic_to_real_vehicle=mimic_bundle["mimic_to_real_vehicle"],
     )
     t_virtual_trigger = loop_result["t_virtual_trigger"]
     simulated_timestep_count = loop_result["simulated_timestep_count"]
     vehicle_transfer_timesteps = loop_result["vehicle_transfer_timesteps"]
     sink_end_trip_trace = loop_result["sink_end_trip_trace"]
+    virtual_node_arrival_timesteps = loop_result["virtual_node_arrival_timesteps"]
+    virtual_outlink_choices = loop_result["virtual_outlink_choices"]
+    service_stop_trace = loop_result["service_stop_trace"]
 
     base_result = {
         "t_level_1": int(t_level_1),
@@ -58,6 +70,9 @@ def estimate_order_control_batch_t_trigger_level_2_reference(
         "trigger_vehicle_name": real_trigger_vehicle.name,
         "vehicle_transfer_timesteps": vehicle_transfer_timesteps,
         "sink_end_trip_trace": sink_end_trip_trace,
+        "virtual_node_arrival_timesteps": virtual_node_arrival_timesteps,
+        "virtual_outlink_choices": virtual_outlink_choices,
+        "service_stop_trace": service_stop_trace,
     }
 
     if t_virtual_trigger is not None:
@@ -390,11 +405,24 @@ def _build_mimic_world(real_node, real_trigger_vehicle, *, mimic_random_seed):
         default=0,
     ) + 1
 
+    real_to_mimic_vehicle = node_maps["real_to_mimic_vehicle"]
+    mimic_to_real_vehicle = {
+        mimic_veh: real_veh for real_veh, mimic_veh in real_to_mimic_vehicle.items()
+    }
+    snapshot_route_states = {
+        mimic_veh: _snapshot_route_state_from_real(
+            real_veh, real_node, node_maps["real_to_mimic_link"]
+        )
+        for real_veh, mimic_veh in real_to_mimic_vehicle.items()
+    }
+
     return {
         "mimic_W": mimic_W,
         "mimic_node": mimic_node,
         "mimic_trigger": mimic_trigger,
         "node_maps": node_maps,
+        "mimic_to_real_vehicle": mimic_to_real_vehicle,
+        "snapshot_route_states": snapshot_route_states,
     }
 
 
@@ -458,7 +486,10 @@ def _create_mimic_vehicle(mimic_W, real_veh, real_node, mimic_node, node_maps):
     if real_link.end_node is real_node:
         orig_name = f"_mimic_up_{real_link.name}"
         dest_name = real_node.name
-        mimic_route_next = real_to_mimic_link[real_veh.route_next_link]
+        if real_veh.route_next_link is not None:
+            mimic_route_next = real_to_mimic_link[real_veh.route_next_link]
+        else:
+            mimic_route_next = None
         on_inlink = True
     elif real_link.start_node is real_node:
         orig_name = real_node.name
@@ -598,23 +629,477 @@ def _ensure_link_cum_arrays(mimic_W, timestep):
                 link.cum_departure[-1] = link.cum_departure[-2]
 
 
-def _run_limited_virtual_loop(mimic_W, mimic_node, mimic_trigger, virtual_horizon):
+def _snapshot_route_state_from_real(real_veh, real_node, real_to_mimic_link):
+    route_next_link = real_veh.route_next_link
+    real_link = real_veh.link
+    if route_next_link in real_node.outlinks.values():
+        return {
+            "kind": "A",
+            "fixed_outlink": real_to_mimic_link[route_next_link],
+        }
+    if route_next_link is None or route_next_link is real_link:
+        return {"kind": "B", "fixed_outlink": None}
+    return {"kind": "invalid", "fixed_outlink": None}
+
+
+def _clearance_satisfied_reference(mimic_node, inlink, mimic_W):
+    clearance_required = (
+        mimic_node.last_order_control_inlink is not None
+        and inlink != mimic_node.last_order_control_inlink
+    )
+    if not clearance_required:
+        return True
+    return (
+        mimic_W.T - mimic_node.last_order_control_entry_timestep
+        > mimic_node.order_control_clearance_timesteps
+    )
+
+
+def _outlink_has_entrance_space(outlink, mimic_W):
+    if len(outlink.vehicles) < outlink.number_of_lanes:
+        return True
+    return (
+        outlink.vehicles[-outlink.number_of_lanes].x
+        > outlink.delta_per_lane * mimic_W.DELTAN
+    )
+
+
+def _get_acceptable_outlinks(mimic_node, mimic_W):
+    acceptable = []
+    for outlink in sorted(mimic_node.outlinks.values(), key=lambda link: link.id):
+        if outlink.capacity_in_remain < mimic_W.DELTAN:
+            continue
+        if _outlink_has_entrance_space(outlink, mimic_W):
+            acceptable.append(outlink)
+    return acceptable
+
+
+def _choose_outlink_by_vehicle_id(acceptable_outlinks, real_vehicle_id):
+    sorted_outlinks = sorted(acceptable_outlinks, key=lambda outlink: outlink.id)
+    selection_index = real_vehicle_id % len(sorted_outlinks)
+    return sorted_outlinks[selection_index]
+
+
+def _validate_service_unit_vehicle_reference(mimic_node, veh, service_unit):
+    for required_key in ("batch_id", "inlink", "vehicles", "visit_ids"):
+        if required_key not in service_unit:
+            raise ValueError(
+                f"Node {mimic_node.name}: service unit is missing required key "
+                f"{required_key!r}."
+            )
+    batch_id = service_unit["batch_id"]
+    if isinstance(batch_id, bool) or not isinstance(batch_id, int) or batch_id < 0:
+        raise ValueError(
+            f"Node {mimic_node.name}: service unit has invalid batch_id={batch_id!r}; "
+            "expected a non-negative int."
+        )
+    unit_vehicles = service_unit["vehicles"]
+    unit_visit_ids = service_unit["visit_ids"]
+    if not isinstance(unit_vehicles, list) or not isinstance(unit_visit_ids, list):
+        raise ValueError(
+            f"Node {mimic_node.name}: service unit batch_id={batch_id} has invalid "
+            f"vehicles={unit_vehicles!r} or visit_ids={unit_visit_ids!r}; expected lists."
+        )
+    if len(unit_vehicles) != len(unit_visit_ids):
+        raise ValueError(
+            f"Node {mimic_node.name}: service unit batch_id={batch_id} has "
+            f"len(vehicles)={len(unit_vehicles)} and "
+            f"len(visit_ids)={len(unit_visit_ids)}; expected equal lengths."
+        )
+    if not unit_vehicles:
+        raise ValueError(
+            f"Node {mimic_node.name}: service unit batch_id={batch_id} has an empty "
+            "vehicles list during service."
+        )
+    registered_visit_id = unit_visit_ids[0]
+    if (
+        isinstance(registered_visit_id, bool)
+        or not isinstance(registered_visit_id, int)
+        or registered_visit_id < 1
+    ):
+        raise ValueError(
+            f"Node {mimic_node.name}: service unit batch_id={batch_id} has invalid "
+            f"registered_visit_id={registered_visit_id!r}; expected a positive int."
+        )
+    current_visit = veh.order_control_current_visit
+    if current_visit is None:
+        raise ValueError(
+            f"Vehicle {veh.name} at node {mimic_node.name}: order_control_current_visit "
+            f"is None for service unit batch_id={batch_id}, "
+            f"registered visit_id={registered_visit_id}."
+        )
+    if current_visit["node"] is not mimic_node:
+        raise ValueError(
+            f"Vehicle {veh.name} at node {mimic_node.name}: current visit node "
+            f"{current_visit['node'].name!r} does not match service node "
+            f"{mimic_node.name!r} for service unit batch_id={batch_id}, "
+            f"registered visit_id={registered_visit_id}, "
+            f"current visit_id={current_visit['visit_id']}."
+        )
+    current_visit_id = current_visit["visit_id"]
+    if current_visit_id != registered_visit_id:
+        raise ValueError(
+            f"Vehicle {veh.name} at node {mimic_node.name}: visit_id mismatch for "
+            f"service unit batch_id={batch_id}: registered visit_id="
+            f"{registered_visit_id}, current visit_id={current_visit_id}, "
+            f"current batch_assignment="
+            f"{current_visit.get('batch_assignment')!r}."
+        )
+    current_batch_assignment = veh.get_order_control_batch_assignment(mimic_node)
+    if current_batch_assignment is None:
+        raise ValueError(
+            f"Vehicle {veh.name} at node {mimic_node.name}: current visit "
+            f"batch_assignment is None for service unit batch_id={batch_id}, "
+            f"registered visit_id={registered_visit_id}, "
+            f"current visit_id={current_visit_id}."
+        )
+    if current_batch_assignment != batch_id:
+        raise ValueError(
+            f"Vehicle {veh.name} at node {mimic_node.name}: batch_assignment mismatch "
+            f"for service unit batch_id={batch_id}: current "
+            f"batch_assignment={current_batch_assignment}, registered "
+            f"visit_id={registered_visit_id}, current visit_id="
+            f"{current_visit_id}."
+        )
+    inlink = service_unit["inlink"]
+    if veh.link is not inlink:
+        raise ValueError(
+            f"Vehicle {veh.name} at node {mimic_node.name} has veh.link="
+            f"{getattr(veh.link, 'name', veh.link)!r}, expected "
+            f"{inlink.name} for service unit batch_id={batch_id}."
+        )
+
+
+def _classify_snapshot_route_state(snapshot_route_states, veh):
+    route_state = snapshot_route_states[veh]
+    kind = route_state["kind"]
+    if kind == "invalid":
+        raise ValueError(
+            f"Vehicle {veh.name} has unexpected snapshot route_next_link state."
+        )
+    return route_state
+
+
+def _transfer_vehicle_reference(mimic_node, mimic_W, veh, inlink, outlink):
+    inlink.cum_departure[-1] += mimic_W.DELTAN
+    outlink.cum_arrival[-1] += mimic_W.DELTAN
+    inlink.traveltime_actual[
+        int(veh.link_arrival_time / mimic_W.DELTAT) :
+    ] = mimic_W.T * mimic_W.DELTAT - veh.link_arrival_time
+
+    veh.link_arrival_time = mimic_W.T * mimic_W.DELTAT
+
+    inlink.capacity_out_remain -= mimic_W.DELTAN
+    outlink.capacity_in_remain -= mimic_W.DELTAN
+    if mimic_node.flow_capacity is not None:
+        mimic_node.flow_capacity_remain -= mimic_W.DELTAN
+
+    inlink.vehicles.popleft()
+    outlink.vehicles_enter_log[mimic_W.T * mimic_W.DELTAT] = veh
+    veh.link = outlink
+    veh.begin_order_control_visit_on_link_entry()
+    veh.x = 0
+
+    if veh.follower is not None:
+        veh.follower.leader = None
+        veh.follower = None
+
+    if len(outlink.vehicles) > 0:
+        veh.lane = (outlink.vehicles[-1].lane + 1) % outlink.number_of_lanes
+    else:
+        veh.lane = 0
+
+    veh.leader = None
+    if len(outlink.vehicles) >= outlink.number_of_lanes:
+        veh.leader = outlink.vehicles[-outlink.number_of_lanes]
+        veh.leader.follower = veh
+        assert veh.leader.lane == veh.lane
+
+    x_next = veh.move_remain * outlink.u / inlink.u
+    if veh.leader is not None:
+        x_cong = veh.leader.x_old - veh.link.delta_per_lane * veh.W.DELTAN
+        if x_cong < veh.x:
+            x_cong = veh.x
+        if x_next > x_cong:
+            x_next = x_cong
+
+    if x_next >= outlink.length:
+        x_next = outlink.length
+
+    veh.x = x_next
+    veh.v += veh.x / mimic_W.DELTAT
+    veh.move_remain = 0
+
+    outlink.vehicles.append(veh)
+    mimic_node.incoming_vehicles.remove(veh)
+
+    mimic_node.last_order_control_inlink = inlink
+    mimic_node.last_order_control_entry_timestep = mimic_W.T
+
+
+def _evaluate_vehicle_reference(
+    mimic_node,
+    mimic_W,
+    veh,
+    service_unit,
+    *,
+    snapshot_route_states,
+    mimic_to_real_vehicle,
+    virtual_outlink_choices,
+    transferred_vehicle_count,
+):
+    _validate_service_unit_vehicle_reference(mimic_node, veh, service_unit)
+    route_state = _classify_snapshot_route_state(snapshot_route_states, veh)
+    inlink = service_unit["inlink"]
+
+    if veh not in mimic_node.incoming_vehicles:
+        return STOP_QUEUE
+
+    if not _clearance_satisfied_reference(mimic_node, inlink, mimic_W):
+        return STOP_QUEUE
+
+    if not inlink.vehicles or veh is not inlink.vehicles[0]:
+        raise ValueError(
+            f"Vehicle {veh.name} at node {mimic_node.name} is not FIFO head on "
+            f"inlink {inlink.name}."
+        )
+
+    if mimic_node.flow_capacity_remain < mimic_W.DELTAN:
+        return STOP_QUEUE
+
+    acceptable_outlinks = _get_acceptable_outlinks(mimic_node, mimic_W)
+    if not acceptable_outlinks:
+        return STOP_QUEUE
+
+    if inlink.capacity_out_remain < mimic_W.DELTAN:
+        if transferred_vehicle_count == 0:
+            return BLOCK_INLINK
+        return STOP_AFTER_TRANSFER
+
+    if route_state["kind"] == "A":
+        fixed_outlink = route_state["fixed_outlink"]
+        if fixed_outlink in acceptable_outlinks:
+            _transfer_vehicle_reference(
+                mimic_node, mimic_W, veh, inlink, fixed_outlink
+            )
+            service_unit["vehicles"].pop(0)
+            service_unit["visit_ids"].pop(0)
+            return TRANSFER_OK
+        if transferred_vehicle_count == 0:
+            return BLOCK_INLINK
+        return STOP_AFTER_TRANSFER
+
+    real_vehicle = mimic_to_real_vehicle[veh]
+    chosen_outlink = _choose_outlink_by_vehicle_id(
+        acceptable_outlinks, real_vehicle.id
+    )
+    virtual_outlink_choices[veh.name] = chosen_outlink.name
+    _transfer_vehicle_reference(mimic_node, mimic_W, veh, inlink, chosen_outlink)
+    service_unit["vehicles"].pop(0)
+    service_unit["visit_ids"].pop(0)
+    return TRANSFER_OK
+
+
+def _serve_reference_batch_queue(
+    mimic_node,
+    mimic_W,
+    *,
+    snapshot_route_states,
+    mimic_to_real_vehicle,
+    virtual_outlink_choices,
+):
+    if (mimic_node.last_order_control_inlink is None) != (
+        mimic_node.last_order_control_entry_timestep is None
+    ):
+        raise ValueError(
+            f"Node {mimic_node.name} has inconsistent order-control clearance history."
+        )
+
+    if not mimic_node.order_control_batch_service_queue:
+        return {
+            "transferred_vehicle_count": 0,
+            "stop_reason": None,
+            "blocked_inlinks": set(),
+            "skipped_units": [],
+            "evaluated_unit_batch_ids": [],
+        }
+
+    service_units_to_check = list(mimic_node.order_control_batch_service_queue)
+    transferred_vehicle_count = 0
+    active_inlink = None
+    blocked_inlinks = set()
+    stop_reason = None
+    skipped_units = []
+    evaluated_unit_batch_ids = []
+
+    def _finalize_service_queue():
+        mimic_node.order_control_batch_service_queue.clear()
+        for service_unit in service_units_to_check:
+            if service_unit["vehicles"]:
+                mimic_node.order_control_batch_service_queue.append(service_unit)
+
+    for service_unit in service_units_to_check:
+        inlink = service_unit["inlink"]
+
+        if transferred_vehicle_count == 0 and inlink in blocked_inlinks:
+            skipped_units.append(
+                {
+                    "batch_id": service_unit["batch_id"],
+                    "inlink": inlink.name,
+                    "reason": SKIP_INLINK,
+                }
+            )
+            continue
+
+        if (
+            transferred_vehicle_count > 0
+            and active_inlink is not None
+            and inlink != active_inlink
+        ):
+            break
+
+        evaluated_unit_batch_ids.append(service_unit["batch_id"])
+
+        while service_unit["vehicles"]:
+            veh = service_unit["vehicles"][0]
+            result = _evaluate_vehicle_reference(
+                mimic_node,
+                mimic_W,
+                veh,
+                service_unit,
+                snapshot_route_states=snapshot_route_states,
+                mimic_to_real_vehicle=mimic_to_real_vehicle,
+                virtual_outlink_choices=virtual_outlink_choices,
+                transferred_vehicle_count=transferred_vehicle_count,
+            )
+
+            if result == TRANSFER_OK:
+                transferred_vehicle_count += 1
+                active_inlink = inlink
+                continue
+
+            if result == BLOCK_INLINK:
+                blocked_inlinks.add(inlink)
+                break
+
+            if result == STOP_QUEUE:
+                stop_reason = STOP_QUEUE
+                _finalize_service_queue()
+                return {
+                    "transferred_vehicle_count": transferred_vehicle_count,
+                    "stop_reason": stop_reason,
+                    "blocked_inlinks": set(blocked_inlinks),
+                    "skipped_units": skipped_units,
+                    "evaluated_unit_batch_ids": evaluated_unit_batch_ids,
+                }
+
+            if result == STOP_AFTER_TRANSFER:
+                stop_reason = STOP_AFTER_TRANSFER
+                _finalize_service_queue()
+                return {
+                    "transferred_vehicle_count": transferred_vehicle_count,
+                    "stop_reason": stop_reason,
+                    "blocked_inlinks": set(blocked_inlinks),
+                    "skipped_units": skipped_units,
+                    "evaluated_unit_batch_ids": evaluated_unit_batch_ids,
+                }
+
+            raise ValueError(f"Unexpected vehicle evaluation result: {result!r}")
+
+    _finalize_service_queue()
+    # stop_reason is the direct reason the serve call ended, not a log of every
+    # BLOCK_INLINK. None means the queue scan finished without STOP_QUEUE or
+    # STOP_AFTER_TRANSFER (including after one or more successful transfers).
+    if (
+        stop_reason is None
+        and transferred_vehicle_count == 0
+        and blocked_inlinks
+    ):
+        stop_reason = BLOCK_INLINK
+    return {
+        "transferred_vehicle_count": transferred_vehicle_count,
+        "stop_reason": stop_reason,
+        "blocked_inlinks": set(blocked_inlinks),
+        "skipped_units": skipped_units,
+        "evaluated_unit_batch_ids": evaluated_unit_batch_ids,
+    }
+
+
+def _collect_inlink_advance_targets(mimic_node):
+    targets = set()
+    for service_unit in mimic_node.order_control_batch_service_queue:
+        for veh in service_unit["vehicles"]:
+            if veh.state != "run":
+                continue
+            if veh in mimic_node.incoming_vehicles:
+                continue
+            if veh.link is None or veh.link not in mimic_node.inlinks.values():
+                continue
+            targets.add(veh)
+    return targets
+
+
+def _rebuild_inlink_leader_followers(inlink):
+    for index, veh in enumerate(inlink.vehicles):
+        veh.leader = inlink.vehicles[index - 1] if index > 0 else None
+        veh.follower = (
+            inlink.vehicles[index + 1] if index + 1 < len(inlink.vehicles) else None
+        )
+
+
+def _advance_inlink_vehicles(
+    mimic_W,
+    mimic_node,
+    advance_targets,
+    virtual_node_arrival_timesteps,
+):
+    for inlink in mimic_node.inlinks.values():
+        _rebuild_inlink_leader_followers(inlink)
+        for veh in list(inlink.vehicles):
+            if veh not in advance_targets:
+                continue
+            veh.carfollow()
+            veh.v = (veh.x_next - veh.x) / mimic_W.DELTAT
+            veh.x_old = veh.x
+            veh.x = min(veh.x_next, inlink.length)
+            if (
+                veh.x >= inlink.length
+                and veh not in mimic_node.incoming_vehicles
+            ):
+                veh.x = inlink.length
+                mimic_node.incoming_vehicles.append(veh)
+                virtual_node_arrival_timesteps.setdefault(veh.name, mimic_W.T)
+
+
+def _run_limited_virtual_loop(
+    mimic_W,
+    mimic_node,
+    mimic_trigger,
+    virtual_horizon,
+    *,
+    snapshot_route_states,
+    mimic_to_real_vehicle,
+):
     """
     Limited virtual timestep loop aligned with exec_simulation order for local scope.
 
     offset == 0 (snapshot W.T):
       Use post-Link.update / post-Node.update capacity remains copied from the real
-      World without refilling. Serve, then advance outlink vehicles and sink end-trip.
+      World without refilling. Reference serve, then advance inlink/outlink vehicles
+      and sink end-trip.
 
     offset >= 1:
-      Advance W.T, refill Link and Node flow capacity, serve, then outlink movement
-      and sink end-trip.
+      Advance W.T, refill Link and Node flow capacity, reference serve, then inlink
+      and outlink movement and sink end-trip.
 
     Inlink waiting vehicles do not call Vehicle.update() to keep route_next_link fixed.
     """
     simulated_timestep_count = 0
     vehicle_transfer_timesteps = {}
     sink_end_trip_trace = {}
+    virtual_node_arrival_timesteps = {}
+    virtual_outlink_choices = {}
+    service_stop_trace = []
 
     for offset in range(virtual_horizon + 1):
         if offset > 0:
@@ -634,7 +1119,26 @@ def _run_limited_virtual_loop(mimic_W, mimic_node, mimic_trigger, virtual_horizo
                     link.cum_departure[-1] if link.cum_departure else 0
                 )
 
-        mimic_node._serve_order_control_batch_service_queue_internal(set())
+        serve_result = _serve_reference_batch_queue(
+            mimic_node,
+            mimic_W,
+            snapshot_route_states=snapshot_route_states,
+            mimic_to_real_vehicle=mimic_to_real_vehicle,
+            virtual_outlink_choices=virtual_outlink_choices,
+        )
+        service_stop_trace.append(
+            {
+                "timestep": mimic_W.T,
+                "transferred_vehicle_count": serve_result["transferred_vehicle_count"],
+                "stop_reason": serve_result["stop_reason"],
+                "blocked_inlinks": sorted(
+                    inlink.name for inlink in serve_result["blocked_inlinks"]
+                ),
+                "skipped_units": serve_result["skipped_units"],
+                "evaluated_unit_batch_ids": serve_result["evaluated_unit_batch_ids"],
+            }
+        )
+
         for veh in waiting_before_serve:
             if (
                 veh not in mimic_node.incoming_vehicles
@@ -648,7 +1152,18 @@ def _run_limited_virtual_loop(mimic_W, mimic_node, mimic_trigger, virtual_horizo
                 "simulated_timestep_count": simulated_timestep_count,
                 "vehicle_transfer_timesteps": vehicle_transfer_timesteps,
                 "sink_end_trip_trace": sink_end_trip_trace,
+                "virtual_node_arrival_timesteps": virtual_node_arrival_timesteps,
+                "virtual_outlink_choices": virtual_outlink_choices,
+                "service_stop_trace": service_stop_trace,
             }
+
+        advance_targets = _collect_inlink_advance_targets(mimic_node)
+        _advance_inlink_vehicles(
+            mimic_W,
+            mimic_node,
+            advance_targets,
+            virtual_node_arrival_timesteps,
+        )
 
         outlink_vehicles = _get_outlink_running_vehicles(mimic_W, mimic_node)
         for veh in outlink_vehicles:
@@ -667,6 +1182,9 @@ def _run_limited_virtual_loop(mimic_W, mimic_node, mimic_trigger, virtual_horizo
         "simulated_timestep_count": simulated_timestep_count,
         "vehicle_transfer_timesteps": vehicle_transfer_timesteps,
         "sink_end_trip_trace": sink_end_trip_trace,
+        "virtual_node_arrival_timesteps": virtual_node_arrival_timesteps,
+        "virtual_outlink_choices": virtual_outlink_choices,
+        "service_stop_trace": service_stop_trace,
     }
 
 

@@ -1,4 +1,4 @@
-# Order-control diagnostics (Phase 4-6N / 4-6V / 4-6W)
+# Order-control diagnostics (Phase 4-6N / 4-6V / 4-6W / 4-6X)
 
 ## Purpose
 
@@ -10,7 +10,7 @@ automated test discovery (`tests_*.py` at the repository root).
 
 - **Phase 4-6N legacy (4 scripts):** pre-fix bug reproduction and root-cause investigation
 - **Phase 4-6V post-fix (2 scripts):** exploratory manual regression after zero-service reformation fix
-- **Phase 4-6W reference model (1 module):** mimic-World Level 2 `t_trigger` reference estimator (not connected to UXsim body)
+- **Phase 4-6W reference model (1 module):** mimic-World Level 2 `t_trigger` reference estimator (not connected to UXsim body). Extended in Phase 4-6X with unarrived service-unit virtual advancement and reference-only BATCH serve.
 
 Modules and scripts under `diagnostics/order_control/` are **not** discovered by repository-root `tests_*.py` automated test discovery.
 
@@ -18,14 +18,18 @@ Phase 4-6W has a **dedicated test at the repository root** (separate from the di
 
 - `tests_order_control_batch_t_trigger_level_2_reference.py`
 
-That file is a standalone reference-model test, not a normal diagnostic script and not part of the automated regression suite unless run explicitly.
+Phase 4-6X has an additional **dedicated test** at the repository root:
+
+- `tests_order_control_batch_t_trigger_level_2_unarrived_reference.py`
+
+Those files are standalone reference-model tests, not normal diagnostic scripts and not part of the automated regression suite unless run explicitly.
 
 ## Formal record
 
 Detailed results, timelines, and design conclusions are in:
 
-- `ORDER_EXCHANGE_PROGRESS.md` — Phase 4-6V (zero-service reformation, equivalence, batch-size exploration, corrected signal baseline); Phase 4-6W (mimic-World Level 2 `t_trigger` reference model)
-- `ORDER_EXCHANGE_PHASE4-6_BATCH_PROCESSING_DESIGN_NOTES.md` — **§1G** (prefix violations), **§1H.24** (Phase 4-6U high-demand), **§1H.25** (zero-service reformation design, corrected signal setting), **§1H.26** (Phase 4-6W reference model)
+- `ORDER_EXCHANGE_PROGRESS.md` — Phase 4-6V (zero-service reformation, equivalence, batch-size exploration, corrected signal baseline); Phase 4-6W (mimic-World Level 2 `t_trigger` reference model); Phase 4-6X (unarrived service-unit support in reference model)
+- `ORDER_EXCHANGE_PHASE4-6_BATCH_PROCESSING_DESIGN_NOTES.md` — **§1G** (prefix violations), **§1H.24** (Phase 4-6U high-demand), **§1H.25** (zero-service reformation design, corrected signal setting), **§1H.26** (Phase 4-6W reference model), **§1H.27** (Phase 4-6X unarrived vehicles and reference-only serve)
 
 Do not duplicate capacity tables or N=10 vs signal ratio tables here.
 
@@ -39,11 +43,13 @@ Do not duplicate capacity tables or N=10 vs signal ratio tables here.
 | `node_revisit_high_demand_5000_diagnostic.py` | Compares Node revisit rates across signalized UXsim, FCFS, and BATCH on the same demand. **Before Phase 4-6S:** BATCH stopped at W.T=605 with the known prefix violation. |
 | `grid_n1_fcfs_route_fixed_small_check.py` | 200 vehicles, 6×6 grid, horizontal-first fixed Manhattan route. FCFS clearance=1 vs size-one BATCH Level 1 clearance=1 on identical vehicle plans. Strict aggregate and per-vehicle comparison (state, arrival_time, travel_time, traveled route, `log_t_link`). Fast independent regression without dynamic route choice. **Not** a general proof for all networks/demands. |
 | `grid_10000_batch_size_and_signal_timing_preliminary_check.py` | 10,000 vehicles, 6×6 grid, free routing. Exploratory pre–Level 2 diagnostic. Default run: P1–P4. Modes for size-one BATCH vs FCFS, post-fix strict equivalence, N=10 vs N=20 recheck, and legacy pre-fix investigation. **Not** a formal sensitivity analysis. |
-| `level2_virtual_world_reference.py` | Phase 4-6W mimic-World Level 2 `t_trigger` reference model. Builds a local mimic World from a real snapshot, rebuilds the service queue plus a trigger-only pseudo unit, runs virtual BATCH serve, and returns `t_virtual_trigger` / `t_level_2_candidate`. **Not** the body Level 2 implementation; **not** connected to `form_order_control_batch()`. Does not modify the real World. |
+| `level2_virtual_world_reference.py` | Phase 4-6W mimic-World Level 2 `t_trigger` reference model, extended in **Phase 4-6X** with unarrived service-unit virtual advancement, Type A / Type B route classification, `acceptable_outlinks` Vehicle ID modulo selection, and reference-only BATCH serve (`_serve_reference_batch_queue`). Builds a local mimic World from a real snapshot, rebuilds the service queue plus a trigger-only pseudo unit, runs the virtual loop, and returns `t_virtual_trigger` / `t_level_2_candidate` plus `virtual_node_arrival_timesteps`, `virtual_outlink_choices`, and `service_stop_trace`. **Not** the body Level 2 implementation; **not** connected to `form_order_control_batch()`. Does not modify the real World. Performance benchmark not run. |
 
-## Phase 4-6W reference model (`level2_virtual_world_reference.py`)
+## Phase 4-6W / 4-6X reference model (`level2_virtual_world_reference.py`)
 
 **Role:** diagnostic / design baseline for Level 2 semantics before body connection.
+
+**Phase 4-6W (baseline):**
 
 - Builds a local mimic World from a real World snapshot at W.T
 - Rebuilds existing service units and appends a trigger-only pseudo service unit (trigger is **not** formally batched in the real World)
@@ -53,13 +59,29 @@ Do not duplicate capacity tables or N=10 vs signal ratio tables here.
 - Returns the trigger’s virtual pass timestep (`t_virtual_trigger`) and a provisional candidate `max(t_level_1, t_virtual_trigger)` when resolved
 - Excludes unassigned vehicles behind the trigger from the mimic World
 
-**Dedicated test (repository root, not under `diagnostics/`):**
+**Phase 4-6X (extension, reference model only — body not connected):**
+
+- Unarrived service-unit Vehicle virtual advancement on mimic inlinks and virtual node-arrival registration (`virtual_node_arrival_timesteps`)
+- Reference-only BATCH serve (not `uxsim.py` body serve): Type A fixed outlink vs Type B optimistic virtual outlink choice at transfer time
+- `acceptable_outlinks` built per vehicle evaluation; Type B uses Vehicle ID modulo selection on sorted acceptable outlinks (not full-outlink cyclic search). Does not guarantee optimal load balancing
+- `service_stop_trace` with `stop_reason` (direct end reason), `blocked_inlinks`, `skipped_units`, `active_inlink` rules
+- `virtual_outlink_choices` for Type B selections
+
+**Dedicated tests (repository root, not under `diagnostics/`):**
+
+Phase 4-6W regression (18 tests; file unchanged):
 
 ```bash
 python tests_order_control_batch_t_trigger_level_2_reference.py
 ```
 
-Full design, test matrix, and open issues: `ORDER_EXCHANGE_PROGRESS.md` (Phase 4-6W) and design notes **§1H.26**. Do not treat this module as “Level 2 complete” or as enabled in the UXsim body.
+Phase 4-6X unarrived / reference-only serve (28 tests):
+
+```bash
+python tests_order_control_batch_t_trigger_level_2_unarrived_reference.py
+```
+
+Full design, implementation record, test matrix, and open issues: `ORDER_EXCHANGE_PROGRESS.md` (Phase 4-6W, Phase 4-6X) and design notes **§1H.26**, **§1H.27**. Do not treat this module as “Level 2 complete” or as enabled in the UXsim body. Performance benchmark not run.
 
 ## Phase 4-6V scripts (zero-service reformation)
 
