@@ -29,6 +29,7 @@ def _snapshot_nodes(nodes):
             "batch_size": node.batch_size,
             "transaction_case": node.transaction_case,
             "order_control_batch_t_trigger_level": node.order_control_batch_t_trigger_level,
+            "order_control_batch_virtual_horizon": node.order_control_batch_virtual_horizon,
         }
         for node in nodes
     }
@@ -65,6 +66,146 @@ def test_node_attribute_defaults():
     for node in (node_default, node_fcfs, node_batch, node_tv):
         assert node.batch_size == 1
         assert node.order_control_batch_t_trigger_level == 1
+        assert node.order_control_batch_virtual_horizon == 30
+
+
+def test_addnode_virtual_horizon_individual():
+    W = _build_world("batch_settings_vh_addnode")
+    node = W.addNode(
+        "merge_vh",
+        0,
+        0,
+        order_control_eligible=True,
+        order_control_type="batch",
+        order_control_batch_virtual_horizon=50,
+    )
+    assert node.order_control_batch_virtual_horizon == 50
+
+
+def test_addnode_level_2_accepted():
+    W = _build_world("batch_settings_level2_addnode")
+    node = W.addNode(
+        "merge_l2",
+        0,
+        0,
+        order_control_eligible=True,
+        order_control_type="batch",
+        order_control_batch_t_trigger_level=2,
+    )
+    assert node.order_control_batch_t_trigger_level == 2
+
+
+def test_setter_level_2_accepted():
+    W = _build_world("batch_settings_level2_setter")
+    node_a = W.addNode("node_a", 0, 0, order_control_eligible=True)
+    node_b = W.addNode("node_b", 1, 0, order_control_eligible=True)
+    W.set_order_control_for_nodes(
+        ["node_a", "node_b"],
+        order_control_type="batch",
+        batch_size=10,
+        order_control_batch_t_trigger_level=2,
+    )
+    for node in (node_a, node_b):
+        assert node.order_control_batch_t_trigger_level == 2
+
+
+def test_random_setter_level_2_accepted():
+    W = _build_world("batch_settings_level2_random")
+    orig_a = W.addNode("orig_a", 0, 0)
+    orig_b = W.addNode("orig_b", 0, 1)
+    merge = W.addNode("merge", 1, 0)
+    dest = W.addNode("dest", 2, 0)
+    W.addLink("link1", "orig_a", "merge", length=200, free_flow_speed=20, number_of_lanes=1)
+    W.addLink("link2", "orig_b", "merge", length=200, free_flow_speed=20, number_of_lanes=1)
+    W.addLink("link3", "merge", "dest", length=200, free_flow_speed=20, number_of_lanes=1)
+    W.infer_order_control_eligible_nodes()
+    W.set_order_control_for_randomly_selected_eligible_nodes(
+        fraction=1.0,
+        order_control_type="batch",
+        batch_size=10,
+        random_seed=0,
+        order_control_batch_t_trigger_level=2,
+    )
+    assert merge.order_control_batch_t_trigger_level == 2
+
+
+def test_virtual_horizon_bulk_setting():
+    W = _build_world("batch_settings_vh_bulk")
+    node_a = W.addNode("node_a", 0, 0, order_control_eligible=True)
+    node_b = W.addNode("node_b", 1, 0, order_control_eligible=True)
+    W.set_order_control_for_nodes(
+        ["node_a", "node_b"],
+        order_control_type="batch",
+        batch_size=10,
+        order_control_batch_virtual_horizon=40,
+    )
+    for node in (node_a, node_b):
+        assert node.order_control_batch_virtual_horizon == 40
+
+
+def test_virtual_horizon_partial_override():
+    W = _build_world("batch_settings_vh_partial")
+    node_a = W.addNode("node_a", 0, 0, order_control_eligible=True)
+    node_b = W.addNode("node_b", 1, 0, order_control_eligible=True)
+    W.set_order_control_for_nodes(
+        ["node_a", "node_b"],
+        order_control_type="batch",
+        batch_size=10,
+        order_control_batch_virtual_horizon=40,
+    )
+    W.set_order_control_for_nodes(
+        ["node_b"],
+        order_control_type="batch",
+        batch_size=10,
+        order_control_batch_virtual_horizon=15,
+    )
+    assert node_a.order_control_batch_virtual_horizon == 40
+    assert node_b.order_control_batch_virtual_horizon == 15
+
+
+def test_virtual_horizon_outside_node_unchanged():
+    W = _build_world("batch_settings_vh_outside")
+    node_a = W.addNode("node_a", 0, 0, order_control_eligible=True)
+    outside = W.addNode("outside", 2, 0)
+    before = _snapshot_nodes([outside])
+    W.set_order_control_for_nodes(
+        ["node_a"],
+        order_control_type="batch",
+        batch_size=10,
+        order_control_batch_virtual_horizon=25,
+    )
+    assert _snapshot_nodes([outside]) == before
+
+
+def test_virtual_horizon_zero_accepted():
+    W = _build_world("batch_settings_vh_zero")
+    node = W.addNode(
+        "node_zero",
+        0,
+        0,
+        order_control_eligible=True,
+        order_control_type="batch",
+        order_control_batch_virtual_horizon=0,
+    )
+    assert node.order_control_batch_virtual_horizon == 0
+
+
+def test_virtual_horizon_validation():
+    W = _build_world("batch_settings_vh_validation")
+    node_a = W.addNode("node_a", 0, 0, order_control_eligible=True)
+    before = _snapshot_nodes([node_a])
+
+    for invalid in (-1, 1.5, "30", True, False, None):
+        _expect_value_error(
+            lambda invalid=invalid: W.set_order_control_for_nodes(
+                ["node_a"],
+                order_control_type="batch",
+                batch_size=10,
+                order_control_batch_virtual_horizon=invalid,
+            ),
+            message_substrings=("order_control_batch_virtual_horizon",),
+        )
+        assert _snapshot_nodes([node_a]) == before
 
 
 def test_world_addnode_individual_specification():
@@ -237,26 +378,18 @@ def test_addnode_t_trigger_level_validation():
             )
             assert False, f"expected ValueError for {invalid!r}"
         except ValueError as exc:
-            assert "expected 0 or 1" in str(exc) or "non-bool int" in str(exc)
+            assert "expected 0, 1, or 2" in str(exc) or "non-bool int" in str(exc)
         assert len(W.NODES) == before_count
 
-    try:
-        W.addNode(
-            "bad_level_2",
-            0,
-            0,
-            order_control_eligible=True,
-            order_control_type="batch",
-            order_control_batch_t_trigger_level=2,
-        )
-        assert False, "expected ValueError for level 2"
-    except ValueError as exc:
-        message = str(exc)
-        assert "bad_level_2" in message
-        assert "order_control_batch_t_trigger_level=2" in message
-        assert "Level 2 is planned" in message
-        assert "virtual-service estimation is not yet implemented" in message
-    assert len(W.NODES) == before_count
+    node_level_2 = W.addNode(
+        "good_level_2",
+        0,
+        0,
+        order_control_eligible=True,
+        order_control_type="batch",
+        order_control_batch_t_trigger_level=2,
+    )
+    assert node_level_2.order_control_batch_t_trigger_level == 2
 
 
 def test_setter_t_trigger_level_validation():
@@ -274,24 +407,18 @@ def test_setter_t_trigger_level_validation():
                 batch_size=10,
                 order_control_batch_t_trigger_level=invalid,
             ),
-            message_substrings=("expected 0 or 1",),
+            message_substrings=("expected 0, 1, or 2",),
         )
         assert _snapshot_nodes(nodes) == before
 
-    _expect_value_error(
-        lambda: W.set_order_control_for_nodes(
-            ["node_a", "node_b"],
-            order_control_type="batch",
-            batch_size=10,
-            order_control_batch_t_trigger_level=2,
-        ),
-        message_substrings=(
-            "order_control_batch_t_trigger_level=2",
-            "Level 2",
-            "virtual-service estimation is not yet implemented",
-        ),
+    W.set_order_control_for_nodes(
+        ["node_a", "node_b"],
+        order_control_type="batch",
+        batch_size=10,
+        order_control_batch_t_trigger_level=2,
     )
-    assert _snapshot_nodes(nodes) == before
+    for node in nodes:
+        assert node.order_control_batch_t_trigger_level == 2
 
 
 def test_random_setter_t_trigger_level_validation():
@@ -306,21 +433,14 @@ def test_random_setter_t_trigger_level_validation():
     W.infer_order_control_eligible_nodes()
     before = _snapshot_nodes([merge])
 
-    _expect_value_error(
-        lambda: W.set_order_control_for_randomly_selected_eligible_nodes(
-            fraction=1.0,
-            order_control_type="batch",
-            batch_size=10,
-            random_seed=0,
-            order_control_batch_t_trigger_level=2,
-        ),
-        message_substrings=(
-            "order_control_batch_t_trigger_level=2",
-            "Level 2",
-            "virtual-service estimation is not yet implemented",
-        ),
+    W.set_order_control_for_randomly_selected_eligible_nodes(
+        fraction=1.0,
+        order_control_type="batch",
+        batch_size=10,
+        random_seed=0,
+        order_control_batch_t_trigger_level=2,
     )
-    assert _snapshot_nodes([merge]) == before
+    assert merge.order_control_batch_t_trigger_level == 2
 
 
 def test_batch_size_existing_validation():
@@ -365,13 +485,22 @@ def test_partial_update_prevention():
             batch_size=10,
             order_control_batch_t_trigger_level=3,
         ),
-        message_substrings=("expected 0 or 1",),
+        message_substrings=("expected 0, 1, or 2",),
     )
     assert _snapshot_nodes(nodes) == before
 
 
 def main():
     test_node_attribute_defaults()
+    test_addnode_virtual_horizon_individual()
+    test_addnode_level_2_accepted()
+    test_setter_level_2_accepted()
+    test_random_setter_level_2_accepted()
+    test_virtual_horizon_bulk_setting()
+    test_virtual_horizon_partial_override()
+    test_virtual_horizon_outside_node_unchanged()
+    test_virtual_horizon_zero_accepted()
+    test_virtual_horizon_validation()
     test_world_addnode_individual_specification()
     test_set_order_control_for_nodes_bulk()
     test_sensitivity_analysis_batch_size_bulk_change()

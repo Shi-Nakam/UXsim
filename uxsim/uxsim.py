@@ -25,34 +25,47 @@ def _validate_order_control_batch_t_trigger_level(value, node_name=None):
             raise ValueError(
                 f"Node {node_name} received invalid "
                 f"order_control_batch_t_trigger_level={value!r}; "
-                "expected 0 or 1 as a non-bool int."
+                "expected 0, 1, or 2 as a non-bool int."
             )
         raise ValueError(
             f"Invalid order_control_batch_t_trigger_level={value!r}; "
-            "expected 0 or 1 as a non-bool int."
+            "expected 0, 1, or 2 as a non-bool int."
         )
-    if value == 2:
-        if node_name is not None:
-            raise ValueError(
-                f"Node {node_name} received "
-                f"order_control_batch_t_trigger_level=2; "
-                "Level 2 is planned, but virtual-service estimation "
-                "is not yet implemented."
-            )
-        raise ValueError(
-            "order_control_batch_t_trigger_level=2 is planned, but "
-            "Level 2 virtual-service estimation is not yet implemented."
-        )
-    if value not in (0, 1):
+    if value not in (0, 1, 2):
         if node_name is not None:
             raise ValueError(
                 f"Node {node_name} received invalid "
                 f"order_control_batch_t_trigger_level={value}; "
-                "expected 0 or 1 as a non-bool int."
+                "expected 0, 1, or 2 as a non-bool int."
             )
         raise ValueError(
             f"Invalid order_control_batch_t_trigger_level={value}; "
-            "expected 0 or 1 as a non-bool int."
+            "expected 0, 1, or 2 as a non-bool int."
+        )
+
+
+def _validate_order_control_batch_virtual_horizon(value, node_name=None):
+    if not isinstance(value, int) or isinstance(value, bool):
+        if node_name is not None:
+            raise ValueError(
+                f"Node {node_name} received invalid "
+                f"order_control_batch_virtual_horizon={value!r}; "
+                "expected a non-negative int."
+            )
+        raise ValueError(
+            f"Invalid order_control_batch_virtual_horizon={value!r}; "
+            "expected a non-negative int."
+        )
+    if value < 0:
+        if node_name is not None:
+            raise ValueError(
+                f"Node {node_name} received invalid "
+                f"order_control_batch_virtual_horizon={value}; "
+                "expected a non-negative int."
+            )
+        raise ValueError(
+            f"Invalid order_control_batch_virtual_horizon={value}; "
+            "expected a non-negative int."
         )
 
 
@@ -62,7 +75,7 @@ class Node:
 
     Optional research attributes for intersection order control: order_control_type, batch_size, transaction_case, order_control_eligible, order_control_batch_t_trigger_level.
     """
-    def __init__(s, W: "World", name: str, x: float, y: float, signal: list[float]=[0], signal_offset: float=0, signal_offset_old: float|None=None, flow_capacity: float|None=None, number_of_lanes: int|None=None, auto_rename=False, attribute=None, user_attribute=None, user_function=None, order_control_type="none", batch_size=1, transaction_case=None, order_control_eligible=False, order_control_batch_t_trigger_level=1):
+    def __init__(s, W: "World", name: str, x: float, y: float, signal: list[float]=[0], signal_offset: float=0, signal_offset_old: float|None=None, flow_capacity: float|None=None, number_of_lanes: int|None=None, auto_rename=False, attribute=None, user_attribute=None, user_function=None, order_control_type="none", batch_size=1, transaction_case=None, order_control_eligible=False, order_control_batch_t_trigger_level=1, order_control_batch_virtual_horizon=30):
         """
         Create a node.
 
@@ -204,6 +217,10 @@ class Node:
             order_control_batch_t_trigger_level,
             node_name=name,
         )
+        _validate_order_control_batch_virtual_horizon(
+            order_control_batch_virtual_horizon,
+            node_name=name,
+        )
 
         s.W = W
         #node position (for visualization)
@@ -219,6 +236,7 @@ class Node:
         s.transaction_case = transaction_case
         s.order_control_eligible = order_control_eligible
         s.order_control_batch_t_trigger_level = order_control_batch_t_trigger_level
+        s.order_control_batch_virtual_horizon = order_control_batch_virtual_horizon
         # World共通のorder-control clearance設定を、Nodeごとの参照値として保持する。
         # last_order_control_* は、clearance-awareなorder-control transferで、
         # 直近にこのNodeへ進入したVehicleのinlinkと進入タイムステップを記録するための初期値。
@@ -495,6 +513,72 @@ class Node:
             + 1
         )
         return int(max(base_trigger_timestep, clearance_satisfied_timestep))
+
+    def _resolve_order_control_batch_t_trigger(s, trigger_vehicle, t_trigger_level):
+        """
+        Select and return the BATCH formation t_trigger for the given level.
+
+        Level 2 invokes the mimic-World reference estimator once, using a single
+        Level 1 estimate as input and fallback. Does not extract candidates or
+        register a BATCH.
+        """
+        if t_trigger_level == 0:
+            return int(s.estimate_order_control_batch_t_trigger_level_0(trigger_vehicle))
+        if t_trigger_level == 1:
+            return int(s.estimate_order_control_batch_t_trigger_level_1(trigger_vehicle))
+        if t_trigger_level == 2:
+            from .order_control_batch_level_2_reference import (
+                estimate_order_control_batch_t_trigger_level_2_reference,
+            )
+
+            t_level_1 = int(
+                s.estimate_order_control_batch_t_trigger_level_1(trigger_vehicle)
+            )
+            W = s.W
+            W.order_control_batch_level_2_call_count += 1
+            level_2_result = estimate_order_control_batch_t_trigger_level_2_reference(
+                s,
+                trigger_vehicle,
+                t_level_1,
+                s.order_control_batch_virtual_horizon,
+                mimic_random_seed=0,
+            )
+            if not isinstance(level_2_result, dict):
+                raise ValueError(
+                    f"Node {s.name} received invalid Level 2 result type "
+                    f"{type(level_2_result).__name__}; expected dict."
+                )
+            if "resolved" not in level_2_result:
+                raise ValueError(
+                    f"Node {s.name} received Level 2 result without 'resolved' key."
+                )
+            resolved = level_2_result["resolved"]
+            if not isinstance(resolved, bool):
+                raise ValueError(
+                    f"Node {s.name} received invalid Level 2 resolved value "
+                    f"{resolved!r}; expected bool."
+                )
+            if resolved:
+                t_level_2_candidate = level_2_result.get("t_level_2_candidate")
+                if (
+                    not isinstance(t_level_2_candidate, int)
+                    or isinstance(t_level_2_candidate, bool)
+                    or t_level_2_candidate < 0
+                ):
+                    raise ValueError(
+                        f"Node {s.name} received invalid Level 2 "
+                        f"t_level_2_candidate={t_level_2_candidate!r}; "
+                        "expected a non-bool non-negative int when resolved=True."
+                    )
+                W.order_control_batch_level_2_resolved_count += 1
+                return int(t_level_2_candidate)
+            W.order_control_batch_level_2_unresolved_count += 1
+            W.order_control_batch_level_2_level_1_fallback_count += 1
+            return t_level_1
+        raise ValueError(
+            f"Node {s.name} received unsupported t_trigger_level={t_trigger_level}; "
+            "supported design levels are 0, 1, and 2."
+        )
 
     def get_order_control_batch_candidates_by_inlink(s, t_trigger):
         """
@@ -1252,16 +1336,7 @@ class Node:
                 "expected a non-bool int."
             )
 
-        if t_trigger_level == 0:
-            pass
-        elif t_trigger_level == 1:
-            pass
-        elif t_trigger_level == 2:
-            raise ValueError(
-                f"Node {s.name} received t_trigger_level=2; "
-                "Level 2 is planned but virtual-service estimation is not yet implemented."
-            )
-        else:
+        if t_trigger_level not in (0, 1, 2):
             raise ValueError(
                 f"Node {s.name} received unsupported t_trigger_level={t_trigger_level}; "
                 "supported design levels are 0, 1, and 2."
@@ -1279,10 +1354,10 @@ class Node:
 
         trigger_vehicle = trigger_candidates[0]
 
-        if t_trigger_level == 0:
-            t_trigger = s.estimate_order_control_batch_t_trigger_level_0(trigger_vehicle)
-        else:
-            t_trigger = s.estimate_order_control_batch_t_trigger_level_1(trigger_vehicle)
+        t_trigger = s._resolve_order_control_batch_t_trigger(
+            trigger_vehicle,
+            t_trigger_level,
+        )
 
         candidates_by_inlink = s.get_order_control_batch_candidates_by_inlink(t_trigger)
         if not candidates_by_inlink:
@@ -3889,8 +3964,12 @@ class World:
         W.order_control_eligibility_prepared = False
         W.order_control_clearance_timesteps = 1
         W.order_control_batch_tau_timesteps = 1
+        W.order_control_batch_level_2_call_count = 0
+        W.order_control_batch_level_2_resolved_count = 0
+        W.order_control_batch_level_2_unresolved_count = 0
+        W.order_control_batch_level_2_level_1_fallback_count = 0
 
-    def addNode(W, name: str, x: float, y: float, signal: list[float]=[0], signal_offset: float=0, signal_offset_old: float|None=None, flow_capacity: float|None=None, number_of_lanes: int=None, auto_rename=False, attribute=None, user_attribute=None, user_function=None, order_control_type="none", batch_size=1, transaction_case=None, order_control_eligible=False, order_control_batch_t_trigger_level=1) -> Node:
+    def addNode(W, name: str, x: float, y: float, signal: list[float]=[0], signal_offset: float=0, signal_offset_old: float|None=None, flow_capacity: float|None=None, number_of_lanes: int=None, auto_rename=False, attribute=None, user_attribute=None, user_function=None, order_control_type="none", batch_size=1, transaction_case=None, order_control_eligible=False, order_control_batch_t_trigger_level=1, order_control_batch_virtual_horizon=30) -> Node:
         """
         Add a node to world.
 
@@ -3955,9 +4034,9 @@ class World:
         signal_t : float
             The elapsed time since the current signal phase started. When it is larger than `Link.signal[Link.signal_phase]`, the phase changes to the next one.
         """
-        return Node(W, name, x, y, signal=signal, signal_offset=signal_offset, signal_offset_old=signal_offset_old, flow_capacity=flow_capacity, number_of_lanes=number_of_lanes, auto_rename=auto_rename, attribute=attribute, user_attribute=user_attribute, user_function=user_function, order_control_type=order_control_type, batch_size=batch_size, transaction_case=transaction_case, order_control_eligible=order_control_eligible, order_control_batch_t_trigger_level=order_control_batch_t_trigger_level)
+        return Node(W, name, x, y, signal=signal, signal_offset=signal_offset, signal_offset_old=signal_offset_old, flow_capacity=flow_capacity, number_of_lanes=number_of_lanes, auto_rename=auto_rename, attribute=attribute, user_attribute=user_attribute, user_function=user_function, order_control_type=order_control_type, batch_size=batch_size, transaction_case=transaction_case, order_control_eligible=order_control_eligible, order_control_batch_t_trigger_level=order_control_batch_t_trigger_level, order_control_batch_virtual_horizon=order_control_batch_virtual_horizon)
 
-    def set_order_control_for_nodes(W, node_names, order_control_type="none", batch_size=1, transaction_case=None, order_control_batch_t_trigger_level=1):
+    def set_order_control_for_nodes(W, node_names, order_control_type="none", batch_size=1, transaction_case=None, order_control_batch_t_trigger_level=1, order_control_batch_virtual_horizon=30):
         """
         Apply intersection order control settings to multiple nodes for research use.
 
@@ -4000,6 +4079,7 @@ class World:
             raise ValueError('transaction_case must be None, "I", "II", or "III".')
 
         _validate_order_control_batch_t_trigger_level(order_control_batch_t_trigger_level)
+        _validate_order_control_batch_virtual_horizon(order_control_batch_virtual_horizon)
 
         nodes_to_configure = []
         for node_name in node_names:
@@ -4016,6 +4096,7 @@ class World:
             node.batch_size = batch_size
             node.transaction_case = transaction_case
             node.order_control_batch_t_trigger_level = order_control_batch_t_trigger_level
+            node.order_control_batch_virtual_horizon = order_control_batch_virtual_horizon
 
         return nodes_to_configure
 
@@ -4125,6 +4206,7 @@ class World:
         transaction_case=None,
         random_seed=None,
         order_control_batch_t_trigger_level=1,
+        order_control_batch_virtual_horizon=30,
     ):
         """
         Randomly select a fraction of order_control_eligible nodes and apply order control settings.
@@ -4191,6 +4273,7 @@ class World:
             batch_size=batch_size,
             transaction_case=transaction_case,
             order_control_batch_t_trigger_level=order_control_batch_t_trigger_level,
+            order_control_batch_virtual_horizon=order_control_batch_virtual_horizon,
         )
 
     def addLink(W, name: str, start_node: Node|str, end_node: Node|str, length: float, free_flow_speed: float=20, jam_density: float=0.2, jam_density_per_lane: float|None=None, number_of_lanes: int=1, merge_priority: float=1, signal_group: list[int]=[0], capacity_out: float|None=None, capacity_in: float|None=None, eular_dx=None, attribute=None, user_attribute=None, user_function=None, auto_rename=False) -> Link:

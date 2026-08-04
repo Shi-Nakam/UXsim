@@ -248,25 +248,55 @@ def test_level_1_basic_integration():
     assert merge.order_control_batch_next_id == 1
 
 
-def test_level_2_planned_but_not_implemented():
-    W = _build_network("integration_level_2")
+def test_level_2_resolved_integration():
+    W = _build_network("integration_level_2_resolved")
     merge = W.get_node("merge")
     link1 = W.get_link("link1")
+    link2 = W.get_link("link2")
     out = W.get_link("out")
     trigger = _make_vehicle(W, "orig1", "A1")
-    _setup_arrived_vehicle(merge, trigger, link1, out, 12, 10.0, 0.1, 100.0)
-    before = _snapshot_state(merge, [trigger])
+    other = _make_vehicle(W, "orig2", "B1")
+    _setup_arrived_vehicle(merge, trigger, link1, out, 12, 10.0, 0.1, 120.0)
+    _setup_arrived_vehicle(merge, other, link2, out, 10, 15.0, 0.2, 100.0)
+    t_l1 = merge.estimate_order_control_batch_t_trigger_level_1(trigger)
 
-    _expect_value_error(
-        lambda: merge.form_order_control_batch(t_trigger_level=2, max_batch_size=2),
-        message_substrings=(
-            "merge",
-            "t_trigger_level=2",
-            "Level 2 is planned",
-            "virtual-service estimation is not yet implemented",
-        ),
-    )
-    assert before == _snapshot_state(merge, [trigger])
+    def fake_l2(real_node, real_trigger_vehicle, t_level_1, virtual_horizon, **kwargs):
+        return {"resolved": True, "t_level_2_candidate": t_level_1 + 2}
+
+    with patch(
+        "uxsim.order_control_batch_level_2_reference.estimate_order_control_batch_t_trigger_level_2_reference",
+        fake_l2,
+    ):
+        result = merge.form_order_control_batch(t_trigger_level=2, max_batch_size=5)
+    assert result == "batch_formed"
+    assert trigger.order_control_batch_assignments["merge"] == 0
+    assert W.order_control_batch_level_2_resolved_count == 1
+    assert W.order_control_batch_level_2_level_1_fallback_count == 0
+
+
+def test_level_2_unresolved_integration():
+    W = _build_network("integration_level_2_unresolved")
+    merge = W.get_node("merge")
+    link1 = W.get_link("link1")
+    link2 = W.get_link("link2")
+    out = W.get_link("out")
+    trigger = _make_vehicle(W, "orig1", "A1")
+    other = _make_vehicle(W, "orig2", "B1")
+    _setup_arrived_vehicle(merge, trigger, link1, out, 12, 10.0, 0.1, 120.0)
+    _setup_arrived_vehicle(merge, other, link2, out, 10, 15.0, 0.2, 100.0)
+
+    def fake_l2(real_node, real_trigger_vehicle, t_level_1, virtual_horizon, **kwargs):
+        return {"resolved": False, "t_level_2_candidate": 999}
+
+    with patch(
+        "uxsim.order_control_batch_level_2_reference.estimate_order_control_batch_t_trigger_level_2_reference",
+        fake_l2,
+    ):
+        result = merge.form_order_control_batch(t_trigger_level=2, max_batch_size=5)
+    assert result == "batch_formed"
+    assert trigger.order_control_batch_assignments["merge"] == 0
+    assert W.order_control_batch_level_2_unresolved_count == 1
+    assert W.order_control_batch_level_2_level_1_fallback_count == 1
 
 
 def test_invalid_t_trigger_level_values():
@@ -533,7 +563,7 @@ def test_uses_existing_helper_methods():
     call_order = []
     method_names = [
         "get_order_control_batch_trigger_candidates",
-        "estimate_order_control_batch_t_trigger_level_0",
+        "_resolve_order_control_batch_t_trigger",
         "get_order_control_batch_candidates_by_inlink",
         "get_ordered_order_control_batch_candidates_by_inlink",
         "apply_order_control_batch_max_size",
@@ -562,7 +592,7 @@ def test_uses_existing_helper_methods():
     assert result == "batch_formed"
     assert call_order == [
         "get_order_control_batch_trigger_candidates",
-        "estimate_order_control_batch_t_trigger_level_0",
+        "_resolve_order_control_batch_t_trigger",
         "get_order_control_batch_candidates_by_inlink",
         "get_ordered_order_control_batch_candidates_by_inlink",
         "apply_order_control_batch_max_size",
@@ -623,7 +653,8 @@ def main():
     test_no_trigger_candidate()
     test_level_0_basic_integration()
     test_level_1_basic_integration()
-    test_level_2_planned_but_not_implemented()
+    test_level_2_resolved_integration()
+    test_level_2_unresolved_integration()
     test_invalid_t_trigger_level_values()
     test_max_batch_size_reflected()
     test_multiple_formations_on_same_node()
