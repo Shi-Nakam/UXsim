@@ -40,7 +40,7 @@ UXsim Order Exchange 改変作業における、phase 4-6：交差点BATCH処理
 | | phase 4-6V診断：size-one BATCH対FCFS等価性・batch size予備比較（fe9e53e。§1H.25） |
 | **診断スクリプト** | `diagnostics/order_control/`（6本＋README）。通常回帰テストから分離済み（`0e35799`）。詳細は `diagnostics/order_control/README.md` |
 | **BATCH形成〜シミュレーション接続まで完成** | trigger候補取得 → … → service queue登録（4-6I）→ 実通過（4-6K）→ 統括呼出し（4-6L）→ **`Node.transfer()` 接続（4-6M）** → **BATCH形成のcurrent visit参照（4-6R）** → **BATCH assignmentの訪問対応（4-6S）** → **小規模BATCH再訪end-to-end統合（4-6T）** |
-| **現時点の主要課題** | trip-end VehicleのBATCH service unit対応、stale service unit処理方針、assignment正式全訪問履歴、Level 2本体接続、Time-value Transaction |
+| **現時点の主要課題** | Level 2本体接続、Level 2 unresolved時のLevel 1 fallback、Level 2呼出の軽量カウンター、Time-value Transaction |
 | **未実装** | Level 2本体接続・有効化（模倣World型参照モデルは **§1H.26** で確立済み） |
 | | trip-end VehicleのBATCH service unit対応 |
 | | stale service unitの自動削除または回復方針 |
@@ -50,7 +50,7 @@ UXsim Order Exchange 改変作業における、phase 4-6：交差点BATCH処理
 | | 全比較方式で同一ネットワーク・同一OD需要 |
 | **研究基本設定（明示指定）** | 研究の通常方式は **Level 2**（未実装）。Level 2で解決不能時は **Level 1** へfallback、必要に応じて **Level 0** へfallback。 |
 | | 暫定比較では `batch_size=10`、`order_control_batch_t_trigger_level=1`（Level 1は最終基本設定ではない） |
-| **次工程候補** | 1. Phase 4-6W参照モデルの適用範囲と性能測定計画を確定 2. 模倣Worldを本体で直接使うかlocal virtual clockへ移植するかを比較 3. 本体Level 2接続仕様を確定 4. virtual horizonの扱いを決定 5. inlink未到着Vehicleへの対応要否を判断 6. 通常非適用時にLevel 1値を採用する処理を本体接続時にどこへ置くか決定（参照モデルでは `t_level_2_candidate=t_level_1`。重大不整合はValueError）。trip-end Vehicleは研究対象外。stale service unit回復は必要性が低ければ保留。assignment全訪問履歴は後回し。Time-value Transaction本体 |
+| **次工程候補** | **§1H.27.40・§1H.27.41** を参照。優先：Level 2本体実装・unresolved時Level 1 fallback・軽量カウンター。性能ベンチマーク拡張は本体実装開始の前提としない。virtual horizon正式値は§1H.27.38を踏まえ未決定。trip-end Vehicleは研究対象外。stale service unit回復は必要性が低ければ保留。assignment全訪問履歴は後回し（§1H.27.41）。Time-value Transaction本体 |
 
 ---
 
@@ -5146,7 +5146,7 @@ Phase 4-6Xの**最小実装**と**専用テスト**作成。実装前設計か�
 
 - 参照モデル（`level2_virtual_world_reference.py`）内の拡張。UXsim本体Level 2へは**未接続**
 - `uxsim/uxsim.py`は変更していない
-- performance benchmarkは未実施。network-wide simulationは未実施
+- 小規模quickベンチマークによるhorizon感度・性能概算を実施（§1H.27.38）。network-wide simulationは未実施
 - Phase 4-6X専用テスト **28/28 PASS**
 - Phase 4-6W既存テスト **18/18 PASS**（既存テストファイルは変更していない）
 - 限定既存テスト5ファイルすべてPASS
@@ -5453,22 +5453,26 @@ python tests_order_control_batch_t_trigger_level_2_reference.py
 
 - UXsim本体Level 2未接続
 - 本体設定でlevel=2を有効化していない
-- performance benchmark未実施
-- 大規模利用時の実行時間未評価
-- virtual horizon正式値未決定
+- 小規模quickベンチマークによるhorizon感度・性能概算は実施済み（§1H.27.38・§1H.27.39）。virtual horizon正式値は未決定
+- 大規模条件での実測は未実施（§1H.27.39の概算を参照）
 - local virtual clockとの比較未実施
 - network-wide simulation未実施
-- 実装は参照モデル内に限定
+- 実装は参照モデル内に限定（本体接続は次工程 §1H.27.40）
 
 #### 1H.27.36 次工程候補
 
-次工程を1つに決め打ちしない。候補：
+**優先（確定方針 §1H.27.40）：**
 
-1. Phase 4-6X参照モデルの実装差分とテストを最終レビュー・commit・push
-2. 小規模performance benchmarkの設計
-3. 模倣World直接利用とlocal virtual clockの比較
-4. 本体Level 2接続仕様の検討
-5. virtual horizon正式値の判断
+1. Level 2仮想サービス推定の本体実装（BATCH `t_trigger`推定への接続）
+2. Level 2 unresolved時のLevel 1 fallback接続
+3. 軽量整数カウンター（§1H.27.41）の実装
+
+**その他の候補（本実装開始の前提としない）：**
+
+- 性能ベンチマークのさらなる拡張
+- virtual horizon正式値の最終決定（§1H.27.38の結果を参照しつつ）
+- 模倣World直接利用とlocal virtual clockの比較
+- network-wide simulation
 
 #### 1H.27.37 virtual timestep順序（実装結果）
 
@@ -5501,6 +5505,77 @@ python tests_order_control_batch_t_trigger_level_2_reference.py
 - offset=0のservice後に最初の前進を行う
 - service後に仮想到着したVehicleは次のvirtual W.Tからservice対象
 - trigger通過後は同じoffset内の前進・到着登録・sink・horizon判定を行わない
+
+#### 1H.27.38 Level 2 horizon感度・性能のquickベンチマーク（参照モデル）
+
+Level 2参照モデル（`level2_virtual_world_reference.py`）に対し、診断用ベンチマーク（`level2_reference_horizon_performance_benchmark.py`）でquickモードを実行した。
+
+**条件：**
+
+- 対象シナリオ：S01、S03、S05、S07、S12、S14
+- virtual horizon：10、20、50（本記録の焦点）
+- measured repeats：1
+- reference horizon：50
+
+**horizon感度：**
+
+- horizon 10で6シナリオすべてがresolvedとなった
+- horizon 10および20の全シナリオで、horizon 50（reference）と同じ`t_virtual_trigger`が得られた
+- 今回シナリオにおける最大仮想進行は6 timestepであった
+
+**性能概算：**
+
+- Level 2 APIの平均実行時間は、1回あたり約15.67 msであった
+- 各条件の実測値は、概ね1回あたり約7.48 msから22.80 msであった
+- 今回の範囲では、resolved時に早期終了するため、horizon上限を10から50へ増やしても計算時間は大幅には増加しなかった
+- measured repeatsは1回であるため、数ms程度の差を厳密な性能差とは解釈しない
+- 今回の結果は、Level 2の計算時間が概ね数十ms以内のオーダーであることを確認するための**概算**として扱う
+
+#### 1H.27.39 大規模条件への実行時間概算
+
+今回の実測最大値である約22.8 ms/callを単純に直列計算すると、Level 2の計算時間は次の規模となる。
+
+- 10,000回の呼出し：約3.8分
+- 30,000回の呼出し：約11.4分
+- 50,000回の呼出し：約19分
+
+ただし、今回のquickシナリオにおける最大仮想進行は6 timestepであり、horizon 50まで進み切る重いケースを実測したものではない。本体実装後に大規模条件で計測するまでは、必要に応じて1回あたり50 msから100 ms程度を安全側の概算値として扱う。
+
+約100個の対象Nodeが存在しても、全車両が全対象Nodeを通過するわけではない。そのため、総負荷は単純な「車両数×全対象Node数」ではなく、実際のLevel 2総呼出回数によって評価する。
+
+性能上の主な懸念はhorizon上限そのものではなく、関連状態が変化していない同一vehicle visitについて、Level 2を不必要に繰り返し呼び出すことである。
+
+#### 1H.27.40 BATCH本処理接続前に確定した実装方針
+
+BATCH本処理（`t_trigger`推定）へLevel 2を接続する前に、次の方針を**確定事項**として記録する。
+
+- BATCHの`t_trigger`推定では、Level 2仮想サービス推定を**通常方式**として使用する
+- Level 2がunresolvedを返した場合は**Level 1へfallback**する
+- Level 0へのfallbackは、既存方針上必要な場合に限って使用する
+- 状態が変化していない同一vehicle visitへの不要なLevel 2再計算を避ける
+- 今回の性能ベンチマークをさらに拡張することは、本体実装開始の前提としない
+- **次の作業**として、Level 2本体実装とunresolved時のLevel 1 fallback接続へ進む
+
+本節は、§1A・§1Cの研究基本設定（通常Level 2→Level 1→必要時Level 0）と整合する。
+
+#### 1H.27.41 Level 2呼出の軽量カウンター（必須）
+
+10,000台規模・約100 Node規模の実験でLevel 2の実際の呼出頻度を確認できるよう、Level 2の呼出回数を後から確認できる**軽量カウンター**を必ず設ける。
+
+World単位の軽量な整数カウンターを基本とし、最低限、次の回数を確認できる構成とする。
+
+- Level 2の総呼出回数
+- Level 2でresolvedとなった回数
+- Level 2でunresolvedとなった回数
+- Level 2 unresolved後にLevel 1 fallbackを使用した回数
+
+**今回の本体実装では追加しないもの：**
+
+- 車両別のLevel 2詳細呼出履歴
+- assignmentの全訪問履歴
+- 性能測定のための詳細ログ蓄積
+
+整数カウンターによる集計に限定し、本体処理への負荷を最小限にする。assignmentの正式な全訪問履歴は引き続き後回しとする（§1H.27.41）。
 
 ---
 
@@ -6268,9 +6343,9 @@ Phase 4-6Mで追加された `Node.transfer()` 接続統合テストは **§1F.1
 - **Phase 4-6A〜4-6M：** 実装・テスト・commit済み（4-6Mは `b03538c`）。
 - **Phase 4-6N（commit済み）：** route_next_link参照順修正（`05fa2d1`）、clearance=0比較テスト3本（`f339b88`）、正式記録（`c06936c`）、診断スクリプト分離（`0e35799`）。
 - **Phase 4-6N Step 5：** Node訪問単位の共通状態設計を **§1H** に記録済み。基盤（4-6O）・到着記録（4-6P）・FCFS参照先変更（4-6Q）・BATCH参照先変更（4-6R）・BATCH assignment訪問対応（4-6S）・小規模BATCH再訪end-to-end統合（4-6T）は実装済み。high-demand再実行・検証（4-6U）は5,000台・clearance=0、5,000台・clearance=1、10,000台・clearance=1の3ケースで完了（§1H.24）。zero-service追加形成修正（4-6V）は完了（§1H.25、`2b10b08`）。診断スクリプト（`fe9e53e`）は§1H.25。模倣World型Level 2 t_trigger参照モデル（4-6W）は確立（§1H.26。参照モデル・専用テスト実装・独立レビュー完了。本体未接続）
-- **現時点の主要課題：** trip-end Vehicle・stale service unit・assignment全訪問履歴・Level 2本体接続・Time-value Transaction（設計メモ **§1H.26**）
+- **現時点の主要課題：** Level 2本体接続・Level 2 unresolved時のLevel 1 fallback・Level 2呼出の軽量カウンター・Time-value Transaction（**§1H.27.40・§1H.27.41**）
 - **優先参照：** ORDER_EXCHANGE_PHASE4-6_BATCH_PROCESSING_DESIGN_NOTES.md の **§1H** を優先参照。診断・根本原因は **§1G**、`Node.transfer()` 接続は **§1F**。Phase 4-6Q実装記録は **§1H.20**、Phase 4-6R実装記録は **§1H.21**、Phase 4-6S実装記録は **§1H.22**、Phase 4-6T実装記録は **§1H.23**、Phase 4-6U実行記録は **§1H.24**、Phase 4-6V zero-service追加形成・等価性・batch size予備比較は **§1H.25**、Phase 4-6W参照モデルは **§1H.26**
-- **次工程候補（§1H.17・§1H.26）：** Phase 4-6W参照モデルの適用範囲と性能測定計画を確定。模倣World直接利用 vs local virtual clock移植の比較。本体Level 2接続仕様を確定。virtual horizonの扱いを決定。inlink未到着Vehicle対応要否。通常非適用時のLevel 1値採用処理の本体配置（参照モデルでは `t_level_2_candidate=t_level_1`。重大不整合はValueError）。trip-end Vehicleは研究対象外。stale service unit回復は必要性が低ければ保留。assignment全訪問履歴は後回し。Time-value Transaction本体
+- **次工程候補（§1H.27.40・§1H.27.41）：** Level 2本体実装・unresolved時Level 1 fallback・軽量カウンター（優先）。性能ベンチマーク拡張は本体実装開始の前提としない。virtual horizon正式値は§1H.27.38を踏まえ未決定。trip-end Vehicleは研究対象外。stale service unit回復は必要性が低ければ保留。assignment全訪問履歴は後回し。Time-value Transaction本体
 - **最新のUXsim本体実装commit：** `2b10b08`（Phase 4-6Wは `uxsim/uxsim.py` 未変更。Phase 4-6Wのcommit IDはGit履歴参照）
 - 目的地Vehicleは端点間OD前提で保留。比較対象Node共通管理・自動検証は将来課題。
 - 一時退避PDF `phase4-6A_batch_earliest_arrival_timestep_memo.pdf` はリポジトリ外。正式Markdownを優先参照。
