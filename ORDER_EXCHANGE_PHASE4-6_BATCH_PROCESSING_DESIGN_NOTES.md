@@ -8,7 +8,7 @@ UXsim Order Exchange 改変作業における、phase 4-6：交差点BATCH処理
 
 ## 1A. 実装状況サマリ（phase 4-6A〜4-6M）
 
-進捗の詳細・コミットID・回帰結果は [ORDER_EXCHANGE_PROGRESS.md](ORDER_EXCHANGE_PROGRESS.md) を参照。Phase 4-6E〜4-6Jの設計・判断経緯の詳細は **§1C**、Phase 4-6Kの実装記録は **§1D**、Phase 4-6Lの統括メソッド記録は **§1E**、Phase 4-6Mの `Node.transfer()` 接続記録は **§1F**、Phase 4-6Nの比較・診断記録は **§1G**、Node訪問単位の共通状態設計は **§1H**（zero-service追加形成・size-one BATCHとFCFS等価性は **§1H.25**、模倣World型Level 2 t_trigger参照モデルは **§1H.26**）を参照。
+進捗の詳細・コミットID・回帰結果は [ORDER_EXCHANGE_PROGRESS.md](ORDER_EXCHANGE_PROGRESS.md) を参照。Phase 4-6E〜4-6Jの設計・判断経緯の詳細は **§1C**、Phase 4-6Kの実装記録は **§1D**、Phase 4-6Lの統括メソッド記録は **§1E**、Phase 4-6Mの `Node.transfer()` 接続記録は **§1F**、Phase 4-6Nの比較・診断記録は **§1G**、Node訪問単位の共通状態設計は **§1H**（zero-service追加形成・size-one BATCHとFCFS等価性は **§1H.25**、模倣World型Level 2 t_trigger参照モデルは **§1H.26**、Level 2本体接続は **§1H.27.42**）を参照。
 
 | 区分 | 内容 |
 |------|------|
@@ -38,19 +38,29 @@ UXsim Order Exchange 改変作業における、phase 4-6：交差点BATCH処理
 | | phase 4-6U：high-demand再実行・検証完了（§1H.24。本体変更なし） |
 | | phase 4-6V：zero-service追加形成修正・size-one BATCHとFCFSの等価性回復（2b10b08） |
 | | phase 4-6V診断：size-one BATCH対FCFS等価性・batch size予備比較（fe9e53e。§1H.25） |
+| | Level 2本体接続：BATCH `t_trigger`推定へのLevel 2正式接続（6e6a601。§1H.27.42） |
 | **診断スクリプト** | `diagnostics/order_control/`（6本＋README）。通常回帰テストから分離済み（`0e35799`）。詳細は `diagnostics/order_control/README.md` |
-| **BATCH形成〜シミュレーション接続まで完成** | trigger候補取得 → … → service queue登録（4-6I）→ 実通過（4-6K）→ 統括呼出し（4-6L）→ **`Node.transfer()` 接続（4-6M）** → **BATCH形成のcurrent visit参照（4-6R）** → **BATCH assignmentの訪問対応（4-6S）** → **小規模BATCH再訪end-to-end統合（4-6T）** |
-| **現時点の主要課題** | Level 2本体接続、Level 2 unresolved時のLevel 1 fallback、Level 2呼出の軽量カウンター、Time-value Transaction |
-| **未実装** | Level 2本体接続・有効化（模倣World型参照モデルは **§1H.26** で確立済み） |
-| | trip-end VehicleのBATCH service unit対応 |
+| **BATCH形成〜シミュレーション接続まで完成** | trigger候補取得 → … → service queue登録（4-6I）→ 実通過（4-6K）→ 統括呼出し（4-6L）→ **`Node.transfer()` 接続（4-6M）** → **BATCH形成のcurrent visit参照（4-6R）** → **BATCH assignmentの訪問対応（4-6S）** → **小規模BATCH再訪end-to-end統合（4-6T）** → **Level 2 `t_trigger`推定の本体接続（6e6a601、§1H.27.42）** |
+| **現時点の主要課題** | **Level 2本体接続後**の5,000台・10,000台grid network試験（Level 1対Level 2比較、N=1 BATCH Level 2対FCFS一致性、virtual horizon 30の妥当性、Level 2カウンター・計算時間）。Time-value Transaction |
+| **未実装** | trip-end VehicleのBATCH service unit対応 |
 | | stale service unitの自動削除または回復方針 |
 | | assignmentの正式な全訪問履歴 |
 | | Time-value Transaction、比較対象Node共通管理、目的地自動検証、taxi mode向け動的dest検証 |
+| | Level 2またはLevel 1からLevel 0への**自動切替**（§1H.27.42） |
+| **未実施の試験・評価** | Level 2本体接続後の5,000台・10,000台grid network試験（§1H.27.42） |
+| | 同一条件でのBATCH Level 1対Level 2比較 |
+| | N=1 BATCH Level 2対FCFS一致性確認 |
+| | 混雑条件でのvirtual horizon 30の妥当性確認 |
+| | Level 2の4個のカウンター確認 |
+| | Level 2の計算時間確認 |
+| **Level 1大規模試験（完了済み）** | Phase 4-6U：5,000台・10,000台high-demand BATCH比較（§1H.24）。Level 2本体接続**前**のLevel 1試験 |
+| **N=1 BATCH Level 1対FCFS一致性（確認済み）** | t_trigger Level 1、`batch_size=1`、同一clearance・同一候補順位。200台固定route条件および10,000台自由経路条件（Phase 4-6V、§1H.25） |
+| **N=1 BATCH Level 2対FCFS一致性** | **未実施**。5,000台・10,000台grid network条件で今後確認（§1H.27.42） |
 | **当面の研究シナリオ前提** | 比較対象内部交差点Nodeを目的地としない端点間OD |
 | | 全比較方式で同一ネットワーク・同一OD需要 |
-| **研究基本設定（明示指定）** | 研究の通常方式は **Level 2**（未実装）。Level 2で解決不能時は **Level 1** へfallback、必要に応じて **Level 0** へfallback。 |
+| **研究基本設定（明示指定）** | 研究の通常方式は **Level 2**（`order_control_batch_t_trigger_level=2`。6e6a601で本体接続済み、§1H.27.42）。Level 2で `resolved=False` となった場合は、先に計算済みの **Level 1値を採用**する（6e6a601で実装済み）。**Level 0推定**（`estimate_order_control_batch_t_trigger_level_0`）は独立した推定Levelとして実装済みであるが、**Level 2またはLevel 1からLevel 0へ自動的に切り替える処理は現在実装していない**。Level 0への追加切替は、実際の試験で必要性が確認された場合に別途検討する。 |
 | | 暫定比較では `batch_size=10`、`order_control_batch_t_trigger_level=1`（Level 1は最終基本設定ではない） |
-| **次工程候補** | **§1H.27.40・§1H.27.41** を参照。優先：Level 2本体実装・unresolved時Level 1 fallback・軽量カウンター。性能ベンチマーク拡張は本体実装開始の前提としない。virtual horizon正式値は§1H.27.38を踏まえ未決定。trip-end Vehicleは研究対象外。stale service unit回復は必要性が低ければ保留。assignment全訪問履歴は後回し（§1H.27.41）。Time-value Transaction本体 |
+| **次工程候補** | **§1H.27.42** を参照。**Level 2本体接続後に新たに必要な試験：** 5,000台・10,000台grid networkでのLevel 1対Level 2比較、N=1 BATCH Level 2対FCFS一致性、混雑条件でのvirtual horizon 30の妥当性、Level 2の4個のカウンターと計算時間の確認。**完了済みのLevel 1試験（再実施の位置付けは基準値・再現確認）：** Phase 4-6Uの5,000台・10,000台high-demand（§1H.24）、Phase 4-6VのN=1 BATCH Level 1対FCFS（200台固定route・10,000台自由経路、§1H.25）。virtual horizon正式値は§1H.27.38・§1H.27.42を踏まえ未決定。trip-end Vehicleは研究対象外。stale service unit回復は必要性が低ければ保留。assignment全訪問履歴は後回し。Time-value Transaction本体 |
 
 ---
 
@@ -2529,26 +2539,33 @@ VehicleがNodeを実際に通過した場合、service unit側とVehicle側を**
 | Phase 4-6U | **再実行・検証完了**（**§1H.24**。本体・テスト・診断Python変更なし。結果は§1H.24に記録する） |
 | Phase 4-6V | **実装・専用テスト・限定回帰・commit・push済み**（**§1H.25**、`2b10b08`） |
 | Phase 4-6V診断 | **診断スクリプト追加・commit・push済み**（**§1H.25**、`fe9e53e`） |
-| Phase 4-6W | **参照モデル・専用テスト実装・独立レビュー完了**（**§1H.26**。本体未接続。`uxsim/uxsim.py` 未変更。commit IDはGit履歴参照） |
-| Level 2本体 | **未接続・未有効化**（参照モデルのみ確立。§1H.26） |
-| 最新のUXsim本体実装commit | `2b10b08` |
+| Phase 4-6W | **参照モデル・専用テスト実装・独立レビュー完了**（**§1H.26**。commit IDはGit履歴参照） |
+| Level 2本体 | **接続済み**（**§1H.27.42**、`6e6a601`） |
+| 最新のUXsim本体実装commit | `6e6a601`（Level 2本体接続。§1H.27.42） |
 | high-demand BATCH比較 | **完了**（Phase 4-6U。5,000台・clearance=0、5,000台・clearance=1、10,000台・clearance=1の3ケース。U1〜U3すべてexit 0、prefix violationなし。§1H.24） |
-| size-one BATCHとFCFSの等価性 | **修正後コードで確認済み**（200台固定route・10,000台自由経路。§1H.25） |
+| size-one BATCHとFCFSの等価性 | **修正後コードで確認済み（t_trigger Level 1、batch_size=1）**（200台固定route・10,000台自由経路。§1H.25）。**N=1 BATCH Level 2対FCFSは未実施**（§1H.27.42） |
 | batch size探索 | **ここで終了**（修正後N=10・N=20予備比較のみ。§1H.25） |
 
 **次工程候補（断定しない）：**
 
-1. Phase 4-6W参照モデルの適用範囲と性能測定計画を確定
-2. 模倣Worldを本体で直接使うか、local virtual clockへ移植するかを比較
-3. 本体Level 2接続仕様を確定
-4. virtual horizonの扱いを決定
-5. inlink未到着Vehicleへの対応要否を判断
-6. 通常非適用時にLevel 1値を採用する処理を、本体接続時にどこへ置くか決定（参照モデルでは `t_level_2_candidate=t_level_1`。重大不整合はValueErrorで隠さない）
-7. 必要に応じてLevel 0 fallback（未実装）
+**Level 2本体接続後に新たに必要な試験（§1H.27.42）：**
+
+1. 5,000台・10,000台grid networkでのLevel 1対Level 2比較
+2. 5,000台・10,000台grid networkでのN=1 BATCH Level 2対FCFS一致性確認
+3. 混雑条件でのvirtual horizon 30の妥当性確認
+4. 大規模条件でのLevel 2呼出カウンター（4個の整数）と計算時間の確認
+
+**その他の候補：**
+
+5. virtual horizon正式値の最終決定
+6. 模倣Worldを本体で直接使うか、local virtual clockへ移植するかを比較
+7. Level 0への自動切替（現時点では未実装。試験で必要性が確認された場合に検討）
 8. trip-end Vehicleは研究対象外
 9. stale service unit回復は必要性が低ければ保留
 10. assignment正式全訪問履歴は後回し
 11. Time-value Transaction本体（未実装）
+
+**完了済みのLevel 1大規模試験（再実施時は基準値・再現確認の位置付け）：** Phase 4-6Uの5,000台・10,000台high-demand（§1H.24）。Phase 4-6VのN=1 BATCH Level 1対FCFS（200台固定route・10,000台自由経路、§1H.25）。
 
 **終了した工程：**
 
@@ -5451,28 +5468,32 @@ python tests_order_control_batch_t_trigger_level_2_reference.py
 
 #### 1H.27.35 未解決事項
 
-- UXsim本体Level 2未接続
-- 本体設定でlevel=2を有効化していない
-- 小規模quickベンチマークによるhorizon感度・性能概算は実施済み（§1H.27.38・§1H.27.39）。virtual horizon正式値は未決定
-- 大規模条件での実測は未実施（§1H.27.39の概算を参照）
+- ~~UXsim本体Level 2未接続~~ → **6e6a601で接続済み（§1H.27.42）**
+- ~~本体設定でlevel=2を有効化していない~~ → **6e6a601で受理・接続済み（§1H.27.42）**
+- 小規模quickベンチマークによるhorizon感度・性能概算は実施済み（§1H.27.38・§1H.27.39）。virtual horizon正式値は未決定（暫定30、§1H.27.42）
+- 大規模条件での**Level 2本体接続後**の実測は未実施（§1H.27.39の概算を参照。§1H.27.42）。Phase 4-6UのLevel 1 high-demand試験（5,000台・10,000台）は完了済み（§1H.24）
 - local virtual clockとの比較未実施
-- network-wide simulation未実施
-- 実装は参照モデル内に限定（本体接続は次工程 §1H.27.40）
+- network-wide simulation（**Level 2本体接続後**の5,000台・10,000台grid network試験）未実施
+- 混雑条件でのvirtual horizon 30の妥当性未確認
 
 #### 1H.27.36 次工程候補
 
-**優先（確定方針 §1H.27.40）：**
+**優先（§1H.27.42 未実施事項。Level 2本体接続後に新たに必要）：**
 
-1. Level 2仮想サービス推定の本体実装（BATCH `t_trigger`推定への接続）
-2. Level 2 unresolved時のLevel 1 fallback接続
-3. 軽量整数カウンター（§1H.27.41）の実装
+1. 5,000台grid networkでのLevel 1対Level 2比較
+2. 10,000台grid networkでのLevel 1対Level 2比較
+3. 5,000台grid networkでのN=1 BATCH Level 2対FCFS一致性確認
+4. 10,000台grid networkでのN=1 BATCH Level 2対FCFS一致性確認
+5. 混雑条件での `order_control_batch_virtual_horizon=30` の妥当性確認
+6. 大規模条件でのLevel 2呼出カウンター（4個の整数）と計算時間の確認
 
-**その他の候補（本実装開始の前提としない）：**
+**完了済み（Level 1。再実施時は基準値・再現確認）：** Phase 4-6Uの5,000台・10,000台high-demand（§1H.24）。Phase 4-6VのN=1 BATCH Level 1対FCFS（200台固定route・10,000台自由経路、§1H.25）。
 
-- 性能ベンチマークのさらなる拡張
-- virtual horizon正式値の最終決定（§1H.27.38の結果を参照しつつ）
+**その他の候補：**
+
+- virtual horizon正式値の最終決定（§1H.27.38・§1H.27.42の結果を踏まえつつ）
 - 模倣World直接利用とlocal virtual clockの比較
-- network-wide simulation
+- Level 0への自動切替（現時点では未実装。試験で必要性が確認された場合に検討）
 
 #### 1H.27.37 virtual timestep順序（実装結果）
 
@@ -5576,6 +5597,240 @@ World単位の軽量な整数カウンターを基本とし、最低限、次の
 - 性能測定のための詳細ログ蓄積
 
 整数カウンターによる集計に限定し、本体処理への負荷を最小限にする。assignmentの正式な全訪問履歴は引き続き後回しとする（§1H.27.41）。
+
+#### 1H.27.42 Level 2本体接続（BATCH `t_trigger`推定への正式接続）
+
+**コミット：** `6e6a601` — *Connect Level 2 trigger estimation to BATCH formation*
+
+**位置付け：** Phase 4-6W（§1H.26）およびPhase 4-6X（§1H.27）で確立した模倣World型Level 2 t_trigger参照モデルを、UXsim本体のBATCH形成処理へ正式に接続した実装記録である。接続前に確定した方針（§1H.27.40・§1H.27.41）に基づき、Level 2を研究の通常方式として `form_order_control_batch()` から利用可能にした。
+
+**実装前の課題：** `order_control_batch_t_trigger_level=2` は設定時に拒否され、`form_order_control_batch()` でも `ValueError` となっていた。Level 2参照処理は `diagnostics/order_control/level2_virtual_world_reference.py` にのみ存在し、正式なUXsim配布環境では利用できない可能性があった。`t_trigger` の決定は `form_order_control_batch()` 内でLevel 0またはLevel 1を直接選ぶ構造であり、Level 2未解決時のLevel 1 fallback（Level 2で解決できなかった場合に、計算済みのLevel 1値を採用すること）も未接続であった。
+
+##### 1H.27.42.1 BATCH形成における処理順（本体接続後）
+
+ここでいう**現在の交差点訪問**とは、1台の車両が対象交差点へ向かい始めてから、その交差点を通過するまでの1回分を指す。
+
+BATCH形成は、Level 0・Level 1・Level 2のいずれでも、次の共通手順で進む。
+
+1. まだBATCH割当されていない車両のうち、BATCH形成のきっかけとなるtrigger車両を既存処理（`get_order_control_batch_trigger_candidates()` 等）で1台選ぶ。
+2. `form_order_control_batch()` が、`t_trigger` の決定を `Node._resolve_order_control_batch_t_trigger(trigger_vehicle, t_trigger_level)` へ任せる。
+3. **level=0：** `estimate_order_control_batch_t_trigger_level_0()` を1回だけ呼び、その値を `t_trigger` とする。
+4. **level=1：** `estimate_order_control_batch_t_trigger_level_1()` を1回だけ呼び、その値を `t_trigger` とする。
+5. **level=2：** まず `estimate_order_control_batch_t_trigger_level_1()` を1回だけ呼び、戻り値を `t_level_1` として保持する。
+6. 保持した `t_level_1` と、当該Nodeの `order_control_batch_virtual_horizon` を入力として、`estimate_order_control_batch_t_trigger_level_2_reference()` を1回だけ呼ぶ。
+7. Level 2が `resolved=True` を返した場合は `t_level_2_candidate` を `t_trigger` として採用する。
+8. Level 2が `resolved=False` を返した場合（virtual horizon内で解決できなかった正常な未解決）は、先に計算済みの `t_level_1` を `t_trigger` として採用する。**このときLevel 1推定をもう一度呼ばない。**
+9. 決定した `t_trigger` を、既存の候補抽出（`get_order_control_batch_candidates_by_inlink()`）、inlinkごとの順序付け（`get_ordered_order_control_batch_candidates_by_inlink()`）、最大BATCHサイズ適用（`apply_order_control_batch_max_size()`）、正式登録（`register_order_control_batch_service_units()`）へ渡す。
+10. Level 2専用の別BATCH形成経路は作っていない。`transfer_batch()` も含め、Level 2接続後も既存の形成・通過処理をそのまま使用する。
+11. 正式登録によってBATCH割当済みとなった**現在の交差点訪問**は、次回以降のBATCH形成対象から外れる（既存の `has_order_control_batch_assignment()` による除外を維持）。
+12. 同じ車両が別の対象Nodeへ到達した場合、または後で同じNodeを再訪した場合は、新しい交差点訪問として必要な計算対象になり得る。
+
+**変更範囲を限定した理由：** Level 2の追加で変更が必要なのは、BATCH形成に使用する `t_trigger` の決定方法だけであり、その後の候補抽出・順序付け・最大サイズ適用・正式登録はすべてのLevelで共通だからである。
+
+**変更していない既存処理：** trigger候補取得、`blocked_inlinks` による絞込み、`trigger_snapshot_keys` による絞込み、`transfer_batch()` による形成と通過処理、service queue通過処理、BATCH割当済み訪問の除外。
+
+##### 1H.27.42.2 Level 2参照処理の本体配置
+
+1. Level 2参照処理の**実体**を `uxsim/order_control_batch_level_2_reference.py` へ移した（Phase 4-6W/4-6Xの診断用ファイルからの移設）。
+2. `diagnostics/order_control/level2_virtual_world_reference.py` は、本体側実装を読み込んで再公開する**互換用ファイル**に変更した。既存の参照テスト・ベンチマークは `from diagnostics.order_control.level2_virtual_world_reference import ...` を引き続き使用できる。
+3. Level 2処理本体を本体側とdiagnostics側へ**二重実装していない**。
+4. diagnostics側から再公開している名前：`estimate_order_control_batch_t_trigger_level_2_reference`、`TRANSFER_OK`、`STOP_QUEUE`、`BLOCK_INLINK`、`STOP_AFTER_TRANSFER`、`SKIP_INLINK`。
+5. **正式機能をdiagnostics配下へ依存させなかった理由：** diagnosticsは診断・検証用の場所であり、正式なUXsim本体機能の依存先として適切ではない。通常のUXsim配布環境でdiagnosticsフォルダが含まれない可能性がある。正式なLevel 2機能は `uxsim` パッケージ内だけで利用可能である必要がある。同じ処理を2か所へ残すと、将来の修正不一致が起こり得る。
+6. **読み込み衝突の回避：** `uxsim/uxsim.py` のファイル先頭ではLevel 2モジュールを import しない。`Node._resolve_order_control_batch_t_trigger()` 内で `t_trigger_level == 2` のときだけ `from .order_control_batch_level_2_reference import estimate_order_control_batch_t_trigger_level_2_reference` を実行する。`uxsim.py` とLevel 2ファイルが互いを読み込む途中で処理が衝突することを避けるためである。Level 0またはLevel 1だけを使用する場合には、この import は実行されない。
+
+##### 1H.27.42.3 Level 2未解決時の計算済みLevel 1値採用（fallback）
+
+Level 2では、Level 1を単なる事後的な予備処理として後から呼ぶのではない。Level 2を呼ぶ**前に**、Level 2の入力と未解決時の代替値を兼ねて、Level 1を1回だけ計算する。
+
+処理順序：
+
+1. `t_level_1` を1回計算する。
+2. `t_level_1` をLevel 2へ渡す。
+3. Level 2で解決できた場合は `t_level_2_candidate` を採用する。
+4. Level 2で解決できなかった場合は、保存してある `t_level_1` を採用する。
+5. 未解決後にLevel 1をもう一度呼ばない。
+
+この構造にした理由：
+
+- Level 2参照処理が `t_level_1` を入力として必要とする。
+- 未解決時に同じLevel 1計算を繰り返す必要がない。
+- Level 1の二重計算を避けられる。
+- Level 2未解決時も同じ `form_order_control_batch()` 処理内でBATCH形成と割当まで進められる。
+
+**実装済みの切替範囲と未実装の切替：**
+
+- **実装済み（6e6a601）：** Level 2で `resolved=False` となった場合に、先に計算済みのLevel 1値を `t_trigger` として採用する（Level 1の二重計算なし）。
+- **実装済み（独立推定Level）：** Level 0推定（`estimate_order_control_batch_t_trigger_level_0`）は、`order_control_batch_t_trigger_level=0` を指定した場合に単独で使用できる。
+- **未実装：** Level 2またはLevel 1の実行結果に応じて、Level 0へ**自動的に**切り替える処理はない。三段階の自動fallback（Level 2 → Level 1 → Level 0）は実装していない。Level 0への追加切替は、実際の試験で必要性が確認された場合に別途検討する。
+
+**正常な未解決と重大な不整合の区別：**
+
+- `resolved=False` は正常な未解決（virtual horizon内でtriggerの仮想通過時刻が得られなかった場合）。
+- `ValueError` 等は重大な不整合。重大な不整合を `resolved=False` へ変換しない。重大な不整合時にはLevel 1値を使って処理を続けず、例外を呼出元へ通知する。
+- 本体接続箇所では、Level 2戻り値について `resolved`（bool）と、`resolved=True` 時の `t_level_2_candidate`（非boolの非負int）のみを確認する。参照モデル側で既に検証しているservice queue内部整合性等は、本体接続箇所で重複検証しない（§1H.27.40の方針どおり）。
+
+##### 1H.27.42.4 virtual horizon（`order_control_batch_virtual_horizon`）
+
+**属性名：** `order_control_batch_virtual_horizon`
+
+**設定場所：** 各Node（World共通属性は設けていない。実際にLevel 2を実行するNodeが設定値を保持する）。
+
+**暫定既定値：** 30 timestep（正式な研究条件として確定した値ではない）。
+
+**設定経路：** `Node.__init__()`、`World.addNode()`、`World.set_order_control_for_nodes()`、`World.set_order_control_for_randomly_selected_eligible_nodes()`（ランダム選択setterは `set_order_control_for_nodes()` へ委譲）。
+
+**検証（`_validate_order_control_batch_virtual_horizon()`）：** 0以上のintを受理。bool・負数・float・文字列・Noneは拒否。
+
+**設定方針：** 通常は対象Node群へ同じ値を一括設定できる。必要な場合はNode別に異なる値を設定できる。World属性とNode属性の二重管理はしていない。
+
+**暫定既定値を10ではなく30とした理由（§1H.27.38の結果を踏まえた位置付け）：**
+
+- quickベンチマークではhorizon 10でも小規模シナリオ6件すべてが解決し、horizon 50と同じ `t_virtual_trigger` が得られた。
+- しかし、Level 2の効果が特に必要となる混雑時には、仮想計算により多くのtimestepが必要になる可能性がある。
+- Level 2はtrigger車両の仮想通過時刻が求まった時点で早期終了する。上限を30にしても、短い計算で解決する場合に30 timestepすべてを計算するわけではない。
+- **30は正式な研究条件ではなく、大規模・混雑条件で再評価する暫定値である。** 30が実測上の最適値として証明されたわけではない。
+
+##### 1H.27.42.5 Level 2呼出の軽量カウンター（4個の整数）
+
+§1H.27.41で必須とした軽量カウンターを、`World.__init__()` で0に初期化する4個の整数として実装した。
+
+| 属性名 | 意味 |
+|--------|------|
+| `order_control_batch_level_2_call_count` | Level 2を実際に呼び始めた総回数 |
+| `order_control_batch_level_2_resolved_count` | Level 2が正常に結果を返し、virtual horizon内で解決できた回数 |
+| `order_control_batch_level_2_unresolved_count` | Level 2が正常に結果を返したが、virtual horizon内では解決できなかった回数 |
+| `order_control_batch_level_2_level_1_fallback_count` | Level 2で解決できず、先に計算済みのLevel 1値を採用した回数 |
+
+**増加位置（すべて `Node._resolve_order_control_batch_t_trigger()` の `t_trigger_level == 2` 分岐内のみ）：**
+
+- `call_count`：Level 2関数を呼ぶ直前
+- `resolved_count`：`resolved=True` の結果を正常に受けた後
+- `unresolved_count`：`resolved=False` の結果を正常に受けた後
+- `level_1_fallback_count`：`resolved=False` で計算済みLevel 1値を採用するとき
+
+**Level 2が例外を出した場合：** `call_count` は増えたまま。`resolved_count`・`unresolved_count`・`level_1_fallback_count` は増やさない。したがって `resolved_count + unresolved_count == call_count` が成立しないことがある（呼び始めたが正常な解決/未解決結果を返す前に例外終了した呼出しが存在する場合）。
+
+**追加していないもの：** 車両別・Node別のLevel 2履歴、呼出時刻一覧、個別計算結果一覧、個別計算時間一覧、カウンター専用getter、専用リセットメソッド。
+
+##### 1H.27.42.6 前回結果を保存しない方針
+
+Level 2の前回計算結果を保存して再利用する機能は追加しなかった。
+
+1. Level 2の計算条件には、交通状態、service queue、利用可能容量、前方車両などが含まれる。
+2. これらが変われば、前回と同じ条件ではない。
+3. 前回と完全に同じ条件が再び成立する場面は通常想定しにくい。
+4. 古い結果を再利用すると、現在の状態と合わない値を使用する危険がある。
+5. Level 2で解決できない場合も、その場で計算済みLevel 1値を使用してBATCH形成と割当まで進む。
+6. BATCH割当済みとなった現在の交差点訪問は、次回以降のBATCH形成対象から外れる。
+7. したがって、同じ交差点訪問についてLevel 2を繰り返すことを防ぐための結果保存機能は不要である。
+
+##### 1H.27.42.7 `form_order_control_batch()` の変更
+
+**変更前：** `form_order_control_batch()` 内でLevel 0またはLevel 1を直接選んで `t_trigger` を計算していた。`t_trigger_level=2` は `ValueError`。
+
+**変更後：** trigger車両を選んだ後、`_resolve_order_control_batch_t_trigger(trigger_vehicle, t_trigger_level)` を1回呼び、最終的な `t_trigger` を受け取る。Level 0・Level 1・Level 2の選択は `_resolve_order_control_batch_t_trigger()` へ集約した。
+
+**受理する `order_control_batch_t_trigger_level`：** 非boolの整数 0、1、2（`_validate_order_control_batch_t_trigger_level()` で検証）。
+
+##### 1H.27.42.8 変更ファイル（コミット `6e6a601`）
+
+| ファイル | 変更内容 |
+|----------|----------|
+| `uxsim/uxsim.py` | level=2受理、virtual horizon、`_resolve_order_control_batch_t_trigger()`、4カウンター、`form_order_control_batch()` 接続 |
+| `uxsim/order_control_batch_level_2_reference.py` | **新規。** Level 2参照処理本体 |
+| `diagnostics/order_control/level2_virtual_world_reference.py` | 本体実装の互換用再公開のみ |
+| `tests_order_control_batch_t_trigger_level_2_body.py` | **新規。** 本体接続テスト22件 |
+| `tests_order_control_batch_node_settings.py` | level=2受理、virtual horizon設定テスト追加 |
+| `tests_order_control_batch_formation_integration.py` | Level 2 resolved/unresolved統合テストへ置換 |
+
+##### 1H.27.42.9 テストと検証
+
+**新規：** `tests_order_control_batch_t_trigger_level_2_body.py`（**22件**）
+
+確認内容（要約）：
+
+- Worldの4個の整数が0で初期化される
+- Nodeの `order_control_batch_virtual_horizon` 既定値が30
+- Level 0・Level 1ではLevel 2を呼ばず、4個の整数を変更しない
+- Level 2ではLevel 1を1回だけ計算し、Level 2参照処理を1回だけ呼ぶ
+- Nodeのvirtual horizon（テストでは47）がLevel 2関数の `virtual_horizon` 引数へ渡る（`test_level_2_receives_node_virtual_horizon`）
+- `resolved=True` 時に `t_level_2_candidate` を採用、`resolved=False` 時に計算済みLevel 1値を採用（Level 1再計算なし）
+- 4個の整数が解決・未解決・例外で意図どおり変化する
+- Level 2の `ValueError` をそのまま通知、不正戻り値を拒否
+- resolved/unresolvedのいずれでもBATCH形成と割当まで進む
+- BATCH割当済みの現在の交差点訪問が次回以降の形成対象から外れる
+- 別Node訪問・同Node再訪が新しい対象になり得る
+- 実Level 2処理で `batch_formed` となり、trigger車両がBATCH割当済みになる
+- 実Level 2処理でreal World・real Vehicle・実乱数状態を不必要に変更しない
+
+**既存テスト更新：**
+
+- `tests_order_control_batch_node_settings.py` — virtual horizon・level=2受理
+- `tests_order_control_batch_formation_integration.py` — Level 2 resolved/unresolved統合
+
+**既存Level 2参照テスト（変更なし、コミット後も成功）：**
+
+- `tests_order_control_batch_t_trigger_level_2_reference.py`：18件成功
+- `tests_order_control_batch_t_trigger_level_2_unarrived_reference.py`：28件成功
+
+**関連回帰（コミット `6e6a601` 時点で成功）：**
+
+- `tests_order_control_batch_t_trigger_estimation.py`
+- `tests_order_control_batch_formation_integration.py`
+- `tests_order_control_batch_node_settings.py`
+- `tests_order_control_batch_transfer.py`
+- `tests_order_control_batch_service_queue_transfer.py`
+- `tests_order_control_n1_batch_blocked_candidate_equivalence.py`
+- `tests_order_control_n1_batch_vs_fcfs_revisit_equivalence.py`
+- `tests_order_exchange_baseline.py`
+- `demos_and_examples/example_00en_simple.py`
+
+**baseline確認値（`tests_order_exchange_baseline.py`）：** 完了48/48、平均速度16.5 m/s、delay ratio 0.017、平均旅行時間61.0 s
+
+**example確認値（`example_00en_simple.py`）：** 完了735/810、平均速度11.7 m/s、delay ratio 0.385、平均旅行時間162.6 s
+
+**W.Tに関するテスト上の注意：** `W.T` は、シミュレーションが現在何番目の時間区切りにいるかを表す数字である。通常の `exec_simulation()` 経路ではUXsimが自動的に設定する。シミュレーションを開始せずLevel 2の内部処理だけをテストから直接呼ぶ場合は、テスト側で `W.T = 0` を設定する。これは通常の研究シミュレーションにおける未解決の不具合ではない。本体へ追加の検証や既定値は追加していない。
+
+##### 1H.27.42.10 完了事項と未実施事項
+
+**完了済み（コミット `6e6a601`）：**
+
+- Level 2参照処理の本体側配置（`uxsim/order_control_batch_level_2_reference.py`）
+- diagnostics互換用再公開
+- `order_control_batch_t_trigger_level=2` の正式受理
+- BATCH形成へのLevel 2接続（`_resolve_order_control_batch_t_trigger()`）
+- Level 2未解決時の計算済みLevel 1値採用（Level 1二重計算防止）
+- `order_control_batch_virtual_horizon` のNode設定（暫定既定値30）
+- 4個のLevel 2呼出カウンター
+- 前回結果保存機能を追加しない方針の実装
+- 本体接続テスト22件、参照テスト18件、未到着参照テスト28件、関連回帰テスト
+
+**未実施（現時点。実施前に結果を推測して記録しない）：**
+
+**Level 2本体接続後に新たに必要なgrid network試験：**
+
+- 5,000台grid networkでのBATCH Level 1とLevel 2の比較
+- 10,000台grid networkでのBATCH Level 1とLevel 2の比較
+- 5,000台grid networkでのN=1 BATCH Level 2とFCFSの一致性確認
+- 10,000台grid networkでのN=1 BATCH Level 2とFCFSの一致性確認
+- 混雑条件での `order_control_batch_virtual_horizon=30` の妥当性確認
+- 大規模条件でのLevel 2呼出回数・解決回数・未解決回数・Level 1値採用回数（4個の整数）の確認
+- 大規模条件でのLevel 2計算時間確認
+- grid network試験結果に基づく必要な修正
+- git push（コミット `6e6a601` 時点）
+
+**N=1 BATCH対FCFS一致性の区別：**
+
+| 対象 | 状態 | 確認済み条件 |
+|------|------|-------------|
+| N=1 BATCH **Level 1**対FCFS | **確認済み**（Phase 4-6V、§1H.25） | 200台固定route条件、10,000台自由経路条件。t_trigger Level 1、`batch_size=1`、同一clearance、同一候補順位、修正後コードにおけるFCFSとの交通結果一致 |
+| N=1 BATCH **Level 2**対FCFS | **未実施** | 5,000台・10,000台grid network条件で今後確認 |
+
+大規模試験でN=1 Level 1対FCFSを再実行する場合、それは未確認事項の初回検証ではなく、Level 2比較時の基準値または再現確認として位置付ける。
+
+**完了済みのLevel 1大規模試験（Level 2本体接続前）：** Phase 4-6Uの5,000台・10,000台high-demand BATCH比較（§1H.24）。上記「未実施」は、これらを否定するものではない。
+
+**次に確認する必要があること：** Level 2本体接続後の5,000台・10,000台grid network試験において、Level 2が正常に動作するか、Level 1と比較して意図どおりの効果があるか、N=1 BATCH Level 2がFCFSと一致するか、virtual horizon 30が混雑条件で十分か、Level 2呼出カウンターと計算時間が許容範囲か。
 
 ---
 
@@ -6231,12 +6486,16 @@ Phase 4-6Mで追加された `Node.transfer()` 接続統合テストは **§1F.1
 - 正常終了時の `incoming_vehicles` 整理 → **phase 4-6Lで実装済み**（§1E.8）
 - `Node.transfer()` へのBATCH分岐 → **phase 4-6Mで実装済み**（§1F）
 - N=1 BATCHとFCFSのシミュレーション全体での完全同一性 → **phase 4-6Mで確認済み**（§1F.13）
+- Level 2仮想サービス推定の本体接続 → **6e6a601で実装済み**（§1H.27.42）
+- Level 2 unresolved時の計算済みLevel 1値採用（fallback）→ **6e6a601で実装済み**（§1H.27.42）
+- Level 2呼出の軽量カウンター（4個の整数）→ **6e6a601で実装済み**（§1H.27.42）
 
 ### 未解決・将来課題
 
 - `tau_timesteps` を常に1でよいか（研究比較で可変にするか）。
-- Level 2仮想サービス計算をいつ導入するか。
-- Level 2 unresolved時のLevel 1 fallback接続をいつ実装するか。
+- 大規模grid network試験（5,000台・10,000台）でのLevel 2動作確認（§1H.27.42）。Phase 4-6UのLevel 1 high-demand試験は完了済み（§1H.24）
+- 混雑条件での `order_control_batch_virtual_horizon=30` の妥当性（§1H.27.42）
+- N=1 BATCH Level 2対FCFS一致性（5,000台・10,000台grid network、§1H.27.42）
 - debug/log出力の粒度。
 - 比較対象Node共通管理。
 - 目的地自動検証。
