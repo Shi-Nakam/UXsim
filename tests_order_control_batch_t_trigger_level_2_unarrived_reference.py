@@ -192,12 +192,16 @@ def _boost_capacity(merge, *links):
 
 def _snapshot_vehicle(veh):
     visit = veh.order_control_current_visit
+    if hasattr(veh, "route_next_link"):
+        route_next_link_name = (
+            veh.route_next_link.name if veh.route_next_link is not None else None
+        )
+    else:
+        route_next_link_name = "<missing attribute>"
     return {
         "x": veh.x,
         "state": veh.state,
-        "route_next_link": (
-            veh.route_next_link.name if veh.route_next_link is not None else None
-        ),
+        "route_next_link": route_next_link_name,
         "arrival_time": visit.get("arrival_time") if visit else None,
         "arrival_tiebreaker": visit.get("arrival_tiebreaker") if visit else None,
     }
@@ -209,6 +213,19 @@ def _expect_value_error(callable_obj):
         assert False, "expected ValueError"
     except ValueError:
         pass
+
+
+def _expect_value_error_with_message(callable_obj, **required_substrings):
+    try:
+        callable_obj()
+        assert False, "expected ValueError"
+    except ValueError as exc:
+        message = str(exc)
+        for key, fragment in required_substrings.items():
+            assert fragment in message, (
+                f"expected {key!r} in ValueError message, got: {message!r}"
+            )
+        return message
 
 
 def test_offset0_no_advance_before_service():
@@ -464,8 +481,53 @@ def test_block_inlink_then_different_inlink_transfer_clears_stop_reason():
     assert trace["stop_reason"] != BLOCK_INLINK
 
 
-def test_type_b_route_next_link_none():
-    W = _build_multi_outlink_network("type_b_none")
+def test_first_link_unarrived_service_vehicle_without_route_next_link_attribute():
+    W = _build_three_inlink_network("first_link_natural")
+    merge = W.get_node("merge")
+    link1 = W.get_link("link1")
+    link2 = W.get_link("link2")
+    out = W.get_link("out")
+    orig1 = W.get_node("orig1")
+
+    unarrived = W.addVehicle("orig1", "dest", 0, name="UNARR")
+    unarrived.state = "wait"
+    orig1.generation_queue.append(unarrived)
+    orig1.generate()
+
+    assert unarrived.state == "run"
+    assert unarrived.link is link1
+    assert not hasattr(unarrived, "route_next_link")
+    assert unarrived not in merge.incoming_vehicles
+
+    W.VEHICLES_RUNNING[unarrived.name] = unarrived
+    for _ in range(5):
+        unarrived.carfollow()
+        unarrived.v = (unarrived.x_next - unarrived.x) / W.DELTAT
+        unarrived.x_old = unarrived.x
+        unarrived.x = min(unarrived.x_next, link1.length)
+    assert unarrived.x < link1.length
+
+    _sync_visit(unarrived, merge, link1, 0, None, None)
+    _register_unit(merge, 0, link1, [unarrived])
+
+    trigger = _make_vehicle(W, "orig2", "TRIG")
+    _setup_arrived(merge, trigger, link2, out, 0, 12.0, 0.2)
+    merge.last_order_control_inlink = None
+    merge.last_order_control_entry_timestep = None
+    W.T = 10
+    _boost_capacity(merge, link1, link2, out)
+    before = _snapshot_vehicle(unarrived)
+    result = estimate_level2_reference(
+        merge, trigger, t_level_1=10, virtual_horizon=8
+    )
+    assert _snapshot_vehicle(unarrived) == before
+    assert "UNARR" in result["virtual_node_arrival_timesteps"]
+    assert result["virtual_node_arrival_timesteps"]["UNARR"] >= 10
+    assert result["vehicle_transfer_timesteps"].get("UNARR", 99) >= 11
+
+
+def test_unarrived_service_vehicle_route_next_link_none_is_unsupported():
+    W = _build_multi_outlink_network("explicit_none_unsupported")
     merge = W.get_node("merge")
     link1 = W.get_link("link1")
     out1 = W.get_link("out1")
@@ -485,14 +547,25 @@ def test_type_b_route_next_link_none():
     merge.last_order_control_entry_timestep = None
     W.T = 10
     _boost_capacity(merge, link1, out1, out2, out3)
-    result = estimate_level2_reference(
-        merge, trigger, t_level_1=10, virtual_horizon=3
+    message = _expect_value_error_with_message(
+        lambda: estimate_level2_reference(
+            merge, trigger, t_level_1=10, virtual_horizon=0
+        ),
+        vehicle_name=a1.name,
+        node_name=merge.name,
+        explicit_none="route_next_link=None",
+        scope="unsupported by the current Level 2 scope",
+        trip_end="trip-end",
+        taxi_mode="taxi-mode",
+        no_attribute="no route_next_link attribute",
+        retain_current_link="retain its current Link as route_next_link",
+        outgoing_link="outgoing Link",
+        extend_design="extend the Level 2 route-state design",
     )
-    assert "A1" in result["virtual_outlink_choices"]
-    assert result["vehicle_transfer_timesteps"]["A1"] >= 11
+    assert message
 
 
-def test_type_b_route_next_link_is_veh_link():
+def test_later_link_unarrived_service_vehicle_retains_current_link_as_route_next_link():
     W = _build_multi_outlink_network("type_b_link")
     merge = W.get_node("merge")
     link1 = W.get_link("link1")
@@ -938,8 +1011,9 @@ def main():
         test_type_a_fixed_outlink_maintained,
         test_type_a_fixed_outlink_blocked_other_available,
         test_block_inlink_then_different_inlink_transfer_clears_stop_reason,
-        test_type_b_route_next_link_none,
-        test_type_b_route_next_link_is_veh_link,
+        test_first_link_unarrived_service_vehicle_without_route_next_link_attribute,
+        test_unarrived_service_vehicle_route_next_link_none_is_unsupported,
+        test_later_link_unarrived_service_vehicle_retains_current_link_as_route_next_link,
         test_type_b_modulo_two_outlinks,
         test_type_b_modulo_three_outlinks,
         test_stop_queue_arrival_wait,

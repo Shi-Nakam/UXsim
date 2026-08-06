@@ -103,10 +103,21 @@ def _validate_reference_inputs(real_node, real_trigger_vehicle, t_level_1, virtu
             f"Vehicle {real_trigger_vehicle.name} is not in incoming_vehicles of node "
             f"{real_node.name}."
         )
+    if not hasattr(real_trigger_vehicle, "route_next_link"):
+        raise ValueError(
+            f"Vehicle {real_trigger_vehicle.name} has no route_next_link attribute at "
+            f"order-control Node {real_node.name}."
+        )
     if real_trigger_vehicle.route_next_link is None:
         raise ValueError(
-            f"Vehicle {real_trigger_vehicle.name} has no route_next_link at node "
-            f"{real_node.name}."
+            f"Vehicle {real_trigger_vehicle.name} has route_next_link=None at "
+            f"order-control Node {real_node.name}."
+        )
+    if real_trigger_vehicle.route_next_link not in real_node.outlinks.values():
+        raise ValueError(
+            f"Vehicle {real_trigger_vehicle.name} has route_next_link "
+            f"{real_trigger_vehicle.route_next_link.name!r} at order-control Node "
+            f"{real_node.name}, which is not one of the node's outgoing links."
         )
     if real_trigger_vehicle.get_order_control_batch_assignment(real_node) is not None:
         raise ValueError(
@@ -486,19 +497,27 @@ def _create_mimic_vehicle(mimic_W, real_veh, real_node, mimic_node, node_maps):
     if real_link.end_node is real_node:
         orig_name = f"_mimic_up_{real_link.name}"
         dest_name = real_node.name
-        if real_veh.route_next_link is not None:
-            mimic_route_next = real_to_mimic_link[real_veh.route_next_link]
+        route_state = _classify_route_state_from_real(
+            real_veh, real_node, real_to_mimic_link
+        )
+        if route_state["kind"] == "A":
+            mimic_route_next = route_state["fixed_outlink"]
+        elif hasattr(real_veh, "route_next_link") and real_veh.route_next_link is real_link:
+            mimic_route_next = mimic_link
         else:
             mimic_route_next = None
         on_inlink = True
     elif real_link.start_node is real_node:
         orig_name = real_node.name
         dest_name = f"_mimic_sink_{real_link.name}"
-        mimic_route_next = (
-            real_to_mimic_link[real_veh.route_next_link]
-            if real_veh.route_next_link is not None
-            else None
-        )
+        if hasattr(real_veh, "route_next_link"):
+            route_next_link = real_veh.route_next_link
+            if route_next_link is not None and route_next_link in real_to_mimic_link:
+                mimic_route_next = real_to_mimic_link[route_next_link]
+            else:
+                mimic_route_next = None
+        else:
+            mimic_route_next = None
         on_inlink = False
     else:
         raise ValueError(
@@ -629,15 +648,102 @@ def _ensure_link_cum_arrays(mimic_W, timestep):
                 link.cum_departure[-1] = link.cum_departure[-2]
 
 
-def _snapshot_route_state_from_real(real_veh, real_node, real_to_mimic_link):
-    route_next_link = real_veh.route_next_link
+def _unsupported_unarrived_route_next_link_none_message(veh, real_node):
+    return (
+        f"Unarrived service-unit Vehicle {veh.name} has route_next_link=None at "
+        f"order-control Node {real_node.name}. This state can occur in broader UXsim "
+        f"scenarios, but it is unsupported by the current Level 2 scope. The current "
+        f"research scope excludes trip-end Vehicles, taxi-mode dynamic destinations, "
+        f"and Nodes without a usable outgoing Link. Under the current scope, a normal "
+        f"unarrived service-unit Vehicle must either have no route_next_link attribute "
+        f"while traveling on its first Link after departure, or retain its current Link "
+        f"as route_next_link after entering that Link through a previous Node transfer. "
+        f"In either supported state, the Vehicle is treated as an unarrived Vehicle whose "
+        f"outgoing Link from the upcoming order-control Node has not yet been selected. "
+        f"Do not silently treat route_next_link=None as either supported state. If the "
+        f"research scope has been extended to include a scenario that legitimately "
+        f"produces route_next_link=None, extend the Level 2 route-state design for "
+        f"that scenario before continuing."
+    )
+
+
+def _real_link_log_entries(veh):
+    entries = []
+    for _time_value, link_value in veh.log_t_link:
+        if link_value in ("home", "end") or link_value is None:
+            continue
+        entries.append(link_value)
+    return entries
+
+
+def _classify_route_state_from_real(real_veh, real_node, real_to_mimic_link):
     real_link = real_veh.link
+    if real_link is None or real_link.end_node is not real_node:
+        raise ValueError(
+            f"Vehicle {real_veh.name} is not on an inlink to order-control Node "
+            f"{real_node.name}."
+        )
+
+    if real_veh in real_node.incoming_vehicles:
+        if not hasattr(real_veh, "route_next_link"):
+            raise ValueError(
+                f"Vehicle {real_veh.name} has no route_next_link attribute at "
+                f"order-control Node {real_node.name}."
+            )
+        route_next_link = real_veh.route_next_link
+        if route_next_link is None:
+            raise ValueError(
+                f"Vehicle {real_veh.name} has route_next_link=None at "
+                f"order-control Node {real_node.name}."
+            )
+        if route_next_link not in real_node.outlinks.values():
+            raise ValueError(
+                f"Vehicle {real_veh.name} has unexpected snapshot route_next_link state."
+            )
+        return {
+            "kind": "A",
+            "fixed_outlink": real_to_mimic_link[route_next_link],
+        }
+
+    if not hasattr(real_veh, "route_next_link"):
+        link_log_entries = _real_link_log_entries(real_veh)
+        if len(link_log_entries) > 1:
+            raise ValueError(
+                f"Vehicle {real_veh.name} has no route_next_link attribute at "
+                f"order-control Node {real_node.name}, but its link history records "
+                f"{len(link_log_entries)} traveled links; expected a first-Link "
+                "unarrived service-unit Vehicle."
+            )
+        return {"kind": "B", "fixed_outlink": None}
+
+    route_next_link = real_veh.route_next_link
     if route_next_link in real_node.outlinks.values():
         return {
             "kind": "A",
             "fixed_outlink": real_to_mimic_link[route_next_link],
         }
-    if route_next_link is None or route_next_link is real_link:
+    if route_next_link is None:
+        raise ValueError(
+            _unsupported_unarrived_route_next_link_none_message(real_veh, real_node)
+        )
+    if route_next_link is real_link:
+        return {"kind": "B", "fixed_outlink": None}
+    raise ValueError(
+        f"Vehicle {real_veh.name} has unexpected snapshot route_next_link state."
+    )
+
+
+def _snapshot_route_state_from_real(real_veh, real_node, real_to_mimic_link):
+    real_link = real_veh.link
+    if real_link is not None and real_link.end_node is real_node:
+        route_state = _classify_route_state_from_real(
+            real_veh, real_node, real_to_mimic_link
+        )
+        return {
+            "kind": route_state["kind"],
+            "fixed_outlink": route_state["fixed_outlink"],
+        }
+    if real_link is not None and real_link.start_node is real_node:
         return {"kind": "B", "fixed_outlink": None}
     return {"kind": "invalid", "fixed_outlink": None}
 
