@@ -8,7 +8,7 @@ UXsim Order Exchange 改変作業における、phase 4-6：交差点BATCH処理
 
 ## 1A. 実装状況サマリ（phase 4-6A〜4-6M）
 
-進捗の詳細・コミットID・回帰結果は [ORDER_EXCHANGE_PROGRESS.md](ORDER_EXCHANGE_PROGRESS.md) を参照。Phase 4-6E〜4-6Jの設計・判断経緯の詳細は **§1C**、Phase 4-6Kの実装記録は **§1D**、Phase 4-6Lの統括メソッド記録は **§1E**、Phase 4-6Mの `Node.transfer()` 接続記録は **§1F**、Phase 4-6Nの比較・診断記録は **§1G**、Node訪問単位の共通状態設計は **§1H**（zero-service追加形成・size-one BATCHとFCFS等価性は **§1H.25**、模倣World型Level 2 t_trigger参照モデルは **§1H.26**、Level 2本体接続は **§1H.27.42**）を参照。
+進捗の詳細・コミットID・回帰結果は [ORDER_EXCHANGE_PROGRESS.md](ORDER_EXCHANGE_PROGRESS.md) を参照。Phase 4-6E〜4-6Jの設計・判断経緯の詳細は **§1C**、Phase 4-6Kの実装記録は **§1D**、Phase 4-6Lの統括メソッド記録は **§1E**、Phase 4-6Mの `Node.transfer()` 接続記録は **§1F**、Phase 4-6Nの比較・診断記録は **§1G**、Node訪問単位の共通状態設計は **§1H**（zero-service追加形成・size-one BATCHとFCFS等価性は **§1H.25**、模倣World型Level 2 t_trigger参照モデルは **§1H.26**、Level 2本体接続は **§1H.27.42**、Level 2未到着Vehicle route状態修正と5,000台grid network試験は **§1H.27.43**）を参照。
 
 | 区分 | 内容 |
 |------|------|
@@ -39,28 +39,29 @@ UXsim Order Exchange 改変作業における、phase 4-6：交差点BATCH処理
 | | phase 4-6V：zero-service追加形成修正・size-one BATCHとFCFSの等価性回復（2b10b08） |
 | | phase 4-6V診断：size-one BATCH対FCFS等価性・batch size予備比較（fe9e53e。§1H.25） |
 | | Level 2本体接続：BATCH `t_trigger`推定へのLevel 2正式接続（6e6a601。§1H.27.42） |
-| **診断スクリプト** | `diagnostics/order_control/`（6本＋README）。通常回帰テストから分離済み（`0e35799`）。詳細は `diagnostics/order_control/README.md` |
-| **BATCH形成〜シミュレーション接続まで完成** | trigger候補取得 → … → service queue登録（4-6I）→ 実通過（4-6K）→ 統括呼出し（4-6L）→ **`Node.transfer()` 接続（4-6M）** → **BATCH形成のcurrent visit参照（4-6R）** → **BATCH assignmentの訪問対応（4-6S）** → **小規模BATCH再訪end-to-end統合（4-6T）** → **Level 2 `t_trigger`推定の本体接続（6e6a601、§1H.27.42）** |
-| **現時点の主要課題** | **Level 2本体接続後**の5,000台・10,000台grid network試験（Level 1対Level 2比較、N=1 BATCH Level 2対FCFS一致性、virtual horizon 30の妥当性、Level 2カウンター・計算時間）。Time-value Transaction |
+| | Level 2未到着Vehicle route状態修正・5,000台grid network試験（af0e037。§1H.27.43） |
+| **診断スクリプト** | `diagnostics/order_control/`（6本＋README、うち `grid_level_1_vs_level_2_check.py` はaf0e037で追加）。通常回帰テストから分離済み（`0e35799`）。詳細は `diagnostics/order_control/README.md` |
+| **BATCH形成〜シミュレーション接続まで完成** | trigger候補取得 → … → service queue登録（4-6I）→ 実通過（4-6K）→ 統括呼出し（4-6L）→ **`Node.transfer()` 接続（4-6M）** → **BATCH形成のcurrent visit参照（4-6R）** → **BATCH assignmentの訪問対応（4-6S）** → **小規模BATCH再訪end-to-end統合（4-6T）** → **Level 2 `t_trigger`推定の本体接続（6e6a601、§1H.27.42）** → **Level 2未到着Vehicle route状態修正（af0e037、§1H.27.43）** |
+| **現時点の主要課題** | **Level 2本体接続後**の**10,000台**grid network試験（Level 1対Level 2比較、N=1 BATCH Level 2対FCFS一致性、virtual horizon 30の妥当性、Level 2計算時間）。5,000台Level 1対Level 2比較は完了（§1H.27.43）。Time-value Transaction |
 | **未実装** | trip-end VehicleのBATCH service unit対応 |
 | | stale service unitの自動削除または回復方針 |
 | | assignmentの正式な全訪問履歴 |
 | | Time-value Transaction、比較対象Node共通管理、目的地自動検証、taxi mode向け動的dest検証 |
 | | Level 2またはLevel 1からLevel 0への**自動切替**（§1H.27.42） |
-| **未実施の試験・評価** | Level 2本体接続後の5,000台・10,000台grid network試験（§1H.27.42） |
-| | 同一条件でのBATCH Level 1対Level 2比較 |
+| **未実施の試験・評価** | Level 2本体接続後の**10,000台**grid network試験（§1H.27.43） |
+| | 同一条件でのBATCH Level 1対Level 2比較（**10,000台**） |
 | | N=1 BATCH Level 2対FCFS一致性確認 |
 | | 混雑条件でのvirtual horizon 30の妥当性確認 |
-| | Level 2の4個のカウンター確認 |
-| | Level 2の計算時間確認 |
+| | Level 2の計算時間確認（**10,000台**） |
 | **Level 1大規模試験（完了済み）** | Phase 4-6U：5,000台・10,000台high-demand BATCH比較（§1H.24）。Level 2本体接続**前**のLevel 1試験 |
+| **Level 2大規模試験（5,000台・完了済み）** | Phase 4-6U Case U2相当条件での5,000台Level 1対Level 2比較（§1H.27.43、af0e037）。全車両完了、Level 2解決率91.52%、未解決率8.48%、計算時間L2/L1≈270.8倍 |
 | **N=1 BATCH Level 1対FCFS一致性（確認済み）** | t_trigger Level 1、`batch_size=1`、同一clearance・同一候補順位。200台固定route条件および10,000台自由経路条件（Phase 4-6V、§1H.25） |
 | **N=1 BATCH Level 2対FCFS一致性** | **未実施**。5,000台・10,000台grid network条件で今後確認（§1H.27.42） |
 | **当面の研究シナリオ前提** | 比較対象内部交差点Nodeを目的地としない端点間OD |
 | | 全比較方式で同一ネットワーク・同一OD需要 |
 | **研究基本設定（明示指定）** | 研究の通常方式は **Level 2**（`order_control_batch_t_trigger_level=2`。6e6a601で本体接続済み、§1H.27.42）。Level 2で `resolved=False` となった場合は、先に計算済みの **Level 1値を採用**する（6e6a601で実装済み）。**Level 0推定**（`estimate_order_control_batch_t_trigger_level_0`）は独立した推定Levelとして実装済みであるが、**Level 2またはLevel 1からLevel 0へ自動的に切り替える処理は現在実装していない**。Level 0への追加切替は、実際の試験で必要性が確認された場合に別途検討する。 |
 | | 暫定比較では `batch_size=10`、`order_control_batch_t_trigger_level=1`（Level 1は最終基本設定ではない） |
-| **次工程候補** | **§1H.27.42** を参照。**Level 2本体接続後に新たに必要な試験：** 5,000台・10,000台grid networkでのLevel 1対Level 2比較、N=1 BATCH Level 2対FCFS一致性、混雑条件でのvirtual horizon 30の妥当性、Level 2の4個のカウンターと計算時間の確認。**完了済みのLevel 1試験（再実施の位置付けは基準値・再現確認）：** Phase 4-6Uの5,000台・10,000台high-demand（§1H.24）、Phase 4-6VのN=1 BATCH Level 1対FCFS（200台固定route・10,000台自由経路、§1H.25）。virtual horizon正式値は§1H.27.38・§1H.27.42を踏まえ未決定。trip-end Vehicleは研究対象外。stale service unit回復は必要性が低ければ保留。assignment全訪問履歴は後回し。Time-value Transaction本体 |
+| **次工程候補** | **§1H.27.43** を参照。**未実施：** 10,000台grid networkでのLevel 1対Level 2比較、N=1 BATCH Level 2対FCFS一致性、混雑条件でのvirtual horizon 30の妥当性、10,000台でのLevel 2計算時間確認。**完了済み（Level 2本体接続後）：** 5,000台Level 1対Level 2比較（§1H.27.43）。**完了済みのLevel 1試験（再実施の位置付けは基準値・再現確認）：** Phase 4-6Uの5,000台・10,000台high-demand（§1H.24）、Phase 4-6VのN=1 BATCH Level 1対FCFS（200台固定route・10,000台自由経路、§1H.25）。virtual horizon正式値は§1H.27.38・§1H.27.42・§1H.27.43を踏まえ未決定（暫定30）。trip-end Vehicleは研究対象外。stale service unit回復は必要性が低ければ保留。assignment全訪問履歴は後回し。Time-value Transaction本体 |
 
 ---
 
@@ -2541,19 +2542,23 @@ VehicleがNodeを実際に通過した場合、service unit側とVehicle側を**
 | Phase 4-6V診断 | **診断スクリプト追加・commit・push済み**（**§1H.25**、`fe9e53e`） |
 | Phase 4-6W | **参照モデル・専用テスト実装・独立レビュー完了**（**§1H.26**。commit IDはGit履歴参照） |
 | Level 2本体 | **接続済み**（**§1H.27.42**、`6e6a601`） |
-| 最新のUXsim本体実装commit | `6e6a601`（Level 2本体接続。§1H.27.42） |
+| Level 2未到着Vehicle route状態修正 | **完了**（**§1H.27.43**、`af0e037`） |
+| 5,000台grid network Level 1対Level 2比較 | **完了**（**§1H.27.43**。`grid_level_1_vs_level_2_check.py --num-vehicles 5000`） |
+| 最新のUXsim本体実装commit | `af0e037`（Level 2未到着Vehicle route状態修正。§1H.27.43） |
 | high-demand BATCH比較 | **完了**（Phase 4-6U。5,000台・clearance=0、5,000台・clearance=1、10,000台・clearance=1の3ケース。U1〜U3すべてexit 0、prefix violationなし。§1H.24） |
 | size-one BATCHとFCFSの等価性 | **修正後コードで確認済み（t_trigger Level 1、batch_size=1）**（200台固定route・10,000台自由経路。§1H.25）。**N=1 BATCH Level 2対FCFSは未実施**（§1H.27.42） |
 | batch size探索 | **ここで終了**（修正後N=10・N=20予備比較のみ。§1H.25） |
 
 **次工程候補（断定しない）：**
 
-**Level 2本体接続後に新たに必要な試験（§1H.27.42）：**
+**Level 2本体接続後に新たに必要な試験（§1H.27.42・§1H.27.43）：**
 
-1. 5,000台・10,000台grid networkでのLevel 1対Level 2比較
-2. 5,000台・10,000台grid networkでのN=1 BATCH Level 2対FCFS一致性確認
-3. 混雑条件でのvirtual horizon 30の妥当性確認
-4. 大規模条件でのLevel 2呼出カウンター（4個の整数）と計算時間の確認
+1. ~~5,000台grid networkでのLevel 1対Level 2比較~~ → **完了**（§1H.27.43）
+2. 10,000台grid networkでのLevel 1対Level 2比較
+3. 5,000台grid networkでのN=1 BATCH Level 2対FCFS一致性確認
+4. 10,000台grid networkでのN=1 BATCH Level 2対FCFS一致性確認
+5. 混雑条件でのvirtual horizon 30の妥当性確認
+6. 大規模条件でのLevel 2呼出カウンター（4個の整数）と計算時間の確認（5,000台は完了、§1H.27.43。10,000台は未実施）
 
 **その他の候補：**
 
@@ -2575,7 +2580,7 @@ VehicleがNodeを実際に通過した場合、service unit側とVehicle側を**
 
 **再開時に読むもの：**
 
-- 本メモ **§1H**（本設計）、**§1G**（診断・根本原因）、**§1H.19**（Phase 4-6P到着記録・乱数設計・実装記録）、**§1H.20**（Phase 4-6Q FCFS参照先変更・実装記録）、**§1H.21**（Phase 4-6R BATCH参照先変更・実装記録）、**§1H.22**（Phase 4-6S BATCH assignment訪問対応・実装記録）、**§1H.23**（Phase 4-6T 小規模BATCH再訪end-to-end統合・実装記録）、**§1H.24**（Phase 4-6U high-demand再実行・検証記録）、**§1H.25**（Phase 4-6V zero-service追加形成・size-one BATCHとFCFS等価性・batch size予備比較）、**§1H.26**（Phase 4-6W 模倣World型Level 2 t_trigger参照モデル）
+- 本メモ **§1H**（本設計）、**§1G**（診断・根本原因）、**§1H.19**（Phase 4-6P到着記録・乱数設計・実装記録）、**§1H.20**（Phase 4-6Q FCFS参照先変更・実装記録）、**§1H.21**（Phase 4-6R BATCH参照先変更・実装記録）、**§1H.22**（Phase 4-6S BATCH assignment訪問対応・実装記録）、**§1H.23**（Phase 4-6T 小規模BATCH再訪end-to-end統合・実装記録）、**§1H.24**（Phase 4-6U high-demand再実行・検証記録）、**§1H.25**（Phase 4-6V zero-service追加形成・size-one BATCHとFCFS等価性・batch size予備比較）、**§1H.26**（Phase 4-6W 模倣World型Level 2 t_trigger参照モデル）、**§1H.27.42**（Level 2本体接続）、**§1H.27.43**（Level 2未到着Vehicle route状態修正・5,000台grid network試験）
 - `diagnostics/order_control/README.md`（診断スクリプトは通常回帰ではなく既知問題の再現・確認資料。Phase 4-6U後の比較診断2本の現在期待はexit 0）
 - 本体：`Vehicle.order_control_current_visit`、`current visit` の `batch_assignment`、`Vehicle.get_order_control_batch_assignment()`、`Vehicle.has_order_control_batch_assignment()`、`Vehicle.assign_order_control_batch_to_current_visit()`、`Vehicle.order_control_batch_assignments`、`Node.get_order_control_batch_trigger_candidates()`、`Node.get_order_control_batch_candidates_by_inlink()`、`Node.get_ordered_order_control_batch_candidates_by_inlink()`、`Node.register_order_control_batch_service_units()`、`Node.serve_order_control_batch_service_queue()`、`Node.transfer_batch()`、`Node.transfer()`
 - テスト：`tests_order_control_batch_revisit_integration.py`、`tests_order_control_batch_visit_assignment.py`、`tests_order_control_batch_revisit_ranking.py`、`tests_order_control_batch_service_unit_registration.py`、`tests_order_control_batch_service_queue_transfer.py`、`tests_order_control_batch_transfer.py`、`tests_order_control_batch_node_transfer_integration.py`
@@ -5805,11 +5810,11 @@ Level 2の前回計算結果を保存して再利用する機能は追加しな�
 - 前回結果保存機能を追加しない方針の実装
 - 本体接続テスト22件、参照テスト18件、未到着参照テスト28件、関連回帰テスト
 
-**未実施（現時点。実施前に結果を推測して記録しない）：**
+**未実施（コミット6e6a601完了時点。その後の実施状況は§1H.27.43を参照。実施前に結果を推測して記録しない）：**
 
 **Level 2本体接続後に新たに必要なgrid network試験：**
 
-- 5,000台grid networkでのBATCH Level 1とLevel 2の比較
+- 5,000台grid networkでのBATCH Level 1とLevel 2の比較（その後、af0e037・§1H.27.43で完了）
 - 10,000台grid networkでのBATCH Level 1とLevel 2の比較
 - 5,000台grid networkでのN=1 BATCH Level 2とFCFSの一致性確認
 - 10,000台grid networkでのN=1 BATCH Level 2とFCFSの一致性確認
@@ -5830,7 +5835,400 @@ Level 2の前回計算結果を保存して再利用する機能は追加しな�
 
 **完了済みのLevel 1大規模試験（Level 2本体接続前）：** Phase 4-6Uの5,000台・10,000台high-demand BATCH比較（§1H.24）。上記「未実施」は、これらを否定するものではない。
 
-**次に確認する必要があること：** Level 2本体接続後の5,000台・10,000台grid network試験において、Level 2が正常に動作するか、Level 1と比較して意図どおりの効果があるか、N=1 BATCH Level 2がFCFSと一致するか、virtual horizon 30が混雑条件で十分か、Level 2呼出カウンターと計算時間が許容範囲か。
+**次に確認する必要があること：** Level 2本体接続後の**10,000台**grid network試験において、Level 2が正常に動作するか、Level 1と比較して意図どおりの効果があるか、N=1 BATCH Level 2がFCFSと一致するか、virtual horizon 30が混雑条件で十分か、Level 2計算時間が許容範囲か。**5,000台**については §1H.27.43 に記録済み。
+
+#### 1H.27.43 Level 2未到着Vehicleのroute状態修正と5,000台grid network試験
+
+**コミット：** `af0e037` — *Support Level 2 estimation for unarrived vehicles without route_next_link on links immediately after departure*
+
+**位置付け：** コミット `6e6a601`（§1H.27.42）でLevel 2本体接続を完了した後、6×6 grid network・5,000台条件で初めて実施したLevel 1対Level 2比較試験で発生した `AttributeError` を修正し、修正後に同一条件で5,000台試験を完了した記録である。
+
+**変更ファイル（コミット `af0e037`）：**
+
+| ファイル | 変更内容 |
+|----------|----------|
+| `uxsim/order_control_batch_level_2_reference.py` | 未到着service-unit Vehicleのroute状態判定を共通化。`_classify_route_state_from_real()`、`_real_link_log_entries()`、`_unsupported_unarrived_route_next_link_none_message()` を追加・更新 |
+| `tests_order_control_batch_t_trigger_level_2_unarrived_reference.py` | 最初のLink自然状態・明示的None・2本目以降current link保持のテストを追加・明確化（**29件**） |
+| `diagnostics/order_control/grid_level_1_vs_level_2_check.py` | **新規。** Phase 4-6U Case U2相当条件でLevel 1対Level 2を比較する診断スクリプト |
+
+##### 1H.27.43.1 試験の流れ
+
+1. コミット `6e6a601` 完了後、6×6 grid network・5,000台・`virtual_horizon=30` でLevel 1対Level 2比較を試行した。
+2. 最初の5,000台Level 2試験では、出発直後のLink上にある未到着service-unit Vehicleの `route_next_link` 属性がまだ存在せず、`AttributeError: 'Vehicle' object has no attribute 'route_next_link'` で停止した。
+3. 原因を特定し、route状態の3区分を明確化したうえで本体を修正した（コミット `af0e037`）。
+4. 修正後、診断スクリプト `grid_level_1_vs_level_2_check.py --num-vehicles 5000` で5,000台Level 1対Level 2比較を完了した。
+5. 10,000台試験とN=1 BATCH Level 2対FCFS試験は**未実施**である。
+
+##### 1H.27.43.2 最初の5,000台試験で発生した例外
+
+**例外：** `AttributeError: 'Vehicle' object has no attribute 'route_next_link'`
+
+**失敗時点のLevel 2カウンター（4個の整数）：**
+
+| カウンター | 値 |
+|-----------|-----|
+| `call_count` | 62 |
+| `resolved_count` | 61 |
+| `unresolved_count` | 0 |
+| `level_1_fallback_count` | 0 |
+
+**カウンターの解釈：**
+
+- 61回は正常に解決した（`resolved_count=61`）。
+- 62回目はLevel 2を呼び始めた後、正常な `resolved` または `unresolved` を返す前に例外終了した。
+- そのため `call_count=62` だが `resolved_count + unresolved_count = 61` となり、§1H.27.42.5で説明した例外時カウンター仕様と整合する。
+- `unresolved_count=0` は、例外発生前に正常なunresolved結果として記録された呼出しが0件だったことを示す。
+- 62回目の呼出しは、resolvedまたはunresolvedの分類が完了する前に例外終了したため、どちらにも計上されていない。
+- したがって、`unresolved_count=0` から、62回目を含めて未解決状態が存在しなかったとは判断できない。
+
+この例外は、Level 2本体接続全体の失敗ではなく、出発直後の最初のLink上にある未到着service-unit Vehicleのroute状態を正しく扱えていなかったことによるものであった。
+
+##### 1H.27.43.3 なぜ出発直後のLink上で `route_next_link` 属性が存在しなかったか
+
+UXsimの1 timestep内では、概ね次の順序で処理される。
+
+1. `Node.generate()`
+2. `Node.transfer()`
+3. `Vehicle.update()`
+
+`Node.generate()` でVehicleが最初のLinkへ進入した後、同じtimestepの `Node.transfer()` でLevel 2が呼ばれる時点では、`Vehicle.update()` 冒頭の `record_log()` がまだ実行されていない場合がある。
+
+したがって、次の状態が正常に発生し得る。
+
+- Vehicleは最初のLink上
+- current visitは存在する
+- `earliest_arrival_timestep <= t_trigger` によりservice unitへ登録済み
+- order-control Node端へは未到着
+- `route_next_link` 属性はまだ存在しない
+- `log_t_link` の実Link履歴が0件の場合もある
+
+これは、出発後まだ一度もNode端で `route_next_link_choice()` を実行していないVehicleに対して自然に起こる状態である。
+
+##### 1H.27.43.4 `route_next_link` の3状態区分
+
+今回の修正で区別した3状態を、交通上の意味とともに記録する。
+
+**状態1：最初のLink上の未到着service-unit Vehicle（属性未作成）**
+
+- 出発Nodeから最初のorder-control対象Nodeへ向かう最初のLink上にある未到着service-unit Vehicle。
+- `route_next_link` 属性そのものがまだ存在しない場合がある。
+- Link履歴が0件または1件なら、正常な未到着状態としてLevel 2で扱う。
+- Link履歴が2件以上あるのに属性がない場合は、最初のLink上ではないため `ValueError` とする。
+
+**状態2：2本目以降のLink上の未到着service-unit Vehicle（現在Link保持）**
+
+- 少なくとも1回のNode転送後、2本目以降のLink上にある未到着service-unit Vehicle。
+- 直前のNodeで現在Linkが進入先として `route_next_link` へ設定され、その値がLink進入後も残る。
+- したがって `vehicle.route_next_link is vehicle.link` となる。
+- これは、次のorder-control Nodeから進むoutgoing Linkがまだ選ばれていない正常な未到着状態として扱う。
+
+**状態3：明示的 `route_next_link=None`**
+
+- `route_next_link` 属性は存在するが、値が明示的に `None` である状態。
+- UXsim全体では、trip-end Vehicle、taxi modeの動的destination、利用可能なoutgoing LinkがないNode等で起こり得る。
+- しかし、現在のLevel 2対応範囲ではこれらを扱わない。
+- 状態1または状態2と同一視せず、長い自己完結型の `ValueError` によって停止する。
+- `getattr(..., None)` で属性欠如と明示的Noneを同一化していない。
+
+**状態A（確定済みoutgoing Link）：** `route_next_link` が対象Nodeのoutlinkを指す場合は、確定済みの移動先として扱う（既存処理）。
+
+##### 1H.27.43.5 未到着Vehicleがservice-unitである理由
+
+Level 2は、対象Nodeのinlink終端へ到着済みのtrigger Vehicleが選ばれた時点で呼ばれる。
+
+一方、別inlinkのVehicleはNode端へ未到着でも、
+
+`earliest_arrival_timestep <= t_trigger`
+
+を満たせば、同じBATCHに含まれて正式service unitへ登録され得る。
+
+したがって、次の状態は両立する。
+
+- trigger VehicleはNode端へ到着済み
+- 別inlinkのVehicleはまだNode端へ未到着
+- その未到着VehicleはBATCH割当済み
+- その未到着Vehicleは正式service queueへ登録済み
+
+また、trigger Vehicleと同じinlinkでtriggerより前方にいるVehicleは、Level 2入力検証により次を必須とされる。
+
+- BATCH割当済み
+- 正式service queue登録済み
+
+したがって、長い `ValueError` で使用している **Unarrived service-unit Vehicle** という表現は、現在のLevel 2処理構造と整合する。Unarrived inlink Vehicleへ変更したわけではない。
+
+##### 1H.27.43.6 本体修正内容
+
+- `_classify_route_state_from_real()` を追加し、未到着Vehicleのroute状態判定を共通化した。
+- `_create_mimic_vehicle()` と `_snapshot_route_state_from_real()` が同じ分類結果を使用するよう修正し、片方だけ属性欠如へ対応してもう片方で `AttributeError` になる状態を解消した。
+- `_real_link_log_entries()` でLink履歴を確認し、最初のLink上かどうかを判定する。
+- `_validate_reference_inputs()` では、trigger Vehicleについて次の重大不整合検出を維持した。
+  - `route_next_link` 属性がない
+  - `route_next_link is None`
+  - `route_next_link` が対象Nodeのoutlinkではない
+- `_collect_real_vehicles()`、`_validate_service_queue_invariants()` は、今回の修正範囲において既存のservice-unit検証を維持した。
+
+##### 1H.27.43.7 長いValueError（`route_next_link=None`）
+
+`route_next_link=None` に対する `ValueError` は、`_unsupported_unarrived_route_next_link_none_message()` により、別のdocstringを探さなくてもその場で意味を理解できる自己完結型にした。
+
+メッセージは少なくとも次を説明する。
+
+- どのVehicleか、どのorder-control Nodeか
+- `route_next_link=None` であること
+- より広いUXsim条件では起こり得ること
+- 現在のLevel 2では未対応であること
+- trip-end、taxi mode、outgoing Linkなし等を現在対象外としていること
+- 最初のLink上では `route_next_link` 属性が未作成の場合があること
+- 2本目以降では現在Linkを `route_next_link` として保持すること
+- どちらも次のoutgoing Linkがまだ選ばれていない未到着状態であること
+- `route_next_link=None` をこれらへ黙って変換しないこと
+- 将来対象範囲を広げる場合はLevel 2のroute-state設計を拡張すること
+
+Type Bという内部分類名だけに依存する説明にはしていない。同じ長い説明をdocstringへ二重記載していない。
+
+##### 1H.27.43.8 テスト
+
+未到着参照テストは、修正後 **29件** となった（テスト関数数と `main()` からの呼出数がともに29件で一致）。
+
+追加または明確化した主要テスト：
+
+1. **`test_first_link_unarrived_service_vehicle_without_route_next_link_attribute`**
+   - 実際の `Node.generate()` でVehicleを最初のLinkへ進入させる
+   - `delattr` で属性を人工的に削除しない
+   - `route_next_link` 属性が自然に存在しないことを確認する
+   - Node端へ未到着であることを確認する
+   - service unitへ登録する
+   - Level 2で `AttributeError` が発生しないことを確認する
+   - 対象VehicleのスナップショットがLevel 2呼出し前後で変化しないことを確認する
+
+2. **`test_later_link_unarrived_service_vehicle_retains_current_link_as_route_next_link`**
+   - 2本目以降のLink上の未到着Vehicleを扱う
+   - `route_next_link is vehicle.link` を確認する
+   - 正常な未到着状態としてLevel 2が処理することを確認する
+
+3. **`test_unarrived_service_vehicle_route_next_link_none_is_unsupported`**
+   - `route_next_link` 属性は存在するが値が明示的に `None`
+   - 現在のLevel 2対応範囲外として `ValueError`
+   - 長いメッセージの重要部分を確認する
+
+**不変性確認の範囲：**
+
+- `test_first_link_unarrived_service_vehicle_without_route_next_link_attribute` では、対象VehicleのスナップショットがLevel 2呼出し前後で変化しないことを直接確認する。
+- 実World側状態と実RNGの不変性は、未到着参照テスト群の別テストで確認する。
+- 特にRNG不変性は `test_rng_unchanged_unarrived` で確認する。
+- World全体とRNGを、この1件のテストだけで確認したとは書かない。
+
+**コミット前の最終確認結果：**
+
+| テスト群 | 件数 | 結果 |
+|---------|------|------|
+| 未到着参照テスト | 29件 | 成功 |
+| Level 2参照テスト | 18件 | 成功 |
+| Level 2本体接続テスト | 22件 | 成功 |
+| `git diff --check` | — | 問題なし |
+
+##### 1H.27.43.9 診断スクリプト
+
+**新規作成（コミット `af0e037`）：** `diagnostics/order_control/grid_level_1_vs_level_2_check.py`
+
+**役割：**
+
+- Phase 4-6U Case U2の入力条件を再利用
+- Level 1とLevel 2へ同一Vehicle計画を適用
+- 入力同一性をシミュレーション前に確認
+- Level 1とLevel 2の交通結果を比較
+- Level 2の4個のカウンターを記録
+- World構築、Vehicle適用、`exec_simulation`、ケース全体の時間を分離計測
+- `--num-vehicles 5000` と `--num-vehicles 10000` を受理（対応TMAXはそれぞれ30000・50000）
+- `unresolved_count` と `unresolved_rate` を各実行の実測変数から動的表示する
+- Remaining uncertaintiesのVehicle数も `num_vehicles` から動的表示する
+
+**今回実行したのは5,000台のみ**である。10,000台は未実施である。
+
+##### 1H.27.43.10 5,000台試験条件
+
+**実行コマンド：** `python diagnostics/order_control/grid_level_1_vs_level_2_check.py --num-vehicles 5000`
+
+| 項目 | 値 |
+|------|-----|
+| grid | 6×6 |
+| 内部grid Node数 | 36 |
+| 外部OD Node数 | 24 |
+| Vehicle数 | 5,000 |
+| departure期間 | 0〜500 |
+| TMAX | 30,000 |
+| RANDOM_SEED | 0 |
+| DEMAND_GEN_SEED | 42 |
+| 最小OD Manhattan距離 | 5 |
+| 内部Link長 | 400 m |
+| OD connector長 | 300 m |
+| 自由流速度 | 20 m/s |
+| 単車線 | 1 |
+| merge priority | 1 |
+| jam density | 0.2 |
+| reaction time | 1 |
+| DELTAN / DELTAT | 1 / 1 |
+| clearance_timesteps | 1 |
+| batch_size | 10 |
+| 内部grid Node | 無信号 |
+| 経路選択 | 自由経路 |
+| 比較基準 | Phase 4-6U Case U2と同じ入力条件。L1とL2へ同一Vehicle計画を適用 |
+
+**Case L1：** `order_control_type="batch"`、`batch_size=10`、`order_control_batch_t_trigger_level=1`、`clearance_timesteps=1`
+
+**Case L2：** `order_control_type="batch"`、`batch_size=10`、`order_control_batch_t_trigger_level=2`、`order_control_batch_virtual_horizon=30`、`clearance_timesteps=1`
+
+##### 1H.27.43.11 修正後の5,000台 Case L1結果
+
+| 項目 | 値 |
+|------|-----|
+| total_vehicles | 5,000 |
+| completed_trips | 5,000 |
+| unfinished_trips | 0 |
+| completed_ratio | 1.000000 |
+| total_travel_time | 5,735,703.0 s |
+| average_travel_time | 1,147.1 s |
+| average_delay | 982.5 s |
+| delay_ratio | 0.856520 |
+| total_distance_traveled | 18,976,800.0 m |
+| last_completed_trip_time | 2,348.0 s |
+| Analyzer参考average_speed | 3.5282 m/s |
+| exec_simulation時間 | 15.543 s |
+| ケース全体時間 | 15.611 s |
+| Level 2の4個のカウンター | すべて0 |
+
+このL1結果はPhase 4-6U Case U2の既知値と一致した。
+
+##### 1H.27.43.12 修正後の5,000台 Case L2結果
+
+| 項目 | 値 |
+|------|-----|
+| total_vehicles | 5,000 |
+| completed_trips | 5,000 |
+| unfinished_trips | 0 |
+| completed_ratio | 1.000000 |
+| total_travel_time | 5,688,091.0 s |
+| average_travel_time | 1,137.6 s |
+| average_delay | 973.0 s |
+| delay_ratio | 0.855319 |
+| total_distance_traveled | 19,436,000.0 m |
+| last_completed_trip_time | 2,435.0 s |
+| Analyzer参考average_speed | 3.6507 m/s |
+| exec_simulation時間 | 4,209.710 s |
+| ケース全体時間 | 4,209.741 s |
+
+**Level 2カウンター（4個の整数）：**
+
+| カウンター / 率 | 値 |
+|----------------|-----|
+| call_count | 10,837 |
+| resolved_count | 9,918 |
+| unresolved_count | 919 |
+| level_1_fallback_count | 919 |
+| resolved_rate | 0.9152（91.52%） |
+| unresolved_rate | 0.0848（8.48%） |
+| level_1_fallback_rate | 0.0848（8.48%） |
+
+**整合確認：**
+
+- `resolved_count + unresolved_count == call_count`（9,918 + 919 = 10,837）
+- `level_1_fallback_count == unresolved_count`（919 = 919）
+
+**観測されなかった重大不整合：**
+
+- assignment prefix violation
+- visit_id mismatch
+- batch_assignment mismatch
+- service unit mismatch
+- `route_next_link` 属性欠如による `AttributeError`
+
+##### 1H.27.43.13 Level 1対Level 2の差（L2 − L1）
+
+| 項目 | 差（L2 − L1） |
+|------|--------------|
+| completed_trips | 0 |
+| unfinished_trips | 0 |
+| total_travel_time | −47,612.0 s |
+| average_travel_time | −9.5 s |
+| average_delay | −9.5 s |
+| delay_ratio | −0.001201 |
+| total_distance_traveled | +459,200.0 m |
+| last_completed_trip_time | +87.0 s |
+| exec_simulation時間 | +4,194.167 s |
+| ケース全体時間 | +4,194.130 s |
+
+**計算時間比（L2 / L1）：**
+
+| 項目 | 比 |
+|------|-----|
+| exec_simulation時間 | 270.8404（約270.8倍） |
+| ケース全体時間 | 269.6657 |
+
+**解釈（慎重）：**
+
+- L2では平均旅行時間と平均delayが9.5秒短かった。
+- L2では総走行距離が459,200 m（459.2 km）長かった。
+- L2では最終完了時刻が87秒遅かった。
+- L2の計算時間はL1の約270.8倍だった。
+- 自由経路条件なので、交通状態の変化が経路選択へ影響した可能性がある。
+- **1 network、1需要条件、1 seedだけでは、Level 2の一般的な優位性を断定できない。**
+- 平均旅行時間が短いという一点だけで、Level 2が優れているとは書かない。総走行距離の増加、最終完了時刻、計算負荷も含めて評価する必要がある。
+
+##### 1H.27.43.14 virtual horizon 30について分かったこと
+
+**今回、virtual horizon 30で直接確認できた事実：**
+
+- Level 2は10,837回呼ばれた。
+- 9,918回、virtual horizon内で解決した（解決率91.52%）。
+- 919回、virtual horizon内で解決しなかった（未解決率8.48%）。
+- 未解決時は919回、計算済みLevel 1値を採用した。
+- 5,000台シミュレーションは例外なく完了した。
+- Level 2の計算時間は約4,210秒だった。
+
+**今回の結果だけでは判断できないこと：**
+
+- virtual horizon 30が最適か
+- horizonを増やせば、計算負荷に見合うだけ未解決率が下がるか
+- horizonを減らしても交通結果を維持できるか
+- 10,000台で同じ解決率になるか
+- 別の混雑条件、network、seedでも同様か
+
+919件の未解決があったからといって、直ちにhorizon 30が不足しているとは書かない。一方、5,000台で正常終了したからといって、30が十分または正式値と確定したとも書かない。未解決率、Level 1値採用率、交通結果、計算時間を合わせて判断する必要がある。
+
+##### 1H.27.43.15 完了事項と未実施事項
+
+**完了済み：**
+
+- Level 2本体接続（`6e6a601`、§1H.27.42）
+- 5,000台Level 1実行
+- 5,000台Level 2の最初の例外再現と原因特定
+- 出発直後のLink上の `route_next_link` 属性未作成状態への対応
+- 属性未作成、現在Link保持、明示的Noneの区別
+- Level 2本体修正（`af0e037`）
+- 未到着参照テスト29件、Level 2参照テスト18件、Level 2本体接続テスト22件
+- 修正後5,000台Level 1とLevel 2の正常完了
+- Level 2カウンター実測
+- Level 1対Level 2交通結果比較
+- Level 1対Level 2計算時間比較
+- 診断スクリプト `grid_level_1_vs_level_2_check.py` の作成
+- コミット `af0e037`
+
+**未実施：**
+
+- 10,000台Level 1対Level 2比較
+- 10,000台でのLevel 2カウンター確認
+- 10,000台での計算時間確認
+- 5,000台のN=1 BATCH Level 2対FCFS一致性
+- 10,000台のN=1 BATCH Level 2対FCFS一致性
+- virtual horizonの感度分析
+- 複数seedでの比較
+- 別networkでの比較
+- Level 2の計算負荷削減
+- git push
+
+**維持する既知事項：** N=1 BATCH Level 1対FCFSについては、200台固定routeと10,000台自由経路で確認済みである（Phase 4-6V、§1H.25）。未実施なのはN=1 BATCH Level 2対FCFSである。
+
+**次に必要な試験：** 計算負荷（L2/L1≈270.8倍）を考慮し、10,000台試験とN=1 BATCH Level 2対FCFS試験の実行方法を決めたうえで実施する。
 
 ---
 
@@ -6489,11 +6887,13 @@ Phase 4-6Mで追加された `Node.transfer()` 接続統合テストは **§1F.1
 - Level 2仮想サービス推定の本体接続 → **6e6a601で実装済み**（§1H.27.42）
 - Level 2 unresolved時の計算済みLevel 1値採用（fallback）→ **6e6a601で実装済み**（§1H.27.42）
 - Level 2呼出の軽量カウンター（4個の整数）→ **6e6a601で実装済み**（§1H.27.42）
+- Level 2出発直後Link上の未到着service-unit Vehicleの`route_next_link`属性未作成状態への対応 → **af0e037で実装済み**（§1H.27.43）
+- 5,000台grid networkでのLevel 2動作確認とLevel 1対Level 2比較 → **af0e037で実施・記録済み**（§1H.27.43）
 
 ### 未解決・将来課題
 
 - `tau_timesteps` を常に1でよいか（研究比較で可変にするか）。
-- 大規模grid network試験（5,000台・10,000台）でのLevel 2動作確認（§1H.27.42）。Phase 4-6UのLevel 1 high-demand試験は完了済み（§1H.24）
+- 10,000台grid network試験でのLevel 2動作確認とLevel 1対Level 2比較（§1H.27.43）。5,000台は完了済み（§1H.27.43）。Phase 4-6UのLevel 1 high-demand試験は完了済み（§1H.24）
 - 混雑条件での `order_control_batch_virtual_horizon=30` の妥当性（§1H.27.42）
 - N=1 BATCH Level 2対FCFS一致性（5,000台・10,000台grid network、§1H.27.42）
 - debug/log出力の粒度。
