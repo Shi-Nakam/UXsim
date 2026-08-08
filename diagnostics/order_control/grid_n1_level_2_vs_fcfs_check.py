@@ -1118,14 +1118,42 @@ def main():
     )
 
     _print_section("Remaining uncertainties")
-    print(
-        f"  - Results from this {num_vehicles:,}-vehicle run do not guarantee "
-        "equivalence at 5,000 or 10,000 vehicles."
-    )
-    print(
-        f"  - Execution time from this {num_vehicles:,}-vehicle run does not "
-        "predict 5,000- or 10,000-vehicle runtime."
-    )
+    if num_vehicles == 200:
+        print(
+            "  - Results from this 200-vehicle run do not guarantee "
+            "equivalence at 1,000, 5,000, or 10,000 vehicles."
+        )
+        print(
+            "  - Execution time from this 200-vehicle run does not predict "
+            "1,000-, 5,000-, or 10,000-vehicle runtime."
+        )
+    elif num_vehicles == 1000:
+        print(
+            "  - Results from this 1,000-vehicle run do not guarantee "
+            "equivalence at 5,000 or 10,000 vehicles."
+        )
+        print(
+            "  - Execution time from this 1,000-vehicle run does not predict "
+            "5,000- or 10,000-vehicle runtime."
+        )
+    elif num_vehicles == 5000:
+        print(
+            "  - Results from this 5,000-vehicle run do not guarantee "
+            "equivalence at 10,000 vehicles."
+        )
+        print(
+            "  - Execution time from this 5,000-vehicle run does not predict "
+            "10,000-vehicle runtime."
+        )
+    elif num_vehicles == 10000:
+        print(
+            "  - This run does not guarantee equivalence under other network, "
+            "demand, or parameter conditions."
+        )
+        print(
+            "  - Execution time from this run does not predict runtime under "
+            "other network, demand, or parameter conditions."
+        )
     if num_vehicles == 200:
         print("  - 5,000-vehicle formal diagnostic: not executed in this run.")
         print("  - 10,000-vehicle formal diagnostic: not executed in this run.")
