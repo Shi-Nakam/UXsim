@@ -716,6 +716,94 @@ def test_determinism():
     assert r1 == r2
 
 
+def _build_minimal_unfinalized_world(name="mini_finalize"):
+    W = World(
+        name=name,
+        deltan=1,
+        tmax=100,
+        print_mode=0,
+        save_mode=0,
+        show_mode=0,
+        random_seed=0,
+        hard_deterministic_mode=True,
+    )
+    W.addNode("orig", 0, 0)
+    W.addNode("dest", 1, 0)
+    W.addLink(
+        "link",
+        "orig",
+        "dest",
+        length=100,
+        free_flow_speed=20,
+        number_of_lanes=1,
+    )
+    return W
+
+
+def test_finalize_scenario_create_analyzer_flag():
+    from unittest.mock import patch
+
+    import uxsim.uxsim as uxsim_module
+
+    with patch.object(uxsim_module, "Analyzer") as mock_analyzer:
+        W_default = _build_minimal_unfinalized_world("default_analyzer")
+        W_default.finalize_scenario()
+        assert mock_analyzer.call_count == 1
+        assert hasattr(W_default, "analyzer")
+
+        W_true = _build_minimal_unfinalized_world("explicit_true_analyzer")
+        W_true.finalize_scenario(create_analyzer=True)
+        assert mock_analyzer.call_count == 2
+        assert hasattr(W_true, "analyzer")
+
+        W_false = _build_minimal_unfinalized_world("skip_analyzer")
+        W_false.finalize_scenario(create_analyzer=False)
+        assert mock_analyzer.call_count == 2
+        assert not hasattr(W_false, "analyzer")
+        assert W_false.finalized == 1
+
+
+def test_level2_reference_skips_mimic_analyzer():
+    from unittest.mock import patch
+
+    import uxsim.uxsim as uxsim_module
+
+    W = _build_three_inlink_network("skip_mimic_analyzer", clearance=0)
+    merge = W.get_node("merge")
+    link1 = W.get_link("link1")
+    link2 = W.get_link("link2")
+    out = W.get_link("out")
+    a1 = _make_vehicle(W, "orig1", "A1")
+    trigger = _make_vehicle(W, "orig2", "TRIG")
+    _setup_arrived(merge, a1, link1, out, 0, 10.0, 0.1)
+    _setup_arrived(merge, trigger, link2, out, 0, 12.0, 0.2)
+    _register_unit(merge, 0, link1, [a1])
+    merge.last_order_control_inlink = link1
+    merge.last_order_control_entry_timestep = 9
+    W.T = 10
+    _boost_capacity(merge, link1, link2, out)
+    t_level_1 = merge.estimate_order_control_batch_t_trigger_level_1(trigger)
+    before = _snapshot_world_state(merge, [a1, trigger])
+
+    with patch.object(uxsim_module, "Analyzer") as mock_analyzer:
+        with patch(
+            "matplotlib.font_manager.findSystemFonts", return_value=[]
+        ) as mock_find_fonts:
+            result = estimate_level2_reference(
+                merge, trigger, t_level_1, virtual_horizon=20
+            )
+        assert mock_analyzer.call_count == 0
+        assert mock_find_fonts.call_count == 0
+
+    assert isinstance(result, dict)
+    assert isinstance(result["resolved"], bool)
+    if result["resolved"]:
+        assert isinstance(result["t_level_2_candidate"], int)
+        assert result["t_level_2_candidate"] >= t_level_1
+    after = _snapshot_world_state(merge, [a1, trigger])
+    _assert_world_unchanged(before, after)
+
+
 def _measure_reference_runtime():
     W = _build_three_inlink_network("timing", clearance=0)
     merge = W.get_node("merge")
@@ -767,13 +855,16 @@ def main():
         test_real_world_unchanged,
         test_rng_unchanged,
         test_determinism,
+        test_finalize_scenario_create_analyzer_flag,
+        test_level2_reference_skips_mimic_analyzer,
     ]
     for test in tests:
         test()
     runtime = _measure_reference_runtime()
     print(f"All {len(tests)} Level 2 reference tests passed.")
     print(
-        "Small-scale test-fixture single-call time including World build: "
+        "Single Level 2 reference-call time including mimic-World build "
+        "but excluding real-World fixture setup: "
         f"{runtime * 1000:.2f} ms"
     )
     return runtime

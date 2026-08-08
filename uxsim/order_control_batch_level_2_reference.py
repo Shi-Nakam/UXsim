@@ -375,7 +375,7 @@ def _build_mimic_world(real_node, real_trigger_vehicle, *, mimic_random_seed):
         )
         node_maps["real_to_mimic_link"][real_outlink] = mimic_outlink
 
-    mimic_W.finalize_scenario()
+    mimic_W.finalize_scenario(create_analyzer=False)
 
     mimic_node = mimic_W.get_node(real_node.name)
     _copy_node_capacity_state(real_node, mimic_node)

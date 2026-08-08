@@ -4688,7 +4688,7 @@ class World:
                 d2 = W.rng.choice([dd for dd in dests if dd!=d])
             W.addVehicle(o, d2, t, attribute=attribute, direct_call=False)
 
-    def finalize_scenario(W, tmax:float|None=None):
+    def finalize_scenario(W, tmax:float|None=None, *, create_analyzer:bool=True):
         """
         Finalizes the settings and preparations for the simulation scenario execution.
 
@@ -4696,6 +4696,28 @@ class World:
         ----------
         tmax : float, optional
             The maximum simulation time. If not provided, it will be determined based on the departure times of the vehicles.
+        create_analyzer : bool, optional
+            Whether to create the result Analyzer for this World. Default is True.
+            When True, an Analyzer is created as in previous UXsim versions.
+
+            Setting this to False does not merely disable visualization. It skips
+            creation of ``W.analyzer`` itself. The normal ``exec_simulation()``
+            workflow expects ``W.analyzer`` to exist because vehicle logging and
+            other result-recording operations write simulation data to it.
+            Therefore, a World finalized with ``create_analyzer=False`` must not
+            be executed through the normal ``exec_simulation()`` workflow.
+
+            Use ``create_analyzer=False`` only for an internal virtual World that
+            is processed by a dedicated loop known not to access ``W.analyzer``.
+            The Level 2 mimic World satisfies this condition. It does not call the
+            normal ``exec_simulation()`` method. Instead, it uses a limited virtual
+            loop to estimate the trigger Vehicle's passage timestep without
+            producing normal analysis or visualization results.
+
+            A World finalized with ``create_analyzer=False`` is not a
+            general-purpose simulation World. Use the default value ``True`` for
+            normal UXsim simulations and for any workflow that requires Analyzer
+            output.
 
         Notes
         -----
@@ -4736,7 +4758,8 @@ class World:
             W.ADJ_MAT_LINKS[i,j] = link
             W.NODE_PAIR_LINKS[start_node.name,end_node.name] = link
 
-        W.analyzer = Analyzer(W)
+        if create_analyzer:
+            W.analyzer = Analyzer(W)
 
         W.finalized = 1
 
