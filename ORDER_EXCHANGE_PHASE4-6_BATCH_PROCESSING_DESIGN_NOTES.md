@@ -8,7 +8,7 @@ UXsim Order Exchange 改変作業における、phase 4-6：交差点BATCH処理
 
 ## 1A. 実装状況サマリ（phase 4-6A〜4-6M）
 
-進捗の詳細・コミットID・回帰結果は [ORDER_EXCHANGE_PROGRESS.md](ORDER_EXCHANGE_PROGRESS.md) を参照。Phase 4-6E〜4-6Jの設計・判断経緯の詳細は **§1C**、Phase 4-6Kの実装記録は **§1D**、Phase 4-6Lの統括メソッド記録は **§1E**、Phase 4-6Mの `Node.transfer()` 接続記録は **§1F**、Phase 4-6Nの比較・診断記録は **§1G**、Node訪問単位の共通状態設計は **§1H**（zero-service追加形成・size-one BATCHとFCFS等価性は **§1H.25**、模倣World型Level 2 t_trigger参照モデルは **§1H.26**、**フェーズ4-6Y**（Level 2本体接続・実ネットワーク診断）は **§1H.27.42**、**§1H.27.43**、**§1H.27.44**）を参照。
+進捗の詳細・コミットID・回帰結果は [ORDER_EXCHANGE_PROGRESS.md](ORDER_EXCHANGE_PROGRESS.md) を参照。Phase 4-6E〜4-6Jの設計・判断経緯の詳細は **§1C**、Phase 4-6Kの実装記録は **§1D**、Phase 4-6Lの統括メソッド記録は **§1E**、Phase 4-6Mの `Node.transfer()` 接続記録は **§1F**、Phase 4-6Nの比較・診断記録は **§1G**、Node訪問単位の共通状態設計は **§1H**（zero-service追加形成・size-one BATCHとFCFS等価性は **§1H.25**、模倣World型Level 2 t_trigger参照モデルは **§1H.26**、**フェーズ4-6Y**（Level 2本体接続・実ネットワーク診断）は **§1H.27.42**、**§1H.27.43**、**§1H.27.44**、**§1H.27.45**）を参照。
 
 | 区分 | 内容 |
 |------|------|
@@ -38,33 +38,27 @@ UXsim Order Exchange 改変作業における、phase 4-6：交差点BATCH処理
 | | phase 4-6U：high-demand再実行・検証完了（§1H.24。本体変更なし） |
 | | phase 4-6V：zero-service追加形成修正・size-one BATCHとFCFSの等価性回復（2b10b08） |
 | | phase 4-6V診断：size-one BATCH対FCFS等価性・batch size予備比較（fe9e53e。§1H.25） |
-| | **フェーズ4-6Y Step 1：** Level 2本体接続（6e6a601。§1H.27.42） |
-| | **フェーズ4-6Y Step 2：** 未到着Vehicle route状態修正・5,000台grid network試験（af0e037。§1H.27.43） |
-| | **フェーズ4-6Y Step 3：** N=1 BATCH Level 2対FCFS一致性診断・mimic World Analyzer省略（5439cf3・639444f・4ab1b66・1a84132。§1H.27.44） |
+| | Level 2本体接続（`6e6a601`、§1H.27.42） |
+| | 未到着Vehicle route状態修正・5,000台grid network試験（`af0e037`、§1H.27.43） |
+| | N=1 BATCH Level 2対FCFS一致性診断・mimic World Analyzer省略（`5439cf3`・`639444f`・`4ab1b66`・`1a84132`、§1H.27.44） |
 | **診断スクリプト** | `diagnostics/order_control/`（9本＋README。Phase 4-6N 4本、Phase 4-6V 2本、Phase 4-6W参照モデル 1本、フェーズ4-6Y 2本。`grid_level_1_vs_level_2_check.py` はaf0e037、`grid_n1_level_2_vs_fcfs_check.py` は5439cf3で追加）。通常回帰テストから分離済み（`0e35799`）。詳細は `diagnostics/order_control/README.md` |
 | **BATCH形成〜シミュレーション接続まで完成** | trigger候補取得 → … → service queue登録（4-6I）→ 実通過（4-6K）→ 統括呼出し（4-6L）→ **`Node.transfer()` 接続（4-6M）** → **BATCH形成のcurrent visit参照（4-6R）** → **BATCH assignmentの訪問対応（4-6S）** → **小規模BATCH再訪end-to-end統合（4-6T）** → **フェーズ4-6Y：** Level 2本体接続（6e6a601、§1H.27.42）→ 未到着Vehicle route状態修正（af0e037、§1H.27.43）→ N=1一致性・Analyzer省略（§1H.27.44） |
-| **現時点の主要課題** | **10,000台**grid network試験（Level 1対Level 2比較、N=1 BATCH Level 2対FCFS一致性、virtual horizon 30の妥当性、Level 2計算時間）。フェーズ4-6Yで5,000台Level 1対Level 2・200/1,000/5,000台N=1一致性は完了（§1H.27.43・§1H.27.44）。Level 2仮想計算本体の追加性能改善。Time-value Transaction |
+| **現時点の主要課題** | Level 2仮想計算本体の追加性能改善。Time-value Transaction。複数seed、別network、体系的horizon感度分析（30・50以外）、Vehicle別・Node別分析（§1H.27.45参照） |
 | **未実装** | trip-end VehicleのBATCH service unit対応（**現在の研究対象外**。将来研究対象を拡張する場合の課題） |
 | | stale service unitの自動削除または回復方針（必要性が低ければ保留） |
 | | assignmentの正式な全訪問履歴（後回し） |
 | | Time-value Transaction、比較対象Node共通管理、目的地自動検証、taxi mode向け動的dest検証 |
 | | Level 2またはLevel 1からLevel 0への**自動切替**（§1H.27.42） |
-| **未実施の試験・評価（フェーズ4-6Y）** | **10,000台**grid network試験（§1H.27.43・§1H.27.44） |
-| | 同一条件でのBATCH Level 1対Level 2比較（**10,000台**） |
-| | N=1 BATCH Level 2対FCFS一致性確認（**10,000台**） |
-| | 混雑条件でのvirtual horizon 30の妥当性確認 |
-| | Level 2の計算時間確認（**10,000台**） |
-| | virtual horizon感度分析、複数seed、別network |
-| | Level 2仮想計算本体の追加性能改善 |
+| **未実施の試験・評価（フェーズ4-6Y）** | 複数seed、別network、体系的horizon感度分析（30・50以外）、Vehicle別・Node別分析、Level 2仮想計算本体の追加性能改善（§1H.27.45） |
 | **Level 1大規模試験（完了済み）** | Phase 4-6U：5,000台・10,000台high-demand BATCH比較（§1H.24）。Level 2本体接続**前**のLevel 1試験 |
-| **Level 2大規模試験（5,000台・完了済み）** | Phase 4-6U Case U2相当条件での5,000台Level 1対Level 2比較（§1H.27.43、af0e037）。全車両完了、Level 2解決率91.52%、未解決率8.48%、計算時間L2/L1≈270.8倍 |
+| **Level 2大規模試験（5,000台・完了済み）** | Phase 4-6U Case U2相当条件。§1H.27.43の初回h=30診断では全車両完了、resolved 91.52%、当時のL2/L1計算時間比≈270.8。§1H.27.45の現在コード再実行ではh=30の交通結果を再現し、exec比6.2626。h=50も実行済み |
 | **N=1 BATCH Level 1対FCFS一致性（確認済み）** | t_trigger Level 1、`batch_size=1`、同一clearance・同一候補順位。200台固定route条件および10,000台自由経路条件（Phase 4-6V、§1H.25） |
-| **N=1 BATCH Level 2対FCFS一致性** | **200台・1,000台・5,000台で確認済み**（`grid_n1_level_2_vs_fcfs_check.py`、§1H.27.44）。**10,000台は未実施** |
+| **N=1 BATCH Level 2対FCFS一致性** | **200台・1,000台・5,000台・10,000台で確認済み**（`grid_n1_level_2_vs_fcfs_check.py`、§1H.27.44・§1H.27.45） |
 | **当面の研究シナリオ前提** | 比較対象内部交差点Nodeを目的地としない端点間OD |
 | | 全比較方式で同一ネットワーク・同一OD需要 |
 | **研究基本設定（明示指定）** | 研究の通常方式は **Level 2**（`order_control_batch_t_trigger_level=2`。6e6a601で本体接続済み、§1H.27.42）。Level 2で `resolved=False` となった場合は、先に計算済みの **Level 1値を採用**する（6e6a601で実装済み）。**Level 0推定**（`estimate_order_control_batch_t_trigger_level_0`）は独立した推定Levelとして実装済みであるが、**Level 2またはLevel 1からLevel 0へ自動的に切り替える処理は現在実装していない**。Level 0への追加切替は、実際の試験で必要性が確認された場合に別途検討する。 |
 | | 暫定比較では `batch_size=10`、`order_control_batch_t_trigger_level=1`（Level 1は最終基本設定ではない） |
-| **次工程候補** | **§1H.27.44** を参照。**未実施（フェーズ4-6Y）：** 10,000台grid networkでのLevel 1対Level 2比較、10,000台N=1 BATCH Level 2対FCFS一致性、混雑条件でのvirtual horizon 30の妥当性、10,000台でのLevel 2計算時間確認、virtual horizon感度分析、複数seed、別network、Level 2仮想計算本体の追加性能改善。**完了済み（フェーズ4-6Y）：** Level 2本体接続（§1H.27.42）、5,000台Level 1対Level 2比較（§1H.27.43）、200/1,000/5,000台N=1 BATCH Level 2対FCFS一致性（§1H.27.44）、mimic World Analyzer省略（§1H.27.44）。**後続保留：** Time-value Transaction、stale service unit（必要性が低ければ保留）、assignment全訪問履歴（後回し）。**研究対象外：** trip-end Vehicle（将来研究対象を拡張する場合の課題）。virtual horizon正式値は§1H.27.38〜§1H.27.44を踏まえ未決定（暫定30） |
+| **次工程候補** | **§1H.27.45** を参照。**未実施（フェーズ4-6Y）：** 複数seed、別network、体系的horizon感度分析（30・50以外）、Vehicle別・Node別分析、Level 2仮想計算本体の追加性能改善。**完了済み（フェーズ4-6Y）：** Level 2本体接続（§1H.27.42）、5,000台・10,000台Level 1対Level 2比較（§1H.27.43・§1H.27.45）、200/1,000/5,000/10,000台N=1 BATCH Level 2対FCFS一致性（§1H.27.44・§1H.27.45）、mimic World Analyzer省略（§1H.27.44）、指定条件でのvirtual horizon 30対50限定比較（§1H.27.45）、5,000台補正signalized UXsim比較（§1H.27.45）。**後続保留：** Time-value Transaction、stale service unit（必要性が低ければ保留）、assignment全訪問履歴（後回し）。**研究対象外：** trip-end Vehicle（将来研究対象を拡張する場合の課題）。virtual horizon 30を当面の暫定値として維持（正式値・最適値ではない、§1H.27.45） |
 
 ---
 
@@ -5610,9 +5604,9 @@ World単位の軽量な整数カウンターを基本とし、最低限、次の
 
 整数カウンターによる集計に限定し、本体処理への負荷を最小限にする。assignmentの正式な全訪問履歴は引き続き後回しとする（§1H.27.41）。
 
-> **Phase boundary:** §1H.27.1〜§1H.27.41はフェーズ4-6Xの参照モデル設計・実装・本体接続前準備を記録する。§1H.27.42以降は、Level 2本体接続から始まるフェーズ4-6Yの実装・診断記録である。フェーズ4-6Yという名称は本体接続開始時（`6e6a601`）には事前告知されておらず、今回の正式記録作成時に利用者との確認を経て確定した。今後、新フェーズは作業開始前に名称・目的・対象範囲を明示する。
+> **Phase boundary:** §1H.27.1〜§1H.27.41はフェーズ4-6Xの参照モデル設計・実装・本体接続前準備を記録する。§1H.27.42以降は、Level 2本体接続から始まるフェーズ4-6Yの実装・診断記録である。§1H.27.42、§1H.27.43、§1H.27.44は個別の実装・診断記録であり、Step区分は使用しない。フェーズ4-6Yという名称は本体接続開始時（`6e6a601`）には事前告知されておらず、今回の正式記録作成時に利用者との確認を経て確定した。今後、新フェーズは作業開始前に名称・目的・対象範囲を明示する。利用者の事前合意なくStep番号や下位区分名を作らない。
 
-#### 1H.27.42 Phase 4-6Y Step 1：Level 2本体接続（BATCH `t_trigger`推定への正式接続）
+#### 1H.27.42 フェーズ4-6Y：Level 2本体接続（BATCH `t_trigger`推定への正式接続）
 
 **コミット：** `6e6a601` — *Connect Level 2 trigger estimation to BATCH formation*
 
@@ -5848,7 +5842,7 @@ Level 2の前回計算結果を保存して再利用する機能は追加しな�
 
 **次に必要な試験：** Level 2本体接続後の**10,000台**grid network試験において、Level 1対Level 2比較、N=1 BATCH Level 2対FCFS一致性、virtual horizon 30の妥当性、Level 2計算時間。**5,000台**Level 1対Level 2は §1H.27.43、**200/1,000/5,000台**N=1 BATCH Level 2対FCFS一致性は §1H.27.44 に記録済み。
 
-#### 1H.27.43 Phase 4-6Y Step 2：Level 2未到着Vehicleのroute状態修正と5,000台grid network試験
+#### 1H.27.43 フェーズ4-6Y：Level 2未到着Vehicleのroute状態修正と5,000台grid network試験
 
 **コミット：** `af0e037` — *Support Level 2 estimation for unarrived vehicles without route_next_link on links immediately after departure*
 
@@ -6243,7 +6237,7 @@ Type Bという内部分類名だけに依存する説明にはしていない�
 
 **次に必要な試験：** 10,000台Level 1対Level 2比較、10,000台N=1 BATCH Level 2対FCFS一致性、virtual horizon感度分析、複数seed・別network、Level 2仮想計算本体の追加性能改善。
 
-#### 1H.27.44 Phase 4-6Y Step 3：N=1 BATCH Level 2対FCFS一致性とmimic World Analyzer省略
+#### 1H.27.44 フェーズ4-6Y：N=1 BATCH Level 2対FCFS一致性とmimic World Analyzer省略
 
 **関連コミット：**
 
@@ -6281,7 +6275,7 @@ Type Bという内部分類名だけに依存する説明にはしていない�
 | 5,000 | 30,000 |
 | 10,000 | 50,000 |
 
-**10,000台N=1 BATCH Level 2対FCFS診断は未実施**である。
+**§1H.27.44記録時点では、10,000台N=1 BATCH Level 2対FCFS診断は未実施だった。その後、§1H.27.45で実施し、`exact_match`を確認済みである。**
 
 ##### 1H.27.44.1 目的と位置付け
 
@@ -6498,6 +6492,366 @@ N=1なら理論的に常にFCFSと一致することを証明したわけでは�
 - stale service unit対応は必要性が低ければ保留
 - assignment全訪問履歴は後回し
 - trip-end Vehicleは**現在の研究対象外**であり、将来研究対象を拡張する場合の課題
+
+#### 1H.27.45 フェーズ4-6Y追加検証：5,000台・10,000台におけるBATCH関連の相互・相対比較
+
+**記録作成前HEAD：** `8dc83d9`。診断スクリプト2本とMarkdown3本は未コミット。commit後に新しいcommit IDが確定する。
+
+##### 1H.27.45.1 目的と位置付け
+
+- フェーズ4-6Yで接続・修正したLevel 2について、5,000台と10,000台の6×6 grid条件で追加診断した
+- BATCH Level 1とLevel 2を相互比較した
+- Level 2 virtual horizon 30と50を相互比較した
+- 補正signalized UXsimとFCFSに対する相対的な位置を確認した
+- N=1 BATCH Level 2対FCFS一致性を10,000台まで確認した
+- 交通性能、総走行距離、最終完了時刻、Level 2解決率、fallback、計算時間を併せて確認した
+- 複数seed、別network、統計的検定、Vehicle別経路差、Node別分析は実施していない
+- 一般的優位性、最適horizon、最終設定値を決定するものではない
+
+##### 1H.27.45.2 変更した診断スクリプト
+
+**1. `diagnostics/order_control/grid_level_1_vs_level_2_check.py`**
+
+- `--virtual-horizon VIRTUAL_HORIZON` を追加
+- 既定値30
+- 0以上の整数のみ受理
+- 負数はargparseでシミュレーション開始前に拒否
+- Level 2ケースだけへhorizonを適用
+- Trial conditions、Case L2 settings、observed facts、remaining uncertaintiesを実行時値で動的表示
+- 5,000台と10,000台でhorizon 30・50を実行可能
+
+**2. `diagnostics/order_control/grid_10000_batch_size_and_signal_timing_preliminary_check.py`**
+
+- `--num-vehicles {5000,10000}` を追加
+- 既定値10,000
+- 5,000台はTMAX=30,000、10,000台はTMAX=50,000
+- 5,000台指定は`--corrected-signal-baseline-only`と組み合わせた場合だけ受理
+- 5,000台corrected signal baselineを実行可能
+- 5,000台結果を10,000台historical referenceと数値比較しない
+- 5,000台ではcross-scale differences、ratios、rankingsを計算しない
+- 10,000台の既存動作とreference比較は維持
+
+**変更していないもの：**
+
+- Python本体のLevel 1・Level 2・signal・FCFSロジック
+- UXsim本体
+- 診断実行支援と表示・比較範囲の安全化である
+
+##### 1H.27.45.3 共通条件
+
+**Level 1対Level 2診断：**
+
+- grid size: 6×6
+- internal grid Nodes: 36
+- external OD Nodes: 24
+- internal links and OD connectorsを含むlink count: 168
+- Vehicle数: 5,000または10,000
+- departure start: 0、departure end: 500
+- 5,000台TMAX: 30,000、10,000台TMAX: 50,000
+- random seed: 0、demand generation seed: 42
+- minimum OD Manhattan distance: 5
+- internal link length: 400 m、OD connector length: 300 m
+- free flow speed: 20 m/s、lanes: 1、merge priority: 1
+- jam density: 0.2、reaction time: 1、DELTAN: 1、DELTAT: 1
+- clearance timesteps: 1、BATCH size: 10
+- internal grid signal: none（BATCH Level 1/Level 2 cases）
+- route choice: free、固定routeなし
+- 比較対象内部Node: 36（比較対象内部Nodeを目的地としない端点間OD）
+- Level 1とLevel 2へ同一Vehicle計画を投入
+- pre-simulation identity check: PASS
+
+**補正signalized UXsim：**
+
+- signal setting: `[59,0,59,0]`
+- effective transfer phase lengths: `[60,1,60,1]`
+- effective transfer cycle: 122 timesteps
+- offset step: 29.5 s、offset values: `[0.0,29.5,59.0,88.5]`
+- 同じOD生成条件、seed、network条件
+- signalized UXsimはBATCHと異なる制御方式であり、制御条件が同一という意味ではない
+
+##### 1H.27.45.4 5,000台BATCH Level 1・Level 2結果
+
+| 指標 | Level 1 | Level 2 h=30 | Level 2 h=50 |
+|------|--------:|-------------:|-------------:|
+| completed trips | 5,000 / 5,000 | 5,000 / 5,000 | 5,000 / 5,000 |
+| unfinished trips | 0 | 0 | 0 |
+| total travel time (s) | 5,735,703.0 | 5,688,091.0 | 5,842,918.0 |
+| average travel time (s) | 1,147.1 | 1,137.6 | 1,168.6 |
+| average delay (s) | 982.5 | 973.0 | 1,004.0 |
+| delay ratio | 0.856520 | 0.855319 | 0.859153 |
+| total distance traveled (m) | 18,976,800.0 | 19,436,000.0 | 19,704,800.0 |
+| last completed trip time (s) | 2,348.0 | 2,435.0 | 2,633.0 |
+| exec simulation seconds | 28.773 | 180.196 | 196.705 |
+| case total seconds | 28.835 | 180.223 | 196.743 |
+
+**Level 1対Level 2 h=30の差：**
+
+- total travel time: −47,612.0 s
+- average travel time: −9.5 s、約−0.83%
+- average delay: −9.5 s、約−0.97%
+- delay ratio: −0.001201
+- total distance: +459,200 m、約+2.42%
+- last completed trip time: +87 s、約+3.71%
+- exec time ratio L2/L1: 6.2626
+
+**Level 1対Level 2 h=50の差：**
+
+- total travel time: +107,215.0 s
+- average travel time: +21.4 s（表示丸め前は約+21.44 s。表の1桁値から21.5と断定しない）
+- average delay: +21.4 s
+- delay ratio: +0.002633
+- total distance: +728,000 m
+- last completed trip time: +285 s
+- exec time ratio L2/L1: 6.7226
+
+診断出力で表示された差を正として記録する。表の丸め値から差を再計算して診断出力と異なる丸め値へ変更しない。
+
+##### 1H.27.45.5 10,000台BATCH Level 1・Level 2結果
+
+| 指標 | Level 1 | Level 2 h=30 | Level 2 h=50 |
+|------|--------:|-------------:|-------------:|
+| completed trips | 10,000 / 10,000 | 10,000 / 10,000 | 10,000 / 10,000 |
+| unfinished trips | 0 | 0 | 0 |
+| total travel time (s) | 27,782,978.0 | 29,857,632.0 | 31,913,859.0 |
+| average travel time (s) | 2,778.3 | 2,985.8 | 3,191.4 |
+| average delay (s) | 2,613.4 | 2,820.9 | 3,026.5 |
+| delay ratio | 0.940649 | 0.944773 | 0.948331 |
+| total distance traveled (m) | 39,962,400.0 | 42,358,400.0 | 43,370,400.0 |
+| last completed trip time (s) | 4,971.0 | 5,346.0 | 5,618.0 |
+| exec simulation seconds | 69.786 | 545.385 | 616.350 |
+| case total seconds | 69.895 | 565.853 | 638.206 |
+
+**Level 1対Level 2 h=30の差：**
+
+- total travel time: +2,074,654.0 s
+- average travel time: +207.5 s
+- average delay: +207.5 s
+- delay ratio: +0.004124
+- total distance: +2,396,000 m
+- last completed trip time: +375 s
+- exec time ratio L2/L1: 7.8151
+- case total ratio L2/L1: 8.0958
+
+**Level 1対Level 2 h=50の差：**
+
+- total travel time: +4,130,881.0 s
+- average travel time: +413.1 s
+- average delay: +413.1 s
+- delay ratio: +0.007682
+- total distance: +3,408,000 m
+- last completed trip time: +647 s
+- exec time ratio L2/L1: 7.3064
+- case total ratio L2/L1: 7.5546
+
+##### 1H.27.45.6 virtual horizon 30対50
+
+**5,000台：**
+
+| 指標 | h=30 | h=50 | h50 − h30 |
+|------|-----:|-----:|----------:|
+| average travel time (s) | 1,137.6 | 1,168.6 | +31.0 |
+| average delay (s) | 973.0 | 1,004.0 | +31.0 |
+| delay ratio | 0.855319 | 0.859153 | +0.003834 |
+| total distance (m) | 19,436,000 | 19,704,800 | +268,800 |
+| last completed trip time (s) | 2,435 | 2,633 | +198 |
+| call count | 10,837 | 11,979 | +1,142 |
+| resolved count | 9,918 | 11,840 | +1,922 |
+| unresolved count | 919 | 139 | −780 |
+| fallback count | 919 | 139 | −780 |
+| resolved rate | 0.9152 | 0.9884 | +0.0732 |
+| unresolved rate | 0.0848 | 0.0116 | −0.0732 |
+| exec seconds | 180.196 | 196.705 | +16.509 |
+
+補足: unresolved countは約84.87%減少。exec timeは約9.16%増加。average travel timeは約2.73%増加。total distanceは約1.38%増加。last completed trip timeは約8.13%増加。
+
+**10,000台：**
+
+| 指標 | h=30 | h=50 | h50 − h30 |
+|------|-----:|-----:|----------:|
+| average travel time (s) | 2,985.8 | 3,191.4 | +205.6 |
+| average delay (s) | 2,820.9 | 3,026.5 | +205.6 |
+| delay ratio | 0.944773 | 0.948331 | +0.003558 |
+| total distance (m) | 42,358,400 | 43,370,400 | +1,012,000 |
+| last completed trip time (s) | 5,346 | 5,618 | +272 |
+| call count | 15,268 | 16,905 | +1,637 |
+| resolved count | 11,951 | 15,967 | +4,016 |
+| unresolved count | 3,317 | 938 | −2,379 |
+| fallback count | 3,317 | 938 | −2,379 |
+| resolved rate | 0.7827 | 0.9445 | +0.1618 |
+| unresolved rate | 0.2173 | 0.0555 | −0.1618 |
+| exec seconds | 545.385 | 616.350 | +70.965 |
+
+補足: unresolved countは約71.72%減少。exec timeは約13.01%増加。average travel timeは約6.89%増加。total distanceは約2.39%増加。last completed trip timeは約5.09%増加。
+
+**限定的な解釈：**
+
+- 5,000台・10,000台の両方で、horizon 50はresolved率を改善した
+- 両方でfallback率が低下した
+- しかし両方でhorizon 30より平均旅行時間、平均遅延、総走行距離、最終完了時刻、計算時間が増加した
+- resolved率の改善と交通性能の改善は、今回の指定条件では一致しなかった
+- この結果だけから、他のseed・networkでも同じになるとは断定しない
+
+##### 1H.27.45.7 補正signalized UXsimとの相対比較
+
+**5,000台補正signalized UXsim：**
+
+| 指標 | 補正signalized UXsim |
+|------|---------------------:|
+| completed trips | 5,000 / 5,000 |
+| unfinished trips | 0 |
+| total travel time (s) | 5,721,001.0 |
+| average travel time (s) | 1,144.2002 |
+| average delay (s) | 979.6082 |
+| delay ratio | 0.856151 |
+| total distance traveled (m) | 20,774,400.0 |
+| last completed trip time (s) | 2,941 |
+| exec simulation seconds | 14.8 |
+
+delay ratioはスクリプト出力ではなく、979.6082 / 1144.2002から算出した値である。case total seconds約31秒はコマンド全体のwall timeであり、他診断のcase_total_secondsと同じ計測方法ではないため、正式な計算時間比較表へ混在させない。Analyzer参考average_speedは既存スクリプトで収集していない。
+
+**5,000台平均旅行時間による相対比較：**
+
+- Level 2 h=30: 1,137.6 s
+- 補正signalized UXsim: 1,144.2002 s
+- Level 1: 1,147.1 s
+- Level 2 h=50: 1,168.6 s
+- FCFS: 1,573.2 s
+
+補正signalized UXsimとの差: Level 2 h=30 約−6.6002 s（約−0.58%）、Level 1 約+2.8998 s（約+0.25%）、Level 2 h=50 約+24.3998 s（約+2.13%）、FCFS 約+428.9998 s（約+37.49%）。
+
+5,000台ではLevel 2 h=30、補正signalized UXsim、Level 1の平均旅行時間差は1%未満であり、単一seedだけから明確な一般順位を主張しない。総走行距離では補正signalized UXsimが20,774,400 mであり、Level 1、Level 2 h=30、Level 2 h=50、FCFSより長い。最終完了時刻では補正signalized UXsimが2,941秒であり、Level 1、Level 2 h=30、Level 2 h=50より遅く、FCFSより早い。
+
+**10,000台補正signalized UXsim（既存正式記録）：**
+
+| 指標 | 補正signalized UXsim |
+|------|---------------------:|
+| completed trips | 10,000 / 10,000 |
+| total travel time (s) | 28,535,318.0 |
+| average travel time (s) | 2,853.5318 |
+| average delay (s) | 2,688.6 |
+| total distance traveled (m) | 49,528,800.0 |
+| last completed trip time (s) | 5,900 |
+
+**10,000台平均旅行時間による相対比較：**
+
+- Level 1: 2,778.3 s
+- 補正signalized UXsim: 2,853.5318 s
+- Level 2 h=30: 2,985.8 s
+- Level 2 h=50: 3,191.4 s
+- FCFS: 3,329.3 s
+
+補正signalized UXsimとの差: Level 1 約−75.2 s（約−2.64%）、Level 2 h=30 約+132.3 s（約+4.64%）、Level 2 h=50 約+337.9 s（約+11.84%）、FCFS 約+475.8 s（約+16.68%）。
+
+**注意：** signalized UXsimとBATCHは異なる制御方式である。平均旅行時間だけでなく総走行距離と最終完了時刻も異なる。動的経路選択による経路差が結果へ含まれる。signalized UXsimとの比較は相対的位置の確認であり、同一制御ロジック間の比較ではない。signalがBATCHより一般的に優れる、または劣るとは断定しない。
+
+##### 1H.27.45.8 FCFSとの相対比較とN=1一致性
+
+**5,000台FCFS：**
+
+- completed trips: 5,000 / 5,000
+- total travel time: 7,866,209.0 s
+- average travel time: 1,573.2 s
+- average delay: 1,408.6 s
+- delay ratio: 0.895380
+- total distance: 19,571,200.0 m
+- last completed trip time: 3,409.0 s
+- exec seconds: 31.086
+
+**10,000台FCFS：**
+
+- completed trips: 10,000 / 10,000
+- total travel time: 33,293,441.0 s
+- average travel time: 3,329.3 s
+- average delay: 3,164.4 s
+- delay ratio: 0.950472
+- total distance: 39,892,000.0 m
+- last completed trip time: 6,492.0 s
+- exec seconds: 65.310
+
+**N=1 BATCH Level 2対FCFS（5,000台）：**
+
+- comparison_class: exact_match
+- aggregate mismatch count: 0、Vehicle単位不一致: 0
+- call count: 46,428、resolved: 46,390、unresolved: 38、fallback: 38
+- resolved rate: 0.9992
+- N1-L2 exec: 765.662 s、FCFS exec: 31.086 s、比: 24.6302
+
+**N=1 BATCH Level 2対FCFS（10,000台）：**
+
+- comparison_class: exact_match
+- aggregate mismatch count: 0、Vehicle単位不一致: 0
+- call count: 94,730、resolved: 93,856、unresolved: 874、fallback: 874
+- resolved rate: 0.9908
+- N1-L2 exec: 3,098.328 s、FCFS exec: 65.310 s、比: 47.4405
+
+**結論：**
+
+- 200台、1,000台、5,000台、10,000台の指定条件でN=1 BATCH Level 2とFCFSはexact_match
+- N=1でもLevel 2呼出しを省略していない
+- unresolved時のLevel 1 fallbackを含む実際の本体経路で一致した
+- 指定条件における診断結果であり、一般的理論証明ではない
+- N=1 Level 2の計算負荷は大きい
+- N=1専用shortcutは実装していない
+
+##### 1H.27.45.9 5,000台と10,000台で観測された違い
+
+- Level 2 h=30対Level 1: 5,000台 average travel time −9.5 s（約−0.83%）、10,000台 +207.5 s（約+7.47%）
+- Level 2 h=50対Level 1: 5,000台 +21.4 s、10,000台 +413.1 s
+- horizon 30→50のaverage travel time変化: 5,000台 +31.0 s（約+2.73%）、10,000台 +205.6 s（約+6.89%）
+
+**限定的解釈：**
+
+- Level 2 h=30のLevel 1に対する相対結果は5,000台と10,000台で方向が異なった
+- Level 2の相対効果には需要規模依存性がある可能性が示された
+- horizon 50は両規模でLevel 1よりaverage travel timeが長かった
+- horizon 50は両規模でhorizon 30よりaverage travel timeが長かった
+- 1 network、1 seedだけで需要規模依存性を一般化しない
+
+##### 1H.27.45.10 計算時間とLevel 2カウンター
+
+| Vehicle数 | ケース | exec seconds | 比較対象比 |
+|----------:|--------|-------------:|-----------:|
+| 5,000 | Level 1 | 28.773 | 基準 |
+| 5,000 | Level 2 h=30 | 180.196 | L2/L1=6.2626 |
+| 5,000 | Level 2 h=50 | 196.705 | L2/L1=6.7226 |
+| 5,000 | FCFS | 31.086 | 基準 |
+| 5,000 | N1-L2 | 765.662 | N1-L2/FCFS=24.6302 |
+| 10,000 | Level 1 | 69.786 | 基準 |
+| 10,000 | Level 2 h=30 | 545.385 | L2/L1=7.8151 |
+| 10,000 | Level 2 h=50 | 616.350 | L2/L1=7.3064 |
+| 10,000 | FCFS | 65.310 | 基準 |
+| 10,000 | N1-L2 | 3,098.328 | N1-L2/FCFS=47.4405 |
+
+実行時間は実行環境に依存する。
+
+horizon 30対50: 5,000台でexec time約9.16%増加、10,000台で約13.01%増加。call countも両規模で増加した。総時間増加をhorizon 1回当たりの純粋コストだけへ帰属しない。交通状態と呼出回数自体が変化している。
+
+##### 1H.27.45.11 暫定判断
+
+- virtual horizon 50は採用しない
+- virtual horizon 30を当面の暫定値として維持する
+- virtual horizon 30を正式値または最適値とは確定しない
+- horizon 50はresolved率を改善したが、今回の5,000台・10,000台条件ではhorizon 30より交通時間、総走行距離、最終完了時刻、計算時間が増加した
+- resolved率の最大化だけではhorizonを決定しない
+- 次工程へ進むため、現時点では追加のhorizon探索を行わない
+
+この判断は今回の指定条件に基づく暫定判断である。研究の通常推定方式をLevel 2とする既存方針を、今回の1 seedだけで撤回または確定し直さない。
+
+##### 1H.27.45.12 解釈上の制約と後続課題
+
+**未実施：**
+
+- 複数seed、別network、Vehicle別経路差、OD別集計、Node別効果
+- 旅行時間分布、最終完了側Vehicleの詳細、方向切替回数
+- horizon 30・50以外の体系的探索、統計的検定
+- Level 2仮想計算本体の追加性能改善、get_font_for_matplotlib()キャッシュ
+- Time-value Transaction
+
+**研究対象外または保留（維持）：**
+
+- trip-end Vehicleは現在の研究対象外
+- stale service unit対応は必要性が低ければ保留
+- assignment全訪問履歴は後回し
 
 ---
 
