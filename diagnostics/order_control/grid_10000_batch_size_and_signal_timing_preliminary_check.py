@@ -34,6 +34,10 @@ NUM_VEHICLES = 10000
 DEPARTURE_START = 0
 DEPARTURE_END = 500
 TMAX = 50000
+VEHICLE_CASES = {
+    5000: {"tmax": 30000},
+    10000: {"tmax": 50000},
+}
 MIN_OD_MANHATTAN_DISTANCE = 5
 MERGE_PRIORITY = 1
 NUMBER_OF_LANES = 1
@@ -801,17 +805,21 @@ def _direction_change_timeline_from_transfer_history(timeline):
     }
 
 
-def _verify_vehicle_plan_invariants(vehicle_plans):
-    if len(vehicle_plans) != NUM_VEHICLES:
+def _verify_vehicle_plan_invariants(vehicle_plans, num_vehicles=None):
+    if num_vehicles is None:
+        num_vehicles = NUM_VEHICLES
+    if len(vehicle_plans) != num_vehicles:
         raise AssertionError(
-            f"expected {NUM_VEHICLES} vehicle plans, got {len(vehicle_plans)}"
+            f"expected {num_vehicles} vehicle plans, got {len(vehicle_plans)}"
         )
 
-    expected_names = [f"veh_{index}" for index in range(NUM_VEHICLES)]
+    expected_names = [f"veh_{index}" for index in range(num_vehicles)]
     actual_names = [plan["name"] for plan in vehicle_plans]
     if actual_names != expected_names:
-        raise AssertionError("vehicle names are not veh_0..veh_9999 without gaps")
-    if len(set(actual_names)) != NUM_VEHICLES:
+        raise AssertionError(
+            f"vehicle names are not veh_0..veh_{num_vehicles - 1} without gaps"
+        )
+    if len(set(actual_names)) != num_vehicles:
         raise AssertionError("duplicate vehicle names in generated plans")
 
     departure_times = []
@@ -825,7 +833,7 @@ def _verify_vehicle_plan_invariants(vehicle_plans):
                 f"< {MIN_OD_MANHATTAN_DISTANCE}"
             )
         expected_departure = DEPARTURE_START + (
-            (DEPARTURE_END - DEPARTURE_START) * index / max(NUM_VEHICLES - 1, 1)
+            (DEPARTURE_END - DEPARTURE_START) * index / max(num_vehicles - 1, 1)
         )
         if plan["departure_time"] != expected_departure:
             raise AssertionError(
@@ -1016,24 +1024,30 @@ def _verify_corrected_signal_offset_sanity():
     }
 
 
-def _run_corrected_signal_case(case_name, vehicle_plans):
+def _run_corrected_signal_case(
+    case_name, vehicle_plans, num_vehicles=None, tmax=None
+):
+    if num_vehicles is None:
+        num_vehicles = NUM_VEHICLES
+    if tmax is None:
+        tmax = TMAX
     started = time.perf_counter()
     W, signal_params = build_corrected_signalized_world(
-        vehicle_plans, TMAX, CORRECTED_SIGNAL_SETTING
+        vehicle_plans, tmax, CORRECTED_SIGNAL_SETTING
     )
     elapsed = time.perf_counter() - started
 
     control_summary = _collect_signalized_control_summary(W, signal_params)
     results = _collect_traffic_results(W)
-    completion = _collect_completion_time_summary(W, TMAX)
-    demand_summary = _demand_summary(vehicle_plans, case_name, TMAX)
+    completion = _collect_completion_time_summary(W, tmax)
+    demand_summary = _demand_summary(vehicle_plans, case_name, tmax)
 
     sanity = {}
-    sanity["total vehicles == 10000"] = (
-        "pass" if results["total_vehicles"] == NUM_VEHICLES else "fail"
+    sanity[f"total vehicles == {num_vehicles}"] = (
+        "pass" if results["total_vehicles"] == num_vehicles else "fail"
     )
-    sanity["completed trips == 10000"] = (
-        "pass" if results["completed_trips"] == NUM_VEHICLES else "fail"
+    sanity[f"completed trips == {num_vehicles}"] = (
+        "pass" if results["completed_trips"] == num_vehicles else "fail"
     )
     sanity["completed ratio == 1.0"] = (
         "pass" if results["completed_ratio"] == 1.0 else "fail"
@@ -1062,7 +1076,7 @@ def _run_corrected_signal_case(case_name, vehicle_plans):
         "pass" if signal_params["cycle_length"] == 118 else "fail"
     )
     try:
-        _verify_vehicle_plan_invariants(vehicle_plans)
+        _verify_vehicle_plan_invariants(vehicle_plans, num_vehicles=num_vehicles)
         sanity["demand plan invariant checks"] = "pass"
     except AssertionError:
         sanity["demand plan invariant checks"] = "fail"
@@ -1139,12 +1153,15 @@ def _compare_average_travel_time_gap(batch_avg_tt, signal_avg_tt):
     }
 
 
-def main_corrected_signal_baseline_only():
+def main_corrected_signal_baseline_only(num_vehicles=NUM_VEHICLES):
+    tmax = VEHICLE_CASES[num_vehicles]["tmax"]
     print("=" * 72)
     print("Corrected signal baseline only: S_CORRECTED_SIGNAL_EFFECTIVE_60_1_60_1")
     print("=" * 72)
     print(
         "\nDoes NOT run FCFS, BATCH, P1–P4, or other simulations.\n"
+        f"Vehicle count: {num_vehicles:,}\n"
+        f"TMAX: {tmax}\n"
         f"Corrected signal setting: {CORRECTED_SIGNAL_SETTING}\n"
         f"Offset strategy: {SIGNAL_OFFSET_STRATEGY}\n"
     )
@@ -1191,9 +1208,11 @@ def main_corrected_signal_baseline_only():
         print(f"    offset={offset_value}: {lengths}")
 
     vehicle_plans = _generate_vehicle_plans(
-        NUM_VEHICLES, DEPARTURE_START, DEPARTURE_END
+        num_vehicles, DEPARTURE_START, DEPARTURE_END
     )
-    demand_invariants = _verify_vehicle_plan_invariants(vehicle_plans)
+    demand_invariants = _verify_vehicle_plan_invariants(
+        vehicle_plans, num_vehicles=num_vehicles
+    )
     print("\nDemand plan invariant checks: PASS")
     print(f"  total plans: {demand_invariants['total_vehicles']}")
     print(
@@ -1212,6 +1231,8 @@ def main_corrected_signal_baseline_only():
     case_result = _run_corrected_signal_case(
         CORRECTED_SIGNAL_CASE_NAME,
         vehicle_plans,
+        num_vehicles=num_vehicles,
+        tmax=tmax,
     )
     print("\n" + _format_case_report(case_result))
     print(
@@ -1229,183 +1250,205 @@ def main_corrected_signal_baseline_only():
         f"{sorted(case_result['control_summary']['signal_offsets'].keys())}"
     )
 
-    corrected_results = case_result["results"]
-    corrected_completion = case_result["completion"]
-    batch_ref = REFERENCE_BATCH_N10_POST_ZERO_SERVICE_FIX
-    old_signal_ref = REFERENCE_SIGNAL_60_1_60_1
+    if num_vehicles == NUM_VEHICLES:
+        corrected_results = case_result["results"]
+        corrected_completion = case_result["completion"]
+        batch_ref = REFERENCE_BATCH_N10_POST_ZERO_SERVICE_FIX
+        old_signal_ref = REFERENCE_SIGNAL_60_1_60_1
 
-    batch_vs_corrected = {
-        "total_travel_time": _format_metric_delta(
-            "total travel time",
-            corrected_results["total_travel_time"],
-            batch_ref["total_travel_time"],
-        ),
-        "average_travel_time": _format_metric_delta(
-            "average travel time",
-            corrected_results["average_travel_time"],
-            batch_ref["average_travel_time"],
-        ),
-        "total_distance_traveled": _format_metric_delta(
-            "total distance traveled",
-            corrected_results["total_distance_traveled"],
-            batch_ref["total_distance_traveled"],
-        ),
-        "last_completed_trip_time": _format_metric_delta(
-            "last completed trip time",
-            corrected_completion["last_completed_trip_time"],
-            batch_ref["last_completed_trip_time"],
-        ),
-    }
+        batch_vs_corrected = {
+            "total_travel_time": _format_metric_delta(
+                "total travel time",
+                corrected_results["total_travel_time"],
+                batch_ref["total_travel_time"],
+            ),
+            "average_travel_time": _format_metric_delta(
+                "average travel time",
+                corrected_results["average_travel_time"],
+                batch_ref["average_travel_time"],
+            ),
+            "total_distance_traveled": _format_metric_delta(
+                "total distance traveled",
+                corrected_results["total_distance_traveled"],
+                batch_ref["total_distance_traveled"],
+            ),
+            "last_completed_trip_time": _format_metric_delta(
+                "last completed trip time",
+                corrected_completion["last_completed_trip_time"],
+                batch_ref["last_completed_trip_time"],
+            ),
+        }
 
-    print("\nCorrected signal vs post-fix BATCH N=10:")
-    for key, metric in batch_vs_corrected.items():
-        _print_metric_delta_block(key, metric)
+        print("\nCorrected signal vs post-fix BATCH N=10:")
+        for key, metric in batch_vs_corrected.items():
+            _print_metric_delta_block(key, metric)
 
-    avg_tt_gap = _compare_average_travel_time_gap(
-        batch_ref["average_travel_time"], corrected_results["average_travel_time"]
-    )
-    print("\nBATCH N=10 vs corrected signal (average travel time):")
-    print(f"  BATCH - corrected difference: {avg_tt_gap['difference_seconds']:.4f} s")
-    print(f"  BATCH / corrected ratio: {avg_tt_gap['ratio']:.6f}")
-    print(
-        f"  BATCH excess percent over corrected signal: "
-        f"{avg_tt_gap['percent_difference']:.4f}%"
-    )
-
-    print(
-        "\nAverage delay reference comparison (display-precision approximation only):"
-    )
-    print(
-        f"  corrected signal average delay (full precision): "
-        f"{corrected_results['average_delay']}"
-    )
-    print(
-        f"  BATCH N=10 average delay display value: {BATCH_N10_POST_FIX_AVG_DELAY_DISPLAY}"
-    )
-    delay_display_ratio = _safe_ratio(
-        BATCH_N10_POST_FIX_AVG_DELAY_DISPLAY, corrected_results["average_delay"]
-    )
-    if delay_display_ratio is not None:
+        avg_tt_gap = _compare_average_travel_time_gap(
+            batch_ref["average_travel_time"], corrected_results["average_travel_time"]
+        )
+        print("\nBATCH N=10 vs corrected signal (average travel time):")
         print(
-            f"  BATCH display / corrected full ratio "
-            f"(display-precision approximation): {delay_display_ratio:.6f}"
+            f"  BATCH - corrected difference: {avg_tt_gap['difference_seconds']:.4f} s"
+        )
+        print(f"  BATCH / corrected ratio: {avg_tt_gap['ratio']:.6f}")
+        print(
+            f"  BATCH excess percent over corrected signal: "
+            f"{avg_tt_gap['percent_difference']:.4f}%"
         )
 
-    print("\nRanking (lower is better for time metrics):")
-    rankings = {
-        "average_travel_time": (
-            "BATCH N=10"
-            if batch_ref["average_travel_time"]
-            < corrected_results["average_travel_time"]
-            else "corrected signal"
-        ),
-        "average_delay": (
-            "BATCH N=10"
-            if BATCH_N10_POST_FIX_AVG_DELAY_DISPLAY
-            < corrected_results["average_delay"]
-            else "corrected signal"
-        ),
-        "total_distance_traveled": (
-            "BATCH N=10"
-            if batch_ref["total_distance_traveled"]
-            < corrected_results["total_distance_traveled"]
-            else "corrected signal"
-        ),
-        "last_completed_trip_time": (
-            "BATCH N=10"
-            if batch_ref["last_completed_trip_time"]
-            < corrected_completion["last_completed_trip_time"]
-            else "corrected signal"
-        ),
-    }
-    for metric_name, winner in rankings.items():
-        print(f"  {metric_name}: {winner}")
-
-    old_vs_corrected = {
-        "total_travel_time": _format_metric_delta(
-            "total travel time",
-            corrected_results["total_travel_time"],
-            old_signal_ref["total_travel_time"],
-        ),
-        "average_travel_time": _format_metric_delta(
-            "average travel time",
-            corrected_results["average_travel_time"],
-            OLD_SIGNAL_PRECISE_AVERAGE_TRAVEL_TIME,
-        ),
-        "average_delay": _format_metric_delta(
-            "average delay",
-            corrected_results["average_delay"],
-            old_signal_ref["average_delay"],
-        ),
-        "total_distance_traveled": _format_metric_delta(
-            "total distance traveled",
-            corrected_results["total_distance_traveled"],
-            old_signal_ref["total_distance_traveled"],
-        ),
-        "last_completed_trip_time": _format_metric_delta(
-            "last completed trip time",
-            corrected_completion["last_completed_trip_time"],
-            old_signal_ref["last_completed_trip_time"],
-        ),
-    }
-
-    print(
-        "\nHistorical old signal [60,1,60,1] vs corrected signal "
-        "(old signal is NOT a fair clearance baseline):"
-    )
-    for metric in old_vs_corrected.values():
-        _print_metric_delta_block(metric["label"], metric)
-
-    old_batch_gap = _compare_average_travel_time_gap(
-        batch_ref["average_travel_time"], OLD_SIGNAL_PRECISE_AVERAGE_TRAVEL_TIME
-    )
-    corrected_batch_gap = _compare_average_travel_time_gap(
-        batch_ref["average_travel_time"], corrected_results["average_travel_time"]
-    )
-    old_excess_pp = old_batch_gap["percent_difference"]
-    corrected_excess_pp = corrected_batch_gap["percent_difference"]
-    pp_change = None
-    if old_excess_pp is not None and corrected_excess_pp is not None:
-        pp_change = corrected_excess_pp - old_excess_pp
-
-    print("\nBATCH vs signal average travel time gap comparison:")
-    print(
-        f"  old signal precise average travel time: "
-        f"{OLD_SIGNAL_PRECISE_AVERAGE_TRAVEL_TIME}"
-    )
-    print(
-        f"  old signal gap (BATCH - old signal): "
-        f"{old_batch_gap['difference_seconds']:.4f} s "
-        f"({old_excess_pp:.4f}% over old signal)"
-    )
-    print(
-        f"  corrected signal gap (BATCH - corrected signal): "
-        f"{corrected_batch_gap['difference_seconds']:.4f} s "
-        f"({corrected_excess_pp:.4f}% over corrected signal)"
-    )
-    if pp_change is not None:
-        if abs(pp_change) < 0.05:
-            change_label = "approximately unchanged"
-        elif pp_change > 0:
-            change_label = "expanded"
-        else:
-            change_label = "shrunk"
         print(
-            f"  BATCH relative lag vs signal: {change_label} "
-            f"({pp_change:+.4f} percentage points vs old-signal comparison)"
+            "\nAverage delay reference comparison "
+            "(display-precision approximation only):"
+        )
+        print(
+            f"  corrected signal average delay (full precision): "
+            f"{corrected_results['average_delay']}"
+        )
+        print(
+            f"  BATCH N=10 average delay display value: "
+            f"{BATCH_N10_POST_FIX_AVG_DELAY_DISPLAY}"
+        )
+        delay_display_ratio = _safe_ratio(
+            BATCH_N10_POST_FIX_AVG_DELAY_DISPLAY, corrected_results["average_delay"]
+        )
+        if delay_display_ratio is not None:
+            print(
+                f"  BATCH display / corrected full ratio "
+                f"(display-precision approximation): {delay_display_ratio:.6f}"
+            )
+
+        print("\nRanking (lower is better for time metrics):")
+        rankings = {
+            "average_travel_time": (
+                "BATCH N=10"
+                if batch_ref["average_travel_time"]
+                < corrected_results["average_travel_time"]
+                else "corrected signal"
+            ),
+            "average_delay": (
+                "BATCH N=10"
+                if BATCH_N10_POST_FIX_AVG_DELAY_DISPLAY
+                < corrected_results["average_delay"]
+                else "corrected signal"
+            ),
+            "total_distance_traveled": (
+                "BATCH N=10"
+                if batch_ref["total_distance_traveled"]
+                < corrected_results["total_distance_traveled"]
+                else "corrected signal"
+            ),
+            "last_completed_trip_time": (
+                "BATCH N=10"
+                if batch_ref["last_completed_trip_time"]
+                < corrected_completion["last_completed_trip_time"]
+                else "corrected signal"
+            ),
+        }
+        for metric_name, winner in rankings.items():
+            print(f"  {metric_name}: {winner}")
+
+        old_vs_corrected = {
+            "total_travel_time": _format_metric_delta(
+                "total travel time",
+                corrected_results["total_travel_time"],
+                old_signal_ref["total_travel_time"],
+            ),
+            "average_travel_time": _format_metric_delta(
+                "average travel time",
+                corrected_results["average_travel_time"],
+                OLD_SIGNAL_PRECISE_AVERAGE_TRAVEL_TIME,
+            ),
+            "average_delay": _format_metric_delta(
+                "average delay",
+                corrected_results["average_delay"],
+                old_signal_ref["average_delay"],
+            ),
+            "total_distance_traveled": _format_metric_delta(
+                "total distance traveled",
+                corrected_results["total_distance_traveled"],
+                old_signal_ref["total_distance_traveled"],
+            ),
+            "last_completed_trip_time": _format_metric_delta(
+                "last completed trip time",
+                corrected_completion["last_completed_trip_time"],
+                old_signal_ref["last_completed_trip_time"],
+            ),
+        }
+
+        print(
+            "\nHistorical old signal [60,1,60,1] vs corrected signal "
+            "(old signal is NOT a fair clearance baseline):"
+        )
+        for metric in old_vs_corrected.values():
+            _print_metric_delta_block(metric["label"], metric)
+
+        old_batch_gap = _compare_average_travel_time_gap(
+            batch_ref["average_travel_time"], OLD_SIGNAL_PRECISE_AVERAGE_TRAVEL_TIME
+        )
+        corrected_batch_gap = _compare_average_travel_time_gap(
+            batch_ref["average_travel_time"], corrected_results["average_travel_time"]
+        )
+        old_excess_pp = old_batch_gap["percent_difference"]
+        corrected_excess_pp = corrected_batch_gap["percent_difference"]
+        pp_change = None
+        if old_excess_pp is not None and corrected_excess_pp is not None:
+            pp_change = corrected_excess_pp - old_excess_pp
+
+        print("\nBATCH vs signal average travel time gap comparison:")
+        print(
+            f"  old signal precise average travel time: "
+            f"{OLD_SIGNAL_PRECISE_AVERAGE_TRAVEL_TIME}"
+        )
+        print(
+            f"  old signal gap (BATCH - old signal): "
+            f"{old_batch_gap['difference_seconds']:.4f} s "
+            f"({old_excess_pp:.4f}% over old signal)"
+        )
+        print(
+            f"  corrected signal gap (BATCH - corrected signal): "
+            f"{corrected_batch_gap['difference_seconds']:.4f} s "
+            f"({corrected_excess_pp:.4f}% over corrected signal)"
+        )
+        if pp_change is not None:
+            if abs(pp_change) < 0.05:
+                change_label = "approximately unchanged"
+            elif pp_change > 0:
+                change_label = "expanded"
+            else:
+                change_label = "shrunk"
+            print(
+                f"  BATCH relative lag vs signal: {change_label} "
+                f"({pp_change:+.4f} percentage points vs old-signal comparison)"
+            )
+    else:
+        print(
+            "\nHistorical reference comparison skipped:\n"
+            f"  - this run uses {num_vehicles:,} vehicles\n"
+            f"  - stored BATCH N=10 and old-signal references use {NUM_VEHICLES:,} vehicles\n"
+            "  - cross-scale differences, ratios, and rankings are not computed\n"
+            "  - compare this result only with matching-demand "
+            f"{num_vehicles:,}-vehicle results"
         )
 
-    print(
+    interpretation_notes = (
         "\nInterpretation notes:\n"
         "  - same offset formula as before; cycle length and offset values changed only "
         "because the corrected signal setting changed\n"
         "  - corrected setting targets effective green 60 timesteps / all-red 1 timestep\n"
         "  - old signal [60,1,60,1] is a historical condition, not a fair clearance baseline\n"
-        "  - exploratory result for fixed demand, one seed, free routing\n"
+        f"  - exploratory result for fixed {num_vehicles:,}-vehicle demand, one seed, free routing\n"
         "  - do not attribute network-wide differences to a single factor\n"
     )
+    if num_vehicles != NUM_VEHICLES:
+        interpretation_notes += (
+            f"  - stored BATCH and old-signal references use {NUM_VEHICLES:,} vehicles\n"
+            "  - cross-scale numerical comparison was skipped\n"
+            f"  - this {num_vehicles:,}-vehicle result should be compared only with "
+            f"matching {num_vehicles:,}-vehicle conditions\n"
+        )
+    print(interpretation_notes)
     print(
-        "\nGrid 10000 corrected signal baseline check passed "
+        f"\nGrid {num_vehicles} corrected signal baseline check passed "
         f"({CORRECTED_SIGNAL_CASE_NAME})."
     )
 
@@ -4229,9 +4272,21 @@ if __name__ == "__main__":
             "Checkout pre-fix commit to reproduce. No P1–P4."
         ),
     )
+    parser.add_argument(
+        "--num-vehicles",
+        type=int,
+        choices=[5000, 10000],
+        default=10000,
+        help="number of vehicles (default: 10000)",
+    )
     args = parser.parse_args()
+    if args.num_vehicles != NUM_VEHICLES and not args.corrected_signal_baseline_only:
+        parser.error(
+            f"--num-vehicles {args.num_vehicles} is only supported with "
+            "--corrected-signal-baseline-only"
+        )
     if args.corrected_signal_baseline_only:
-        main_corrected_signal_baseline_only()
+        main_corrected_signal_baseline_only(num_vehicles=args.num_vehicles)
     elif args.batch_size_recheck_after_zero_service_fix_only:
         main_batch_size_recheck_after_zero_service_fix_only()
     elif args.n1_first_local_difference_only:

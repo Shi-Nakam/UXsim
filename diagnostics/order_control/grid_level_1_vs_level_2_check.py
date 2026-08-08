@@ -1,13 +1,14 @@
 # DIAGNOSTIC SCRIPT — NOT a regression test.
 #
-# Phase 4-6X: BATCH Level 1 vs Level 2 comparison on high-demand 6x6 grid.
+# Phase 4-6Y: BATCH Level 1 vs Level 2 comparison on high-demand 6x6 grid.
 # Reuses Phase 4-6U Case U2 (clearance=1, batch_size=10, unsignaled internal
 # grid, free routing) input conditions. Does NOT run signalized, FCFS, or N=1.
 #
 # Run from repository root:
-#   python diagnostics/order_control/grid_level_1_vs_level_2_check.py
-#   python diagnostics/order_control/grid_level_1_vs_level_2_check.py --num-vehicles 5000
-#   python diagnostics/order_control/grid_level_1_vs_level_2_check.py --num-vehicles 10000
+#   python diagnostics/order_control/grid_level_1_vs_level_2_check.py --num-vehicles 5000 --virtual-horizon 30
+#   python diagnostics/order_control/grid_level_1_vs_level_2_check.py --num-vehicles 5000 --virtual-horizon 50
+#   python diagnostics/order_control/grid_level_1_vs_level_2_check.py --num-vehicles 10000 --virtual-horizon 30
+#   python diagnostics/order_control/grid_level_1_vs_level_2_check.py --num-vehicles 10000 --virtual-horizon 50
 #
 # Requires uxsim to be importable (e.g. pip install -e .).
 
@@ -630,14 +631,14 @@ def _print_section(title):
     print("=" * 72)
 
 
-def _print_case_settings(case_label, trigger_level):
+def _print_case_settings(case_label, trigger_level, virtual_horizon):
     print(f"  case label: {case_label}")
     print('  order_control_type: "batch"')
     print(f"  batch_size: {BATCH_SIZE}")
     print(f"  order_control_batch_t_trigger_level: {trigger_level}")
     print(f"  clearance_timesteps: {CLEARANCE_TIMESTEPS}")
     if trigger_level == 2:
-        print(f"  order_control_batch_virtual_horizon: {LEVEL_2_VIRTUAL_HORIZON}")
+        print(f"  order_control_batch_virtual_horizon: {virtual_horizon}")
 
 
 def _print_traffic_results(results, last_completed_trip_time):
@@ -697,7 +698,7 @@ def _print_level_2_counters(counters, rates):
     )
 
 
-def _run_case(case_label, vehicle_plans, tmax, trigger_level):
+def _run_case(case_label, vehicle_plans, tmax, trigger_level, *, virtual_horizon):
     W = None
     timing = None
     try:
@@ -705,7 +706,7 @@ def _run_case(case_label, vehicle_plans, tmax, trigger_level):
             vehicle_plans,
             tmax,
             trigger_level,
-            virtual_horizon=LEVEL_2_VIRTUAL_HORIZON,
+            virtual_horizon=virtual_horizon,
             run_simulation=True,
         )
         if simulation_error is not None:
@@ -754,6 +755,15 @@ def _run_case(case_label, vehicle_plans, tmax, trigger_level):
         }
 
 
+def _non_negative_int(value):
+    parsed = int(value)
+    if parsed < 0:
+        raise argparse.ArgumentTypeError(
+            f"virtual horizon must be a non-negative integer, got {parsed}"
+        )
+    return parsed
+
+
 def _parse_args():
     parser = argparse.ArgumentParser(
         description=(
@@ -768,12 +778,23 @@ def _parse_args():
         choices=[5000, 10000],
         help="number of vehicles (default: 5000)",
     )
+    parser.add_argument(
+        "--virtual-horizon",
+        type=_non_negative_int,
+        default=LEVEL_2_VIRTUAL_HORIZON,
+        metavar="VIRTUAL_HORIZON",
+        help=(
+            "Level 2 virtual horizon (default: "
+            f"{LEVEL_2_VIRTUAL_HORIZON})"
+        ),
+    )
     return parser.parse_args()
 
 
 def main():
     args = _parse_args()
     num_vehicles = args.num_vehicles
+    virtual_horizon = args.virtual_horizon
     tmax = VEHICLE_CASES[num_vehicles]["tmax"]
 
     _print_section("Trial conditions")
@@ -799,7 +820,10 @@ def main():
     print(f"  batch_size: {BATCH_SIZE}")
     print("  internal_grid_signals: none (unsignaled, same as Case U2 BATCH)")
     print("  route_choice: free (dynamic, no enforce_route)")
-    print("  comparison: Case L1 (Level 1) vs Case L2 (Level 2, virtual_horizon=30)")
+    print(
+        "  comparison: Case L1 (Level 1) vs Case L2 "
+        f"(Level 2, virtual_horizon={virtual_horizon})"
+    )
     print("  excluded: signalized_all_red, FCFS, N=1")
 
     plan_gen_started = time.perf_counter()
@@ -840,7 +864,7 @@ def main():
         vehicle_plans,
         tmax,
         2,
-        virtual_horizon=LEVEL_2_VIRTUAL_HORIZON,
+        virtual_horizon=virtual_horizon,
         run_simulation=False,
     )
     _assert_pre_simulation_identity(
@@ -860,9 +884,11 @@ def main():
     comparison_done = False
 
     _print_section("Case L1 settings")
-    _print_case_settings("L1", trigger_level=1)
+    _print_case_settings("L1", trigger_level=1, virtual_horizon=virtual_horizon)
 
-    case_l1 = _run_case("L1", vehicle_plans, tmax, trigger_level=1)
+    case_l1 = _run_case(
+        "L1", vehicle_plans, tmax, trigger_level=1, virtual_horizon=virtual_horizon
+    )
     if not case_l1["success"]:
         exc = case_l1["error"]
         _print_section("Case L1 failure")
@@ -885,9 +911,11 @@ def main():
     _print_level_2_counters(case_l1["counters"], case_l1["rates"])
 
     _print_section("Case L2 settings")
-    _print_case_settings("L2", trigger_level=2)
+    _print_case_settings("L2", trigger_level=2, virtual_horizon=virtual_horizon)
 
-    case_l2 = _run_case("L2", vehicle_plans, tmax, trigger_level=2)
+    case_l2 = _run_case(
+        "L2", vehicle_plans, tmax, trigger_level=2, virtual_horizon=virtual_horizon
+    )
     if not case_l2["success"]:
         exc = case_l2["error"]
         _print_section("Case L2 failure")
@@ -986,8 +1014,10 @@ def main():
     )
     comparison_done = True
 
-    _print_section("Virtual horizon 30 — directly observed facts (this run)")
-    print(f"  virtual_horizon setting (L2 only): {LEVEL_2_VIRTUAL_HORIZON}")
+    _print_section(
+        f"Virtual horizon {virtual_horizon} — directly observed facts (this run)"
+    )
+    print(f"  virtual_horizon setting (L2 only): {virtual_horizon}")
     print(f"  L2 completed without exception: yes")
     print(f"  L2 Level 2 call_count: {case_l2['counters']['call_count']}")
     print(f"  L2 resolved_count: {case_l2['counters']['resolved_count']}")
@@ -1034,7 +1064,7 @@ def main():
 
     _print_section("Remaining uncertainties")
     print(
-        "  - Whether virtual_horizon=30 is optimal cannot be determined from "
+        f"  - Whether virtual_horizon={virtual_horizon} is optimal cannot be determined from "
         f"this single {num_vehicles:,}-vehicle run."
     )
     print(
@@ -1042,7 +1072,7 @@ def main():
         f"{case_l2['counters']['unresolved_count']} and unresolved_rate="
         f"{_format_optional_float(case_l2['rates']['unresolved_rate'])}. "
         "These observed values do not by themselves determine whether "
-        "virtual_horizon=30 should be increased or decreased. "
+        f"virtual_horizon={virtual_horizon} should be increased or decreased. "
         "The unresolved rate, Level 1 fallback rate, computation time, "
         "and traffic results must be assessed together."
     )
@@ -1051,12 +1081,9 @@ def main():
         "no general superiority claim is made."
     )
     print(
-        "  - N=1 BATCH Level 2 vs FCFS equivalence has not been tested yet."
+        "  - N=1 BATCH Level 2 vs FCFS equivalence is outside this diagnostic; "
+        "use grid_n1_level_2_vs_fcfs_check.py for that comparison."
     )
-    if num_vehicles == 5000:
-        print(
-            "  - 10,000-vehicle run (--num-vehicles 10000) is pending independent review."
-        )
 
     print()
     print("grid_level_1_vs_level_2_check completed successfully.")
