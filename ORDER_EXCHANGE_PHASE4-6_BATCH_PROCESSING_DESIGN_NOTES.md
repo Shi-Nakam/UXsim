@@ -8,7 +8,7 @@ UXsim Order Exchange 改変作業における、phase 4-6：交差点BATCH処理
 
 ## 1A. 実装状況サマリ（phase 4-6A〜4-6M）
 
-進捗の詳細・コミットID・回帰結果は [ORDER_EXCHANGE_PROGRESS.md](ORDER_EXCHANGE_PROGRESS.md) を参照。Phase 4-6E〜4-6Jの設計・判断経緯の詳細は **§1C**、Phase 4-6Kの実装記録は **§1D**、Phase 4-6Lの統括メソッド記録は **§1E**、Phase 4-6Mの `Node.transfer()` 接続記録は **§1F**、Phase 4-6Nの比較・診断記録は **§1G**、Node訪問単位の共通状態設計は **§1H**（zero-service追加形成・size-one BATCHとFCFS等価性は **§1H.25**、模倣World型Level 2 t_trigger参照モデルは **§1H.26**、Level 2本体接続は **§1H.27.42**、Level 2未到着Vehicle route状態修正と5,000台grid network試験は **§1H.27.43**）を参照。
+進捗の詳細・コミットID・回帰結果は [ORDER_EXCHANGE_PROGRESS.md](ORDER_EXCHANGE_PROGRESS.md) を参照。Phase 4-6E〜4-6Jの設計・判断経緯の詳細は **§1C**、Phase 4-6Kの実装記録は **§1D**、Phase 4-6Lの統括メソッド記録は **§1E**、Phase 4-6Mの `Node.transfer()` 接続記録は **§1F**、Phase 4-6Nの比較・診断記録は **§1G**、Node訪問単位の共通状態設計は **§1H**（zero-service追加形成・size-one BATCHとFCFS等価性は **§1H.25**、模倣World型Level 2 t_trigger参照モデルは **§1H.26**、**フェーズ4-6Y**（Level 2本体接続・実ネットワーク診断）は **§1H.27.42**、**§1H.27.43**、**§1H.27.44**）を参照。
 
 | 区分 | 内容 |
 |------|------|
@@ -38,30 +38,33 @@ UXsim Order Exchange 改変作業における、phase 4-6：交差点BATCH処理
 | | phase 4-6U：high-demand再実行・検証完了（§1H.24。本体変更なし） |
 | | phase 4-6V：zero-service追加形成修正・size-one BATCHとFCFSの等価性回復（2b10b08） |
 | | phase 4-6V診断：size-one BATCH対FCFS等価性・batch size予備比較（fe9e53e。§1H.25） |
-| | Level 2本体接続：BATCH `t_trigger`推定へのLevel 2正式接続（6e6a601。§1H.27.42） |
-| | Level 2未到着Vehicle route状態修正・5,000台grid network試験（af0e037。§1H.27.43） |
-| **診断スクリプト** | `diagnostics/order_control/`（6本＋README、うち `grid_level_1_vs_level_2_check.py` はaf0e037で追加）。通常回帰テストから分離済み（`0e35799`）。詳細は `diagnostics/order_control/README.md` |
-| **BATCH形成〜シミュレーション接続まで完成** | trigger候補取得 → … → service queue登録（4-6I）→ 実通過（4-6K）→ 統括呼出し（4-6L）→ **`Node.transfer()` 接続（4-6M）** → **BATCH形成のcurrent visit参照（4-6R）** → **BATCH assignmentの訪問対応（4-6S）** → **小規模BATCH再訪end-to-end統合（4-6T）** → **Level 2 `t_trigger`推定の本体接続（6e6a601、§1H.27.42）** → **Level 2未到着Vehicle route状態修正（af0e037、§1H.27.43）** |
-| **現時点の主要課題** | **Level 2本体接続後**の**10,000台**grid network試験（Level 1対Level 2比較、N=1 BATCH Level 2対FCFS一致性、virtual horizon 30の妥当性、Level 2計算時間）。5,000台Level 1対Level 2比較は完了（§1H.27.43）。Time-value Transaction |
-| **未実装** | trip-end VehicleのBATCH service unit対応 |
-| | stale service unitの自動削除または回復方針 |
-| | assignmentの正式な全訪問履歴 |
+| | **フェーズ4-6Y Step 1：** Level 2本体接続（6e6a601。§1H.27.42） |
+| | **フェーズ4-6Y Step 2：** 未到着Vehicle route状態修正・5,000台grid network試験（af0e037。§1H.27.43） |
+| | **フェーズ4-6Y Step 3：** N=1 BATCH Level 2対FCFS一致性診断・mimic World Analyzer省略（5439cf3・639444f・4ab1b66・1a84132。§1H.27.44） |
+| **診断スクリプト** | `diagnostics/order_control/`（9本＋README。Phase 4-6N 4本、Phase 4-6V 2本、Phase 4-6W参照モデル 1本、フェーズ4-6Y 2本。`grid_level_1_vs_level_2_check.py` はaf0e037、`grid_n1_level_2_vs_fcfs_check.py` は5439cf3で追加）。通常回帰テストから分離済み（`0e35799`）。詳細は `diagnostics/order_control/README.md` |
+| **BATCH形成〜シミュレーション接続まで完成** | trigger候補取得 → … → service queue登録（4-6I）→ 実通過（4-6K）→ 統括呼出し（4-6L）→ **`Node.transfer()` 接続（4-6M）** → **BATCH形成のcurrent visit参照（4-6R）** → **BATCH assignmentの訪問対応（4-6S）** → **小規模BATCH再訪end-to-end統合（4-6T）** → **フェーズ4-6Y：** Level 2本体接続（6e6a601、§1H.27.42）→ 未到着Vehicle route状態修正（af0e037、§1H.27.43）→ N=1一致性・Analyzer省略（§1H.27.44） |
+| **現時点の主要課題** | **10,000台**grid network試験（Level 1対Level 2比較、N=1 BATCH Level 2対FCFS一致性、virtual horizon 30の妥当性、Level 2計算時間）。フェーズ4-6Yで5,000台Level 1対Level 2・200/1,000/5,000台N=1一致性は完了（§1H.27.43・§1H.27.44）。Level 2仮想計算本体の追加性能改善。Time-value Transaction |
+| **未実装** | trip-end VehicleのBATCH service unit対応（**現在の研究対象外**。将来研究対象を拡張する場合の課題） |
+| | stale service unitの自動削除または回復方針（必要性が低ければ保留） |
+| | assignmentの正式な全訪問履歴（後回し） |
 | | Time-value Transaction、比較対象Node共通管理、目的地自動検証、taxi mode向け動的dest検証 |
 | | Level 2またはLevel 1からLevel 0への**自動切替**（§1H.27.42） |
-| **未実施の試験・評価** | Level 2本体接続後の**10,000台**grid network試験（§1H.27.43） |
+| **未実施の試験・評価（フェーズ4-6Y）** | **10,000台**grid network試験（§1H.27.43・§1H.27.44） |
 | | 同一条件でのBATCH Level 1対Level 2比較（**10,000台**） |
-| | N=1 BATCH Level 2対FCFS一致性確認 |
+| | N=1 BATCH Level 2対FCFS一致性確認（**10,000台**） |
 | | 混雑条件でのvirtual horizon 30の妥当性確認 |
 | | Level 2の計算時間確認（**10,000台**） |
+| | virtual horizon感度分析、複数seed、別network |
+| | Level 2仮想計算本体の追加性能改善 |
 | **Level 1大規模試験（完了済み）** | Phase 4-6U：5,000台・10,000台high-demand BATCH比較（§1H.24）。Level 2本体接続**前**のLevel 1試験 |
 | **Level 2大規模試験（5,000台・完了済み）** | Phase 4-6U Case U2相当条件での5,000台Level 1対Level 2比較（§1H.27.43、af0e037）。全車両完了、Level 2解決率91.52%、未解決率8.48%、計算時間L2/L1≈270.8倍 |
 | **N=1 BATCH Level 1対FCFS一致性（確認済み）** | t_trigger Level 1、`batch_size=1`、同一clearance・同一候補順位。200台固定route条件および10,000台自由経路条件（Phase 4-6V、§1H.25） |
-| **N=1 BATCH Level 2対FCFS一致性** | **未実施**。5,000台・10,000台grid network条件で今後確認（§1H.27.42） |
+| **N=1 BATCH Level 2対FCFS一致性** | **200台・1,000台・5,000台で確認済み**（`grid_n1_level_2_vs_fcfs_check.py`、§1H.27.44）。**10,000台は未実施** |
 | **当面の研究シナリオ前提** | 比較対象内部交差点Nodeを目的地としない端点間OD |
 | | 全比較方式で同一ネットワーク・同一OD需要 |
 | **研究基本設定（明示指定）** | 研究の通常方式は **Level 2**（`order_control_batch_t_trigger_level=2`。6e6a601で本体接続済み、§1H.27.42）。Level 2で `resolved=False` となった場合は、先に計算済みの **Level 1値を採用**する（6e6a601で実装済み）。**Level 0推定**（`estimate_order_control_batch_t_trigger_level_0`）は独立した推定Levelとして実装済みであるが、**Level 2またはLevel 1からLevel 0へ自動的に切り替える処理は現在実装していない**。Level 0への追加切替は、実際の試験で必要性が確認された場合に別途検討する。 |
 | | 暫定比較では `batch_size=10`、`order_control_batch_t_trigger_level=1`（Level 1は最終基本設定ではない） |
-| **次工程候補** | **§1H.27.43** を参照。**未実施：** 10,000台grid networkでのLevel 1対Level 2比較、N=1 BATCH Level 2対FCFS一致性、混雑条件でのvirtual horizon 30の妥当性、10,000台でのLevel 2計算時間確認。**完了済み（Level 2本体接続後）：** 5,000台Level 1対Level 2比較（§1H.27.43）。**完了済みのLevel 1試験（再実施の位置付けは基準値・再現確認）：** Phase 4-6Uの5,000台・10,000台high-demand（§1H.24）、Phase 4-6VのN=1 BATCH Level 1対FCFS（200台固定route・10,000台自由経路、§1H.25）。virtual horizon正式値は§1H.27.38・§1H.27.42・§1H.27.43を踏まえ未決定（暫定30）。trip-end Vehicleは研究対象外。stale service unit回復は必要性が低ければ保留。assignment全訪問履歴は後回し。Time-value Transaction本体 |
+| **次工程候補** | **§1H.27.44** を参照。**未実施（フェーズ4-6Y）：** 10,000台grid networkでのLevel 1対Level 2比較、10,000台N=1 BATCH Level 2対FCFS一致性、混雑条件でのvirtual horizon 30の妥当性、10,000台でのLevel 2計算時間確認、virtual horizon感度分析、複数seed、別network、Level 2仮想計算本体の追加性能改善。**完了済み（フェーズ4-6Y）：** Level 2本体接続（§1H.27.42）、5,000台Level 1対Level 2比較（§1H.27.43）、200/1,000/5,000台N=1 BATCH Level 2対FCFS一致性（§1H.27.44）、mimic World Analyzer省略（§1H.27.44）。**後続保留：** Time-value Transaction、stale service unit（必要性が低ければ保留）、assignment全訪問履歴（後回し）。**研究対象外：** trip-end Vehicle（将来研究対象を拡張する場合の課題）。virtual horizon正式値は§1H.27.38〜§1H.27.44を踏まえ未決定（暫定30） |
 
 ---
 
@@ -2544,9 +2547,12 @@ VehicleがNodeを実際に通過した場合、service unit側とVehicle側を**
 | Level 2本体 | **接続済み**（**§1H.27.42**、`6e6a601`） |
 | Level 2未到着Vehicle route状態修正 | **完了**（**§1H.27.43**、`af0e037`） |
 | 5,000台grid network Level 1対Level 2比較 | **完了**（**§1H.27.43**。`grid_level_1_vs_level_2_check.py --num-vehicles 5000`） |
-| 最新のUXsim本体実装commit | `af0e037`（Level 2未到着Vehicle route状態修正。§1H.27.43） |
+| 200/1,000/5,000台N=1 BATCH Level 2対FCFS一致性 | **完了**（**§1H.27.44**。`grid_n1_level_2_vs_fcfs_check.py`） |
+| mimic World Analyzer省略 | **完了**（**§1H.27.44**、`639444f`） |
+| 最新のUXsim本体実装commit | `639444f`（Level 2 mimic WorldのAnalyzer省略。§1H.27.44） |
+| 最新のリポジトリcommit | `1a84132`（N=1 BATCH診断表示の軽微修正。§1H.27.44） |
 | high-demand BATCH比較 | **完了**（Phase 4-6U。5,000台・clearance=0、5,000台・clearance=1、10,000台・clearance=1の3ケース。U1〜U3すべてexit 0、prefix violationなし。§1H.24） |
-| size-one BATCHとFCFSの等価性 | **修正後コードで確認済み（t_trigger Level 1、batch_size=1）**（200台固定route・10,000台自由経路。§1H.25）。**N=1 BATCH Level 2対FCFSは未実施**（§1H.27.42） |
+| size-one BATCHとFCFSの等価性 | **修正後コードで確認済み（t_trigger Level 1、batch_size=1）**（200台固定route・10,000台自由経路。§1H.25）。**N=1 BATCH Level 2対FCFSは200/1,000/5,000台で確認済み**（§1H.27.44）。**10,000台は未実施** |
 | batch size探索 | **ここで終了**（修正後N=10・N=20予備比較のみ。§1H.25） |
 
 **次工程候補（断定しない）：**
@@ -2555,10 +2561,11 @@ VehicleがNodeを実際に通過した場合、service unit側とVehicle側を**
 
 1. ~~5,000台grid networkでのLevel 1対Level 2比較~~ → **完了**（§1H.27.43）
 2. 10,000台grid networkでのLevel 1対Level 2比較
-3. 5,000台grid networkでのN=1 BATCH Level 2対FCFS一致性確認
+3. ~~5,000台grid networkでのN=1 BATCH Level 2対FCFS一致性確認~~ → **完了**（§1H.27.44）
 4. 10,000台grid networkでのN=1 BATCH Level 2対FCFS一致性確認
 5. 混雑条件でのvirtual horizon 30の妥当性確認
-6. 大規模条件でのLevel 2呼出カウンター（4個の整数）と計算時間の確認（5,000台は完了、§1H.27.43。10,000台は未実施）
+6. 大規模条件でのLevel 2呼出カウンター（4個の整数）と計算時間の確認（5,000台は完了、§1H.27.43・§1H.27.44。10,000台は未実施）
+7. Level 2仮想計算本体の追加性能改善（mimic World Analyzer省略は完了、§1H.27.44）
 
 **その他の候補：**
 
@@ -2580,7 +2587,7 @@ VehicleがNodeを実際に通過した場合、service unit側とVehicle側を**
 
 **再開時に読むもの：**
 
-- 本メモ **§1H**（本設計）、**§1G**（診断・根本原因）、**§1H.19**（Phase 4-6P到着記録・乱数設計・実装記録）、**§1H.20**（Phase 4-6Q FCFS参照先変更・実装記録）、**§1H.21**（Phase 4-6R BATCH参照先変更・実装記録）、**§1H.22**（Phase 4-6S BATCH assignment訪問対応・実装記録）、**§1H.23**（Phase 4-6T 小規模BATCH再訪end-to-end統合・実装記録）、**§1H.24**（Phase 4-6U high-demand再実行・検証記録）、**§1H.25**（Phase 4-6V zero-service追加形成・size-one BATCHとFCFS等価性・batch size予備比較）、**§1H.26**（Phase 4-6W 模倣World型Level 2 t_trigger参照モデル）、**§1H.27.42**（Level 2本体接続）、**§1H.27.43**（Level 2未到着Vehicle route状態修正・5,000台grid network試験）
+- 本メモ **§1H**（本設計）、**§1G**（診断・根本原因）、**§1H.19**（Phase 4-6P到着記録・乱数設計・実装記録）、**§1H.20**（Phase 4-6Q FCFS参照先変更・実装記録）、**§1H.21**（Phase 4-6R BATCH参照先変更・実装記録）、**§1H.22**（Phase 4-6S BATCH assignment訪問対応・実装記録）、**§1H.23**（Phase 4-6T 小規模BATCH再訪end-to-end統合・実装記録）、**§1H.24**（Phase 4-6U high-demand再実行・検証記録）、**§1H.25**（Phase 4-6V zero-service追加形成・size-one BATCHとFCFS等価性・batch size予備比較）、**§1H.26**（Phase 4-6W 模倣World型Level 2 t_trigger参照モデル）、**§1H.27.42**（Level 2本体接続）、**§1H.27.43**（Level 2未到着Vehicle route状態修正・5,000台grid network試験）、**§1H.27.44**（N=1 BATCH Level 2対FCFS一致性・mimic World Analyzer省略）
 - `diagnostics/order_control/README.md`（診断スクリプトは通常回帰ではなく既知問題の再現・確認資料。Phase 4-6U後の比較診断2本の現在期待はexit 0）
 - 本体：`Vehicle.order_control_current_visit`、`current visit` の `batch_assignment`、`Vehicle.get_order_control_batch_assignment()`、`Vehicle.has_order_control_batch_assignment()`、`Vehicle.assign_order_control_batch_to_current_visit()`、`Vehicle.order_control_batch_assignments`、`Node.get_order_control_batch_trigger_candidates()`、`Node.get_order_control_batch_candidates_by_inlink()`、`Node.get_ordered_order_control_batch_candidates_by_inlink()`、`Node.register_order_control_batch_service_units()`、`Node.serve_order_control_batch_service_queue()`、`Node.transfer_batch()`、`Node.transfer()`
 - テスト：`tests_order_control_batch_revisit_integration.py`、`tests_order_control_batch_visit_assignment.py`、`tests_order_control_batch_revisit_ranking.py`、`tests_order_control_batch_service_unit_registration.py`、`tests_order_control_batch_service_queue_transfer.py`、`tests_order_control_batch_transfer.py`、`tests_order_control_batch_node_transfer_integration.py`
@@ -5603,7 +5610,9 @@ World単位の軽量な整数カウンターを基本とし、最低限、次の
 
 整数カウンターによる集計に限定し、本体処理への負荷を最小限にする。assignmentの正式な全訪問履歴は引き続き後回しとする（§1H.27.41）。
 
-#### 1H.27.42 Level 2本体接続（BATCH `t_trigger`推定への正式接続）
+> **Phase boundary:** §1H.27.1〜§1H.27.41はフェーズ4-6Xの参照モデル設計・実装・本体接続前準備を記録する。§1H.27.42以降は、Level 2本体接続から始まるフェーズ4-6Yの実装・診断記録である。フェーズ4-6Yという名称は本体接続開始時（`6e6a601`）には事前告知されておらず、今回の正式記録作成時に利用者との確認を経て確定した。今後、新フェーズは作業開始前に名称・目的・対象範囲を明示する。
+
+#### 1H.27.42 Phase 4-6Y Step 1：Level 2本体接続（BATCH `t_trigger`推定への正式接続）
 
 **コミット：** `6e6a601` — *Connect Level 2 trigger estimation to BATCH formation*
 
@@ -5829,15 +5838,17 @@ Level 2の前回計算結果を保存して再利用する機能は追加しな�
 | 対象 | 状態 | 確認済み条件 |
 |------|------|-------------|
 | N=1 BATCH **Level 1**対FCFS | **確認済み**（Phase 4-6V、§1H.25） | 200台固定route条件、10,000台自由経路条件。t_trigger Level 1、`batch_size=1`、同一clearance、同一候補順位、修正後コードにおけるFCFSとの交通結果一致 |
-| N=1 BATCH **Level 2**対FCFS | **未実施** | 5,000台・10,000台grid network条件で今後確認 |
+| N=1 BATCH **Level 2**対FCFS | **200/1,000/5,000台で確認済み**（§1H.27.44） | 6×6 grid、自由経路、無信号内部Node、`batch_size=1`、`order_control_batch_t_trigger_level=2`、`virtual_horizon=30`。200/1,000/5,000台で `comparison_class=exact_match`。**10,000台は未実施** |
 
 大規模試験でN=1 Level 1対FCFSを再実行する場合、それは未確認事項の初回検証ではなく、Level 2比較時の基準値または再現確認として位置付ける。
 
+**参照（その後の実施）：** 5,000台N=1 BATCH Level 2対FCFS一致性は、その後 **§1H.27.44** で完了した。Analyzer初期化の性能問題と修正後結果も **§1H.27.44** を参照。
+
 **完了済みのLevel 1大規模試験（Level 2本体接続前）：** Phase 4-6Uの5,000台・10,000台high-demand BATCH比較（§1H.24）。上記「未実施」は、これらを否定するものではない。
 
-**次に確認する必要があること：** Level 2本体接続後の**10,000台**grid network試験において、Level 2が正常に動作するか、Level 1と比較して意図どおりの効果があるか、N=1 BATCH Level 2がFCFSと一致するか、virtual horizon 30が混雑条件で十分か、Level 2計算時間が許容範囲か。**5,000台**については §1H.27.43 に記録済み。
+**次に必要な試験：** Level 2本体接続後の**10,000台**grid network試験において、Level 1対Level 2比較、N=1 BATCH Level 2対FCFS一致性、virtual horizon 30の妥当性、Level 2計算時間。**5,000台**Level 1対Level 2は §1H.27.43、**200/1,000/5,000台**N=1 BATCH Level 2対FCFS一致性は §1H.27.44 に記録済み。
 
-#### 1H.27.43 Level 2未到着Vehicleのroute状態修正と5,000台grid network試験
+#### 1H.27.43 Phase 4-6Y Step 2：Level 2未到着Vehicleのroute状態修正と5,000台grid network試験
 
 **コミット：** `af0e037` — *Support Level 2 estimation for unarrived vehicles without route_next_link on links immediately after departure*
 
@@ -6218,17 +6229,275 @@ Type Bという内部分類名だけに依存する説明にはしていない�
 - 10,000台Level 1対Level 2比較
 - 10,000台でのLevel 2カウンター確認
 - 10,000台での計算時間確認
-- 5,000台のN=1 BATCH Level 2対FCFS一致性
+- 5,000台のN=1 BATCH Level 2対FCFS一致性（**その後§1H.27.44で完了**）
 - 10,000台のN=1 BATCH Level 2対FCFS一致性
 - virtual horizonの感度分析
 - 複数seedでの比較
 - 別networkでの比較
-- Level 2の計算負荷削減
+- Level 2の計算負荷削減（mimic World Analyzer省略は完了、§1H.27.44）
 - git push
 
-**維持する既知事項：** N=1 BATCH Level 1対FCFSについては、200台固定routeと10,000台自由経路で確認済みである（Phase 4-6V、§1H.25）。未実施なのはN=1 BATCH Level 2対FCFSである。
+**維持する既知事項：** N=1 BATCH Level 1対FCFSについては、200台固定routeと10,000台自由経路で確認済みである（Phase 4-6V、§1H.25）。N=1 BATCH Level 2対FCFSは200/1,000/5,000台で確認済み（§1H.27.44）。**10,000台は未実施**。
 
-**次に必要な試験：** 計算負荷（L2/L1≈270.8倍）を考慮し、10,000台試験とN=1 BATCH Level 2対FCFS試験の実行方法を決めたうえで実施する。
+**参照：** 5,000台N=1 BATCH Level 2対FCFS一致性とAnalyzer初期化の性能問題・修正後結果は **§1H.27.44** を参照。
+
+**次に必要な試験：** 10,000台Level 1対Level 2比較、10,000台N=1 BATCH Level 2対FCFS一致性、virtual horizon感度分析、複数seed・別network、Level 2仮想計算本体の追加性能改善。
+
+#### 1H.27.44 Phase 4-6Y Step 3：N=1 BATCH Level 2対FCFS一致性とmimic World Analyzer省略
+
+**関連コミット：**
+
+| コミット | 内容 |
+|----------|------|
+| `5439cf3` | N=1 BATCH Level 2対FCFS grid診断スクリプト追加。200台で `exact_match` 確認 |
+| `639444f` | Level 2 mimic Worldで `create_analyzer=False` を使用。`World.finalize_scenario()` に `create_analyzer` 追加 |
+| `4ab1b66` | 診断スクリプトに1,000台条件追加。1,000台診断実施 |
+| `1a84132` | 診断スクリプト `Remaining uncertainties` 表示の軽微修正 |
+
+**診断スクリプト：** `diagnostics/order_control/grid_n1_level_2_vs_fcfs_check.py`
+
+**試験条件（全Vehicle数共通）：**
+
+| 項目 | 値 |
+|------|-----|
+| ネットワーク | 6×6 grid（内部grid Node 36、外部OD Node 24） |
+| 内部信号 | なし（無信号内部Node、Phase 4-6U Case U2相当） |
+| 経路 | 自由経路（`enforce_route` なし） |
+| clearance | `clearance_timesteps=1` |
+| 比較 | FCFS対 N=1 BATCH Level 2 |
+| BATCH設定 | `batch_size=1`、`order_control_batch_t_trigger_level=2`、`order_control_batch_virtual_horizon=30` |
+| seed | `RANDOM_SEED=0`、`DEMAND_GEN_SEED=42` |
+| 車線 | 単車線 |
+| 需要 | 同一Vehicle計画 |
+| 比較内容 | 集計比較・Vehicle単位比較・Level 2カウンター |
+| Level 2呼出 | 実際に呼び出す。`batch_size=1` によるLevel 2 bypassは行わない |
+
+**受理Vehicle数とTMAX：**
+
+| Vehicle数 | TMAX |
+|-----------|------|
+| 200 | 5,000 |
+| 1,000 | 10,000 |
+| 5,000 | 30,000 |
+| 10,000 | 50,000 |
+
+**10,000台N=1 BATCH Level 2対FCFS診断は未実施**である。
+
+##### 1H.27.44.1 目的と位置付け
+
+N=1 BATCH Level 2（`batch_size=1`、`order_control_batch_t_trigger_level=2`）が、同一条件のFCFSと交通結果・Vehicle単位挙動まで一致するかを、6×6 grid・自由経路・高需要条件で確認する。Level 2本体接続（§1H.27.42）後の一致性検証であり、N=1 Level 1対FCFS（§1H.25）とは別試験である。
+
+併せて、Level 2呼出しごとのmimic World `finalize_scenario()` における不要なAnalyzer初期化が大規模試験の性能ボトルネックとなっていた問題を特定し、mimic World限定のAnalyzer省略（`create_analyzer=False`）で解消した。
+
+##### 1H.27.44.2 N=1一致性で確認する意味
+
+`batch_size=1` でもLevel 2推定は実際に呼び出される。N=1 BATCH Level 2がFCFSと一致することは、Level 2仮想計算・fallback経路・BATCH形成が、最小batchサイズ条件下で意図どおりFCFS等価になることを、指定network・需要・seed・parameter条件で実証する。
+
+これはすべてのnetwork・需要・parameter条件における一般的証明ではない。10,000台での一致性は未確認である。
+
+##### 1H.27.44.3 修正前200台診断
+
+Analyzer省略修正前（`5439cf3` 時点）の200台結果：
+
+| 項目 | FCFS | N1-L2 |
+|------|------|-------|
+| completed_trips | 200 / 200 | 200 / 200 |
+| exec_simulation_seconds | 0.878 | 100.783 |
+
+**Level 2カウンター（N1-L2）：** `call_count=1,497`、`resolved_count=1,497`、`unresolved_count=0`、`level_1_fallback_count=0`
+
+**比較：** `aggregate_mismatch_count=0`、Vehicle単位不一致 0、`comparison_class=exact_match`
+
+200台では、N=1 BATCH Level 2とFCFSがVehicle単位まで一致することを確認した。
+
+##### 1H.27.44.4 修正前5,000台診断の20時間超中断
+
+Analyzer省略修正前の5,000台診断では、FCFSは完了したがN1-L2は20時間超でも完了しなかった。
+
+| 項目 | 結果 |
+|------|------|
+| FCFS completed_trips | 5,000 / 5,000 |
+| FCFS exec_simulation_seconds | 16.224 |
+| N1-L2 | 20時間超でも未完了 |
+| CPU使用率 | ほぼ100% |
+| 中断 | 利用者がCtrl+Cで中断 |
+| N1-L2最終結果 | 取得できず |
+| Level 2カウンター | 取得できず |
+| 5,000台一致性 | 未判定 |
+
+この中断は交通計算の無限ループを証明したものではない。Level 2呼出しごとにmimic Worldを `finalize_scenario()` し、不要なAnalyzer初期化とシステムフォント探索を繰り返していたことが、重大な性能要因として確認された。
+
+##### 1H.27.44.5 Tracebackとsampleによるボトルネック確認
+
+中断時のTracebackは、Level 2 mimic Worldの `finalize_scenario()` からAnalyzer作成へ入り、`matplotlib.font_manager.findSystemFonts()` 内にあった。
+
+macOS `sample` では、メインスレッドの約99%が同じフォント一覧構築処理内に観測された。
+
+20時間のすべてがフォント探索だったとは断定しない。Tracebackと5秒sampleの両方がフォント探索を示したため、重大な性能要因だったと記録する。
+
+Level 2参照コードは `mimic_W.analyzer` を使用せず、通常の `exec_simulation()` ではなく専用の限定仮想ループ（`_run_limited_virtual_loop()`）を使用する。
+
+##### 1H.27.44.6 Analyzer省略設計
+
+**コミット：** `639444f` — *Phase 4-6: Skip Analyzer creation for Level 2 mimic worlds*
+
+| 項目 | 内容 |
+|------|------|
+| 変更 | `World.finalize_scenario(W, tmax=None, *, create_analyzer=True)` にkeyword-only引数 `create_analyzer` を追加 |
+| 既定値 | `True`（通常Worldでは従来どおりAnalyzerを作成） |
+| mimic World | `mimic_W.finalize_scenario(create_analyzer=False)` |
+| 維持 | Analyzer以外の `finalize_scenario()` 処理、Level 2交通計算ロジック、virtual horizon、route-state処理、fallback、実WorldとRNGの扱い |
+| 今回追加していない | `get_font_for_matplotlib()` のキャッシュ、`Analyzer.__init__()` の変更 |
+
+##### 1H.27.44.7 create_analyzer=Falseの仕様と利用制約
+
+- 可視化だけを無効にする設定ではない。`W.analyzer` 自体を作成しない。
+- 通常 `exec_simulation()` ではVehicleログ等が `W.analyzer` を使用する。
+- `create_analyzer=False` でfinalizeされたWorldを通常 `exec_simulation()` で実行してはいけない。
+- `W.analyzer` へアクセスしない専用の限定仮想ループだけで使用する。
+- Level 2 mimic Worldはこの条件を満たす。
+- 一般用途のWorld向け設定ではない。通常UXsimシミュレーションでは既定値 `True` を使用する。
+
+##### 1H.27.44.8 テストと通常UXsim回帰
+
+| テスト | 件数 | 結果 |
+|--------|------|------|
+| Level 2参照テスト（`tests_order_control_batch_t_trigger_level_2_reference.py`） | 20 | 成功 |
+| 未到着参照テスト（`tests_order_control_batch_t_trigger_level_2_unarrived_reference.py`） | 29 | 成功 |
+| Level 2本体接続テスト（`tests_order_control_batch_t_trigger_level_2_body.py`） | 22 | 成功 |
+| **合計** | **71** | **成功** |
+
+**追加確認：** 通常 `finalize_scenario()` でAnalyzer作成、`create_analyzer=True` でAnalyzer作成、`create_analyzer=False` でAnalyzer非作成、Level 2 mimic WorldでAnalyzerコンストラクター0回、`findSystemFonts()` 0回、実WorldとRNGの不変性維持。
+
+**単一Level 2参照呼出し時間：** 0.19 ms（mimic World構築を含む。real World fixture準備を含まない。厳密な性能assertではなく診断値）。
+
+**追加回帰：**
+
+| テスト | 結果 |
+|--------|------|
+| `tests_order_exchange_baseline.py` | 48/48成功。平均速度16.5 m/s、平均旅行時間61.0秒、delay ratio 0.017 |
+| `demos_and_examples/example_00en_simple.py` | 完了735/810。平均速度11.7 m/s、平均旅行時間162.6秒、delay ratio 0.385 |
+
+##### 1H.27.44.9 修正後200台結果
+
+| 項目 | FCFS | N1-L2 |
+|------|------|-------|
+| completed_trips | 200 / 200 | 200 / 200 |
+| unfinished_trips | 0 | 0 |
+| exec_simulation_seconds | 15.390 | 4.760 |
+| case_total_seconds | 15.392 | 4.762 |
+
+**Level 2カウンター（N1-L2）：** `call_count=1,497`、`resolved_count=1,497`、`unresolved_count=0`、`level_1_fallback_count=0`
+
+**比較：** `aggregate_mismatch_count=0`、Vehicle単位不一致 0、`comparison_class=exact_match`
+
+**性能（N1-L2中心）：** 修正前 100.783秒 → 修正後 4.760秒（約95.3%短縮、修正前/修正後比 ≈ 21.2倍）。`call_count` は1,497のまま。交通結果とLevel 2カウンターは維持。
+
+FCFS時間は別実行間で0.878秒から15.390秒へ変動した。このFCFS時間差をAnalyzer省略修正の影響とは解釈しない（Analyzer省略はLevel 2 mimic Worldのみに適用される）。
+
+##### 1H.27.44.10 1,000台中間診断結果
+
+**コミット：** `4ab1b66` — *Phase 4-6: Add 1,000-vehicle N=1 Level 2 BATCH vs FCFS diagnostic*
+
+| 項目 | FCFS | N1-L2 |
+|------|------|-------|
+| completed_trips | 1,000 / 1,000 | 1,000 / 1,000 |
+| exec_simulation_seconds | 17.711 | 42.389 |
+
+**Level 2カウンター（N1-L2）：** `call_count=7,766`、`resolved_count=7,766`、`unresolved_count=0`、`level_1_fallback_count=0`、`resolved_rate=1.0000`
+
+**比較：** `aggregate_mismatch_count=0`、Vehicle単位不一致 0、`comparison_class=exact_match`、N1-L2/FCFS exec比 2.3934、exit code 0
+
+##### 1H.27.44.11 修正後5,000台結果
+
+| 項目 | FCFS | N1-L2 |
+|------|------|-------|
+| total_vehicles | 5,000 | 5,000 |
+| completed_trips | 5,000 | 5,000 |
+| unfinished_trips | 0 | 0 |
+| completed_ratio | 1.000000 | 1.000000 |
+| total_travel_time (s) | 7,866,209.0 | 7,866,209.0 |
+| average_travel_time (s) | 1,573.2 | 1,573.2 |
+| average_delay (s) | 1,408.6 | 1,408.6 |
+| delay_ratio | 0.895380 | 0.895380 |
+| total_distance_traveled (m) | 19,571,200.0 | 19,571,200.0 |
+| last_completed_trip_time (s) | 3,409.0 | 3,409.0 |
+| analyzer_reference_average_speed (m/s) | 2.7950 | 2.7950 |
+| exec_simulation_seconds | 31.086 | 765.662 |
+| case_total_seconds | 31.145 | 767.389 |
+
+**Level 2カウンター（N1-L2）：**
+
+| カウンター | 値 |
+|-----------|-----|
+| call_count | 46,428 |
+| resolved_count | 46,390 |
+| unresolved_count | 38 |
+| level_1_fallback_count | 38 |
+| resolved_rate | 0.9992 |
+| unresolved_rate | 0.0008 |
+| level_1_fallback_rate | 0.0008 |
+
+**比較：** `aggregate_mismatch_count=0`、Vehicle単位不一致 0、`comparison_class=exact_match`、N1-L2/FCFS exec比 24.6302。assignment prefix violationなし、visit_id / batch_assignment / service unit mismatchなし。exit code 0、`completed successfully`。
+
+修正前の20時間超未完了状態は解消した。5,000台N1-L2は約12分46秒（765.662秒）で完了した。
+
+##### 1H.27.44.12 Level 2カウンターとfallbackの解釈
+
+5,000台では38回 `unresolved` となり、38回Level 1値を採用した（`level_1_fallback_count=38`）。`unresolved_count + resolved_count = call_count` を満たす。
+
+fallbackを含む実際のLevel 2本体経路で、FCFSと集計・Vehicle単位まで完全一致した。これは指定条件におけるN=1 BATCH Level 2対FCFS一致性を支持する。
+
+38回のfallbackが交通上問題ないという一般化はしない。指定条件・指定診断結果として記録する。
+
+##### 1H.27.44.13 性能改善と残存コスト
+
+| 条件 | 修正前N1-L2 (s) | 修正後N1-L2 (s) | 短縮率 | 比 (前/後) |
+|------|-----------------|-----------------|--------|------------|
+| 200台 | 100.783 | 4.760 | 約95.3% | ≈ 21.2倍 |
+
+| 条件 | FCFS (s) | N1-L2 (s) | N1-L2/FCFS |
+|------|----------|-----------|------------|
+| 1,000台 | 17.711 | 42.389 | 2.3934 |
+| 5,000台 | 31.086 | 765.662 | 24.6302 |
+
+Analyzer省略によりmimic World初期化コストは大幅に削減された。ただし5,000台ではN1-L2がFCFSの約24.63倍であり、Level 2仮想計算本体の計算負荷は残る。Analyzer省略だけで今後すべての性能問題が解決したとは断定しない。
+
+##### 1H.27.44.14 exact_matchの適用範囲
+
+`comparison_class=exact_match` は、診断スクリプトが比較する集計フィールドとVehicle単位フィールドがすべて一致したことを意味する。指定した6×6 grid、自由経路、無信号内部Node、同一Vehicle計画、seed、parameter条件における診断結果である。
+
+N=1なら理論的に常にFCFSと一致することを証明したわけではない。10,000台での一致性は未確認である。
+
+##### 1H.27.44.15 完了事項と未実施事項
+
+**完了済み：**
+
+- N=1 BATCH Level 2対FCFS診断スクリプト（`grid_n1_level_2_vs_fcfs_check.py`）
+- 修正前200台一致性確認（`exact_match`）
+- 修正前5,000台中断とボトルネック特定
+- mimic World Analyzer省略（`639444f`）
+- テスト71件・通常UXsim回帰
+- 修正後200台・1,000台・5,000台診断（いずれも `exact_match`）
+- 診断表示文の軽微修正（`1a84132`）
+
+**未実施（フェーズ4-6Yの試験・評価）：**
+
+- 10,000台Level 1対Level 2比較
+- 10,000台N=1 BATCH Level 2対FCFS一致性
+- 10,000台Level 2カウンター確認
+- 10,000台計算時間確認
+- virtual horizon感度分析
+- 複数seed
+- 別network
+- Level 2仮想計算本体の追加性能改善（mimic World Analyzer省略以外）
+
+**後続実装・保留：**
+
+- Time-value Transaction
+- stale service unit対応は必要性が低ければ保留
+- assignment全訪問履歴は後回し
+- trip-end Vehicleは**現在の研究対象外**であり、将来研究対象を拡張する場合の課題
 
 ---
 
