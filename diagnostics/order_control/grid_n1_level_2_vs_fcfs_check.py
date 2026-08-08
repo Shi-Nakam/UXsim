@@ -9,6 +9,7 @@
 # Run from repository root:
 #   python diagnostics/order_control/grid_n1_level_2_vs_fcfs_check.py
 #   python diagnostics/order_control/grid_n1_level_2_vs_fcfs_check.py --num-vehicles 200
+#   python diagnostics/order_control/grid_n1_level_2_vs_fcfs_check.py --num-vehicles 1000
 #   python diagnostics/order_control/grid_n1_level_2_vs_fcfs_check.py --num-vehicles 5000
 #   python diagnostics/order_control/grid_n1_level_2_vs_fcfs_check.py --num-vehicles 10000
 #
@@ -45,11 +46,13 @@ DEPARTURE_END = 500
 # TMAX rationale:
 # - 5000 vehicles: 30000 (same as grid_level_1_vs_level_2_check / Case U2)
 # - 10000 vehicles: 50000 (same as grid_level_1_vs_level_2_check)
+# - 1000 vehicles: 10000 — intermediate-scale diagnostic between 200 and 5000
 # - 200 vehicles: 5000 — same absolute cap as grid_n1_fcfs_route_fixed_small_check
 #   for 200 vehicles on this grid; last departure is 500 s, leaving ~4500 s for
 #   trips under lighter congestion (well above free-flow upper bound for OD paths)
 VEHICLE_CASES = {
     200: {"tmax": 5000},
+    1000: {"tmax": 10000},
     5000: {"tmax": 30000},
     10000: {"tmax": 50000},
 }
@@ -957,7 +960,7 @@ def _parse_args():
         "--num-vehicles",
         type=int,
         default=200,
-        choices=[200, 5000, 10000],
+        choices=[200, 1000, 5000, 10000],
         help="number of vehicles (default: 200)",
     )
     return parser.parse_args()
@@ -1126,10 +1129,14 @@ def main():
     if num_vehicles == 200:
         print("  - 5,000-vehicle formal diagnostic: not executed in this run.")
         print("  - 10,000-vehicle formal diagnostic: not executed in this run.")
+    elif num_vehicles == 1000:
+        print("  - This run is the 1,000-vehicle intermediate-scale diagnostic.")
+        print("  - 5,000-vehicle formal diagnostic: not executed in this run.")
+        print("  - 10,000-vehicle formal diagnostic: not executed in this run.")
     elif num_vehicles == 5000:
         print("  - This run is the 5,000-vehicle formal diagnostic.")
         print("  - 10,000-vehicle formal diagnostic: not executed in this run.")
-    else:
+    elif num_vehicles == 10000:
         print("  - This run is the 10,000-vehicle formal diagnostic.")
     print(
         "  - If vehicles do not match, investigate before modifying core code."
