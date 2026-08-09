@@ -8,7 +8,7 @@ UXsim Order Exchange 改変作業における、phase 4-6：交差点BATCH処理
 
 ## 1A. 実装状況サマリ（phase 4-6A〜4-6M）
 
-進捗の詳細・コミットID・回帰結果は [ORDER_EXCHANGE_PROGRESS.md](ORDER_EXCHANGE_PROGRESS.md) を参照。Phase 4-6E〜4-6Jの設計・判断経緯の詳細は **§1C**、Phase 4-6Kの実装記録は **§1D**、Phase 4-6Lの統括メソッド記録は **§1E**、Phase 4-6Mの `Node.transfer()` 接続記録は **§1F**、Phase 4-6Nの比較・診断記録は **§1G**、Node訪問単位の共通状態設計は **§1H**（zero-service追加形成・size-one BATCHとFCFS等価性は **§1H.25**、模倣World型Level 2 t_trigger参照モデルは **§1H.26**、**フェーズ4-6Y**（Level 2本体接続・実ネットワーク診断）は **§1H.27.42**、**§1H.27.43**、**§1H.27.44**、**§1H.27.45**）を参照。
+進捗の詳細・コミットID・回帰結果は [ORDER_EXCHANGE_PROGRESS.md](ORDER_EXCHANGE_PROGRESS.md) を参照。Phase 4-6E〜4-6Jの設計・判断経緯の詳細は **§1C**、Phase 4-6Kの実装記録は **§1D**、Phase 4-6Lの統括メソッド記録は **§1E**、Phase 4-6Mの `Node.transfer()` 接続記録は **§1F**、Phase 4-6Nの比較・診断記録は **§1G**、Node訪問単位の共通状態設計は **§1H**（zero-service追加形成・size-one BATCHとFCFS等価性は **§1H.25**、模倣World型Level 2 t_trigger参照モデルは **§1H.26**、**フェーズ4-6Y**（Level 2本体接続・実ネットワーク診断・BATCH残作業整理とTime-value Transactionへの移行判断）は **§1H.27.42**、**§1H.27.43**、**§1H.27.44**、**§1H.27.45**、**§1H.27.46**）を参照。
 
 | 区分 | 内容 |
 |------|------|
@@ -43,7 +43,7 @@ UXsim Order Exchange 改変作業における、phase 4-6：交差点BATCH処理
 | | N=1 BATCH Level 2対FCFS一致性診断・mimic World Analyzer省略（`5439cf3`・`639444f`・`4ab1b66`・`1a84132`、§1H.27.44） |
 | **診断スクリプト** | `diagnostics/order_control/`（9本＋README。Phase 4-6N 4本、Phase 4-6V 2本、Phase 4-6W参照モデル 1本、フェーズ4-6Y 2本。`grid_level_1_vs_level_2_check.py` はaf0e037、`grid_n1_level_2_vs_fcfs_check.py` は5439cf3で追加）。通常回帰テストから分離済み（`0e35799`）。詳細は `diagnostics/order_control/README.md` |
 | **BATCH形成〜シミュレーション接続まで完成** | trigger候補取得 → … → service queue登録（4-6I）→ 実通過（4-6K）→ 統括呼出し（4-6L）→ **`Node.transfer()` 接続（4-6M）** → **BATCH形成のcurrent visit参照（4-6R）** → **BATCH assignmentの訪問対応（4-6S）** → **小規模BATCH再訪end-to-end統合（4-6T）** → **フェーズ4-6Y：** Level 2本体接続（6e6a601、§1H.27.42）→ 未到着Vehicle route状態修正（af0e037、§1H.27.43）→ N=1一致性・Analyzer省略（§1H.27.44） |
-| **現時点の主要課題** | Level 2仮想計算本体の追加性能改善。Time-value Transaction。複数seed、別network、体系的horizon感度分析（30・50以外）、Vehicle別・Node別分析（§1H.27.45参照） |
+| **現時点の主要課題** | Time-value Transactionの設計・実装（Phase名・実装範囲は未決定）。BATCH残作業は§1H.27.46へ整理済み。複数seed、別network、Vehicle別・Node別分析、統計的検定はTime-value Transaction実装後の共通評価段階へ繰り越す。BATCH固有のN・horizon感度分析、Level 2追加性能改善は保留する |
 | **未実装** | trip-end VehicleのBATCH service unit対応（**現在の研究対象外**。将来研究対象を拡張する場合の課題） |
 | | stale service unitの自動削除または回復方針（必要性が低ければ保留） |
 | | assignmentの正式な全訪問履歴（後回し） |
@@ -58,7 +58,7 @@ UXsim Order Exchange 改変作業における、phase 4-6：交差点BATCH処理
 | | 全比較方式で同一ネットワーク・同一OD需要 |
 | **研究基本設定（明示指定）** | 研究の通常方式は **Level 2**（`order_control_batch_t_trigger_level=2`。6e6a601で本体接続済み、§1H.27.42）。Level 2で `resolved=False` となった場合は、先に計算済みの **Level 1値を採用**する（6e6a601で実装済み）。**Level 0推定**（`estimate_order_control_batch_t_trigger_level_0`）は独立した推定Levelとして実装済みであるが、**Level 2またはLevel 1からLevel 0へ自動的に切り替える処理は現在実装していない**。Level 0への追加切替は、実際の試験で必要性が確認された場合に別途検討する。 |
 | | 暫定比較では `batch_size=10`、`order_control_batch_t_trigger_level=1`（Level 1は最終基本設定ではない） |
-| **次工程候補** | **§1H.27.45** を参照。**未実施（フェーズ4-6Y）：** 複数seed、別network、体系的horizon感度分析（30・50以外）、Vehicle別・Node別分析、Level 2仮想計算本体の追加性能改善。**完了済み（フェーズ4-6Y）：** Level 2本体接続（§1H.27.42）、5,000台・10,000台Level 1対Level 2比較（§1H.27.43・§1H.27.45）、200/1,000/5,000/10,000台N=1 BATCH Level 2対FCFS一致性（§1H.27.44・§1H.27.45）、mimic World Analyzer省略（§1H.27.44）、指定条件でのvirtual horizon 30対50限定比較（§1H.27.45）、5,000台補正signalized UXsim比較（§1H.27.45）。**後続保留：** Time-value Transaction、stale service unit（必要性が低ければ保留）、assignment全訪問履歴（後回し）。**研究対象外：** trip-end Vehicle（将来研究対象を拡張する場合の課題）。virtual horizon 30を当面の暫定値として維持（正式値・最適値ではない、§1H.27.45） |
+| **次工程候補** | **§1H.27.46** を参照。**次の本体対象：** Time-value Transactionの設計・実装（Phase名、詳細区分、実装範囲は未決定）。**BATCH：** BATCH単独の追加探索はいったん停止。batch_size=10、通常Level 2、unresolved時Level 1 fallback、virtual horizon 30を暫定ベースラインとして維持（正式値・最適値ではない）。**共通評価へ繰り越し：** 複数seed、別network、Vehicle別・Node別分析、統計的検定。**BATCH固有課題として保留：** N感度、horizon 30・50以外の体系的探索、Level 2追加性能改善。**必要性確認後：** Level 0自動fallback、stale service unit、assignment全訪問履歴。**研究対象外：** trip-end Vehicle。**完了済み（フェーズ4-6Y）：** Level 2本体接続（§1H.27.42）、5,000台・10,000台Level 1対Level 2比較（§1H.27.43・§1H.27.45）、200/1,000/5,000/10,000台N=1 BATCH Level 2対FCFS一致性（§1H.27.44・§1H.27.45）、mimic World Analyzer省略（§1H.27.44）、指定条件でのvirtual horizon 30対50限定比較（§1H.27.45）、5,000台補正signalized UXsim比較（§1H.27.45） |
 
 ---
 
@@ -6852,6 +6852,216 @@ horizon 30対50: 5,000台でexec time約9.16%増加、10,000台で約13.01%増�
 - trip-end Vehicleは現在の研究対象外
 - stale service unit対応は必要性が低ければ保留
 - assignment全訪問履歴は後回し
+
+---
+
+
+#### 1H.27.46 BATCH関連の残作業整理とTime-value Transactionへの移行判断
+
+##### 1H.27.46.1 記録の目的
+
+- フェーズ4-6YまでにBATCHの基本実装、Level 2接続、主要診断、N=1一致性確認を完了した
+- 一方で、BATCHに関する追加評価、性能改善、保留実装は残っている
+- 残作業がTime-value Transaction開始の前提条件であるかのような誤解を避ける
+- 残作業を実施時期と必要性によって分類する
+- Time-value Transactionへ移行した後も、BATCH関連課題を忘れず再参照できるようにする
+- 現行BATCHをTime-value Transactionとの比較に用いる暫定ベースラインとして明示する
+
+##### 1H.27.46.2 Time-value Transactionへ進めると判断した根拠
+
+**実装・接続済み：**
+
+- BATCH trigger候補取得
+- t_trigger Level 0・Level 1推定
+- inlink別候補抽出
+- 候補群順序付け
+- batch size適用
+- service unit登録
+- service queue実通過
+- transfer_batch()統括
+- Node.transfer()へのBATCH分岐接続
+- current visit対応
+- Node再訪時の過去assignment漏出修正
+- Level 2仮想サービス推定
+- Level 2本体接続
+- Level 2 unresolved時のLevel 1 fallback
+- Level 2の4カウンター
+- mimic World Analyzer省略
+
+**指定条件で確認済み：**
+
+- 5,000台・10,000台のLevel 1対Level 2診断
+- Level 2 virtual horizon 30対50の限定比較
+- 200台・1,000台・5,000台・10,000台のN=1 BATCH Level 2対FCFS exact_match
+- 5,000台補正signalized UXsimとの相対比較
+- 全車両完了
+- Level 2 resolved、unresolved、Level 1 fallbackのカウンター整合
+- 計算時間の把握
+
+**判断：**
+
+- 現在、Time-value Transaction開始前に修正必須の既知BATCH不具合は確認されていない
+- 残作業は主として追加評価、性能改善、必要性未確定の拡張、研究範囲外機能である
+- したがって、残作業をすべて完了してからでなくてもTime-value Transactionへ進める
+- 現行BATCHを暫定ベースラインとして保持し、Time-value Transaction実装後の共通評価段階で必要な比較を行う
+
+上記は指定条件での確認結果であり、一般的な正しさや性能優位性の証明ではない。
+
+##### 1H.27.46.3 Time-value Transaction開始前に必要なBATCH作業
+
+**結論：現時点で該当なし**
+
+- BATCH形成、登録、実通過、Level 2推定、fallback、主要診断が現在の研究条件で機能している
+- N=1 BATCH Level 2対FCFS一致性も10,000台まで確認済みである
+- BATCH関連の残作業はあるが、Time-value Transactionの設計・実装開始を妨げる既知の必須作業ではない
+- Time-value Transaction開始前に、追加のhorizon探索、複数seed、別network、性能最適化を必須とはしない
+
+これはBATCH関連作業がすべて完了したという意味ではない。
+
+##### 1H.27.46.4 Time-value Transaction実装後の共通評価段階へ繰り越す事項
+
+- 複数seed
+- 別network
+- Vehicle別旅行時間差
+- Vehicle別遅延差
+- Vehicle別経路差
+- OD別集計
+- Node別効果
+- Node別BATCH形成回数
+- Node別Level 2 call、resolved、unresolved、fallback
+- 旅行時間分布
+- 最終完了側Vehicleの詳細
+- 方向切替回数
+- 動的経路選択による経路差
+- signalized UXsim、FCFS、BATCH、Time-value Transactionの同一条件比較
+- 統計的検定
+
+**繰り越す理由：**
+
+- BATCHだけで先に実施すると、Time-value Transaction実装後に同じ需要、seed、networkで再度評価する必要が生じる
+- 全方式を同じ実験計画で比較した方が、計算資源、結果管理、比較条件の統一の面で合理的である
+- 特に複数seed、別network、Vehicle別・Node別分析は、比較方式が揃ってから共通実験として設計する
+- これらを省略するという判断ではなく、実施時期をTime-value Transaction実装後へ繰り越す判断である
+
+##### 1H.27.46.5 BATCH固有の追加評価として保留する事項
+
+- batch size Nの体系的感度分析
+- Nとt_trigger Levelの組合せ評価
+- virtual horizon 30・50以外の体系的探索
+- Level 2 resolved率と交通性能の関係
+- Level 2 fallback率と交通性能の関係
+- Level 2 call countと計算時間の関係
+- BATCH形成回数
+- service unit数
+- service unit当たりVehicle数
+- BATCH方向切替回数
+- Level 1、Level 2、必要に応じたLevel 0の比較設計
+
+**現在の位置付け：**
+
+- batch_size=10を当面の基本値として使用する
+- N=1はFCFS一致性確認に使用済みである
+- Nについて体系的な研究評価はまだ行っていない
+- horizon 30対50は限定比較まで完了した
+- 体系的なhorizon感度分析は完了していない
+- horizon 30を暫定維持する
+- horizon 30を正式値または最適値とはしない
+- horizon 50は今回の5,000台・10,000台指定条件では採用しない
+- 現時点ではBATCH単独の追加horizon探索を行わない
+- Time-value Transaction実装後の実験計画を作成する段階で、Nやhorizonをどこまで評価するか再判断する
+
+##### 1H.27.46.6 必要性を確認してから実装する事項
+
+**1. Level 2仮想計算本体の追加性能改善**
+
+- mimic World Analyzer省略後もLevel 2の計算負荷はLevel 1やFCFSより大きい
+- 追加性能改善の余地はある
+- ただし、現在の指定条件でLevel 2は完走し、正しさに関する主要診断も通過している
+- 正しさを回復するための必須修正ではない
+- Time-value Transaction実装・共通評価の計算負荷を見て、必要性と優先度を再判断する
+- get_font_for_matplotlib()キャッシュは、BATCH本体の交通ロジックではなく周辺性能改善候補として扱う
+
+**2. Level 0への自動fallback**
+
+- Level 0推定自体は実装済みである
+- 現在はLevel 2 unresolved時に計算済みLevel 1値へfallbackする
+- Level 2またはLevel 1からLevel 0へ自動的に切り替える処理は実装していない
+- 現行のLevel 1 fallbackが機能しているため、直ちに追加しない
+- 実験で必要性が確認された場合に検討する
+
+**3. stale service unit対応**
+
+- stale service unitの自動削除、回復、再形成は未実装である
+- 現在の診断で直ちに必要な問題として確認されていない
+- 必要性が低ければ対応を見送る
+- 実際の不整合が観測された場合に、再現条件を確認してから対応する
+
+**4. assignment全訪問履歴**
+
+- current visitによる制御状態管理は実装済みである
+- Node再訪時の過去assignment漏出問題は修正済みである
+- 全訪問分のassignment履歴を正式保存する機構は未実装である
+- 制御ロジックの現在動作には必須ではない
+- 事後分析やデバッグで必要性が明確になった場合に実装する
+- 現時点では後回しとする
+
+##### 1H.27.46.7 現在の研究対象外
+
+- trip-end VehicleのBATCH service unit対応
+- specified_routeを前提とするBATCH処理
+- taxi mode固有処理
+- BATCHとsignalの統合制御
+
+**理由：**
+
+- 当面の研究シナリオでは比較対象内部交差点Nodeを目的地としない端点間ODを使用する
+- trip-end Vehicleは現在の研究対象から除外している
+- BATCHプロセスではspecified_route、taxi mode、signal統合を扱わない
+- これらは単なる実装漏れではなく、現在の研究範囲から意図的に除外している
+- 将来研究範囲を拡張する場合に別途設計する
+
+Level 2仮想計算内部のType A route_next_link確定状態と、研究シナリオとしてspecified_routeを扱わない方針を混同しない。
+
+##### 1H.27.46.8 Time-value Transaction比較用のBATCH暫定ベースライン
+
+Time-value Transactionとの比較に使用する現行BATCH条件：
+
+- order_control_type: `batch`
+- batch_size: 10
+- 通常のt_trigger推定方式: Level 2
+- order_control_batch_t_trigger_level: 2
+- Level 2 unresolved時: 計算済みLevel 1値へfallback
+- virtual horizon: 30
+- virtual horizon 30は暫定値であり、正式値・最適値ではない
+- virtual horizon 50は今回の指定条件では採用しない
+- clearance timesteps: 1
+- 単車線
+- 自由経路
+- 比較対象内部交差点Nodeを目的地としない端点間OD
+- signalなしのBATCH対象内部Node
+- trip-end Vehicleは研究対象外
+- specified_route、taxi mode、signal統合はBATCHプロセスで扱わない
+- stale service unitの追加処理は行わない
+- assignment全訪問履歴は追加しない
+- Level 0への自動fallbackは追加しない
+
+- この暫定ベースラインはTime-value Transactionの設計・初期比較へ進むための現在条件である
+- 複数seed、別network、N感度、horizon感度の結果に応じて将来変更される可能性がある
+- この条件をBATCHの一般的最適設定とは位置付けない
+
+##### 1H.27.46.9 移行判断
+
+BATCHには追加性能改善、複数seed・別network評価、N・virtual horizonの体系的感度分析、Vehicle別・Node別分析などの残作業がある。ただし、これらは現行BATCHの基本動作やTime-value Transaction実装開始を妨げる既知の不具合ではない。
+
+BATCHの形成、登録、実通過、current visit対応、Level 2推定、Level 1 fallback、主要診断、およびN=1対FCFS一致性は、現在の指定条件で確認済みである。
+
+このため、BATCH単独の追加探索はいったん停止し、virtual horizon 30を暫定維持した状態で、次の本体対象であるTime-value Transactionの設計・実装へ移行する。
+
+複数seed、別network、Vehicle別・Node別分析、統計的検定等は、Time-value Transaction実装後の共通比較実験段階で実施する。
+
+BATCH固有のN・horizon感度分析、追加性能改善、Level 0自動fallback、stale service unit、assignment全訪問履歴は、それぞれ必要性と実験計画に応じて再開する。
+
+この移行判断は、BATCHが一般的に完成した、あるいはBATCH関連の検討が終了したという意味ではない。
 
 ---
 
