@@ -3973,6 +3973,17 @@ Level 2: `call_count=46,428`、`resolved=46,390`、`unresolved=38`、`fallback=3
 - Time-value TransactionのPhase名、詳細区分、実装範囲はまだ決めていない
 - 詳細は設計メモ§1H.27.46を参照する
 
+#### Time-value Transaction（TVT）制度・技術設計整理の開始
+
+- BATCH Phase 4-6Y 後の次の本体対象として、TVT の制度・技術設計整理を開始した
+- `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES.md` を新規作成した
+- この新規ファイルを **TVT 設計の正本**とする
+- **TVT 本体はまだ未実装**
+- FCFS 予想到着順位、割当権利行使順位、意思決定窓 6 timestep、全World baseline、局所候補評価、TVT-SB/MH/SP/MP、確定順位ブロック等の基本設計を整理した
+- 主な保留事項は、非参加 Vehicle あり複数買い手一般形、RNG 設計、全World baseline 性能、horizon 正式値
+- 次の技術作業は**全World baseline 仮想計算の性能測定**
+- 詳細は `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES.md` を参照する
+
 ### フェーズ4-6R設計目標（実装前・設計時点の記録）
 
 （設計時点の目標。実装は上記フェーズ4-6R節・設計メモ **§1H.21** を参照。）
