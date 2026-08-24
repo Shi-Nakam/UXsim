@@ -1,13 +1,25 @@
-# UXsim Level 2 BATCH t_trigger reference model (mimic-World).
+# DIAGNOSTIC COPY — NOT the canonical Level 2 reference implementation.
+# NOT a regression-test target.
+# Experimental copy for diagnosing short-TMAX mimic Worlds in Level 2 BATCH.
+# Canonical reference: uxsim/order_control_batch_level_2_reference.py
+# Keep the canonical file unchanged as the A-condition baseline.
+# Do not integrate into the production body until B-condition validation completes.
+# If diagnostic results diverge, do not adopt this diagnostic-only copy.
 #
-# Used by UXsim body BATCH formation when order_control_batch_t_trigger_level=2.
-# Diagnostic tests may import via diagnostics.order_control.level2_virtual_world_reference.
+# UXsim Level 2 BATCH t_trigger reference model (mimic-World) — short-TMAX variant.
+#
+# Diagnostic tests may import via diagnostics.order_control.level2_mimic_tmax_ab.
 
 from __future__ import annotations
 
+import time
 from collections import deque
 
 from uxsim import World
+
+MIMIC_TMAX_MODE_CURRENT_FULL_TMAX = "current_full_tmax"
+MIMIC_TMAX_MODE_SHORT_LOCAL_TMAX = "short_local_tmax"
+# Diagnostic copy defaults to short_local_tmax; full TMAX is not used unless explicitly overridden.
 
 TRANSFER_OK = "transfer_ok"
 STOP_QUEUE = "stop_queue"
@@ -23,6 +35,8 @@ def estimate_order_control_batch_t_trigger_level_2_reference(
     virtual_horizon,
     *,
     mimic_random_seed=0,
+    mimic_tmax_mode=MIMIC_TMAX_MODE_SHORT_LOCAL_TMAX,
+    timing_collector=None,
 ):
     """
     Reference-only Level 2 estimator using a small mimic World built from a snapshot.
@@ -36,10 +50,16 @@ def estimate_order_control_batch_t_trigger_level_2_reference(
     snapshot_timestep = int(real_node.W.T)
     _validate_service_queue_invariants(real_node, real_trigger_vehicle)
 
+    total_started = (
+        time.perf_counter() if timing_collector is not None else None
+    )
+
     mimic_bundle = _build_mimic_world(
         real_node,
         real_trigger_vehicle,
         mimic_random_seed=mimic_random_seed,
+        mimic_tmax_mode=mimic_tmax_mode,
+        timing_collector=timing_collector,
     )
     mimic_W = mimic_bundle["mimic_W"]
     mimic_node = mimic_bundle["mimic_node"]
@@ -47,6 +67,9 @@ def estimate_order_control_batch_t_trigger_level_2_reference(
     mimic_W.T = snapshot_timestep
     _ensure_link_cum_arrays(mimic_W, snapshot_timestep)
 
+    loop_started = (
+        time.perf_counter() if timing_collector is not None else None
+    )
     loop_result = _run_limited_virtual_loop(
         mimic_W,
         mimic_node,
@@ -55,6 +78,11 @@ def estimate_order_control_batch_t_trigger_level_2_reference(
         snapshot_route_states=mimic_bundle["snapshot_route_states"],
         mimic_to_real_vehicle=mimic_bundle["mimic_to_real_vehicle"],
     )
+    if timing_collector is not None:
+        timing_collector["virtual_loop_seconds"] = (
+            time.perf_counter() - loop_started
+        )
+        timing_collector["total_seconds"] = time.perf_counter() - total_started
     t_virtual_trigger = loop_result["t_virtual_trigger"]
     simulated_timestep_count = loop_result["simulated_timestep_count"]
     vehicle_transfer_timesteps = loop_result["vehicle_transfer_timesteps"]
@@ -301,12 +329,46 @@ def _collect_real_vehicles(real_node, real_trigger_vehicle):
     return vehicles
 
 
-def _build_mimic_world(real_node, real_trigger_vehicle, *, mimic_random_seed):
+def _resolve_mimic_tmax(real_W, snapshot_timestep, mimic_tmax_mode):
+    local_bound_tmax = (snapshot_timestep + 200) * real_W.DELTAT
+    if mimic_tmax_mode == MIMIC_TMAX_MODE_CURRENT_FULL_TMAX:
+        return max(real_W.TMAX, local_bound_tmax)
+    if mimic_tmax_mode == MIMIC_TMAX_MODE_SHORT_LOCAL_TMAX:
+        return local_bound_tmax
+    raise ValueError(
+        f"Invalid mimic_tmax_mode={mimic_tmax_mode!r}; expected "
+        f"{MIMIC_TMAX_MODE_CURRENT_FULL_TMAX!r} or "
+        f"{MIMIC_TMAX_MODE_SHORT_LOCAL_TMAX!r}."
+    )
+
+
+def _record_mimic_link_array_shapes(mimic_W, timing_collector):
+    if not mimic_W.LINKS:
+        return
+    sample_link = mimic_W.LINKS[0]
+    timing_collector["mimic_link_count"] = len(mimic_W.LINKS)
+    timing_collector["traveltime_actual_length"] = len(sample_link.traveltime_actual)
+    timing_collector["k_mat_shape"] = tuple(sample_link.k_mat.shape)
+
+
+def _build_mimic_world(
+    real_node,
+    real_trigger_vehicle,
+    *,
+    mimic_random_seed,
+    mimic_tmax_mode=MIMIC_TMAX_MODE_SHORT_LOCAL_TMAX,
+    timing_collector=None,
+):
     real_W = real_node.W
+    snapshot_timestep = int(real_W.T)
+    mimic_tmax = _resolve_mimic_tmax(real_W, snapshot_timestep, mimic_tmax_mode)
+    build_started = (
+        time.perf_counter() if timing_collector is not None else None
+    )
     mimic_W = World(
         name=f"{real_W.name}_l2_mimic",
         deltan=1,
-        tmax=(real_W.T + 200) * real_W.DELTAT,
+        tmax=mimic_tmax,
         reaction_time=real_W.REACTION_TIME,
         print_mode=0,
         save_mode=0,
@@ -375,7 +437,17 @@ def _build_mimic_world(real_node, real_trigger_vehicle, *, mimic_random_seed):
         )
         node_maps["real_to_mimic_link"][real_outlink] = mimic_outlink
 
+    finalize_started = (
+        time.perf_counter() if timing_collector is not None else None
+    )
     mimic_W.finalize_scenario(create_analyzer=False)
+    if timing_collector is not None:
+        timing_collector["finalize_seconds"] = (
+            time.perf_counter() - finalize_started
+        )
+        timing_collector["mimic_tmax"] = mimic_W.TMAX
+        timing_collector["mimic_tsize"] = mimic_W.TSIZE
+        _record_mimic_link_array_shapes(mimic_W, timing_collector)
 
     mimic_node = mimic_W.get_node(real_node.name)
     _copy_node_capacity_state(real_node, mimic_node)
@@ -426,6 +498,11 @@ def _build_mimic_world(real_node, real_trigger_vehicle, *, mimic_random_seed):
         )
         for real_veh, mimic_veh in real_to_mimic_vehicle.items()
     }
+
+    if timing_collector is not None:
+        timing_collector["mimic_build_seconds"] = (
+            time.perf_counter() - build_started
+        )
 
     return {
         "mimic_W": mimic_W,

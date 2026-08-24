@@ -28,10 +28,65 @@ Those files are standalone tests, not normal diagnostic scripts and not part of 
 
 Detailed results, timelines, and design conclusions are in:
 
-- `ORDER_EXCHANGE_PROGRESS.md` — Phase 4-6V (zero-service reformation, equivalence, batch-size exploration, corrected signal baseline); Phase 4-6W (mimic-World Level 2 `t_trigger` reference model); Phase 4-6X (unarrived service-unit support in reference model); **Phase 4-6Y** (Level 2 body connection, grid diagnostics, N=1 equivalence, mimic-World performance fix, 5,000/10,000-vehicle additional validation)
+- `ORDER_EXCHANGE_PROGRESS.md` — Phase 4-6V (zero-service reformation, equivalence, batch-size exploration, corrected signal baseline); Phase 4-6W (mimic-World Level 2 `t_trigger` reference model); Phase 4-6X (unarrived service-unit support in reference model); **Phase 4-6Y** (Level 2 body connection, grid diagnostics, N=1 equivalence, mimic-World performance fix, 5,000/10,000-vehicle additional validation); **2026-08-24** (TVT global-World baseline performance, Level 2 short TMAX formal adoption)
+- `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES.md` — TVT design canonical; **§23** (global-World baseline performance investigation and Level 2 short TMAX)
 - `ORDER_EXCHANGE_PHASE4-6_BATCH_PROCESSING_DESIGN_NOTES.md` — **§1G** (prefix violations), **§1H.24** (Phase 4-6U high-demand), **§1H.25** (zero-service reformation design, corrected signal setting), **§1H.26** (Phase 4-6W reference model), **§1H.27** (Phase 4-6X reference-model extension), **§1H.27.42** (Phase 4-6Y: Level 2 body connection), **§1H.27.43** (Phase 4-6Y: unarrived route-state fix, 5,000-vehicle Level 1 vs Level 2), **§1H.27.44** (Phase 4-6Y: N=1 BATCH Level 2 vs FCFS, mimic-World Analyzer skip), **§1H.27.45** (Phase 4-6Y: BATCH-related comparisons across levels, horizons, signalized UXsim, and FCFS at 5,000 and 10,000 vehicles)
 
 Do not duplicate capacity tables or N=10 vs signal ratio tables here.
+
+Detailed performance investigation, short TMAX adoption, and design decisions:
+`ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES.md` **§23**.
+
+## TVT global-World baseline diagnostics (2026-08-24)
+
+Manual diagnostics for TVT research. **Not** automated regression tests.
+
+### Saved snapshot: `order_control_batch_level_2_full_tmax_reference_snapshot.py`
+
+- Complete snapshot of the canonical Level 2 reference **before** short TMAX formal adoption (2026-08-24).
+- Byte-identical to the pre-change canonical file at save time.
+- **Do not import** from normal UXsim processing.
+- Use for old full TMAX comparison, restoration checks, and diffs.
+- Size: 52,085 bytes. SHA-256: `1e624467771b5610c95ea977bb1c6fde6752f4f88d48bba67166d2d530135784`.
+
+### Diagnostic short TMAX model: `order_control_batch_level_2_short_tmax_reference.py`
+
+- Diagnostic-only short TMAX reference with `timing_collector` and internal timing.
+- **Not** the canonical implementation (canonical is `uxsim/order_control_batch_level_2_reference.py`, short TMAX since 2026-08-24).
+- Do not use directly from normal UXsim processing.
+
+### A/B diagnostic: `level2_mimic_tmax_ab.py`
+
+- Compares full TMAX vs short TMAX for correctness, boundary cases, and performance.
+- **Warning:** canonical is already short TMAX. For old full TMAX vs short TMAX, set A-condition to the saved full TMAX snapshot and verify import/patch targets before re-running. Running unchanged may compare short TMAX against short TMAX.
+
+```bash
+python diagnostics/order_control/level2_mimic_tmax_ab.py
+```
+
+Default: boundary small cases on; grid5000 9-cell matrix off (`RUN_GRID5000_MATRIX = False`).
+
+### Short TMAX performance (pre-canonical patch): `tvt_global_baseline_short_tmax_performance.py`
+
+- Measured horizons 6, 30, 50 while temporarily patching the diagnostic short TMAX model during forward.
+- Created before canonical adoption; canonical path is now short TMAX.
+- For ongoing formal-path performance, use `tvt_global_baseline_performance.py`.
+
+```bash
+python diagnostics/order_control/tvt_global_baseline_short_tmax_performance.py
+```
+
+### Formal-path baseline performance: `tvt_global_baseline_performance.py`
+
+- `World.copy()` plus `exec_simulation()` on fork; uses **canonical short TMAX** on the normal Analyzer-attached path.
+- 5,000 vehicles, branch T=50, horizons 6 / 30 / 50 (3 repeats each).
+- Past full TMAX medians and current short TMAX medians differ by implementation date; see design notes §23.
+
+```bash
+python diagnostics/order_control/tvt_global_baseline_performance.py
+```
+
+Related: `tvt_global_baseline_logging_ab.py`, `tvt_global_baseline_profile.py`, `world_state_branching_investigation.py` (see Scripts table).
 
 ## Scripts
 
@@ -46,6 +101,14 @@ Do not duplicate capacity tables or N=10 vs signal ratio tables here.
 | `grid_level_1_vs_level_2_check.py` | **Phase 4-6Y** (`af0e037`, §1H.27.43, §1H.27.45). Accepts `--virtual-horizon` (default 30). 5,000- and 10,000-vehicle grid network diagnostic. N=10, Level 1 vs Level 2, traffic results, Level 2 counters, timing. **5,000 and 10,000 vehicles: Level 1 vs Level 2 with h=30 and h=50 completed.** |
 | `grid_n1_level_2_vs_fcfs_check.py` | **Phase 4-6Y** (`5439cf3`, §1H.27.44, §1H.27.45). 200 / 1,000 / 5,000 / 10,000 vehicles. N=1 BATCH Level 2 vs FCFS, strict aggregate and per-vehicle comparison, Level 2 counters. **200 / 1,000 / 5,000 / 10,000 vehicles: `exact_match` confirmed.** Not a general theoretical proof. |
 | `level2_virtual_world_reference.py` | **Phase 4-6W / 4-6X reference model** — pre-body-connection design baseline. Body implementation is in `uxsim/order_control_batch_level_2_reference.py` (body connection: **Phase 4-6Y**, `6e6a601`, §1H.27.42). Mimic-World Analyzer skip applies to the body path (Phase 4-6Y, §1H.27.44). |
+| `order_control_batch_level_2_full_tmax_reference_snapshot.py` | **Saved snapshot (2026-08-24).** Byte-identical copy of the canonical Level 2 reference **before** short TMAX adoption. Size 52,085 bytes. SHA-256: `1e624467771b5610c95ea977bb1c6fde6752f4f88d48bba67166d2d530135784`. Not imported by normal UXsim. For old full TMAX comparison and diff checks only. |
+| `order_control_batch_level_2_short_tmax_reference.py` | **Diagnostic-only** short TMAX reference model with `timing_collector` and internal timing hooks. Not the canonical implementation. Do not import from normal UXsim processing. |
+| `level2_mimic_tmax_ab.py` | Manual A/B diagnostic for full TMAX vs short TMAX correctness, boundary cases, and performance. **The canonical reference is now short TMAX.** Before re-running, point A-condition imports at the full TMAX snapshot; running as-is may compare short TMAX against short TMAX. |
+| `tvt_global_baseline_performance.py` | TVT global-World baseline performance probe (`World.copy()` + `exec_simulation()` on fork). **Now uses the canonical short TMAX implementation on the normal path.** Used for 5,000-vehicle, branch T=50, horizons 6/30/50. Distinguish past full TMAX timings from current short TMAX timings by implementation date. |
+| `tvt_global_baseline_short_tmax_performance.py` | Manual performance probe that temporarily patched the short TMAX diagnostic model during forward (created before canonical adoption). Canonical is now short TMAX; use `tvt_global_baseline_performance.py` for ongoing formal-path checks. |
+| `tvt_global_baseline_logging_ab.py` | Vehicle-logging A/B on the global-World baseline path (logging on vs fork-only `vehicle_logging_timestep_interval=-1`). |
+| `tvt_global_baseline_profile.py` | cProfile probe for copy vs 50-step forward breakdown. Profile wall times are not baseline performance values. |
+| `world_state_branching_investigation.py` | World branching safety probe: `World.copy()`, fork forward, real_W immutability, reference independence. |
 
 ## Phase 4-6Y: Level 2 body connection and grid diagnostics
 

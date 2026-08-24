@@ -16,6 +16,15 @@ UXsimに交差点進入順序制御・順序交換アルゴリズムを段階的
 - 将来的に FCFS, Batch Processing, Time-value Transaction を比較できるようにする
 - 導入Nodeの選択方法、導入割合、Nodeのネットワーク特徴量と効果の関係を分析できるようにする
 
+## 文書保守方針
+
+**採用日：2026-08-25**（作業の途中から正式採用。研究メモ作成当初から一貫適用されていたものではない）
+
+- 過去フェーズの記述は、**歴史的記録**として原則保存する。現在状態と異なる場合は、**削除ではなく**更新注記と最新参照先を追加して整理する。
+- 判断が難しい場合は**保守的に残す**。採用前の編集について、失われた記述を**推測で復元しない**。
+- 誤字、Markdown 崩れ、明白な転記ミス、歴史的意味のない完全重複は、歴史的意味を変えない範囲で直接修正できる。
+- **詳細な方針**は `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES.md` の「**文書保守方針**」を参照する。
+
 ## 完了済みフェーズ
 
 ### フェーズ0：作業基盤の準備
@@ -3665,6 +3674,8 @@ dummy upstream Nodes → mimic inlinks → mimic order-control Node → mimic ou
 - signal制御との統合未評価
 - local virtual clock未実装
 
+> **更新注記（2026-08-24）：** 上記は Phase 4-6W 時点の未解決事項である。本体 Level 2 接続（4-6Y）後、Level 2 short TMAX 正式反映および TVT 向け全World baseline 性能調査を実施済み（設計メモ `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES.md` **§23**）。`virtual horizon` 正式値・10,000 台全World baseline 実測は**未確定**（§23.16、§23.18）。
+
 #### 次工程候補（断定しない）
 
 1. Phase 4-6W参照モデルの適用範囲と性能測定計画を確定
@@ -3673,6 +3684,8 @@ dummy upstream Nodes → mimic inlinks → mimic order-control Node → mimic ou
 4. virtual horizonの扱いを決定
 5. inlink未到着Vehicleへの対応要否を判断
 6. 通常非適用時にLevel 1値を採用する処理を、本体接続時にどこへ置くか決定（参照モデルでは `t_level_2_candidate=t_level_1`。重大不整合はValueErrorで隠さない）
+
+> **更新注記（2026-08-24）：** 上記は Phase 4-6W 時点の候補である。本体 Level 2 接続（4-6Y）および TVT 向け全World baseline 性能調査・Level 2 short TMAX 正式反映はその後実施済み（設計メモ `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES.md` **§23**）。
 
 技術詳細は設計メモ **§1H.26** を参照。
 
@@ -3713,6 +3726,8 @@ dummy upstream Nodes → mimic inlinks → mimic order-control Node → mimic ou
 ### フェーズ4-6Y：Level 2本体接続・実ネットワーク検証・N=1一致性確認・mimic World性能修正
 
 **位置付け：** コミット `6e6a601` のLevel 2本体接続から、実ネットワーク診断・N=1 BATCH Level 2対FCFS一致性確認・mimic World Analyzer省略・5,000/10,000台追加検証までを含むフェーズ。設計メモ **§1H.27.42〜§1H.27.45**。
+
+> **更新注記（2026-08-24）：** 以下の Analyzer 省略による性能改善記録は**当時の記録**である。その後、Level 2 mimic World の **short TMAX 正式反映**（§23.8）により forward コストが大幅に短縮された。全World baseline 経路の現在の主要ボトルネックは `World.copy()`（設計メモ §23.13）。`World.copy()` 軽量化は未着手・後回し（§23.14、§23.19）。
 
 #### Phase名称と対象範囲
 
@@ -3859,6 +3874,8 @@ Level 2: `call_count=46,428`、`resolved=46,390`、`unresolved=38`、`fallback=3
 - 200台N1-L2: 約21.2倍高速化（Analyzer省略）
 - 5,000台: N1-L2はFCFSの約24.63倍。Level 2仮想計算本体の負荷は残る
 
+> **更新注記（2026-08-24）：** 上記は Analyzer 省略後・**full TMAX 時代**の記録である。short TMAX 正式反映後の Level 2 mimic 構築コスト短縮と全World baseline 性能は設計メモ **§23.6、§23.12** を参照。Level 2「追加性能改善」の一部（TMAX 短縮）は実施済み。`World.copy()` 軽量化は未着手（§23.14）。
+
 ##### この記録時点で未実施だった項目
 
 - 10,000台N=1 BATCH Level 2対FCFS診断
@@ -3945,7 +3962,7 @@ Level 2: `call_count=46,428`、`resolved=46,390`、`unresolved=38`、`fallback=3
 - 複数seed、別network → Time-value Transaction実装後の共通評価へ繰り越し（§1H.27.46）
 - 体系的horizon感度分析（30・50以外） → BATCH固有課題として保留（§1H.27.46）
 - Vehicle別・Node別分析 → 共通評価へ繰り越し（§1H.27.46）
-- Level 2仮想計算本体の追加性能改善 → 必要性確認後（§1H.27.46）
+- Level 2仮想計算本体の追加性能改善 → 必要性確認後（§1H.27.46）。**2026-08-24 追記：** short TMAX 正式反映により mimic 構築コストは大幅短縮済み（設計メモ §23）。`World.copy()` 軽量化は未着手・後回し（§23.14）
 
 **後続実装・保留：**
 
@@ -3962,7 +3979,7 @@ Level 2: `call_count=46,428`、`resolved=46,390`、`unresolved=38`、`fallback=3
 - Time-value Transaction開始前に必要な既知BATCH修正は現時点でない
 - BATCH関連の残作業は設計メモ§1H.27.46へ整理した
 - 複数seed、別network、Vehicle別・Node別分析、統計的検定はTime-value Transaction実装後の共通評価へ繰り越す
-- N感度、horizon 30・50以外の体系的探索、Level 2追加性能改善はBATCH固有課題として保留する
+- N感度、horizon 30・50以外の体系的探索、Level 2追加性能改善はBATCH固有課題として保留する（**2026-08-24 追記：** TMAX short 化は実施済み。`World.copy()` 軽量化は未着手。設計メモ §23.14）
 - Level 0自動fallback、stale service unit、assignment全訪問履歴は必要性を確認してから対応する
 - trip-end Vehicle、specified_route、taxi mode、signal統合は現在のBATCH研究対象外
 - batch_size=10、通常Level 2、unresolved時Level 1 fallback、virtual horizon 30を暫定ベースラインとする
@@ -3980,9 +3997,24 @@ Level 2: `call_count=46,428`、`resolved=46,390`、`unresolved=38`、`fallback=3
 - この新規ファイルを **TVT 設計の正本**とする
 - **TVT 本体はまだ未実装**
 - FCFS 予想到着順位、割当権利行使順位、意思決定窓 6 timestep、全World baseline、局所候補評価、TVT-SB/MH/SP/MP、確定順位ブロック等の基本設計を整理した
-- 主な保留事項は、非参加 Vehicle あり複数買い手一般形、RNG 設計、全World baseline 性能、horizon 正式値
-- 次の技術作業は**全World baseline 仮想計算の性能測定**
+- 主な保留事項は、非参加 Vehicle あり複数買い手一般形、RNG 設計、horizon 正式値
+- ~~次の技術作業は**全World baseline 仮想計算の性能測定**~~ **2026-08-24 に性能測定・Level 2 short TMAX 正式反映を実施済み**（設計メモ §23）
 - 詳細は `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES.md` を参照する
+
+#### 2026-08-24：TVT全World baseline性能調査とLevel 2 short TMAX正式反映
+
+- TVT 向け全World baseline 仮想計算の性能を調査した
+- 初期の 5,000 台・50 timestep では copy 込み中央値が約 7.39 秒だった
+- cProfile により、BATCH Level 2 mimic World が実World の `TMAX=30000` を引き継ぎ、過大な配列を毎回生成することが主要ボトルネックと判明した
+- Level 2 mimic World の TMAX を `(real_W.T + 200) * real_W.DELTAT` へ短縮する方式を A/B 検証した
+- 複数 snapshot timestep、virtual horizon 30・199・200、horizon 終端、large real TMAX 境界ケースで正本 full TMAX 方式との結果一致を確認した
+- `uxsim/order_control_batch_level_2_reference.py` の TMAX 選択式 1 行を short TMAX 方式へ正式変更した
+- 変更前 full TMAX 正本は `diagnostics/order_control/order_control_batch_level_2_full_tmax_reference_snapshot.py` へ保存した
+- Level 2 関連 71 件、BATCH 統合等 81 件、合計 152 件のテストが成功した
+- 全 pytest はデモスクリプトの表示待ちと思われる停止が続いたため完走せず、手動中止した
+- 正式 short TMAX 実装で、5,000 台・50 timestep の copy 込み中央値は約 1.94 秒となった
+- 現在の主要ボトルネックは `World.copy()` だが、copy 軽量化は後回しとし、TVT 実装を優先する
+- 詳細は `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES.md` の「§23 全World baseline仮想計算の性能検証とLevel 2 short TMAX」を参照する
 
 ### フェーズ4-6R設計目標（実装前・設計時点の記録）
 
@@ -4305,7 +4337,7 @@ Nodeへの追加メソッド（Phase 4-6関連）：
 - **phase 4-6U：** high-demand再実行・検証完了（§1H.24。本体変更なし）
 - **phase 4-6W：** 模倣World型Level 2 t_trigger参照モデル確立（**§1H.26**。参照モデル・専用テスト実装・独立レビュー完了。commit IDはGit履歴参照）
 - **phase 4-6Y：** Level 2本体接続・実ネットワーク検証・N=1一致性確認・mimic World性能修正・5,000/10,000台追加検証（**§1H.27.42〜§1H.27.45**。開始 `6e6a601`、記録作成前HEAD `8dc83d9`）
-- **現時点の主要課題：** Time-value Transactionの設計・実装（Phase名・実装範囲は未決定）。BATCH残作業は§1H.27.46へ整理済み。複数seed、別network、Vehicle別・Node別分析、統計的検定は共通評価段階へ繰り越し。BATCH固有のN・horizon感度分析、Level 2追加性能改善は保留
+- **現時点の主要課題：** Time-value Transactionの設計・実装（Phase名・実装範囲は未決定）。BATCH残作業は§1H.27.46へ整理済み。複数seed、別network、Vehicle別・Node別分析、統計的検定は共通評価段階へ繰り越し。BATCH固有のN・horizon感度分析は保留。**Level 2 mimic TMAX short 化は 2026-08-24 に正式反映済み**（設計メモ §23）。`World.copy()` 軽量化は未着手
 - フェーズ4-6Y完了：Level 2本体接続、fallback、4カウンター、未到着route修正、5,000/10,000台L1/L2（h=30・h=50）、200/1,000/5,000/10,000台N=1一致性、Analyzer省略、指定条件horizon 30対50限定比較、5,000台補正signalized UXsim。virtual horizon 30を暫定維持（正式値・最適値ではない）。Time-value Transactionは未実装。trip-end Vehicleは現在の研究対象外
 - `earliest_arrival_timestep` はリンク進入時に記録し、候補包含条件に使用する（実装済み）
 - `t_trigger` Level 0/1推定は参照専用ヘルパーとして実装済み。計算式に `W.T` は含めない
@@ -4331,17 +4363,20 @@ Nodeへの追加メソッド（Phase 4-6関連）：
 
 ## 次に進む予定
 
+> **更新注記（2026-08-24）：** 以下は §1H.27.46 整理時点の予定を含む。Level 2 short TMAX 正式反映および TVT 向け全World baseline 性能基盤確認は実施済み（設計メモ `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES.md` **§23**）。次の本体作業は TVT 制度ロジックと baseline 情報設計。
+
 **BATCH関連（§1H.27.46）：**
 
 - BATCH基本実装、Level 2接続、主要診断、N=1一致性は指定条件で確認済み
 - Time-value Transaction開始前に必要な既知BATCH修正は現時点でない
 - BATCH単独の追加探索はいったん停止。virtual horizon 30を暫定維持
 - 複数seed、別network、Vehicle別・Node別分析、統計的検定はTime-value Transaction実装後の共通評価へ繰り越す
-- BATCH固有課題（N感度、horizon探索、Level 2追加性能改善等）は§1H.27.46参照
+- BATCH固有課題（N感度、horizon探索、Level 2追加性能改善等）は§1H.27.46参照（**2026-08-24 追記：** short TMAX 反映済み。copy 軽量化は未着手。設計メモ §23）
 
 **次の本体対象：**
 
 - Time-value Transactionの設計・実装（Phase名、詳細区分、実装範囲は未決定）
+- **2026-08-24：** Level 2 short TMAX 正式反映済み。TVT 向け全World baseline の性能基盤確認済み（設計メモ §23）。次は TVT 制度ロジックと baseline 情報設計
 
 **完了済み（フェーズ4-6Y）：**
 
@@ -4360,7 +4395,7 @@ Nodeへの追加メソッド（Phase 4-6関連）：
 - 複数seed、別network → Time-value Transaction実装後の共通評価へ繰り越し（§1H.27.46）
 - 体系的horizon感度分析（30・50以外） → BATCH固有課題として保留（§1H.27.46）
 - Vehicle別・Node別分析 → 共通評価へ繰り越し（§1H.27.46）
-- Level 2仮想計算本体の追加性能改善 → 必要性確認後（§1H.27.46）
+- Level 2仮想計算本体の追加性能改善 → 必要性確認後（§1H.27.46）。**2026-08-24 追記：** short TMAX 正式反映により mimic 構築コストは大幅短縮済み（設計メモ §23）。`World.copy()` 軽量化は未着手・後回し（§23.14）
 
 **後続実装・保留：**
 
@@ -4411,7 +4446,7 @@ Nodeへの追加メソッド（Phase 4-6関連）：
 
 - Time-value Transactionの設計・実装（次の本体対象。Phase名・実装範囲は未決定）
 - 複数seed、別network、Vehicle別・Node別分析、統計的検定（共通評価段階。§1H.27.46）
-- BATCH固有のN・horizon感度分析、Level 2追加性能改善（保留。§1H.27.46）
+- BATCH固有のN・horizon感度分析、Level 2追加性能改善（保留。§1H.27.46）。**2026-08-24 追記：** short TMAX 反映済み。copy 軽量化は未着手（設計メモ §23.14）
 
 後続実装・保留：
 

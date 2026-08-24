@@ -306,7 +306,7 @@ def _build_mimic_world(real_node, real_trigger_vehicle, *, mimic_random_seed):
     mimic_W = World(
         name=f"{real_W.name}_l2_mimic",
         deltan=1,
-        tmax=(real_W.T + 200) * real_W.DELTAT,
+        tmax=max(real_W.TMAX, (real_W.T + 200) * real_W.DELTAT),
         reaction_time=real_W.REACTION_TIME,
         print_mode=0,
         save_mode=0,

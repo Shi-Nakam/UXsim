@@ -19,6 +19,102 @@
 
 ---
 
+## 文書保守方針
+
+**採用日：2026-08-25**
+
+本節は、本メモおよび関連研究メモ（特に `ORDER_EXCHANGE_PROGRESS.md`）の**編集・更新**について、2026-08-25 に**作業の途中から正式に採用**した方針である。研究メモ作成の最初から一貫して適用されていたものではない。採用前の既存編集には、古い記述の直接更新や削除が含まれている可能性がある。**採用前の編集を推測で復元しない。** 現存する記述について、**今後の編集から**本節を適用する。過去版の復元が必要な場合は、Git 履歴、保存スナップショット、既存の進捗記録等を根拠として**個別に**判断する。採用前の状態が不明な場合、推測で歴史的記録を作らない。
+
+本研究では、実装方式、実験条件、性能値が時点によって変化する。同じ名称の機能でも、Analyzer 生成あり・なし、full TMAX・short TMAX、正式反映前・後などで結果の意味が異なる。最終状態だけを残すと、設計変更の理由、性能改善の原因、過去の診断結果の適用範囲を確認しにくい。Git 履歴だけでは、将来の利用者や AI が適切な過去版を必ず参照できるとは限らない。本文中に当時の記録と更新注記を残すことで、設計判断の根拠と変遷を同時に確認できる。一方で、古い記述を無注記で残すと現行仕様と誤認されるため、現在状態と最新参照先を併記する必要がある。
+
+### 原則として保存する記述
+
+次は、現在状態と異なる場合でも、研究・設計・実装の経緯を示す**歴史的記録**として原則保存する。
+
+- 当時の設計方針
+- 当時の実装状態
+- 当時の未解決事項
+- 当時の次作業候補
+- 実験条件
+- 診断条件
+- 測定結果
+- 性能値
+- 不具合の再現記録
+- 修正経緯
+- 採用または不採用の判断理由
+- 過去の正本や旧方式を前提とする比較方法
+- 当時の研究上の判断を理解するために必要な記述
+
+現在状態と異なるという理由だけで、これらを削除しない。
+
+### 現在状態と異なる場合の整理方法
+
+古い記述と現在状態が異なる場合は、原則として次の順で整理する。
+
+```text
+古い記述を残す
+↓
+当時の記録であることを明示する
+↓
+更新日と現在状態を追記する
+↓
+最新情報の参照先を示す
+```
+
+必要に応じて、次の形式を使用できる。
+
+```markdown
+> **更新注記（YYYY-MM-DD）：**
+> 以下は当時の設計・調査・実装時点の記録である。
+> 現在の状態は更新済みであり、最新情報は該当する最新節を参照する。
+```
+
+既存文書の語調に合う場合は、古い予定へ取り消し線を付け、その直後に完了日と最新参照先を追加してもよい。ただし、取り消し線だけで終わらせず、現在状態と最新参照先が分かるようにする。
+
+### 直接修正してよい記述
+
+次は、歴史的意味を変えない範囲で直接修正できる。
+
+- 誤字脱字
+- 明白な文法上の誤り
+- Markdown の崩れ
+- 明白なファイル名・関数名・属性名の転記ミス
+- 数字の明白な転記ミス
+- 不可視文字
+- 内容を変えない表記統一
+- 意図せず発生した同一内容の完全重複
+- リンクまたは参照先の明白な誤り
+
+数値や名称が当時の実装状態を示している可能性がある場合は、単なる誤記と断定せず、周辺文脈を確認する。
+
+### 判断が難しい場合
+
+記述を残す必要があるか、単純に修正または削除してよいか判断できない場合は、**保守的に判断して残す**。そのうえで、必要に応じて次を追記する。
+
+- 当時の記録である可能性
+- 現在状態
+- 最新参照先
+- 判断が確定していないこと
+
+将来の AI や作業者が、古いという理由だけで削除しないようにする。
+
+### 削除を検討できる場合
+
+削除を検討できるのは、少なくとも次をすべて満たす場合に限定する。
+
+- 歴史的・研究的意味がないことを確認できる
+- 当時の判断や実装状態を失わない
+- 単なる編集事故、完全重複、壊れた断片等である
+- 削除によって実験条件や設計経緯の解釈が変わらない
+
+判断に迷う場合は削除しない。
+
+### 今後の適用
+
+本節は、今後の人間の作業者および AI による編集にも適用する。冒頭付近の本節と、各節に付された更新注記（例：2026-08-24 の §23 関連注記）を併せて参照すること。
+
+---
+
 ## 1. メモの目的と現在の状態
 
 ### 1.1 目的
@@ -31,8 +127,8 @@
 |------|------|
 | TVT制御ロジック | **未実装** |
 | FCFS | 実装済み |
-| BATCH（Level 2含む） | 実装済み・主要診断済み |
-| 全World baseline仮想計算 | **未実装**（設計のみ） |
+| BATCH（Level 2含む） | 実装済み・主要診断済み。**Level 2 mimic World の TMAX は 2026-08-24 に short TMAX 方式へ正式変更済み**（§23） |
+| 全World baseline仮想計算 | **制度ロジック未実装**（設計のみ）。**性能調査・基盤安全性確認は 2026-08-24 に実施済み**（§23） |
 | TVT局所仮想計算 | **未実装**（設計のみ） |
 | 経済評価（G, R） | **未実装**（設計のみ） |
 
@@ -103,6 +199,8 @@
 
 ## 3. 全World baseline仮想計算
 
+> **更新注記（2026-08-24）：** 本章は TVT **制度ロジック**（baseline 到着・通過記録を含む）の設計記録であり、**未実装**のままである。TVT 向け全World baseline の**性能調査**、BATCH Level 2 short TMAX の検証・正式反映は **§23** で実施済み。
+
 ### 3.1 概要（設計・未実装）
 
 各実 timestep の開始時点における実 World を基礎に、**取引なし**の共通 baseline 仮想計算を **World 全体**について実施する。
@@ -156,6 +254,8 @@
 - 全World baseline の仮想 horizon は、**初期想定として50 timestepを中心に検討**している。
 - 50 は正式な基本値として**最終確定していない**。
 - horizon 30、50、100 などの比較と未解決率の測定が必要。
+
+> **更新注記（2026-08-24）：** 上記は策定時点の設計上の未確定事項である。BATCH Level 2 の virtual horizon 30・199・200 での A/B 正しさは §23.7 で確認済み。全World baseline の horizon 正式値・未解決率は **未確定**（§23.18）。
 
 **重要：6 timestep は全World baseline の全長ではない。6 timestep は意思決定窓の基本値である。**
 
@@ -1478,6 +1578,8 @@ established = Decimal(G) >= Decimal(R)
 - **対象**：World 全体。
 - **頻度・horizon**：保留（§18, §20）。
 
+> **更新注記（2026-08-24）：** 頻度・horizon の正式値は**未確定**のまま。5,000 台条件での性能基盤確認（`World.copy()` + forward）は §23 で実施済み。baseline 到着・通過記録の取得は未実装（§23.18）。
+
 ### 16.2 局所仮想計算
 
 - **役割**：個別の候補取引によって割当権利行使順位を変えた場合の予想通過時刻を計算。
@@ -1515,13 +1617,19 @@ BATCH Level 2（`order_control_batch_level_2_reference.py`）で実装済みの�
 
 **注意**：TVT の全World baseline 仮想計算は、BATCH の局所 mimic World（単一 Node 周辺）とはスコープが異なる。再利用は設計・実装時に個別に判断する。
 
+> **更新注記（2026-08-24）：** 上表の mimic World 構築は BATCH Level 2 局所推定向けである。正式実装 `order_control_batch_level_2_reference.py` は **short TMAX 方式**へ変更済み（§23.8）。`Analyzer` を生成しない mimic World は Phase 4-6Y で確認済み。旧 **full TMAX** 方式の説明・比較は §23.6、§23.9。全World baseline 経路の現在ボトルネックは `World.copy()`（§23.13）。
+
 ---
 
 ## 18. 性能測定の必要性
 
+> **更新注記（2026-08-24）：** 以下 §18.2〜§18.4 は**策定時点の測定計画**である。計画に基づく測定・short TMAX 反映・再測定は実施済み。最新結果は **§23** を参照。
+
 ### 18.1 方針
 
 現段階では**性能測定コードを作成しない**。本節は測定**計画**のみを記載する。
+
+**2026-08-24 追記：** 計画に基づく初期測定、Vehicle ログ A/B、cProfile、Level 2 short TMAX の A/B 正しさ検証、正式実装への反映、および正式 short TMAX 実装での再測定を実施した。詳細は **§23** を参照する。
 
 ### 18.2 測定項目（計画）
 
@@ -1555,6 +1663,8 @@ BATCH Level 2（`order_control_batch_level_2_reference.py`）で実装済みの�
 - 将来 50 を 100 へ延長した場合の解決率改善
 
 参考：`diagnostics/order_control/world_state_branching_investigation.py` において、5,000 台 World のコピー時間（tracemalloc なし中央値約 1.59 s）等の初期調査結果がある。
+
+> **更新注記（2026-08-24）：** 上記は branching 調査時点の参考値である。TVT 向け全World baseline の体系測定（full TMAX 時代・short TMAX 正式反映後）は **§23.3、§23.12** を参照。
 
 ---
 
@@ -1639,7 +1749,7 @@ BATCH Level 2（`order_control_batch_level_2_reference.py`）で実装済みの�
 
 ### 20.6 その他の保留事項
 
-- **全World baseline の実行性能**
+- **全World baseline の実行性能**（2026-08-24：5,000 台条件で初期測定・short TMAX 反映・再測定済み。§23。10,000 台実測は未実施）
 - global および local horizon の**正式な基本値**
 - horizon 30、50、100 の**比較**
 - 毎 timestep 実行と 2 または 3 timestep 間隔の**比較**
@@ -1678,10 +1788,535 @@ BATCH Level 2（`order_control_batch_level_2_reference.py`）で実装済みの�
 
 ## 22. 次に行う作業
 
-1. **全World baseline 仮想計算の性能測定**（§18 の計画に基づく。測定コードは別作業で作成）
-2. horizon 30、50、100 の比較と未解決率の評価
-3. 非参加 Vehicle なし共通 `trade_rank` の**独立診断コード**による自動検証
-4. UXsim 処理順と制度上の既到着判定の対応確認
-5. TVT 実装の着手（上記測定・検証結果を踏まえて）
+1. ~~**全World baseline 仮想計算の性能測定**（§18 の計画に基づく。測定コードは別作業で作成）~~ **2026-08-24 実施済み**（§23）
+2. **TVT 向け全World baseline で必要な情報の設計**（baseline 予想到着・通過記録は未実装）
+3. **全 Node 共有の baseline 管理の設計**
+4. **性能カウンターの設計・導入**（§23.17 参照）
+5. **TVT 制度ロジックの段階的実装**
+6. horizon 30、50、100 の比較と未解決率の評価（TVT 実装後）
+7. 非参加 Vehicle なし共通 `trade_rank` の**独立診断コード**による自動検証
+8. UXsim 処理順と制度上の既到着判定の対応確認
+9. 5,000 台で baseline 要求回数・実行回数・総時間を測定（TVT 実装後）
+10. 10,000 台で実測（TVT 実装後）
+11. 3 時間目標を超える場合に `World.copy()` 軽量化を検討（§23.14 参照。未着手）
 
-**今回の作業範囲外**：性能測定コードの作成、TVT 本体の Python 実装、既存テストの変更。
+**今回の作業範囲外（2026-08-24 時点）：** TVT 本体の Python 実装、baseline 到着・通過記録、既存テストの変更。
+
+---
+
+## 23. 全World baseline仮想計算の性能検証とLevel 2 short TMAX
+
+記録日：2026-08-24
+
+対象：TVT向け全World baseline仮想計算
+
+関連機能：BATCH Level 2 `t_trigger` 推定
+
+現在の状態：
+
+- short TMAX を正式実装へ反映済み
+- `World.copy()` 軽量化は未着手
+- TVT 制度ロジックは未実装
+- baseline 予想到着・予想通過記録は未実装
+
+### 23.1 全World baselineを検討する目的
+
+- TVT で全World baseline 仮想計算を利用する可能性がある。
+- 将来、baseline 仮想計算から Vehicle の予想到着 timestep、予想通過可能 timestep、予想到着順位、予想通過順位等を取得する構想がある。
+- 全World baseline の結果は全対象 Node 間で共有することを必須とする。
+- Node ごとに別々の全World 仮想計算を実行する設計は採用しない。
+- 将来 BATCH でも、バッチ形成のきっかけとなる到着 Vehicle が対象 Node を通過するまでに到着可能な Vehicle を抽出し、BATCH 候補選定の精度向上へ使用する可能性がある。
+- 今回の作業は TVT 制度ロジック実装前の基盤性能・安全性確認である。
+
+### 23.2 初期の全World baseline方式
+
+```text
+実World
+↓
+World.copy()
+↓
+複製Worldを通常のexec_simulation()で指定horizonだけ前進
+↓
+実Worldは変更しない
+```
+
+- Analyzer 付きの通常 `exec_simulation()` 経路を使用した。
+- 通常の Vehicle 走行、route、signal、capacity、clearance、FCFS、BATCH 形成、BATCH service queue、Level 2 および fallback を維持した。
+- 表示、保存、progress 表示のみを抑制した。
+- 各試行は同じ `real_W` から独立した `World.copy()` で開始した。
+- 実World、`W.rng`、`W.order_control_rng` の不変性を確認した。
+- fork と実World の参照独立性を確認した。
+
+診断スクリプト：`diagnostics/order_control/tvt_global_baseline_performance.py`
+
+### 23.3 初期性能測定（full TMAX 正本時代）
+
+条件：
+
+```text
+Vehicle数：5,000台
+ネットワーク：6×6 grid
+branch timestep：T=50
+各horizon：3回
+```
+
+| horizon | World.copy()中央値 | forward中央値 | 合計中央値 |
+|---:|---:|---:|---:|
+| 6 timestep | 約1.539秒 | 約0.802秒 | 約2.346秒 |
+| 30 timestep | 約1.522秒 | 約3.776秒 | 約5.302秒 |
+| 50 timestep | 約1.521秒 | 約5.862秒 | 約7.388秒 |
+
+確認結果（全 9 試行）：
+
+- 実World 不変
+- `W.rng` 不変
+- `W.order_control_rng` 不変
+- 参照独立性成立
+- fork は指定 horizon 分だけ正常前進
+- 初期方式は技術的には利用可能だったが、性能負荷が大きかった
+
+### 23.4 Vehicleログ停止A/B診断
+
+診断スクリプト：`diagnostics/order_control/tvt_global_baseline_logging_ab.py`
+
+B 条件：
+
+```python
+fork_W.vehicle_logging_timestep_interval = -1
+```
+
+（`World.copy()` 完了後、forward 開始前に fork のみへ適用）
+
+| horizon | forward短縮率 | total短縮率 |
+|---:|---:|---:|
+| 6 | 約1.80% | 約1.21% |
+| 30 | 約0.71% | 約0.60% |
+| 50 | 約0.95% | 約0.64% |
+
+- A/B 交通状態は完全一致した。
+- fork 側 `W.rng` の終了状態は一致した。
+- fork 側 `W.order_control_rng` の終了状態は一致した。
+- Vehicle ログは主要ボトルネックではなかった。
+- `World.copy()` 後にログを停止しても、すでにコピーされた過去ログ等には作用しないため、copy 時間の直接的な軽量化にはならない。
+
+### 23.5 cProfileによるボトルネック特定
+
+診断スクリプト：`diagnostics/order_control/tvt_global_baseline_profile.py`
+
+50 timestep forward の cProfile 結果（参考。プロファイル実行中の絶対秒数は通常性能値として使用しない）：
+
+```text
+exec_simulation()                            約6.119秒
+Node.transfer()                              約5.873秒
+Node.transfer_batch()                        約5.870秒
+form_order_control_batch()                   約5.833秒
+Level 2 t_trigger推定                        約5.785秒
+_build_mimic_world()                         約5.572秒
+finalize_scenario()                          約5.360秒
+Link.init_after_tmax_fix()                   約5.352秒
+```
+
+```text
+Level 2呼出回数：428回
+_run_limited_virtual_loop()累積：約0.065秒
+```
+
+結論：
+
+- Level 2 の局所仮想進行自体は主要コストではなかった。
+- 毎回の mimic World 構築が主要コストだった。
+- mimic World が実World の `TMAX=30000` を引き継いでいた。
+- 各 mimic Link について、局所 Level 2 計算には過大な長さの `traveltime_actual` および Euler 集計配列が毎回生成されていた。
+- Analyzer、通常の Vehicle 走行、car-following、Vehicle ログは、この条件では主要ボトルネックではなかった。
+
+`World.copy()` について：
+
+- `World.copy()` は dill による World 全体の直列化と復元である。
+- プロファイル上は `dill.dumps()` 側が支配的だった。
+- cProfile には大きなオーバーヘッドがあるため、プロファイル実行中の絶対秒数は通常性能値として使用しない。
+- 通常実行での copy 中央値は約 1.5 秒である。
+
+### 23.6 full TMAX方式とshort TMAX方式
+
+変更前（full TMAX 方式）：
+
+```python
+tmax=max(
+    real_W.TMAX,
+    (real_W.T + 200) * real_W.DELTAT,
+)
+```
+
+変更後（short TMAX 方式、2026-08-24 正式反映）：
+
+```python
+tmax=(real_W.T + 200) * real_W.DELTAT,
+```
+
+理由：
+
+- Level 2 は局所 mimic World を短い virtual horizon だけ進行する。
+- 実World 全期間の TMAX を局所 mimic World へ引き継ぐ必要性は確認されなかった。
+- 実World の大きな TMAX に由来する過大な配列生成が主要コストだった。
+- `finalize_scenario(create_analyzer=False)` や Level 2 の交通ロジックは変更していない。
+- 正式変更は TMAX 選択式の 1 行だけである。
+
+制約：
+
+- 現在の式は、既存余裕値 200 を維持している。
+- virtual horizon 30、199、200 を中心に検証した。
+- virtual horizon が 200 を超える場合の一般化は未検証である。
+- 将来 200 を超える場合は、境界式を別途設計・検証する必要がある。
+
+### 23.7 short TMAXのA/B正しさ検証
+
+診断スクリプト：`diagnostics/order_control/level2_mimic_tmax_ab.py`
+
+grid5000 の A/B 条件：
+
+```text
+snapshot timestep：50、300、550
+virtual horizon：30、199、200
+合計：9組
+```
+
+全 9 組が passed。
+
+比較項目（少なくとも次を含む）：
+
+- Level 2 呼出し入力列
+- `resolved`
+- `reason`
+- `t_virtual_trigger`
+- `t_level_2_candidate`
+- `t_level_1`
+- `snapshot_timestep`
+- `simulated_timestep_count`
+- Vehicle transfer timestep 記録
+- virtual Node arrival timestep 記録
+- virtual outlink choice
+- service stop trace
+- sink end-trip trace
+- adopted `t_trigger`
+- 50 timestep 後の交通状態
+- fork 側 `W.rng`
+- fork 側 `W.order_control_rng`
+- `real_W` 不変性
+
+horizon 終端境界検証：
+
+```text
+virtual horizon 199：simulated_timestep_count=199
+virtual horizon 200：simulated_timestep_count=200
+```
+
+両方について次が成立：
+
+- `resolved=False`
+- `reason="virtual_horizon_exceeded"`
+- A/B 結果完全一致
+- 実World および両 RNG 不変
+
+large real TMAX 境界ケース：
+
+```text
+real_W.TMAX：30000
+snapshot timestep：10
+virtual horizon：200
+clearance：201
+
+full TMAX方式のmimic TMAX期待値：30000
+short TMAX方式のmimic TMAX実測値：210
+short TMAX方式のmimic TSIZE実測値：210
+仮想ループ最終timestep：210
+simulated_timestep_count：200
+```
+
+結果：
+
+- `virtual_horizon_exceeded`
+- A/B 完全一致
+- 実World 不変
+- 両 RNG 不変
+- `IndexError` なし
+- `traveltime_actual` 範囲不足なし
+- `cum_arrival` および `cum_departure` 範囲不足なし
+- off-by-one 問題なし
+
+### 23.8 正式実装への反映
+
+> **重要：BATCH Level 2 の正式実装は、2026-08-24 時点で short TMAX 方式へ変更済み。**
+
+変更した正式実装ファイル：
+
+```text
+uxsim/order_control_batch_level_2_reference.py
+```
+
+変更した関数：
+
+```text
+_build_mimic_world()
+```
+
+変更差分：
+
+```diff
+- tmax=max(real_W.TMAX, (real_W.T + 200) * real_W.DELTAT),
++ tmax=(real_W.T + 200) * real_W.DELTAT,
+```
+
+- 公開関数シグネチャは変更していない。
+- 戻り値形式は変更していない。
+- `timing_collector` 等の診断専用処理は正式実装へ追加していない。
+- `uxsim.py` の import 先は変更していない。
+- 通常の UXsim 処理は従来どおり `uxsim/order_control_batch_level_2_reference.py` を import する。
+
+### 23.9 旧full TMAX正本の保存
+
+保存先：
+
+```text
+diagnostics/order_control/order_control_batch_level_2_full_tmax_reference_snapshot.py
+```
+
+保存時点の情報：
+
+```text
+ファイルサイズ：52085 bytes
+SHA-256：1e624467771b5610c95ea977bb1c6fde6752f4f88d48bba67166d2d530135784
+```
+
+- 保存時点で変更前正本とバイト単位で完全一致していた。
+- 通常の UXsim 処理から import しない。
+- 旧 full TMAX 方式との比較、復元、差分確認に使用する。
+- `uxsim` パッケージ内へ `_original.py` として並置しなかった。
+- 正式実装の二重管理と誤 import を避けるため、`diagnostics` 配下へ保存した。
+
+### 23.10 今後のfull TMAX A/B比較に関する重要注意
+
+> **注意：現在の正本 `uxsim/order_control_batch_level_2_reference.py` は、すでに short TMAX 方式へ変更済みである。**
+
+したがって、今後 `level2_mimic_tmax_ab.py` 等で旧 full TMAX 方式と比較する場合、**A 条件を現在の正本へ向けてはいけない**。
+
+今後の比較構成：
+
+```text
+A条件、旧full TMAX：
+diagnostics/order_control/order_control_batch_level_2_full_tmax_reference_snapshot.py
+
+B条件、正式short TMAX：
+uxsim/order_control_batch_level_2_reference.py
+```
+
+計測用フックが必要な場合に限り、次の診断専用モデルを使用できる：
+
+```text
+diagnostics/order_control/order_control_batch_level_2_short_tmax_reference.py
+```
+
+- 現在の `level2_mimic_tmax_ab.py` には、正本変更前の A/B 構成を前提とする部分がある。
+- 将来再利用する前に、A 条件の import 先と差替え対象を確認・修正する必要がある。
+- 既存診断をそのまま実行すると、意図せず short TMAX 同士を比較する可能性がある。
+
+### 23.11 正式実装でのテスト結果
+
+```text
+Level 2関連テスト：71 passed in 16.13s
+BATCH統合、service queue、current visit、RNG関連：81 passed in 16.81s
+確認済み合計：152 passed
+```
+
+全 pytest について：
+
+- `python -m pytest -q` による全テスト実行も試みた。
+- 全テストは完走していない。
+- デモスクリプトが GUI、描画、表示その他の待機と思われる状態となった。
+- 確認された子プロセスは次である：
+  - `demos_and_examples/example_10en_signal_4legged_intersection.py`
+  - `demos_and_examples/example_05en_gridlock_and_prevention.py`
+  - `demos_and_examples/example_02en_bottleneck.py`
+- 子プロセスは確認時に CPU 0.0% の sleep 状態だった。
+- 子プロセスを個別に終了したが、別のデモが順次起動したため、全 pytest 実行方法自体が今回の確認には不適切と判断した。
+- pytest 本体と `caffeinate` を手動終了した。
+- `F` 表示が確認されたため、少なくとも一部デモ関連テストは失敗扱いとなった。
+- **全テスト成功とは記録しない。**
+- GUI・表示待ちとなるデモを除外したテスト範囲は、必要に応じて後から調査する。
+
+`ps` に表示された約 5 時間等の経過時間は、Mac のスリープ時間、一時停止時間等を含み得るため、実 CPU 計算時間として扱わない。
+
+### 23.12 正式short TMAX実装での全World性能
+
+診断スクリプト：`diagnostics/order_control/tvt_global_baseline_performance.py`（正式実装を通常経路で使用）
+
+条件：
+
+```text
+Vehicle数：5,000台
+ネットワーク：6×6 grid
+branch timestep：T=50
+各horizon：3回
+```
+
+| horizon | copy中央値 | forward中央値 | 合計中央値 |
+|---:|---:|---:|---:|
+| 6 | 約1.518秒 | 約0.051秒 | 約1.570秒 |
+| 30 | 約1.501秒 | 約0.252秒 | 約1.756秒 |
+| 50 | 約1.515秒 | 約0.424秒 | 約1.936秒 |
+
+確認結果（全 9 試行）：
+
+- 実World 不変
+- 両 RNG 不変
+- 参照独立性成立
+- 指定 horizon だけ正常前進
+- 例外なし
+
+旧 full TMAX 方式（§23.3）との概算比較：
+
+```text
+6 timestep forward：約15.7倍高速
+30 timestep forward：約15.0倍高速
+50 timestep forward：約13.8倍高速
+50 timestepのcopy込み合計：約3.8倍高速
+```
+
+（forward 中央値の比。copy 時間はほぼ変化なし）
+
+正式実装反映前の short TMAX 性能測定（診断中のみ差替え）は `tvt_global_baseline_short_tmax_performance.py` で実施したが、正本反映後は `tvt_global_baseline_performance.py` で同等の正式経路測定が可能である。
+
+### 23.13 現在の主要ボトルネック
+
+50 timestep の正式 short TMAX 方式：
+
+```text
+World.copy()：約1.515秒
+forward：約0.424秒
+合計：約1.936秒
+```
+
+- copy が合計時間の約 78% を占める。
+- short TMAX 反映後は `World.copy()` が主要ボトルネックである。
+- Vehicle ログ停止だけでは copy 時間は短くならない。
+- copy 後に Analyzer やログを削除しても、すでに直列化済みなので copy 時間は改善しない。
+- 本格的な copy 軽量化には、コピー前またはコピー処理中の対象変更が必要である。
+- 現時点では copy 軽量化を後回しにし、TVT 実装を優先する。
+
+### 23.14 World.copy()軽量化の将来候補（未着手）
+
+#### 不要状態をコピー対象から除外する専用コピー
+
+対象候補：Analyzer、Vehicle の過去ログ、Link の事後分析用配列、可視化用状態、保存用状態
+
+課題：カスタム直列化が必要となる可能性がある。コピー対象漏れによって交通結果が変わる危険がある。copy 後ではなく、copy 前または copy 処理中に除外する必要がある。
+
+#### 現在状態だけを新Worldへ移植する方式
+
+Network、Vehicle、Node、Link の現在状態を新 World へ明示的に再構築する。全World 版 mimic 構築に近い。必要な状態項目が多く、実装難易度が高い。
+
+#### 不変構造を共有し、可変状態だけ複製する方式
+
+Copy-on-write に近い考え方。性能改善の可能性は高い。仮想側から実World を汚染する危険が最も高い。設計難易度も最も高い。
+
+#### 実Worldの不要ログを最初から蓄積しない方式
+
+コピー元 World そのものを小さくする。通常の分析・可視化への影響確認が必要。Vehicle ログ停止 A/B では forward 改善は約 1% だった。copy 時間への効果は別途測定が必要。
+
+方針：
+
+- short TMAX 正式実装を新しい安定基準とする。
+- copy 軽量化は、short TMAX 正式実装を基礎として別の実験用コピーまたは診断経路で行う。
+- 困難な copy 軽量化が不成立でも、short TMAX の成果を失わない構成にする。
+
+### 23.15 baseline更新頻度と全Node共有
+
+- 全World baseline 結果は全対象 Node 間で共有する。
+- Node ごとに別々の全World 仮想計算を行わない。
+- baseline の計算間隔は、可能な限り長くしたくない。
+- ただし、ネットワーク内の対象 Node のいずれかで意思決定関連状態が変化すれば、再計算が必要となる可能性がある。
+- 36 Node の混雑ネットワークでは、Vehicle 到着、BATCH 形成、service queue 変化、TVT 候補変化等がネットワーク内のどこかで頻繁に発生する可能性がある。
+- **したがって、イベント駆動の再計算回避によって大幅に実行回数を削減できるとは現時点で断定しない。**
+- TVT 対象 Vehicle が存在しない場合等の省略候補はあるが、実際の削減率は実測が必要である。
+- 全 Node 共有の主目的は、同一 timestep・同一 baseline を Node ごとに重複計算しないことである。
+
+### 23.16 10,000台・3時間以内に関する見通し（未測定の概算）
+
+5,000 台での正式 short TMAX 方式：
+
+```text
+50 timestep全World baseline：約1.94秒／回
+```
+
+10,000 台で単純比例を仮定した参考範囲（**未測定の概算**）：
+
+```text
+約3秒から5秒／回の可能性
+```
+
+3 時間は 10,800 秒。
+
+上限概算（**以下を含まない**）：
+
+```text
+1回3秒なら約3,600回
+1回4秒なら約2,700回
+1回5秒なら約2,160回
+```
+
+含まれないもの：通常の実World シミュレーション時間、TVT 制度計算、baseline 情報記録、分析・出力、その他の制御処理。
+
+- TMAX=30000 の全期間で毎 timestep 計算する場合、3 時間以内は難しい可能性が高い。
+- 実際の baseline 実行回数が 2,000 回程度であれば、3 時間以内が視野に入る可能性はある。
+- ただし、対象 Node のいずれかで状態変化が頻繁に起こる場合、実行回数を 2,000 回程度へ抑えられる保証はない。
+- 最終判断には 10,000 台条件での実測が必要である。
+
+### 23.17 TVT実装時の性能カウンター（必須方針）
+
+少なくとも次を記録する方針とする：
+
+- 全World baseline 要求総数
+- 実際の全World baseline 実行総数
+- baseline を実行した実 timestep 数
+- 同一 timestep 内の重複要求数
+- 全 Node 共有により省略した重複計算数
+- horizon 別実行回数
+- `World.copy()` 累積時間
+- forward 累積時間
+- baseline 計算全体の累積時間
+- 1 回当たり時間の中央値、最小値、最大値
+- baseline 到着・通過記録処理時間
+- 10,000 台条件での総実行時間
+
+計測自体が本番処理へ過大な負荷を与えないよう、軽量カウンターを使用する。
+
+### 23.18 未実装・未確定事項
+
+- TVT 制度ロジック
+- 全World baseline 専用モード
+- baseline 予想到着 timestep
+- baseline 予想到着順位
+- baseline 予想通過可能 timestep
+- baseline 予想通過順位
+- 意思決定窓
+- 確定順位ブロック
+- TVT 候補 Vehicle
+- 未解決率測定
+- baseline 結果の保持形式
+- baseline 再計算条件
+- horizon の最終値
+- 10,000 台実測
+- `World.copy()` 軽量化
+- virtual horizon 200 超の一般化
+
+### 23.19 今後の推奨順序
+
+1. 今回の調査結果と正式変更を既存 Markdown へ保存する。
+2. short TMAX 正式実装を現在の安定基準とする。
+3. TVT 向け全World baseline で必要な情報を設計する。
+4. 全 Node 共有の baseline 管理を設計する。
+5. 性能カウンターを設ける。
+6. TVT 制度ロジックを段階的に実装する。
+7. 5,000 台で baseline 要求回数、実行回数、総時間を測定する。
+8. 10,000 台で実測する。
+9. 3 時間目標を超える場合に `World.copy()` 軽量化へ進む。
+10. copy 軽量化は short TMAX 正式実装を基礎とする別の実験用コピーまたは診断経路で行う。
