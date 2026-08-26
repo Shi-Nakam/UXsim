@@ -4016,6 +4016,23 @@ Level 2: `call_count=46,428`、`resolved=46,390`、`unresolved=38`、`fallback=3
 - 現在の主要ボトルネックは `World.copy()` だが、copy 軽量化は後回しとし、TVT 実装を優先する
 - 詳細は `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES.md` の「§23 全World baseline仮想計算の性能検証とLevel 2 short TMAX」を参照する
 
+#### 2026-08-26：全World baselineのsnapshot固定集合と二段階観測設計
+
+- 今回の設計更新直前の保存済み状態はコミット `3690a8c` であり、`feature/intersection-order-control` へpush済み
+- 2026-08-26の今回の設計更新は、そのコミット後に行った未実装・未コミットの設計整理として記録する
+- TVT候補Vehicleを、baseline開始時点ですでに対象inlink上にいるVehicleへ限定する方針を採用
+- baseline開始後に対象inlinkへ入ったVehicleは今回の候補集合へ追加しない
+- snapshot固定集合は到着済みAと未到着Bに概念分類するが、別保存構造を意味しない
+- timestep T到着Vehicleは既到着Vehicleとの同着ではなく、T到着の後着Vehicleとして順位付けし、TVT起点から除外する
+- T+1からT+6の到着Vehicleから権利保有車両を選ぶ
+- T+6後も、権利保有車両の通過 `P` までBの到着記録を継続する
+- 候補時間条件は `arrival <= P - 1`
+- `route_next_link` を局所仮想計算に使用する方向
+- 既存 `visit_id` を利用し、新しいvisit IDは作らない方向
+- 初期実装では過去baseline結果を `real_W` へ蓄積しない
+- TVT順位確定状態、collector、早期終了性能は未実装・未確認
+- 詳細は設計メモ **§24** を参照する
+
 ### フェーズ4-6R設計目標（実装前・設計時点の記録）
 
 （設計時点の目標。実装は上記フェーズ4-6R節・設計メモ **§1H.21** を参照。）

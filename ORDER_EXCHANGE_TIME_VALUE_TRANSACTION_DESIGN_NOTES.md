@@ -376,6 +376,8 @@
 
 ## 7. TVT候補Vehicleの時間条件
 
+> **2026-08-26更新：** TVT候補Vehicleは、時間条件に加え、全World baseline開始時点ですでに対象inlink上にいるVehicleへ限定する。詳細は **§24** を参照。
+
 ### 7.1 意思決定窓内Vehicleとの区別（確定）
 
 | 区分 | 定義 |
@@ -1802,6 +1804,8 @@ BATCH Level 2（`order_control_batch_level_2_reference.py`）で実装済みの�
 
 **今回の作業範囲外（2026-08-24 時点）：** TVT 本体の Python 実装、baseline 到着・通過記録、既存テストの変更。
 
+> **2026-08-26更新：** snapshot固定集合と二段階観測設計の整理は完了した。次は到着・通過collectorの具体設計である。詳細は **§24** を参照。
+
 ---
 
 ## 23. 全World baseline仮想計算の性能検証とLevel 2 short TMAX
@@ -2320,3 +2324,366 @@ Copy-on-write に近い考え方。性能改善の可能性は高い。仮想側
 8. 10,000 台で実測する。
 9. 3 時間目標を超える場合に `World.copy()` 軽量化へ進む。
 10. copy 軽量化は short TMAX 正式実装を基礎とする別の実験用コピーまたは診断経路で行う。
+
+---
+
+## 24. 全World baselineのsnapshot固定集合と二段階観測設計
+
+記録日：2026-08-26
+
+対象：TVT向け全World baseline仮想計算
+
+状態：設計更新。TVT制度ロジックおよびcollectorは未実装。
+
+### 24.1 この更新の位置づけ
+
+- 今回は、全World baselineの交通予測対象、TVT候補Vehicleの追加条件、snapshot固定集合、二段階の観測方法、早期終了の論理を整理した設計更新である。
+- 既存コード調査とTerminalでの実コード確認に基づく。
+- 保存構造、属性名、collectorの具体的実装方式は未確定である。
+- 今回の設計更新によるPythonコード変更はまだ行っていない。
+
+### 24.2 今回の設計検討直前のGit状態
+
+今回の設計検討を開始する直前の保存済みGit状態は次のとおりである。
+
+```
+直前の保存済みコミット：
+3690a8c
+
+コミット名：
+Optimize Level 2 TMAX, partially validate global World baseline, and document findings and revised maintenance policy
+
+ブランチ：
+feature/intersection-order-control
+
+GitHubへのpush：
+完了済み
+
+push時の更新範囲：
+96861f9..3690a8c
+```
+
+- コミット `3690a8c` には、Level 2 short TMAXの正式反映、全World baselineの部分的検証、関連診断、技術記録、および文書保守方針が保存されている。
+- 2026-08-26の今回の設計更新は、コミット `3690a8c` を出発点として行った未実装の設計整理である。
+- 今回編集する2026-08-26の設計更新自体は、現時点ではまだ新しいコミットへ保存されていない。
+- 本節の記録時点では、2026-08-26の設計更新はまだ新しいコミットへ保存されていない。
+
+### 24.3 TVT候補Vehicleのsnapshot時点条件
+
+従来の時間条件（§7.2）に加え、TVT候補Vehicleの必要条件として次を採用する。
+
+```
+全World baseline開始時点において、
+すでに対象Nodeへ接続する対象inlink上にいること
+```
+
+時間条件は次のとおりである。
+
+```
+candidate_expected_arrival_timestep
+<=
+right_holder_expected_passage_timestep - tau
+```
+
+現在の暫定値は次のとおりである。
+
+```
+tau = 1
+```
+
+したがって、TVT候補範囲に入るには、少なくとも次の両方が必要である。
+
+```
+1. baseline開始時点ですでに対象inlink上にいる
+2. 権利保有車両の予想通過timestepの tau timestep前までに到着すると予測される
+```
+
+採用理由：
+
+- baseline開始後に上流Nodeから対象inlinkへ進入したVehicleは、取引なしbaselineではそのinlinkへ入っても、TVTありの実Worldでは上流側の交通状態や経路選択の変化により、同じinlinkへ入らない可能性がある。
+- そのVehicleを下流NodeのTVT候補にすると、TVTありの世界では到着しない可能性があるVehicleを前提として取引を構成する危険がある。
+- baseline開始時点ですでに対象inlink上にいるVehicleへ限定すれば、そのVehicleが対象Nodeへ向かっている事実はsnapshot時点で固定される。
+- baseline開始後に対象inlinkへ入ったVehicleは、今回のTVT候補範囲へ追加しない。
+
+### 24.4 snapshot固定集合
+
+対象Nodeごとに、baseline開始時点で対象inlink上にいるVehicleを固定集合とする。
+
+固定集合には、TVT参加Vehicleと非参加Vehicleの両方を含める。
+
+理由：
+
+- 固定集合は交通予測の対象であり、TVT当事者だけの集合ではない。
+- 非参加Vehicleもbaseline順位や固定順位枠に関係する。
+- `participates_in_order_exchange` はTVT取引への参加・非参加だけを表す。
+- `participates_in_order_exchange` はFCFSまたはBATCHへの参加・適用を表す属性ではない。
+- 1台のVehicleについて、TVT参加・非参加はシミュレーション中に変化しない前提である。
+
+固定集合内のVehicleを、説明上次の2状態に区別する。
+
+```
+A：
+snapshot時点で対象Nodeへ到着済みのVehicle
+
+B：
+snapshot時点で対象inlink上にいるが、
+まだ対象Nodeへ到着していないVehicle
+```
+
+重要事項：
+
+- AとBは、処理上の状態を説明するための概念分類である。
+- A用とB用に別の保存構造を作ると確定したわけではない。
+- `arrival_time` の有無によって排他的に区別できる。
+- AとBの和集合がsnapshot固定集合である。
+- baseline開始後に対象inlinkへ入ったVehicleは固定集合へ追加しない。
+
+### 24.5 既存current visitとvisit ID
+
+既存コード調査で確認した事項：
+
+- order-control対象Nodeへ向かうinlinkへ進入すると、既存 `order_control_visit_id` が増加する。
+- `order_control_current_visit["visit_id"]` へ現在visitのIDが保存される。
+- 同じVehicleが同じNodeを再訪した場合も、新しい `visit_id` で区別される。
+- 新規のvisit IDを追加する必要はない方向である。
+- snapshot時点の `visit_id`、Node、inlinkを固定し、そのvisitに関する到着・通過だけを記録する。
+- 後続の対象Node訪問または再訪は、固定した `visit_id` と異なるため、今回の固定集合記録から除外できる。
+
+対象Node条件は、既存current visit生成条件と同じ次の条件である。
+
+```
+order_control_eligible == True
+かつ
+order_control_type != "none"
+```
+
+対象inlinkは、当該Nodeの `Node.inlinks` に含まれるLinkである。
+
+### 24.6 記録する交通予測
+
+snapshot固定集合の各Vehicleについて、少なくとも次を取得する方向である。
+
+```
+Vehicle識別情報
+既存visit_id
+対象Node
+対象inlink
+到着時に選択されたroute_next_link
+取引なしbaseline予想到着timestep
+取引なしbaseline予想通過timestep
+到着timestepを取得できたか
+通過timestepを取得できたか
+```
+
+補足：
+
+- Bの `route_next_link` はsnapshot時点では未確定であり、対象Nodeへの到着直前の `route_next_link_choice()` 後に取得する。
+- `route_next_link` は、TVT局所仮想計算において固定outlinkとして利用する方向である。
+- 全World baselineの取引なし予想通過timestepと、TVT候補ごとの局所仮想計算によるTVT後予想通過timestepを区別する。
+- 到着順位は、既存の `arrival_time`、`arrival_tiebreaker`、Vehicle IDから必要時に構成する方向である。
+- 通過順位はTVT形成の初期実装には必須とせず、予測対実績の研究分析で必要になった場合に後から追加する。
+- 通過順位を追加する場合は、同一timestep内のtransfer成功順を記録する必要がある。
+- service unitの想定処理順と実処理順の比較も、将来の分析候補として残す。
+
+### 24.7 Aの扱い
+
+snapshot時点で既到着のAについて：
+
+- TVTの起点または新規取引候補にしない。
+- 参加・非参加を問わず、既存設計に従って先に順位を確定する（§5 参照）。
+- 既存の `arrival_time`、`arrival_tiebreaker`、Vehicle IDを順位付けに使える。
+- 取引なし予想通過timestepは、全World baselineのforkで取得する必要がある場合がある。
+- TVT候補から除外することと、baseline記録対象から除外することを混同しない。
+
+### 24.8 baseline開始timestep Tで到着するVehicle
+
+baseline開始時点ではBだったが、forkの最初の処理timestep `T` で到着したVehicleについて、次を確定事項とする。
+
+意思決定窓の条件は次のとおりである。
+
+```
+0 < expected_arrival_timestep - T <= 6
+```
+
+したがって：
+
+- 到着timestepが `T` なら残り時間は0であり、意思決定窓外である。
+- 権利保有車両にはしない。
+- snapshot時点で既到着だったAと同着扱いにはしない。
+- 到着時刻 `T` を持つ、新たに到着したVehicleとして扱う。
+- snapshot時点で既到着のVehicleが `T` より前の到着時刻を持つ場合、既到着Vehicleより後着となる。
+- timestep `T` に複数台が到着した場合、その車両間は `arrival_tiebreaker`、Vehicle IDで一意に順位付けする。
+- TVT起点対象外として、到着順位に従って確定順位ブロックへ追加する方向である。
+
+### 24.9 意思決定窓観測区間
+
+「前半」という曖昧な用語は使わず、次の名称を用いる。
+
+```
+意思決定窓観測区間
+```
+
+baseline開始timestepを `T` とした場合、制度上の意思決定窓内到着は次のとおりである。
+
+```
+T < expected_arrival_timestep <= T + 6
+```
+
+`timestep T+6` の到着も観測する必要がある。
+
+既存 `exec_simulation(duration_t2=DELTAT)` の動作では、`T` から `T+6` までの処理には7 timestep分の実行が必要である。
+
+例（`T = 50`）：
+
+| 到着timestep | 区分 |
+|--------------|------|
+| 50 | 意思決定窓外 |
+| 51 | 意思決定窓内 |
+| 56 | 意思決定窓内 |
+| 57 | 意思決定窓外 |
+
+### 24.10 権利保有車両の選定
+
+意思決定窓観測区間の終了後、Nodeごとに次を行う。
+
+```
+Bのうち、
+T+1からT+6に到着したVehicleを抽出
+↓
+そのうち割当権利行使順位が未確定のVehicleを抽出
+↓
+そのうちTVT参加Vehicleを抽出
+↓
+baseline予想到着順位が最上位のVehicleを権利保有車両とする
+```
+
+補足：
+
+- TVT用の「順位未確定」「割当権利行使順位」「確定順位ブロック」は現在未実装である。
+- BATCHの `batch_assignment` はBATCH service unitへの所属を表すものであり、TVTの順位確定状態には使用しない。
+- 非参加Vehicleはbaseline順位と候補範囲に関係し得るが、権利保有車両、買い手、売り手にはならない。
+
+### 24.11 権利保有車両通過待ち区間
+
+意思決定窓観測区間の後、権利保有車両が存在するNodeについて、そのVehicleの取引なし予想通過timestepを取得するまで全World baselineを継続する。
+
+この区間中も、snapshot固定集合Bの到着timestep記録を継続する。
+
+権利保有車両の通過timestepを `P` とした場合、TVT候補範囲は次のとおりである。
+
+```
+candidate_expected_arrival_timestep <= P - 1
+```
+
+例（`P = 70`）：
+
+| 到着timestep | 区分 |
+|--------------|------|
+| 69 | 候補時間範囲内 |
+| 70 | 候補時間範囲外 |
+
+補足：
+
+- T+6までに到着しなかったBでも、T+6後から `P-1` までに到着すればTVT候補範囲に入り得る。
+- したがって、T+6後もBの到着記録は必要である。
+- `P` より後の到着は今回の候補範囲には不要である。
+- 権利保有車両が意思決定窓観測区間中に既に通過していた場合は、記録済みの `P` を使用する。
+- `P` のtimestep処理が完了してから候補範囲を確定する。
+- UXsimでは同一timestep内に通過処理が到着記録より先に行われるが、`P` と同じtimestepの到着は条件上候補外なので問題にならない。
+
+### 24.12 Node別の概念状態
+
+実装上のenum名や属性名は確定せず、概念上、Nodeごとに次を区別する必要がある。
+
+```
+意思決定窓観測中
+TVT検討不要
+権利保有車両の通過待ち
+TVT用baseline情報取得完了
+horizon終端時未解決
+```
+
+補足：
+
+- 状態遷移は同一baseline内で原則一方向である。
+- 一度完了したNodeを再判定する必要はない。
+- 完了済みNodeの後続通知は無視できる。
+- 具体的な保存構造と名称はcollector設計時に決める。
+
+### 24.13 全World baselineの早期終了
+
+TVTだけが共通baselineを利用する初期段階では、次を全体終了条件の方向とする。
+
+```
+全対象Nodeが、
+
+TVT検討不要
+または
+TVT用baseline情報取得完了
+
+のいずれかになった
+```
+
+補足：
+
+- T+6の到着処理が完了する前には終了しない。
+- 全NodeがT+6時点でTVT検討不要なら、その時点で終了可能である。
+- 一部Nodeが権利保有車両通過待ちなら、全World仮想計算自体は継続する。
+- 最後の未完了Nodeが完了したtimestepの処理終了後に停止する。
+- horizonへ到達しても必要な `P` が得られないNodeは未解決として終了する。
+- 早期終了は完全なtimestep境界でのみ行う。
+- 既存 `exec_simulation()` を1 timestepずつ実行できることは確認済みである。
+- 早期終了の実際の性能効果は未測定であり、1 timestep単位の関数呼出し負荷と比較する必要がある。
+
+### 24.14 TVTと将来BATCHの共通利用
+
+共通化するのは交通予測である。
+
+```
+snapshot固定集合
+到着timestep
+visit_id
+対象Node
+対象inlink
+route_next_link
+取引なし予想通過timestep
+```
+
+BATCHの将来候補条件は、到着済みtrigger Vehicleの予想通過timestepを `P` として、暫定的に次のとおりである。
+
+```
+other_vehicle_expected_arrival_timestep <= P - 1
+```
+
+補足：
+
+- TVTの6 timestep意思決定窓はBATCHには直接使用しない。
+- TVTとBATCHは同じ全World baseline交通予測を共有することを必須とする。
+- 完了条件は制度ごとに異なり得る。
+- 将来、TVTとBATCHの両方が同一baselineを利用する場合、baseline全体の終了には、有効になっている両制度の必要情報が揃う必要がある。これは論理和ではなく論理積である。
+- BATCH共通利用が未実装のTVT初期段階では、BATCH側の完了を待たない。
+
+### 24.15 保持と性能の方針
+
+- 初期実装では、現在のbaseline実行に必要な結果だけを保持する。
+- 直前baselineや全期間のbaseline結果を `real_W` へ蓄積しない。
+- 次回の `World.copy()` 対象を増やさないことを重視する。
+- 研究分析用の長期記録は、必要性が具体化した後に別の軽量ログとして追加する。
+- 分析候補には、予想到着と実到着、予想通過と実通過、必要なら順位差、service unit想定順と実処理順の比較がある。
+- これらをすべて初期実装から記録するとは確定しない。
+
+### 24.16 未実装・未確定事項
+
+- TVT用の割当権利行使順位
+- TVT用の順位未確定状態
+- 確定順位ブロック
+- Aおよびtimestep T到着Vehicleの順位確定処理
+- 権利保有車両選定処理
+- 到着・通過collector
+- Node別状態の保存構造
+- 通過通知の正式な接続方法
+- collector例外時の扱い
+- 早期終了の性能測定
+- 通過順位の研究分析用記録
+- service unit想定順と実処理順の比較記録
+- 将来BATCHによる共通baseline利用
