@@ -4081,6 +4081,39 @@ Git状態（本記録時点）：
 - TVT制度、二段階観測、早期終了等は未実装
 - 次は第2回実装（通知接続とUXsim接続テスト）
 
+#### 2026-08-28：全World baseline collectorのUXsim通知接続と接続テスト
+
+（上記「第1回実装完了」記録の続き。設計メモ **§25.21** を参照。）
+
+Git状態（本記録時点）：
+
+- ブランチ：`feature/intersection-order-control`
+- 直前の保存済みコミット：`c2b36d6`
+- コミット名：`Implement and document snapshot-fixed baseline visit records, arrival and passage handling, and collector tests`
+- 直前コミットは`origin/feature/intersection-order-control`へpush済み
+- 今回の変更は未コミット・未push
+- 変更：`uxsim/uxsim.py`
+- 新規：`tests_order_control_baseline_collector_uxsim.py`
+- 未追跡ファイル：`diagnostics/order_control.zip`（今回触れていない）
+
+実装内容（Terminalで差分・接続位置・テスト結果を直接確認済み）：
+
+- B到着通知を`Vehicle.record_order_control_node_arrival()`へ接続
+- BATCH、FCFS clearanceあり、通常`Node.transfer()`へ通過通知を接続
+- 通過前`prepare_baseline_passage_recording()`と物理通過後`apply_baseline_passage_timestep()`を分離
+- BATCHではservice queue整理後にapply
+- 当初`uxsim.py`からcollector非公開索引`_visit_record_by_vehicle_name`を直接参照していたが、Terminal差分確認後に削除し、固定集合判定を`prepare_baseline_passage_recording()`へ集約
+- collector無効時（既定`None`と明示`None`の2条件）で交通結果と`W.rng`・`W.order_control_rng`の状態が一致
+- BATCH、FCFS、通常transferの3経路で固定集合外Vehicleを安全に処理
+- BATCH不整合時に物理通過前に停止することを確認
+- real_Wとfork_Wのcollector分離を確認
+- 新規接続テスト11件成功
+- 指定既存テスト群、Level 2 body 22 tests、構文確認、形式確認成功
+- `grep -n '_visit_record_by_vehicle_name' uxsim/uxsim.py`は0件
+- FCFS clearanceなしは未接続
+- TVT制度、二段階観測、right_of_entry_vehicle選定、早期終了等は未実装
+- 次は小規模fork診断とsnapshot固定集合構築用の最小補助処理を検討（§25.15の第3回実装相当。直ちに着手済みではない）
+
 ### フェーズ4-6R設計目標（実装前・設計時点の記録）
 
 （設計時点の目標。実装は上記フェーズ4-6R節・設計メモ **§1H.21** を参照。）

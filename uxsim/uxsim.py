@@ -1418,12 +1418,24 @@ class Node:
         transferred_vehicle_count = 0
         clearance_stop = False
         active_inlink = None
+        baseline_collector = s.W._order_control_baseline_collector
+        pending_baseline_passage_records = (
+            [] if baseline_collector is not None else None
+        )
 
         def _finalize_service_queue():
             s.order_control_batch_service_queue.clear()
             for service_unit in service_units_to_check:
                 if service_unit["vehicles"]:
                     s.order_control_batch_service_queue.append(service_unit)
+
+        def _finalize_service_queue_and_apply_pending_baseline_passages():
+            _finalize_service_queue()
+            if baseline_collector is not None:
+                for pending_record in pending_baseline_passage_records:
+                    baseline_collector.apply_baseline_passage_timestep(
+                        pending_record, s.W.T
+                    )
 
         def _clearance_satisfied(inlink):
             clearance_required = (
@@ -1629,7 +1641,7 @@ class Node:
                 _validate_service_unit_visit(veh, service_unit)
 
                 if veh not in s.incoming_vehicles:
-                    _finalize_service_queue()
+                    _finalize_service_queue_and_apply_pending_baseline_passages()
                     return {
                         "transferred_vehicle_count": transferred_vehicle_count,
                         "clearance_stop": False,
@@ -1642,7 +1654,7 @@ class Node:
 
                 if not _clearance_satisfied(inlink):
                     clearance_stop = True
-                    _finalize_service_queue()
+                    _finalize_service_queue_and_apply_pending_baseline_passages()
                     return {
                         "transferred_vehicle_count": transferred_vehicle_count,
                         "clearance_stop": clearance_stop,
@@ -1654,7 +1666,7 @@ class Node:
                     if transferred_vehicle_count == 0:
                         shared_blocked_inlinks.add(inlink)
                         break
-                    _finalize_service_queue()
+                    _finalize_service_queue_and_apply_pending_baseline_passages()
                     return {
                         "transferred_vehicle_count": transferred_vehicle_count,
                         "clearance_stop": clearance_stop,
@@ -1662,13 +1674,26 @@ class Node:
                         "blocked_inlinks": set(shared_blocked_inlinks),
                     }
 
+                pending_passage_record = None
+                if baseline_collector is not None:
+                    registered_visit_id = service_unit["visit_ids"][0]
+                    pending_passage_record = (
+                        baseline_collector.prepare_baseline_passage_recording(
+                            vehicle_name=veh.name,
+                            visit_id=registered_visit_id,
+                            node_name=s.name,
+                        )
+                    )
+
                 _transfer_vehicle(veh, inlink, outlink)
                 service_unit["vehicles"].pop(0)
                 service_unit["visit_ids"].pop(0)
                 transferred_vehicle_count += 1
                 active_inlink = inlink
+                if pending_passage_record is not None:
+                    pending_baseline_passage_records.append(pending_passage_record)
 
-        _finalize_service_queue()
+        _finalize_service_queue_and_apply_pending_baseline_passages()
         return {
             "transferred_vehicle_count": transferred_vehicle_count,
             "clearance_stop": clearance_stop,
@@ -1975,6 +2000,22 @@ class Node:
                 and inlink.capacity_out_remain >= s.W.DELTAN
                 and s.flow_capacity_remain >= s.W.DELTAN
             ):
+                baseline_collector = s.W._order_control_baseline_collector
+                pending_passage_record = None
+                if baseline_collector is not None:
+                    current_visit = veh.order_control_current_visit
+                    if current_visit is None:
+                        passage_visit_id = None
+                    else:
+                        passage_visit_id = current_visit["visit_id"]
+                    pending_passage_record = (
+                        baseline_collector.prepare_baseline_passage_recording(
+                            vehicle_name=veh.name,
+                            visit_id=passage_visit_id,
+                            node_name=s.name,
+                        )
+                    )
+
                 #累積台数関連更新
                 inlink.cum_departure[-1] += s.W.DELTAN
                 outlink.cum_arrival[-1] += s.W.DELTAN
@@ -2034,6 +2075,11 @@ class Node:
 
                 s.last_order_control_inlink = current_inlink
                 s.last_order_control_entry_timestep = s.W.T
+
+                if baseline_collector is not None and pending_passage_record is not None:
+                    baseline_collector.apply_baseline_passage_timestep(
+                        pending_passage_record, s.W.T
+                    )
             else:
                 continue
 
@@ -2100,6 +2146,22 @@ class Node:
                 
                 inlink = veh.link
 
+                baseline_collector = s.W._order_control_baseline_collector
+                pending_passage_record = None
+                if baseline_collector is not None:
+                    current_visit = veh.order_control_current_visit
+                    if current_visit is None:
+                        passage_visit_id = None
+                    else:
+                        passage_visit_id = current_visit["visit_id"]
+                    pending_passage_record = (
+                        baseline_collector.prepare_baseline_passage_recording(
+                            vehicle_name=veh.name,
+                            visit_id=passage_visit_id,
+                            node_name=s.name,
+                        )
+                    )
+
                 #累積台数関連更新
                 inlink.cum_departure[-1] += s.W.DELTAN
                 outlink.cum_arrival[-1] += s.W.DELTAN
@@ -2156,6 +2218,11 @@ class Node:
 
                 outlink.vehicles.append(veh)
                 s.incoming_vehicles.remove(veh)
+
+                if baseline_collector is not None and pending_passage_record is not None:
+                    baseline_collector.apply_baseline_passage_timestep(
+                        pending_passage_record, s.W.T
+                    )
 
         #各リンクの先頭のトリップ終了待ち車両をトリップ終了させる
         for link in s.inlinks.values():
@@ -3375,6 +3442,21 @@ class Vehicle:
             arrival_tiebreaker = s.W.order_control_rng.random()
             current_visit["arrival_time"] = arrival_time
             current_visit["arrival_tiebreaker"] = arrival_tiebreaker
+
+        baseline_collector = s.W._order_control_baseline_collector
+        if baseline_collector is not None:
+            route_next_link = s.route_next_link
+            route_next_link_name = (
+                route_next_link.name if route_next_link is not None else None
+            )
+            baseline_collector.record_baseline_arrival(
+                vehicle_name=s.name,
+                visit_id=current_visit["visit_id"],
+                node_name=node.name,
+                baseline_arrival_timestep=int(round(arrival_time / s.W.DELTAT)),
+                arrival_tiebreaker=current_visit["arrival_tiebreaker"],
+                route_next_link_name=route_next_link_name,
+            )
 
     def _compute_order_control_earliest_arrival_timestep_for_current_link(s):
         """

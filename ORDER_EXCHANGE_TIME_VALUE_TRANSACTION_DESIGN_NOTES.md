@@ -3369,3 +3369,267 @@ Git操作は次の順序を守る。
 - real_Wとforkの分離確認
 
 第2回実装へ直ちに着手済みではない。
+
+### 25.21 第2回実装の結果
+
+記録日：2026-08-28
+
+対象：§25.15・§25.20で定義した第2回実装（UXsim通知接続と接続テスト）
+
+状態：第2回実装のコード上の作業は完了。本節の記録時点では、第2回実装のコード変更と本記録はまだ新しいコミットへ保存されていない。pushもされていない。
+
+§25.1〜§25.19は実装前設計の記録である。§25.20は第1回実装の結果記録である。本節はTerminalで差分、接続位置、テスト結果を直接確認したうえでの第2回実装結果記録である。
+
+#### 25.21.1 実装した範囲
+
+今回、次を実装した。
+
+- `Vehicle.record_order_control_node_arrival()`へのB到着通知接続
+- `Node._serve_order_control_batch_service_queue_internal()`へのBATCH通過通知接続
+- `Node.transfer_fcfs_clearance()`へのFCFS clearanceあり通過通知接続
+- 通常`Node.transfer()`への通過通知接続
+- `tests_order_control_baseline_collector_uxsim.py`の新規作成
+- collector無効時の交通結果とRNG状態の不変確認
+- real_Wとfork_Wのcollector分離確認
+- 固定集合外Vehicleを安全に無視する接続確認
+- 通過前の重大不整合で物理通過前に停止する確認
+
+今回の実装では、次の2ファイルだけを変更・作成した。
+
+- 変更：`uxsim/uxsim.py`
+- 新規：`tests_order_control_baseline_collector_uxsim.py`
+
+第1回実装済みの`uxsim/order_control_baseline_collector.py`と`tests_order_control_baseline_collector.py`は変更していない。
+
+実装では、時間価値取引の根幹に関わる処理について、短さや高度なPython技法より、研究者が処理順序を後から理解できる可読性を優先した。
+
+#### 25.21.2 B到着通知
+
+- 接続先は`Vehicle.record_order_control_node_arrival()`
+- UXsim既存の`arrival_time`と`arrival_tiebreaker`の設定完了後に通知する
+- 同一visitで到着情報がすでに記録済みの場合は、既存の早期returnによりcollectorへ再通知しない
+- collectorが`None`の場合は通知用情報を組み立てない
+- collectorが有効な場合だけ、次を`record_baseline_arrival()`へ渡す
+  - `vehicle_name`
+  - current visitの`visit_id`
+  - `node_name`
+  - baseline到着timestep
+  - `arrival_tiebreaker`
+  - `route_next_link_name`
+- baseline到着timestepは、既存の秒単位`arrival_time`から次の方法で変換する
+
+`int(round(arrival_time / W.DELTAT))`
+
+- この通知では追加RNGを消費しない
+- 固定集合外visitはcollector側で無視する
+- 固定集合内visitで`route_next_link`が存在しない場合は重大不整合となる
+
+#### 25.21.3 通過通知の共通原則
+
+- 物理通過前に`prepare_baseline_passage_recording()`を呼ぶ
+- 物理通過前のvisit IDを使用する
+- `begin_order_control_visit_on_link_entry()`によってcurrent visitが次のNode向けへ切り替わった後に、元のvisit IDを取り直さない
+- 固定集合外Vehicleでは`prepare`が`None`を返し、通常の物理通過を続ける
+- 固定集合内Vehicleの重大不整合は物理通過前に`ValueError`となる
+- 物理通過と必要なUXsim状態更新が成功した後だけ、`apply_baseline_passage_timestep()`を呼ぶ
+- 通過前に確認したrecordを物理通過後に再検索しない
+- 通過後に同じ整合性確認を繰り返さない
+- collector無効時にはcurrent visitやvisit IDをcollector通知用に取得しない
+
+#### 25.21.4 FCFS clearanceあり通過接続
+
+- 接続先は`Node.transfer_fcfs_clearance()`
+- 実際に通過条件を満たしたVehicleだけを対象とする
+- collector有効時に、物理通過前のcurrent visitからvisit IDを取得する
+- current visitが`None`なら`None`をprepareへ渡す
+- 固定集合外Vehicleならprepareがpayload検証前に`None`を返す
+- 固定集合内Vehicleでcurrent visitが欠落していれば、物理通過前に重大不整合として停止する
+- 物理通過、outlink追加、incoming Vehicle削除、`last_order_control_inlink`および`last_order_control_entry_timestep`更新後に通過timestepを設定する
+- FCFS clearanceなしには接続していない
+
+#### 25.21.5 通常Node.transfer通過接続
+
+- 接続先は、FCFSとBATCHへの早期分岐後に実行される通常`Node.transfer()`
+- 固定集合内のtime-value対象visitでもこの通知経路を利用できる
+- time-value制度処理自体はまだ実装していない
+- order-control対象外の通常Nodeでは、固定集合外Vehicleのcurrent visitが`None`でも安全に通過できる
+- collector有効時にだけcurrent visitとvisit IDを通知用に確認する
+- prepareは累積台数やLink状態を変更する前に呼ぶ
+- applyはoutlink追加とincoming Vehicle削除後に呼ぶ
+- 信号、merge priority、通常RNG選択、容量判定などの既存交通処理は変更していない
+
+#### 25.21.6 BATCH通過接続
+
+最終処理順序は次のとおりである。
+
+1. service unitとcurrent visitの既存整合性確認
+2. 到着、clearance、通過可能性の確認
+3. collector有効時に、検証済みの`service_unit["visit_ids"][0]`を使ってprepare
+4. `_transfer_vehicle()`による物理通過
+5. `service_unit["vehicles"].pop(0)`
+6. `service_unit["visit_ids"].pop(0)`
+7. `transferred_vehicle_count`更新
+8. `active_inlink`更新
+9. prepareでrecordが返った場合だけ、関数ローカルのpending listへ追加
+10. service queue整理
+11. queue整理後、pending recordへ同じ`W.T`を設定
+
+補足：
+
+- pending listはcollector有効時だけ作成する
+- pending listの順序を通過順位として保存・解釈しない
+- queue整理とpending recordへのapplyを小さなローカル処理にまとめた
+- arrival wait、clearance stop、transfer後のcapacity block、正常終了の各return経路で、queue整理後にapplyする
+- service queueが最初から空の場合はpending recordがないため追加処理しない
+- queue整理前に例外が発生したbaselineは失敗扱いであり、例外を握りつぶさない
+- rollbackは追加していない
+- zero-service reformation等の既存BATCH挙動を変更していない
+
+#### 25.21.7 collector内部索引との責任分離
+
+実装確認の過程で、初回実装後に次の修正を行った。
+
+- 当初、`uxsim.py`からcollectorの非公開索引`_visit_record_by_vehicle_name`を直接参照する実装があった
+- Terminal差分確認でこれを検出した
+- 最終実装では、BATCH、FCFS clearanceあり、通常transferの3経路から直接参照を削除した
+- 固定集合への所属判定は`prepare_baseline_passage_recording()`へ集約した
+- collectorに新しい所属確認メソッドは追加していない
+- `uxsim.py`に`_visit_record_by_vehicle_name`という文字列が存在しないことをTerminalで確認した
+
+修正理由は次のとおりである。
+
+- collector内部実装をUXsim本体から隠す
+- 索引名変更による接続側の破損を防ぐ
+- 固定集合判定の責任をcollectorへ維持する
+- 同じ索引検索の重複を避ける
+
+#### 25.21.8 collector無効時の不変確認
+
+- 同一ネットワーク、同一Vehicle、同一seedの2つのWorldを使用
+- 一方は既定のcollector `None`
+- もう一方はcollector属性を明示的に`None`へ設定
+- Vehicleの完了状態、到着時刻または旅行時間、通過後Linkが一致
+- `W.rng.bit_generator.state`が一致
+- `W.order_control_rng.bit_generator.state`が一致
+- collector通知接続による追加RNG消費は確認されなかった
+- collector無効時は、World属性の読取とNone判定以外の通知処理を行わない構成である
+
+#### 25.21.9 固定集合外Vehicleの確認
+
+次の3経路で確認した。
+
+- BATCH
+- FCFS clearanceあり
+- 通常Node.transfer
+
+特に次を区別して記録する。
+
+- BATCHではcurrent visitとservice-unit visit IDを持つが、collector未登録のVehicleが正常通過
+- FCFS clearanceありではcurrent visitを持つが、collector未登録のVehicleが正常通過
+- 通常Node.transferではorder-control対象外Nodeでcurrent visitが`None`のcollector未登録Vehicleが正常通過
+
+いずれもcollector記録を作らず、物理通過を妨げなかった。
+
+#### 25.21.10 通過前の重大不整合
+
+- BATCH service unitの登録visit IDとcollector固定visitのvisit IDを意図的に不一致にした接続テストを実施
+- `prepare_baseline_passage_recording()`が物理通過前に`ValueError`を送出
+- Vehicleは元のinlinkと`incoming_vehicles`に残った
+- outlinkへ移動しなかった
+- collectorの`baseline_passage_timestep`も`None`のままだった
+
+#### 25.21.11 real_Wとfork_Wの分離
+
+- real_Wのcollector参照は`None`
+- `fork_W = real_W.copy()`を実行
+- copy完了後にfork_W側だけへcollectorを設定
+- real_W側は`None`のまま
+- fork側collectorへ固定visitを登録してもreal_W側にcollector結果は現れない
+- collectorはWorldへの逆参照を持たない
+- real_Wへcollectorを設定してからcopyする方式にはしていない
+
+#### 25.21.12 新規接続テスト
+
+`tests_order_control_baseline_collector_uxsim.py`に、次の11件がある。
+
+- `test_collector_disabled_traffic_and_rng_unchanged`
+- `test_b_arrival_notification_records_baseline_facts`
+- `test_b_arrival_notification_ignores_duplicate_and_outside_fixed_set`
+- `test_batch_passage_records_after_service_queue_finalize`
+- `test_batch_passage_ignores_outside_fixed_set_vehicle`
+- `test_fcfs_clearance_passage_records_original_visit`
+- `test_fcfs_clearance_passage_ignores_outside_fixed_set_vehicle`
+- `test_normal_transfer_passage_on_time_value_node`
+- `test_normal_transfer_passage_ignores_outside_fixed_set_vehicle`
+- `test_batch_passage_stops_before_physical_transfer_on_inconsistency`
+- `test_real_world_and_fork_collector_are_separated`
+
+#### 25.21.13 Terminalで確認したテスト結果
+
+次を、Terminalで直接実行して成功した。
+
+| コマンド | 結果 |
+|----------|------|
+| `python tests_order_control_baseline_collector.py` | 成功 |
+| `python tests_order_control_baseline_collector_uxsim.py` | 成功 |
+| `python tests_order_control_rng.py` | 成功 |
+| `python tests_order_control_current_visit_state.py` | 成功 |
+| `python tests_order_control_current_visit_arrival.py` | 成功 |
+| `python tests_fcfs_order_control_clearance_1.py` | 成功 |
+| `python tests_order_control_batch_service_queue_transfer.py` | 成功 |
+| `python tests_order_control_batch_transfer.py` | 成功 |
+| `python tests_order_control_batch_zero_service_reformation.py` | 成功 |
+| `python tests_order_control_batch_revisit_integration.py` | 成功 |
+| `python tests_order_control_n1_batch_vs_fcfs_revisit_equivalence.py` | 成功 |
+| `python tests_order_control_batch_t_trigger_level_2_body.py` | 成功（22 tests） |
+| `python -m py_compile uxsim/uxsim.py uxsim/order_control_baseline_collector.py tests_order_control_baseline_collector.py tests_order_control_baseline_collector_uxsim.py` | 成功 |
+| `git diff --check` | 問題なし |
+| 未追跡の新規接続テストについて`git diff --no-index --check` | 問題なし |
+| `grep -n '_visit_record_by_vehicle_name' uxsim/uxsim.py` | 0件 |
+
+#### 25.21.14 今回実装していないもの
+
+- FCFS clearanceなし通知
+- snapshot固定集合を自動構築する正式driver
+- T+6までの意思決定窓管理
+- right_of_entry_vehicle選定
+- right_of_entry_vehicle通過待ち
+- 二段階観測ドライバ
+- TVT候補確定
+- 到着順位
+- 確定順位ブロック
+- trade_rank
+- 買い手・売り手選定
+- 支払い・補償
+- Node別制度状態
+- 早期終了
+- 通過順位
+- BATCH固有の分析情報
+- 長期ログ
+- 全Node一括export
+- real_Wへのbaseline結果保存
+- 性能最適化
+- 診断スクリプト変更
+
+#### 25.21.15 第2回実装の完了判断
+
+- 第2回実装として予定した通知接続、接続テスト、collector無効時確認、real_Wとfork_Wの分離確認を実装した
+- Cursor報告後にTerminalで差分、private索引参照の不存在、追加テスト、全指定テスト、構文、形式を確認した
+- 第2回実装のコード上の作業は完了と判断する
+- 実装結果を整理したうえで本§25.21と進捗メモを更新したため、メモ更新を含めた第2回実装の完了条件を満たした
+- 本記録時点では新しいコミットへ保存されておらず、pushされていない
+
+#### 25.21.16 次の作業
+
+次の作業は、§25.15で想定した第3回実装相当の作業である。
+
+- 必要な追加テストの確認
+- 小規模fork実行診断
+- snapshot固定集合を構築する最小補助処理または診断用driver
+- collector接続後の設計確認
+
+ただし、次を明記する。
+
+- 「第3回実装」という名称は§25.15の実装順序上の便宜的名称であり、恒久的なフェーズ名ではない
+- 直ちに着手済みではない
+- 二段階観測ドライバ、TVT制度処理、Node状態、早期終了は、その後の別作業である
