@@ -3968,6 +3968,8 @@ class World:
         W.order_control_batch_level_2_resolved_count = 0
         W.order_control_batch_level_2_unresolved_count = 0
         W.order_control_batch_level_2_level_1_fallback_count = 0
+        # Fork-only baseline visit collector; real_W keeps None (see design memo §25.11).
+        W._order_control_baseline_collector = None
 
     def addNode(W, name: str, x: float, y: float, signal: list[float]=[0], signal_offset: float=0, signal_offset_old: float|None=None, flow_capacity: float|None=None, number_of_lanes: int=None, auto_rename=False, attribute=None, user_attribute=None, user_function=None, order_control_type="none", batch_size=1, transaction_case=None, order_control_eligible=False, order_control_batch_t_trigger_level=1, order_control_batch_virtual_horizon=30) -> Node:
         """

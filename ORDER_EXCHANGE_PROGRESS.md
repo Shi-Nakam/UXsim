@@ -4053,6 +4053,34 @@ Level 2: `call_count=46,428`、`resolved=46,390`、`unresolved=38`、`fallback=3
 - Cursor報告だけで確定せず、Terminal確認を行う
 - コミットと`git push`は分ける
 
+#### 2026-08-27：全World baseline collectorの第1回実装完了
+
+（上記「実装前設計」記録の続き。設計メモ **§25.20** を参照。）
+
+Git状態（本記録時点）：
+
+- ブランチ：`feature/intersection-order-control`
+- 直前の保存済みコミット：`59aeebd`
+- コミット名：`Document pre-implementation design for the order-control baseline collector`
+- リモートとの状態：作業開始時点では`origin/feature/intersection-order-control`と同期済み
+- 現在の未追跡ファイル：`diagnostics/order_control.zip`
+- 今回のcollector実装と本メモ更新は、まだ新しいコミットへ保存されていない
+
+実装内容（Terminalでコード・差分・テスト結果を確認済み）：
+
+- 新規作成：`uxsim/order_control_baseline_collector.py`、`tests_order_control_baseline_collector.py`
+- `uxsim/uxsim.py`へ`W._order_control_baseline_collector = None`を追加（コメント1行＋初期化1行）
+- 固定visit記録10項目、3索引（`_visit_records_by_primary_key`、`_visit_record_by_vehicle_name`、`_visit_records_by_node_name`）
+- snapshot登録、B到着記録、通過前確認、通過後設定、Node別読取、固定visit1件読取
+- `record_baseline_arrival`は固定集合外通知をpayload検証前に無視する最終処理順序へ修正済み
+- 通過前確認と通過後設定を分離
+- 新規単体テスト33件成功
+- 既存テスト（`tests_order_control_rng.py`、`tests_order_control_current_visit_state.py`、`tests_order_control_current_visit_arrival.py`）および Level 2 body 22 tests 成功
+- `python -m py_compile` および `git diff --check` 成功
+- UXsimの到着・通過通知は未接続
+- TVT制度、二段階観測、早期終了等は未実装
+- 次は第2回実装（通知接続とUXsim接続テスト）
+
 ### フェーズ4-6R設計目標（実装前・設計時点の記録）
 
 （設計時点の目標。実装は上記フェーズ4-6R節・設計メモ **§1H.21** を参照。）

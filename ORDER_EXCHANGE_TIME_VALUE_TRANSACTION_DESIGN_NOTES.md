@@ -3187,3 +3187,185 @@ Git操作は次の順序を守る。
 - push結果の確認
 
 コミットまでのコマンドと`git push`を同じコマンド列へ入れない。
+
+### 25.20 第1回実装の結果
+
+記録日：2026-08-27
+
+対象：§25.15・§25.19で定義した第1回実装
+
+状態：第1回実装は完了。UXsim通知接続は未実装。本節の記録時点では、実装結果と本節の記録はまだ新しいコミットへ保存されていない。
+
+§25.1〜§25.19は実装前設計の記録である。本節はTerminalでコード・差分・テスト結果を確認したうえでの実装結果記録である。
+
+#### 25.20.1 実装した範囲
+
+今回、次を実装した。
+
+- `uxsim/order_control_baseline_collector.py`を新規作成
+- 可変dataclass `OrderControlBaselineVisitRecord`
+- `OrderControlBaselineCollector`
+- 主索引
+- Vehicle別補助索引
+- Node別補助索引
+- snapshot固定visit登録
+- Bのbaseline到着記録
+- 通過前確認
+- 通過後のbaseline予想通過timestep設定
+- Node別読取
+- 固定visit1件読取
+- `World.__init__`の内部collector参照
+- collector単体テスト
+
+実装では、時間価値取引の根幹に関わる処理について、短さや高度なPython技法より、後から研究者が理解しやすい可読性を優先した。
+
+#### 25.20.2 固定visit記録の10項目
+
+- `vehicle_name`
+- `vehicle_id`
+- `node_name`
+- `inlink_name`
+- `visit_id`
+- `was_arrived_at_snapshot`
+- `baseline_arrival_timestep`
+- `arrival_tiebreaker`
+- `route_next_link_name`
+- `baseline_passage_timestep`
+
+補足：
+
+- Vehicle、Node、Link、Worldのオブジェクト参照は保持しない
+- `participates_in_order_exchange`は複製しない
+- 未取得は`None`で表す
+- 重複する取得済みboolは追加していない
+- dataclassは可変であり、`frozen`や`slots`は使用していない
+
+#### 25.20.3 3索引
+
+- `_visit_records_by_primary_key` — `(vehicle_name, visit_id)`から固定visit記録を取得
+- `_visit_record_by_vehicle_name` — `vehicle_name`から同一baselineで唯一の固定visit記録を取得
+- `_visit_records_by_node_name` — `node_name`から固定visit記録の一覧を取得
+
+補足：
+
+- 3索引は同じdataclassインスタンスを参照する
+- snapshot登録時だけ索引を変更する
+- 到着・通過記録では索引を変更しない
+- Node別一覧順には順位としての意味を持たせない
+
+#### 25.20.4 実装した操作
+
+| メソッド | 役割 |
+|----------|------|
+| `register_snapshot_visit` | snapshot固定visit登録と3索引構築 |
+| `record_baseline_arrival` | Bの到着3項目を1回記録（固定集合外は無視） |
+| `prepare_baseline_passage_recording` | 通過前確認（固定集合外Vehicleは`None`） |
+| `apply_baseline_passage_timestep` | 通過前確認済み記録へ通過timestep設定 |
+| `export_node_baseline_visits` | Node別プレーンdict list（未登録Nodeは空list） |
+| `get_baseline_visit_snapshot` | 固定visit1件のプレーンdict（未登録visitは`None`） |
+
+#### 25.20.5 到着通知の処理順序
+
+初回実装後、Terminal確認の過程で`record_baseline_arrival`の処理順序を修正した。最終的な順序は次のとおりである。
+
+1. 主キー検索に必要な`vehicle_name`と`visit_id`を確認
+2. 主キーでsnapshot固定visitを検索
+3. 固定集合外visitなら、到着payloadを検証せず無視
+4. 固定visitがある場合だけNode一致を確認
+5. Aへの二重到着を確認
+6. Bの二重到着または部分的既存状態を確認
+7. 新しい到着3項目を確認
+8. 到着3項目を同じ固定visit記録へ設定
+
+この順序にした理由は、固定集合外通知を安全に無視し、固定visitの重大な既存状態を新しい通知値のvalidationより先に検出するためである。
+
+#### 25.20.6 通過前確認と通過後設定
+
+- `prepare_baseline_passage_recording`は、最初にVehicle別索引で固定集合への所属を確認する
+- 固定集合外Vehicleでは、`visit_id`や`node_name`を検証せず`None`を返す
+- 固定集合内Vehicleでは、visit ID、Node、到着情報、route_next_link、二重通過を確認する
+- `apply_baseline_passage_timestep`は、通過前確認済みの記録へtimestepを設定する薄い処理である
+- 通過後処理では、固定集合検索や同じ確認を繰り返さない
+- この分離は、将来BATCHで物理通過前に確認し、service queue整理後に記録するための準備である
+- 今回はBATCHその他のUXsim通過処理へまだ接続していない
+
+#### 25.20.7 World内部参照
+
+- `World.__init__`へ`W._order_control_baseline_collector = None`を追加
+- 公開constructor引数は変更していない
+- `World.copy()`は変更していない
+- real_Wとforkへのcollector設定処理はまだ実装していない
+- UXsimの到着・通過処理への通知接続もまだ実装していない
+
+#### 25.20.8 validation方針
+
+- `visit_id`はboolではない正のint
+- `vehicle_id`はboolではない非負int
+- timestepはboolではない非負int
+- `arrival_tiebreaker`はboolではないintまたはfloat
+- 名前は空でないstr
+- 登録時に全入力を確認してから3索引を更新するため、入力validation失敗時の部分登録を防いでいる
+- 登録時に保証済みの不変条件は通知時に不要に重複確認しない
+- 二重到着、二重通過、Node不一致、visit ID不一致、未到着通過などの重大不整合は検出する
+
+#### 25.20.9 テスト結果
+
+新規の`tests_order_control_baseline_collector.py`に33件のテストがあり、Terminalで直接実行して成功した。
+
+| コマンド | 結果 |
+|----------|------|
+| `python tests_order_control_baseline_collector.py` | 成功 |
+| `python tests_order_control_rng.py` | 成功 |
+| `python tests_order_control_current_visit_state.py` | 成功 |
+| `python tests_order_control_current_visit_arrival.py` | 成功 |
+| `python tests_order_control_batch_t_trigger_level_2_body.py` | 成功（22 tests） |
+| `python -m py_compile uxsim/order_control_baseline_collector.py uxsim/uxsim.py tests_order_control_baseline_collector.py` | 成功 |
+| `git diff --check` | 問題なし |
+| 未追跡の新規2ファイルについて`git diff --no-index --check /dev/null uxsim/order_control_baseline_collector.py` および `tests_order_control_baseline_collector.py` | 問題なし |
+
+#### 25.20.10 Terminalで確認した実装範囲
+
+- `uxsim/uxsim.py`の変更はコメント1行とcollector参照初期化1行の計2行追加
+- `uxsim.py`内に`record_baseline_arrival`、`prepare_baseline_passage_recording`、`apply_baseline_passage_timestep`の呼出しはまだ存在しない
+- したがって、到着・通過通知は未接続
+- `diagnostics/order_control.zip`は未追跡のままで、今回の実装では触れていない
+
+#### 25.20.11 第1回実装の完了判断
+
+§25.19の完了条件1から16を、Terminal確認済みとして満たした。
+
+完了条件17（実装完了後、設計メモと進捗メモを更新する前に結果を整理）についても、実装結果を整理したうえで本§25.20と進捗メモを更新したため、満たした。
+
+本節の記録時点では、第1回実装および本記録はまだ新しいコミットへ保存されていない。コミット済み・push済みとは記載しない。
+
+#### 25.20.12 今回実装していないもの
+
+- UXsim到着通知接続
+- BATCH通過通知接続
+- FCFS clearanceあり通過通知接続
+- 通常`Node.transfer()`通過通知接続
+- FCFS clearanceなし通知
+- snapshot固定集合を自動構築するdriver
+- real_Wからforkを作成してcollectorを設定する処理
+- 二段階観測ドライバ
+- right_of_entry_vehicle選定
+- TVT制度処理
+- Node別制度状態
+- 早期終了
+- 通過順位
+- 支払い・補償
+- 性能測定
+
+#### 25.20.13 次の作業
+
+次の作業は、§25.15で定義した第2回実装である。
+
+- B到着通知接続
+- BATCH通過接続
+- FCFS clearanceあり通過接続
+- 通常`Node.transfer()`通過接続
+- UXsim接続テスト
+- collector無効時の交通結果とRNG不変確認
+- real_Wとforkの分離確認
+
+第2回実装へ直ちに着手済みではない。
