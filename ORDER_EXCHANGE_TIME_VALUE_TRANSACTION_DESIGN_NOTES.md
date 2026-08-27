@@ -2687,3 +2687,503 @@ other_vehicle_expected_arrival_timestep <= P - 1
 - 通過順位の研究分析用記録
 - service unit想定順と実処理順の比較記録
 - 将来BATCHによる共通baseline利用
+
+**2026-08-27更新：** §24のsnapshot固定集合と二段階観測設計を受け、collectorの内部記録、索引、通知処理、読取機能、実装順序を **§25** に整理した。collector本体とUXsim接続はまだ未実装である。
+
+---
+
+## 25. 全World baseline collectorの実装前設計
+
+記録日：2026-08-27
+
+対象：TVT向け全World baselineにおける到着・通過collector
+
+状態：実装前設計。collector本体、UXsim通知接続、テストは未実装。
+
+### 25.1 位置づけ
+
+- 記録日：2026-08-27
+- §24のsnapshot固定集合と二段階観測設計を、実装可能な形へ具体化した。
+- collector本体、UXsim通知接続、テストはまだ未実装である。
+- Cursor調査だけで確定せず、Terminalによる実コード確認を経て整理した。
+- 今回は実装前設計であり、実装結果ではない。
+
+今回の設計整理の出発点として、直前の保存済みGit状態は次のとおりである。
+
+```
+直前の保存済みコミット：
+86313cc
+
+コミット名：
+Document TVT baseline snapshot-fixed vehicle set, arrived and not-yet-arrived handling, and observation until right_of_entry_vehicle passage
+
+ブランチ：
+feature/intersection-order-control
+
+GitHubへのpush：
+完了済み
+
+push時の更新範囲：
+3690a8c..86313cc
+```
+
+本節の記録時点では、今回の設計更新はまだ新しいコミットへ保存されていない。
+
+### 25.2 collectorの責任
+
+collectorは、snapshot固定visitについて次の交通予測上の事実だけを保持する。
+
+- snapshot時点の固定visit識別情報
+- baseline予想到着timestep
+- arrival_tiebreaker
+- route_next_link
+- baseline予想通過timestep
+
+collectorは次を担当しない。
+
+- 意思決定窓判定
+- Aおよびtimestep T到着Vehicleの順位確定
+- right_of_entry_vehicleの選定
+- TVT候補Vehicleの確定
+- Node別の制度状態
+- 早期終了判定
+- 買い手・売り手選定
+- trade_rank
+- 支払い・補償
+- 通過順位
+- BATCH service unit分析
+- 長期分析ログ
+
+### 25.3 固定visit 1件分の情報
+
+固定visit 1件について、次を保持する方向である。
+
+- vehicle_name
+- vehicle_id
+- node_name
+- inlink_name
+- visit_id
+- snapshot時点で到着済みだったか
+- baseline予想到着timestep
+- arrival_tiebreaker
+- route_next_link_name
+- baseline予想通過timestep
+
+補足：
+
+- vehicle_idは、必要時に到着順位を作るために保持する。
+- 到着順位は、arrival timestep、arrival tiebreaker、vehicle IDから制度側が作る。
+- snapshot時点のA/B区分は、独立した不変情報として保持する。
+- Bがbaseline中に到着すると、AとBの両方でarrival timestepが非Noneになるため、この区分はarrival timestepだけから復元できない。
+- 到着情報、route_next_link、通過情報の未取得はNoneで表す。
+- 取得有無を表す重複したboolは追加しない。
+- fork内のVehicle、Node、Linkオブジェクトは保持しない。
+- participates_in_order_exchangeはcollectorへ複製しない。
+
+主キーは次である。
+
+```
+(vehicle_name, visit_id)
+```
+
+node_nameとinlink_nameは主キーへ含めず、記録項目および整合性確認に使う。
+
+### 25.4 内部記録形式
+
+固定visit 1件を、小さな可変のdataclassで表すことを第一候補とする。
+
+- frozenにはしない。
+- 初期実装ではslots等の最適化を入れない。
+- 10項目とNoneを含む型を明示しやすい。
+- B到着時の3項目更新と通過timestepの更新が読みやすい。
+- 複数索引とBATCH一時保持から同じ記録を参照しやすい。
+- プレーンな結果への変換をcollector内へ集約できる。
+
+dataclass採用は実装予定であり、まだコードへ反映していない。
+
+### 25.5 索引構造
+
+主索引：
+
+```
+(vehicle_name, visit_id) → 固定visit記録
+```
+
+Vehicle別補助索引：
+
+```
+vehicle_name → 同じ固定visit記録
+```
+
+Node別補助索引：
+
+```
+node_name → 同じ固定visit記録の一覧
+```
+
+補足：
+
+- 同一baselineでは、1 Vehicleにつき固定visitは最大1件である。
+- 3索引は記録を複製せず、同じ記録オブジェクトを参照する。
+- 索引はsnapshot登録時だけ構築する。
+- 到着時と通過時には索引を変更しない。
+- Vehicle別索引は、通常transferでcurrent visitを読む前の固定集合判定に使う。
+- Node別索引は、T+6時点のNode別読取に使う。
+- Node別一覧の登録順には、到着順位や通過順位としての意味を持たせない。
+
+### 25.6 snapshot登録
+
+snapshot登録時に、固定visitの記録と3索引を作る。
+
+Aについては登録時に次を保存する。
+
+- baseline予想到着timestepとして使うsnapshot時点の到着timestep
+- arrival_tiebreaker
+- route_next_link_name
+
+Bについては登録時に次をNoneとする。
+
+- baseline予想到着timestep
+- arrival_tiebreaker
+- route_next_link_name
+
+AとBのbaseline予想通過timestepはNoneから開始する。
+
+登録時には少なくとも次を確認する。
+
+- 主キーが未登録
+- 同一Vehicleが別の固定visitへ登録されていない
+- visit_idが正の整数
+- Aなら到着情報とroute_next_linkが存在する
+- Bなら到着情報は未記録
+- passage timestepは未記録
+
+Vehicle、Node、inlink、current visit、A/B判定、研究シナリオ条件の整合は、snapshot固定集合を構築するドライバ側で確認する方向である。
+
+登録時に保証した条件を、通知時に不要に重複検証しない。
+
+### 25.7 Bの到着記録
+
+Bの到着通知では、次を1回だけ記録する。
+
+- baseline予想到着timestep
+- arrival_tiebreaker
+- route_next_link_name
+
+補足：
+
+- 固定集合外visitの通知は無視する。
+- 主キーが一致するのにNodeが異なる通知は重大不整合とする。
+- Aへの到着通知は二重到着として重大不整合とする。
+- 到着済みBへの再通知も二重到着として重大不整合とする。
+- route_next_linkが必要時点でNoneなら重大不整合とする。
+- timestep Tの到着もcollectorには通常どおり記録する。
+- 意思決定窓内外はcollectorでは判定しない。
+
+### 25.8 通過記録
+
+通過記録は次の2処理に分ける。
+
+**通過前：**
+
+- snapshot固定visitか確認する
+- 通過Nodeが固定Nodeと一致するか確認する
+- 到着情報が存在するか確認する
+- route_next_linkが存在するか確認する
+- baseline予想通過timestepが未記録か確認する
+- 二重通過等があれば、Vehicleの物理的通過前に停止する
+
+**通過後：**
+
+- 通過前に確認済みの固定visit記録へ、現在のtimestepをbaseline予想通過timestepとして設定するだけ
+- 固定集合検索、visit ID確認、二重通過確認、到着確認、route_next_link確認は繰り返さない
+
+通過後の設定は、collector内の1件用の薄い内部処理へ統一する方向である。
+
+### 25.9 BATCHの通過記録
+
+BATCHでは次の順序とする方向である。
+
+1. 通過前に固定visitと未記録を確認する
+2. Vehicleの物理的通過を完了する
+3. service unitからVehicleを削除する
+4. service unitからvisit IDを削除する
+5. transferred_vehicle_countを更新する
+6. active_inlinkを更新する
+7. 確認済みの固定visit記録への参照を一時listへ追加する
+8. service queueを整理する
+9. queue整理後、一時list内の各記録へ同じW.Tを設定する
+
+補足：
+
+- 一時listはBATCH関数内のローカル変数とする。
+- collectorがNoneなら一時listを作らない。
+- listの並び順は通過順位として保存または解釈しない。
+- queue整理と通過記録を必ず同じ順序で行う小さな内部処理を設ける方向である。
+- service queueが空の早期returnでは、通過記録予定が存在しないため追加処理は不要である。
+- queue整理前に例外が起きたbaselineは全体を失敗扱いとし、部分的なcollector結果を利用しない。
+- 例外の握りつぶしやロールバックは初期実装へ入れない。
+
+### 25.10 通過接続対象
+
+初期collectorで対応する通過経路は次の3つである。
+
+- BATCH
+- FCFS clearanceあり
+- 通常Node.transfer
+
+FCFS clearanceなしは、回帰確認・デバッグ用であり、研究評価の正式FCFS経路ではないため初期対応へ含めない。必要になった場合は、将来追加可能である。
+
+### 25.11 Worldとの接続
+
+- World内部にcollector参照をNoneで常設する方向である。
+- constructorの公開引数にはしない。
+- real_WではNoneのままとする。
+- real_W.copy()完了後にfork側だけcollectorを設定する。
+- VehicleとNodeは、所属Worldへの既存参照を通じて同じcollectorへ到達する。
+- collectorはfork_Wへの逆参照を持たない。
+- collector無効時はWorld属性の読取とNone判定だけを追加する。
+- collector無効時には、通知情報の取得、名前の組立て、一時list生成、collector処理、追加RNG消費を行わない。
+
+### 25.12 読取機能
+
+初期実装の読取機能は次の2つに限定する。
+
+1. Node名を指定し、そのNodeの固定visitをプレーンなdictのlistとして取得する
+2. vehicle_nameとvisit_idを指定し、固定visit1件をプレーンなdictとして取得する
+
+補足：
+
+- Node別読取はT+6時点の制度判断に使う。
+- 1件読取はright_of_entry_vehicleの通過待ちに使う。
+- collector内部の変更可能な記録は制度側へ直接返さない。
+- 新しいプレーンなdictへ変換して返す。
+- 並び順は保証しない。
+- A/B、到着済みB、到着順位の絞り込みとsortは制度側が行う。
+- 全Node一括exportは初期実装へ含めない。
+- 完了Nodeを再読しない判断は制度側が行う。
+
+### 25.13 名称候補
+
+次を実装時の第一候補名とする。
+
+| 対象 | 第一候補名 |
+|------|-----------|
+| collector本体 | OrderControlBaselineCollector |
+| 固定visit記録 | OrderControlBaselineVisitRecord |
+| World内部参照 | _order_control_baseline_collector |
+| snapshot登録 | register_snapshot_visit |
+| B到着記録 | record_baseline_arrival |
+| 通過前確認 | prepare_baseline_passage_recording |
+| 通過後設定 | apply_baseline_passage_timestep |
+| Node別読取 | export_node_baseline_visits |
+| 1件読取 | get_baseline_visit_snapshot |
+| BATCH一時list | _pending_baseline_passage_records |
+| BATCH queue整理後処理 | _finalize_service_queue_and_apply_pending_baseline_passages |
+| A/B区分 | was_arrived_at_snapshot |
+| 予想到着timestep | baseline_arrival_timestep |
+| 予想通過timestep | baseline_passage_timestep |
+
+これらは実装時の第一候補名である。実装中に既存コードとの衝突や不明瞭さが判明した場合は見直し得る。right-holderという用語は使用しない。
+
+### 25.14 ファイル構成
+
+第一候補の初期ファイル構成は次である。
+
+- `uxsim/order_control_baseline_collector.py`
+  - dataclassによる固定visit記録
+  - collector本体
+  - プレーン結果への変換
+- `uxsim/uxsim.py`
+  - World内部collector参照
+  - 到着通知
+  - BATCH通過通知
+  - FCFS clearanceあり通過通知
+  - 通常transfer通過通知
+- `tests_order_control_baseline_collector.py`
+  - collector単体テスト
+- `tests_order_control_baseline_collector_uxsim.py`
+  - UXsim接続テスト
+
+初期の手動診断は、接続テスト後に必要性を判断する。
+
+### 25.15 実装順序
+
+次の3回に分ける想定とする。
+
+**第1回実装：**
+
+- collector内部記録
+- collector本体
+- World内部collector参照
+- collector単体テスト
+- UXsim通知接続はまだ行わない
+
+**第2回実装：**
+
+- B到着通知
+- BATCH通過接続
+- FCFS clearanceあり通過接続
+- 通常transfer通過接続
+- UXsim接続テスト
+- collector無効時の交通結果とRNG不変確認
+- real_Wとforkの分離確認
+
+**第3回実装：**
+
+- 必要な追加テスト
+- 小規模なfork実行診断
+- snapshot固定集合を構築する最小補助処理または診断用ドライバ
+- collector接続後の設計メモ更新
+
+二段階観測ドライバ、TVT制度処理、Node状態、早期終了は、この3回の後の別作業とする。
+
+### 25.16 初回実装へ含めないもの
+
+少なくとも次を含めない。
+
+- TVT制度ロジック
+- right_of_entry_vehicle選定
+- Aおよびtimestep T到着Vehicleの順位確定
+- trade_rank
+- 買い手・売り手選定
+- 支払い・補償
+- Node別制度状態
+- 早期終了
+- T+6とP待ちの二段階ドライバ
+- 通過順位
+- BATCH固有の分析情報
+- 長期ログ
+- 全Node一括export
+- FCFS clearanceなし通知
+- slots等の性能最適化
+- 過去baseline結果のreal_Wへの保存
+
+### 25.17 最小テスト
+
+**collector単体テスト**として、少なくとも次を実装予定とする。
+
+- A登録
+- B登録
+- 主キー重複
+- 同一Vehicle二重登録
+- B正常到着
+- 固定集合外到着の無視
+- Aへの到着通知を二重到着として停止
+- B二重到着を停止
+- 固定集合外通過を記録対象外にする
+- 正常な通過前確認
+- 未到着Bの通過を停止
+- 二重通過を停止
+- 通過後のtimestep設定
+- Node別読取がプレーンコピーを返す
+- 1件読取がプレーンコピーを返す
+- 読取結果を変更してもcollector内部が変わらない
+
+**UXsim接続テスト**として、少なくとも次を実装予定とする。
+
+- collector無効時の交通結果とRNG状態が従来と一致
+- B到着情報の記録
+- BATCHでqueue整理後に通過timestepを記録
+- FCFS clearanceありの成功処理後に通過timestepを記録
+- 通常transferで固定集合外Vehicleを安全に無視
+- real_Wのcollector参照がNoneのまま
+- forkだけでcollectorが有効
+
+T、T+6、P-1、Pの境界はcollector単体テストではなく、将来の制度ドライバテストで扱う。
+
+### 25.18 未実装・未確定事項
+
+- 実装中の名称の最終確認
+- snapshot固定集合を構築する正式な補助処理
+- 接続テスト用ネットワーク
+- node_name不一致時の具体的な例外メッセージ
+- collector接続後の小規模診断
+- 二段階観測ドライバ
+- TVT制度処理
+- 早期終了
+- 性能測定
+
+### 25.19 次回作業開始点と第1回実装の完了条件
+
+#### 次回作業開始点
+
+次に行う作業は、§25.15で定義した「第1回実装」である。
+
+第1回実装では、次だけを行う。
+
+- `uxsim/order_control_baseline_collector.py`を新規作成する
+- 可変dataclassによる`OrderControlBaselineVisitRecord`を実装する
+- `OrderControlBaselineCollector`を実装する
+- 主索引、Vehicle別補助索引、Node別補助索引を実装する
+- snapshot固定visitの登録処理を実装する
+- Bの到着記録処理を実装する
+- 通過前確認処理を実装する
+- 通過後のbaseline予想通過timestep設定処理を実装する
+- Node別読取処理を実装する
+- 固定visit1件の読取処理を実装する
+- `uxsim/uxsim.py`のWorld初期化へ、内部collector参照を`None`で追加する
+- `tests_order_control_baseline_collector.py`を新規作成する
+- collector単体テストを実装・実行する
+
+第1回実装では、次を行わない。
+
+- `Vehicle.record_order_control_node_arrival()`へのcollector通知接続
+- BATCHへのcollector通知接続
+- FCFS clearanceありへのcollector通知接続
+- 通常`Node.transfer()`へのcollector通知接続
+- `tests_order_control_baseline_collector_uxsim.py`の作成
+- snapshot固定集合をUXsimのforkから自動構築する正式な補助処理
+- 二段階観測ドライバ
+- TVT制度処理
+- 早期終了
+- 性能測定
+
+#### 第1回実装の完了条件
+
+次のすべてを満たした時点で、第1回実装を完了とする。
+
+1. `uxsim/order_control_baseline_collector.py`が作成されている
+2. 固定visit記録の10項目が実装されている
+3. 主索引、Vehicle別補助索引、Node別補助索引が実装されている
+4. 3索引が同じ固定visit記録を参照している
+5. snapshot登録処理が実装されている
+6. Bの到着記録処理が実装されている
+7. 通過前確認処理が実装されている
+8. 通過後のtimestep設定処理が実装されている
+9. Node別読取と固定visit1件読取が、内部記録ではなくプレーンな新しいdictを返す
+10. 読取結果を変更してもcollector内部記録が変化しない
+11. `uxsim/uxsim.py`のWorld初期化に内部collector参照が`None`で存在する
+12. UXsimの到着・通過処理には、まだcollector通知が追加されていない
+13. §25.17で定めたcollector単体テストがすべて成功する
+14. 既存テストへの意図しない影響がない
+15. TVT制度処理、二段階観測、早期終了を実装していない
+16. 実装結果をTerminalで確認している
+17. 実装完了後、設計メモと進捗メモを更新する前に結果を整理している
+
+#### 新しいチャットでの再開方法
+
+新しいチャットでは、最初に次を確認する。
+
+- `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES.md`の§24と§25
+- `ORDER_EXCHANGE_PROGRESS.md`の2026-08-27の記録
+- 最新コミット
+- `git status --short`
+- `uxsim/uxsim.py`のWorld初期化付近
+- 既存のorder-control関連テスト配置
+
+その後、§25.19に従って第1回実装のCursor指示文を作成する。
+
+Cursor報告だけで実装結果を確定せず、Terminalで変更内容とテスト結果を確認する。
+
+Git操作は次の順序を守る。
+
+- ステージング
+- ステージ済み差分の確認
+- コミット
+- 最新コミットと残存変更の確認
+- ここまでの結果に問題がないことを確認
+- 別の指示で`git push`
+- push結果の確認
+
+コミットまでのコマンドと`git push`を同じコマンド列へ入れない。

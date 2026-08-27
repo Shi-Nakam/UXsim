@@ -4033,6 +4033,26 @@ Level 2: `call_count=46,428`、`resolved=46,390`、`unresolved=38`、`fallback=3
 - TVT順位確定状態、collector、早期終了性能は未実装・未確認
 - 詳細は設計メモ **§24** を参照する
 
+#### 2026-08-27：全World baseline collectorの実装前設計
+
+- 直前の保存済みコミットは `86313cc` でpush済み
+- 今回の設計整理は未実装・未コミット
+- dataclass形式の固定visit記録を第一候補とした
+- 主索引、Vehicle別索引、Node別索引は同じ固定visit記録を参照する
+- 通過は通過前確認と通過後設定に分ける
+- BATCHはservice queue整理後に通過timestepをまとめて反映する
+- 初期対応はBATCH、FCFS clearanceあり、通常transfer
+- 読取機能はNode別と固定visit1件の2つ
+- collector本体を独立モジュールへ置く方向
+- 実装は3回に分ける想定
+- 詳細は設計メモ **§25** を参照する
+- 次回作業は設計メモ **§25.19** の第1回実装
+- 第1回実装はcollector本体、World内部参照、collector単体テストまで
+- UXsimの到着・通過通知接続は第2回実装
+- 新しいチャットでは§24、§25、§25.19、最新Git状態を確認して再開する
+- Cursor報告だけで確定せず、Terminal確認を行う
+- コミットと`git push`は分ける
+
 ### フェーズ4-6R設計目標（実装前・設計時点の記録）
 
 （設計時点の目標。実装は上記フェーズ4-6R節・設計メモ **§1H.21** を参照。）
