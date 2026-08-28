@@ -4149,6 +4149,88 @@ Git状態（本記録時点）：
 
 次の作業：§25.22に従い`snapshot`補助処理と`tests_order_control_baseline_snapshot.py`を実装する（未着手）。
 
+#### 2026-08-28：snapshot固定集合構築補助処理の実装・再レビュー・修正
+
+（設計メモ **§25.23** を参照。§25.22の実装前設計に従い実装し、慎重な欠陥探索レビューとMajor相当2件の修正、Terminal最終確認を経た記録。）
+
+Git状態（本記録時点）：
+
+- ブランチ：`feature/intersection-order-control`
+- 直前の保存済みコミット：`d09afe4`（`origin`へpush済み）
+- 今回のコードとメモは未コミット・未push
+- 未追跡ファイル：`uxsim/order_control_baseline_snapshot.py`、`tests_order_control_baseline_snapshot.py`、`diagnostics/order_control.zip`（zipには触れていない）
+
+実装内容（新規2ファイル）：
+
+- `uxsim/order_control_baseline_snapshot.py`
+- `tests_order_control_baseline_snapshot.py`
+- 既存ファイルは変更していない
+
+公開関数：
+
+- `register_snapshot_fixed_visits(fork_W, collector, *, target_node_names) -> int`
+- fork Worldのsnapshot状態からTVT対象Nodeの固定visitを読み取り、collectorへ登録する
+
+処理要点：
+
+- TVT対象Node名を一括事前検証（`order_control_eligible`かつ`order_control_type=="time_value"`のみ）
+- 到着済みVehicle（A）は各対象Nodeの`incoming_vehicles`から抽出
+- 未到着Vehicle（B）は各`inlink.vehicles`をFIFO順に走査して抽出
+- registration plan構築後、空の一時collectorへ全件登録し、collectorの正式`register_snapshot_visit()` validationを全件通過するか確認
+- 全件成功後のみ、同じregistration planを実collectorへ登録
+- 一時collectorのprivate索引は参照しない。一時collectorの内容を実collectorへコピーしない
+- 正常なA再出現（同一Node・visit・inlinkの二重コンテナ）と異常な重複を区別
+- 正常対象外Vehicle（end、abort、trip-end待ち、taxi、specified_route）は除外
+- `participates_in_order_exchange=False`は交通予測のため含める
+
+重複管理の修正経緯：
+
+- 初回実装では未到着Vehicleまで`arrived_vehicle_names`へ加えており、別Node重複を黙ってスキップする可能性があった
+- Terminal確認で検出し、`arrived_vehicle_names`（Aのみ）と`vehicle_name_to_planned_visit`（A/B全体）へ役割分離
+
+レビュー後修正（Major相当2件）：
+
+1. registration planにcollectorが拒否する値がある場合の実collector部分登録リスク → 一時collectorによる事前validationで防止
+2. `get_node()`の予期しない例外までNode不存在に誤変換 → 現行`World.get_node()`のNode不存在メッセージ一致時のみValueErrorへ変換、それ以外は元例外を再送出
+
+追加テスト：
+
+- 通常`exec_simulation()`経路での到着済みVehicle（A）登録
+- collector正式validation失敗時に実collectorが空のままであること
+- Node不存在時の`__cause__`保持
+- 予期しない`get_node`例外の非変換
+- Bの別Node再出現が黙ってスキップされないこと（人工異常状態ではLink不一致で停止）
+
+単体テスト：
+
+- `tests_order_control_baseline_snapshot.py`：最終59件（`grep -c '^def test_'`と`grep -c '^    test_.*,$'`の両方が59。重複テスト名なし）
+- 過去の54件・55件は途中時点または報告誤りであり、最終件数ではない
+
+Terminal確認（すべて成功）：
+
+- `python tests_order_control_baseline_snapshot.py`（59 tests）
+- `python tests_order_control_baseline_collector.py`
+- `python tests_order_control_baseline_collector_uxsim.py`
+- `python tests_order_control_rng.py`
+- `python tests_order_control_current_visit_state.py`
+- `python tests_order_control_current_visit_arrival.py`
+- `python tests_order_control_batch_revisit_integration.py`
+- `python tests_order_control_batch_t_trigger_level_2_body.py`（22 tests）
+- `python -m py_compile`（新規モジュール・テスト・collector・uxsim）
+- `git diff --check`、新規2ファイルの`git diff --no-index --check`
+
+欠陥探索レビュー結果：Critical 0、Major相当2（修正済み）、Minor 8（未対応分は正式driver設計時に再評価）
+
+非空collectorについて残る制約：
+
+- freshな空collectorに対して一度だけ呼ぶ前提
+- 非空collectorや差し替えcollector実装固有の失敗については原子性を保証しない
+- rollbackなし
+
+未実装：正式driver、小規模fork診断の恒久ファイル、二段階観測、TVT制度処理、right_of_entry_vehicle選定、早期終了等
+
+次の作業：小規模fork診断または最小driverの検討（§25.15第3回実装相当の残り。real_W→fork_W、collector設定、`register_snapshot_fixed_visits()`実行、fork進行、real_W不変確認、固定集合外Vehicle非追加確認）
+
 ### フェーズ4-6R設計目標（実装前・設計時点の記録）
 
 （設計時点の目標。実装は上記フェーズ4-6R節・設計メモ **§1H.21** を参照。）

@@ -4035,3 +4035,409 @@ collector本体へ追加しない理由：
 - timestep T到着境界テスト
 
 まだ実装へ着手済みではない。
+
+### 25.23 snapshot固定集合構築補助処理の実装結果
+
+記録日：2026-08-28
+
+本節は、§25.22の実装前設計に従って実装した結果、慎重な欠陥探索レビュー、レビュー後の修正、およびTerminalでの最終確認を記録する。§25.22は実装前設計として残す。
+
+#### 25.23.1 実装した範囲
+
+- 新規作成：`uxsim/order_control_baseline_snapshot.py`
+- 新規作成：`tests_order_control_baseline_snapshot.py`
+- 既存ファイルは変更していない
+- 公開関数：`register_snapshot_fixed_visits(fork_W, collector, *, target_node_names) -> int`
+- TVT対象Nodeの一括事前検証
+- snapshot時点で到着済みのVehicleの抽出・検証
+- snapshot時点で未到着のVehicleの抽出・検証
+- 全候補検証後のcollector登録
+- 同一Vehicleの重複検出
+- 正常な対象外Vehicleの除外
+- timestep T到着境界テスト
+
+#### 25.23.2 公開関数の責任
+
+`register_snapshot_fixed_visits()`が担当すること：
+
+- fork Worldの現在状態をsnapshotとして読む
+- 渡されたTVT対象Node名を検証する
+- 到着済み・未到着の固定visit登録予定データを作る
+- 登録予定データをcollectorの正式validationで全件事前確認する
+- 全検証成功後に実collectorへ登録する
+- 総登録件数をintで返す
+
+担当しないこと：
+
+- real_Wのcopy
+- fork baselineで実際に使用するcollectorの作成とforkへの設定
+- forkの仮想進行
+- 二段階観測
+- right_of_entry_vehicle選定
+- TVT制度処理
+- 早期終了
+- 支払い・補償
+- Node別制度状態
+- 分析ログ
+
+#### 25.23.3 対象Nodeの事前検証
+
+実装した検証：
+
+- `target_node_names`が文字列単体ではなく、Node名の反復可能な集合である
+- 空集合を拒否
+- 非文字列を拒否
+- 空文字列を拒否
+- Node名重複を拒否
+- `fork_W.get_node(node_name)`を正式なNode取得経路として使用
+- 存在しないNode名を、元例外をcauseとして保持したValueErrorへ変換
+- `order_control_eligible=True`を必須とする
+- `order_control_type="time_value"`を必須とする
+- `none`、`fcfs`、`batch`を拒否
+- 全Nodeの検証後にVehicle候補調査へ進む
+
+Node名は、time_value設定時に得たNode一覧から一度だけ作り、forkへ引き継ぐ設計である。
+
+#### 25.23.4 get_node例外変換のレビュー後修正
+
+初回実装では、`fork_W.get_node()`が送出するすべてのExceptionを、Node不存在を表すValueErrorへ変換していた。
+
+慎重な欠陥探索レビューで、Node不存在以外の内部障害まで誤ってNode不存在と表示する可能性を検出した。
+
+最終実装では次のように修正した：
+
+- 現行`World.get_node()`がNode不存在時に生成するメッセージと元例外メッセージを比較する
+- Node不存在メッセージと一致する場合だけValueErrorへ変換する
+- 元例外を`__cause__`として保持する
+- Node不存在以外の予期しない例外は、元の型とメッセージのまま再送出する
+- テストでは、存在しないNode名のcause保持と、予期しないRuntimeErrorの非変換を確認した
+
+#### 25.23.5 到着済みVehicleの処理
+
+到着済みVehicleは、各対象Nodeの`incoming_vehicles`から抽出する。
+
+主な確認内容：
+
+- `state=="run"`
+- current visitが存在
+- 必須キーが存在
+- visit IDがboolではない正のint
+- current visitのvisit IDとVehicleのvisit IDが一致
+- current visitのNodeが対象Node
+- current visitのinlinkが対象Nodeのinlink
+- Vehicleの現在Linkがcurrent visitのinlink
+- Vehicleがそのinlinkの`vehicles`にも存在
+- arrival_timeとarrival_tiebreakerが両方存在
+- route_next_linkが存在
+- route_next_linkが対象Nodeから始まる
+- 到着timestepがsnapshotのTより前
+
+登録値として、§25.22で定めた10項目を設定する。
+
+通常の`exec_simulation()`経路だけでVehicleを対象Nodeへ到着させ、到着済みVehicleとして登録する統合テストを追加した。Terminalで新規モジュール全体とA処理を確認した。
+
+このテストでは次を確認している：
+
+- Vehicleは`incoming_vehicles`と元の`inlink.vehicles`の両方に存在
+- current visitの到着情報が設定済み
+- `was_arrived_at_snapshot is True`
+- baseline到着timestepが実際の到着timestepと一致
+- `route_next_link_name`が正しい
+- 登録件数は1件
+- `record_order_control_node_arrival()`をテストから直接呼ばず、通常のUXsim実行経路を使用
+
+#### 25.23.6 未到着Vehicleの処理
+
+未到着Vehicleは、各対象Nodeの各`inlink.vehicles`をFIFO順に走査して抽出する。
+
+主な確認内容：
+
+- `state=="run"`
+- Vehicleの現在Linkが走査中inlink
+- current visitが存在
+- 必須キーが存在
+- visit IDが正しい
+- current visitのNodeが対象Node
+- current visitのinlinkが走査中inlink
+- arrival_timeとarrival_tiebreakerが両方None
+- 対象Nodeのincoming_vehiclesには存在しない
+
+登録時には、snapshot時点のroute_next_linkを保存せず、次をNoneとする：
+
+- baseline_arrival_timestep
+- arrival_tiebreaker
+- route_next_link_name
+- baseline_passage_timestep
+
+#### 25.23.7 正常な対象外Vehicle
+
+次を固定集合から正常に除外する：
+
+- `state=="end"`
+- `state=="abort"`
+- trip-end待ち
+- taxi mode
+- specified_routeあり
+
+`participates_in_order_exchange=False`は除外せず、交通予測のため固定集合へ含める。
+
+#### 25.23.8 全候補検証後の登録
+
+最終実装では、次の三段階になった。
+
+第1段階：
+
+- 全対象Nodeを検証
+- 全到着済み・未到着候補を検証
+- 登録予定dictのlistを構築
+- 同一Vehicle重複を検出
+- 実collectorは変更しない
+
+第2段階：
+
+- 空の一時的な`OrderControlBaselineCollector`を作る
+- 登録予定データを一時collectorへ全件登録する
+- collector自身の正式な`register_snapshot_visit()` validationを全件通過するか確認する
+- 失敗した場合は例外をそのまま伝播し、実collectorは変更しない
+- 一時collectorのprivate索引は参照しない
+
+第3段階：
+
+- 一時collectorへの全件登録が成功した場合だけ、同じ登録予定データを実collectorへ登録する
+
+その他：
+
+- snapshot側へcollectorの型validationを全面複製していない
+- 一時collectorの内容を実collectorへコピーしていない
+- 実collectorへの登録には元のregistration planを使用する
+- registration planはcollectorの引数名に対応するプレーンdict
+- 専用dataclassは追加していない
+
+#### 25.23.9 部分登録リスクのレビュー後修正
+
+慎重な欠陥探索レビューで、初回実装には次の問題があった：
+
+- registration planの後半にcollectorが拒否する値がある場合、実collectorへの前半登録だけが残る可能性があった
+
+具体的な確認テスト：
+
+- 1件目は正常な到着済みVehicle
+- 2件目は`arrival_tiebreaker=True`
+- snapshot側では登録予定データまで作成できる
+- collectorはboolのarrival_tiebreakerを拒否する
+- 一時collectorで失敗する
+- 実collectorには1件目を含め何も登録されない
+
+修正後は、registration planに起因するcollector validation失敗では、実collectorが変更されない。
+
+#### 25.23.10 同一Vehicleの重複管理
+
+最終実装の2構造：
+
+`arrived_vehicle_names`
+
+- `incoming_vehicles`から到着済みとして登録予定へ追加したVehicle名だけを保持
+- 同じNode、同じvisit、同じinlinkの走査で再び見つかった到着済みVehicleを、未到着として二重登録しないために使う
+- 未到着Vehicleは追加しない
+
+`vehicle_name_to_planned_visit`
+
+- 到着済み・未到着の両方を含む全登録予定Vehicleを管理
+- Node名、visit ID、inlink名を保持
+- 全対象Nodeを通じた重複検出に使用
+
+実装確認経緯：
+
+- 初回実装では、未到着Vehicleまで`arrived_vehicle_names`へ加えていた
+- Terminal確認で、変数名と役割の不一致、および別Node重複を黙ってスキップする可能性を検出した
+- 修正後は役割を分離した
+- 同じNode、同じvisit、同じinlinkのA再出現だけを正常にスキップ
+- 別Node、別visit、別inlinkでの再出現はValueError
+- incoming_vehicles内の同一Vehicle重複もValueError
+- Bの別Node再出現は`arrived_vehicle_names`によって黙ってスキップされず、人工的な異常状態テストではLink不一致により停止した
+- このLink不一致は重複検出より直接的な物理状態不整合であり、正常な停止である
+
+#### 25.23.11 内部ヘルパー
+
+少なくとも次の内部処理と役割を持つ：
+
+- `_resolve_and_validate_target_nodes`：対象Node名全体の検証とNode取得
+- `_build_snapshot_visit_registration_plan`：到着済み・未到着の登録予定全体を構築
+- `_ordered_inlinks_for_node`：`Node.inlinks`の挿入順でinlinkを返す
+- `_should_skip_non_fixed_set_vehicle`：正常な研究対象外Vehicleの判定
+- `_record_planned_vehicle_name`：全登録予定Vehicleの重複検出
+- `_handle_arrived_vehicle_name_seen_on_inlink`：到着済みVehicleの正常な二重コンテナ出現と異常な再出現を区別
+- current visit、visit ID、arrival情報の小さな検証ヘルパー
+- 到着済み・未到着の登録予定dictを作る処理
+
+ヘルパー数が増えたが、Node検証、重複管理、current visit検証などの異なる責任を明確にするためであり、制度処理を抽象化したものではない。正しく動くことを最優先とし、その範囲で研究者が後からA/B分類、検証、重複防止、登録順序を理解しやすい可読性を優先した。
+
+#### 25.23.12 登録順序と戻り値
+
+登録予定データの順序：
+
+1. `target_node_names`の入力順
+2. 各Nodeで到着済みVehicleを先に調査
+3. `Node.inlinks`の既存挿入順
+4. 各inlink内では`inlink.vehicles`のFIFO順
+
+この順序に到着順位、通過順位、trade_rankなどの制度上の意味を持たせない。
+
+戻り値は、登録した固定visitの総件数intである。
+
+#### 25.23.13 timestep T境界
+
+次のテストがTerminalで成功した：
+
+- snapshot時点の`fork_W.T == 10`
+- timestep 10は未処理
+- Vehicleのarrival情報はNone
+- 未到着Vehicleとして登録
+- timestep 10を通常の`exec_simulation()`で1回処理
+- 実行後`fork_W.T == 11`
+- `baseline_arrival_timestep == 10`
+- `was_arrived_at_snapshot is False`
+
+`record_order_control_node_arrival()`をテストから直接呼ばず、通常のUXsim実行経路を使った。
+
+#### 25.23.14 単体テスト
+
+`tests_order_control_baseline_snapshot.py`には、最終的に59件のテストがある。
+
+Terminalで次を確認した：
+
+- `grep -c '^def test_'`の結果が59
+- `grep -c '^    test_.*,$'`の結果が59
+- 重複したテスト関数名は存在しない
+
+過去の途中時点または報告誤りとして54件、55件が記録されていたが、最終件数は59件である。
+
+主な試験分類：
+
+- 対象Node入力検証
+- Node不存在のcause保持
+- 予期しないget_node例外の非変換
+- 到着済みVehicle
+- 通常exec経路での到着済みVehicle
+- 未到着Vehicle
+- A/B組合せ
+- 複数inlink
+- 複数time_value Node
+- 正常な到着済みVehicleの二重コンテナ出現
+- 別Node・別visit・別inlinkの異常な再出現
+- Bの別Node再出現を黙ってスキップしないこと
+- incoming内の重複
+- current visit不整合
+- arrival情報不整合
+- route_next_link不整合
+- 正常な対象外Vehicle
+- `participates_in_order_exchange=False`の包含
+- Vehicle検証失敗時に実collectorが空
+- collector正式validation失敗時に実collectorが空
+- timestep T境界
+- 登録後の固定集合不変
+
+#### 25.23.15 Terminal確認結果
+
+次をTerminalで直接実行し、すべて成功した：
+
+- `python tests_order_control_baseline_snapshot.py`：成功、59 tests
+- `python tests_order_control_baseline_collector.py`：成功
+- `python tests_order_control_baseline_collector_uxsim.py`：成功
+- `python tests_order_control_rng.py`：成功
+- `python tests_order_control_current_visit_state.py`：成功
+- `python tests_order_control_current_visit_arrival.py`：成功
+- `python tests_order_control_batch_revisit_integration.py`：成功
+- `python tests_order_control_batch_t_trigger_level_2_body.py`：成功、22 tests
+- `python -m py_compile uxsim/order_control_baseline_snapshot.py tests_order_control_baseline_snapshot.py uxsim/order_control_baseline_collector.py uxsim/uxsim.py`：成功
+- `git diff --check`：問題なし
+- 新規2ファイルの`git diff --no-index --check`：問題なし
+- テスト関数数59
+- TESTS一覧数59
+- 重複テスト名なし
+
+新規モジュール全体、A/B処理、重複管理、追加テスト、テスト件数、全指定テスト、構文、形式をTerminalで確認した。
+
+#### 25.23.16 非空collectorに関する制約
+
+- 初期実装は、freshな空collectorに対して一度だけ呼ぶことを前提とする
+- collectorが空かどうかを調べる公開APIは現在ない
+- snapshot補助処理からcollectorのprivate索引を直接参照していない
+- registration planに起因するcollector validation失敗は、一時collectorによって実collector登録前に検出する
+- 非空collectorや外部から差し替えられたcollector実装に固有の失敗については、実collector登録の原子性を保証しない
+- rollbackは実装していない
+- この呼出規約は正式driver実装時にも維持する必要がある
+
+#### 25.23.17 慎重な欠陥探索レビューの結果
+
+通常の実装報告とテスト確認の後に、改めて欠陥を探す目的のレビューを実施した。
+
+レビュー結果：
+
+- Critical：0件
+- Major相当：2件
+- Minor：8件
+
+Major相当として検出・修正したもの：
+
+1. collector正式validationの途中失敗による実collector部分登録の可能性
+2. `get_node()`の予期しない例外までNode不存在に誤変換する問題
+
+修正後、Terminalでコードと追加テストを確認し、全指定テストを再実行して成功した。
+
+Minor指摘のうち、今回対応しなかったもの：
+
+- `np.str_` Node名対応
+- 異常なTまたはDELTATの追加validation
+- 壊れたcurrent visit値に対する型検証の全面追加
+- 同名別Nodeまたは同名別Linkへの過剰な防御
+
+これらは、正常なWorld生成や登録時保証へ委ねるか、正式driver設計時に必要性を再評価する。
+
+#### 25.23.18 今回実装していないもの
+
+- real_W.copy()を行う正式driver
+- fork側へcollectorを設定する正式driver
+- 小規模fork診断の恒久ファイル
+- 二段階観測driver
+- T+6意思決定窓
+- right_of_entry_vehicle選定
+- right_of_entry_vehicle通過待ち
+- TVT候補確定
+- 到着順位
+- 確定順位ブロック
+- trade_rank
+- 買い手・売り手選定
+- 支払い・補償
+- Node別制度状態
+- 早期終了
+- 通過順位
+- 長期ログ
+- real_Wへのbaseline結果保存
+- 性能最適化
+
+#### 25.23.19 完了判断と次の作業
+
+- §25.22で予定したsnapshot固定集合構築補助処理と単体テストは実装済み
+- 初回実装後に慎重な欠陥探索レビューを実施した
+- Major相当2件を修正した
+- Terminalでコード、重複管理、一時collector、例外変換、59件のテスト、既存テスト、構文、形式を確認済み
+- コード上の実装は完了と判断する
+- 実装結果と再レビュー結果を整理したうえで本§25.23と進捗メモを更新したため、メモ更新を含む完了条件を満たした
+- 本記録時点では未コミット・未push
+
+次の作業は、次の小規模fork診断または最小driverの検討である：
+
+- real_Wを作成してtimestep Tまで進める
+- T処理開始前にfork_Wを作る
+- fork側だけcollectorを設定する
+- time_value設定時に得たNode名一覧を渡す
+- `register_snapshot_fixed_visits()`を実行する
+- forkを数timestep進める
+- 到着・通過記録を確認する
+- real_W不変を確認する
+- 固定集合外Vehicleがcollectorへ追加されないことを確認する
+
+これは、§25.15で便宜的に第3回実装相当としていた残りの作業である。
+
+二段階観測やTVT制度処理は、その後の別作業である。
