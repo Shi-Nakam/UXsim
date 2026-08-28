@@ -4441,3 +4441,381 @@ Minor指摘のうち、今回対応しなかったもの：
 これは、§25.15で便宜的に第3回実装相当としていた残りの作業である。
 
 二段階観測やTVT制度処理は、その後の別作業である。
+
+### 25.24 snapshot固定集合の小規模fork統合診断
+
+記録日：2026-08-29
+
+#### 25.24.1 診断の位置づけ
+
+- 新規作成：`diagnostics/order_control/tvt_baseline_snapshot_fork_probe.py`
+- 回帰テストではなく、正式driver実装前の恒久的な統合診断
+- real_Wからfork_Wを作る
+- fork側だけcollectorを設定する
+- `register_snapshot_fixed_visits()`でsnapshot固定集合を登録する
+- fork側だけを進める
+- baseline到着・通過通知を確認する
+- 固定集合外Vehicleの到着・通過通知がcollectorに無視されることを確認する
+- real_W不変と参照分離を確認する
+- TVT制度処理そのものは実装・再現しない
+
+実行方法：
+
+```text
+python diagnostics/order_control/tvt_baseline_snapshot_fork_probe.py
+```
+
+#### 25.24.2 小規模World
+
+- 構成：`orig --[in]--> junction --[out]--> dest`
+- `junction`はVehicleの目的地ではない
+- 単車線
+- `in`と`out`はそれぞれ長さ200、自由流速度20
+- `deltan=1`
+- `DELTAT=1`
+- `tmax=100`
+- `random_seed=0`
+- junctionは作成時にeligibleかつ`order_control_type="none"`
+- その後`set_order_control_for_nodes()`で`time_value`へ設定
+
+#### 25.24.3 TVT対象Node一覧の引継ぎ
+
+- `set_order_control_for_nodes()`の戻り値を`configured_tvt_nodes`として受け取る
+- その戻り値から`tvt_target_node_names`を一度だけ作る
+- 同じNode集合を人が二度入力しない
+- real_WのNodeオブジェクトをfork_Wへ渡さない
+- Node名一覧を`register_snapshot_fixed_visits()`へ渡す
+- fork側ではfork自身のNodeを取得する
+
+#### 25.24.4 snapshot時点
+
+- `SNAPSHOT_T = 20`
+- real_Wをtimestep 0から19まで処理
+- snapshot時点では`real_W.T == 20`
+- timestep 20は未処理
+- copy直後も`fork_W.T == 20`
+- `W.T == T - 1`という解釈は採用しない
+
+#### 25.24.5 Vehicle構成
+
+- `arrived_fixed_vehicle`
+  - 出発時刻0
+  - snapshot時点で到着済み・未通過
+  - 固定集合へ含む
+- `not_yet_arrived_fixed_vehicle`
+  - 出発時刻11
+  - snapshot時点でinlink上・未到着
+  - 固定集合へ含む
+- `outside_fixed_vehicle`
+  - snapshot登録後、fork側だけへ追加
+  - 固定集合へ含めない
+- `outlink_blocker`
+  - 到着済みVehicleをsnapshotまで未通過に保つ診断専用補助Vehicle
+  - 固定集合へ含めない
+
+#### 25.24.6 到着済みVehicle
+
+snapshot時点で次を確認した：
+
+- `incoming_vehicles`に存在
+- `in.vehicles`にも存在
+- current visitのNodeはjunction
+- current visitのinlinkはin
+- arrival_timeとarrival_tiebreakerは設定済み
+- route_next_linkはout
+- arrival timestepは10
+- snapshot T=20より前
+- まだjunctionを通過していない
+
+登録後とfork進行後のcollector結果：
+
+- `was_arrived_at_snapshot is True`
+- `baseline_arrival_timestep == 10`
+- `baseline_passage_timestep == 21`
+
+#### 25.24.7 未到着Vehicle
+
+snapshot時点で次を確認した：
+
+- `in.vehicles`に存在
+- `incoming_vehicles`には存在しない
+- current visitのNodeはjunction
+- current visitのinlinkはin
+- arrival_timeとarrival_tiebreakerはNone
+- snapshot固定集合へ未到着Vehicleとして登録
+
+fork進行後のcollector結果：
+
+- `was_arrived_at_snapshot is False`
+- `baseline_arrival_timestep == 21`
+- `baseline_passage_timestep == 22`
+
+timestepの説明：
+
+- snapshotは`W.T==20`でtimestep 20未処理
+- forkの1 step目でtimestep 20を処理
+- timestep 21の処理中にbaseline arrival timestep 21を記録
+- timestep 22にbaseline passageを記録
+
+#### 25.24.8 snapshot固定集合登録
+
+- fork側のみへfreshな`OrderControlBaselineCollector`を設定
+- real_WのcollectorはNoneのまま
+- `register_snapshot_fixed_visits()`を1回だけ実行
+- Node名一覧はtime_value設定結果から得た一覧をそのまま使用
+- 登録件数は2
+- 登録対象は到着済みVehicleと未到着Vehicle
+- ブロッカーと固定集合外Vehicleは登録されない
+- collectorの公開APIだけで結果を確認
+- collectorはWorldへの逆参照を持たない
+
+#### 25.24.9 ブロッカー初期実装の問題
+
+初回実装には次の問題があった：
+
+- `state=="run"`なのに`VEHICLES_RUNNING`へ登録されていなかった
+- `carfollow()`を受けず、`Vehicle.update()`だけを受けていた
+- 解除時に`x`と`x_old`だけを終端へ移し、`x_next`を更新していなかった
+- 不整合な状態による一時的な入口開放を利用して診断が成功した可能性があった
+
+この初期方式は採用しない。
+
+#### 25.24.10 最終ブロッカー方式
+
+最終方式：
+
+- 診断専用にoutlink入口へ手動配置するrun Vehicle
+- `W.VEHICLES`に存在
+- `W.VEHICLES_LIVING`に存在
+- `W.VEHICLES_RUNNING`に存在
+- `outlink.vehicles`に存在
+- `state=="run"`
+- `link is outlink`
+- `x`、`x_old`、`x_next`、`v`、`move_remain`を0にする
+- 通常の`carfollow()`と`Vehicle.update()`を受ける
+- `Vehicle.update()`末尾の診断用`user_function`で入口位置へ戻す
+- fork作成後、fork側だけ`user_function=None`として固定を解除
+- 瞬間移動は行わない
+- 解除後は通常の`carfollow()`と`update()`で前進
+- 診断終了時には正常にtrip-endし、`state=="end"`となった
+- `VEHICLES_RUNNING`と`VEHICLES_LIVING`から削除済み
+- `link is None`
+
+#### 25.24.11 ブロッカー方式の限界
+
+- ブロッカーは診断専用の人工配置
+- 通常の`Node.generate()`や`Node.transfer()`によるLink進入ではない
+- Linkの`cum_arrival`、`vehicles_enter_log`、`capacity_in_remain`などを標準進入と同一に再現するものではない
+- Aをsnapshotまで未通過に保つための診断補助
+- 正式driverの処理ではない
+- `outlink.u=0`は`set_traveltime_instant()`の除算で問題になるため採用しなかった
+
+#### 25.24.12 固定集合外Vehicle
+
+- snapshot固定集合登録後にfork側だけへ追加
+- real_Wには存在しない
+- 通常のUXsim経路でinlinkへ進入
+- current visitを通常経路で作成
+- junctionへ通常経路で到着
+- junctionを通常経路で通過
+- current visitやarrival情報を診断側で直接書き換えていない
+- inlink進入を確認
+- 対象Node到着を確認
+- 対象Node通過を確認
+- 到着timestepは30
+- 到着直後に主キーでcollector recordがNone
+- 通過直後にも主キーでcollector recordがNone
+- Node別exportにVehicle名が存在しない
+- Node別export件数は2件のまま
+- 到着通知と通過通知が固定集合外Vehicleを無言で無視した
+
+#### 25.24.13 fixed set外確認のレビュー後補強
+
+慎重な欠陥探索レビューで、初回診断はoutside Vehicleがinlinkへ入っただけで成功していた。
+
+その状態では次を未確認だった：
+
+- 対象Node到着通知の無視
+- 対象Node通過通知の無視
+
+レビュー後に次を追加した：
+
+- inlink進入、Node到着、Node通過を別々に履歴管理
+- 到着直後の主キーrecord不存在確認
+- 通過直後の主キーrecord不存在確認
+- Node別exportの名前不存在と件数不変
+- これらすべてをfork loop終了条件へ追加
+- fork進行は3 stepから12 stepへ延長
+- 最終`fork_W.T == 32`
+
+#### 25.24.14 fork進行
+
+- fork側だけを1 timestepずつ進める
+- `MAX_FORK_STEPS=30`
+- 実際は12 stepで完了
+- 最終`fork_W.T == 32`
+- 上限未達時はVehicle状態、collector状態、outside進捗を含むAssertionError
+- 無限loopにはしない
+
+終了条件：
+
+- Aのbaseline passage記録済み
+- Bのbaseline arrival記録済み
+- Bのbaseline passage記録済み
+- outsideのinlink進入済み
+- outsideの対象Node到着済み
+- outsideの対象Node通過済み
+- outside到着後のcollector非登録確認済み
+- outside通過後のcollector非登録確認済み
+- Node別export件数不変
+
+#### 25.24.15 real_W不変
+
+比較項目：
+
+World：
+
+- T
+- TIME
+- W.rng状態
+- W.order_control_rng状態
+- collectorがNone
+
+Vehicle：
+
+- state
+- link名
+- x
+- link_arrival_time
+- order_control_visit_id
+- current visit要点
+- `has_user_function`
+- ブロッカーについては`x_old`、`x_next`、`v`、`move_remain`
+
+Node：
+
+- junctionのincoming Vehicle名
+
+Link：
+
+- inとoutのVehicle名順
+- outlink速度
+
+次を確認した：
+
+- fork作成直前とfork進行完了後のreal_W snapshotが完全一致
+- real_Wをfork作成後に進めていない
+- outside Vehicleをreal_Wへ追加していない
+- real_W側ブロッカーのuser_functionは残った
+- `real_world_unchanged is True`
+
+#### 25.24.16 参照分離
+
+次を確認した：
+
+- real_Wとfork_Wは別オブジェクト
+- junction Nodeは別オブジェクト
+- in Linkとout Linkは別オブジェクト
+- 到着済みVehicleは別オブジェクト
+- 未到着Vehicleは別オブジェクト
+- ブロッカーは別オブジェクト
+- fork Vehicleのlinkはfork側Link
+- fork current visitのNodeとinlinkはfork側オブジェクト
+- fork側だけcollectorを保持
+- collectorはWorldへの逆参照を持たない
+- `reference_independence is True`
+
+#### 25.24.17 最終実行結果
+
+最終出力の要点：
+
+- `snapshot_timestep = 20`
+- `registered_visit_count = 2`
+- A arrival = 10
+- A passage = 21
+- B arrival = 21
+- B passage = 22
+- outside entered inlink = True
+- outside arrived at target node = True
+- outside passed target node = True
+- outside arrival timestep = 30
+- outside recorded = False
+- real_W unchanged = True
+- reference independence = True
+- blocker state = end
+- blocker managed consistently = True
+- real outlink speed unchanged = True
+- final fork timestep = 32
+- fork steps executed = 12
+- 最終メッセージ：`TVT baseline snapshot fork probe passed.`
+
+#### 25.24.18 関連テストと形式確認
+
+Terminalで次が成功した：
+
+- `python diagnostics/order_control/tvt_baseline_snapshot_fork_probe.py`
+- `python tests_order_control_baseline_snapshot.py`（59件）
+- `python tests_order_control_baseline_collector.py`
+- `python tests_order_control_baseline_collector_uxsim.py`
+- `python -m py_compile diagnostics/order_control/tvt_baseline_snapshot_fork_probe.py uxsim/order_control_baseline_snapshot.py uxsim/order_control_baseline_collector.py uxsim/uxsim.py`
+- `git diff --check`
+- 新規診断ファイルの`git diff --no-index --check`
+
+#### 25.24.19 慎重な再レビュー
+
+診断実装後に、欠陥を探す目的の再レビューを複数回実施した。
+
+レビューで確認した主な問題：
+
+- 初期ブロッカーのVehicle管理不整合
+- 解除時の`x_next`不整合
+- outside Vehicleがinlinkへ入っただけで成功していた
+- outsideの到着・通過通知無視を実際には確認していなかった
+- 成功出力の一部boolが固定値だった
+- timestepコメントが不正確だった
+- real_W側user_function保持確認がなかった
+
+これらを修正または補強し、Terminalで診断・ブロッカー管理・outside Vehicleの到着・通過・collector非登録・real_W不変・参照分離・関連テスト・構文・形式を再確認して成功した。
+
+正しく動くことを最優先とし、その範囲で処理順序を後から理解しやすい実装を優先した。
+
+#### 25.24.20 この診断で確認できないこと
+
+次は未確認である：
+
+- 複数time_value Node
+- 制御方式の混在
+- 大規模需要
+- 長時間進行
+- 性能
+- 二段階観測
+- T+6意思決定窓
+- right_of_entry_vehicle選定
+- TVT候補確定
+- 到着順位
+- 確定順位ブロック
+- trade_rank
+- 買い手・売り手選定
+- 支払い・補償
+- Node別制度状態
+- 早期終了
+- 通過順位
+
+#### 25.24.21 完了判断と次の作業
+
+- 小規模fork統合診断は実装済み
+- 初期実装後に複数回の慎重な再レビューを実施
+- 指摘された主要な不足を修正済み
+- Terminalで診断と関連テストを最終確認済み
+- 恒久診断として完了と判断した
+- 本記録時点では診断ファイルとメモ更新は未コミット・未push
+
+次の作業は、今回の診断結果を踏まえた正式driver構造の設計である。直ちに二段階観測やTVT制度処理全体へ進むわけではない。まず次を検討する：
+
+- real_Wからfork_Wを作る責任
+- fresh collectorを作りforkへ設定する責任
+- Node名一覧を渡す責任
+- `register_snapshot_fixed_visits()`を呼ぶ責任
+- fork進行の開始・終了条件
+- baseline結果を次の処理へ渡す方法
+- real_W不変確認を本番driverでどこまで行うか

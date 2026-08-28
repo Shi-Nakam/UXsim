@@ -4231,6 +4231,57 @@ Terminal確認（すべて成功）：
 
 次の作業：小規模fork診断または最小driverの検討（§25.15第3回実装相当の残り。real_W→fork_W、collector設定、`register_snapshot_fixed_visits()`実行、fork進行、real_W不変確認、固定集合外Vehicle非追加確認）
 
+#### 2026-08-29：snapshot固定集合の小規模fork統合診断
+
+（設計メモ **§25.24** を参照。初回実装後のブロッカー修正、慎重な欠陥探索レビュー、outside Vehicle確認の補強、Terminal最終確認を経た記録。）
+
+Git状態（本記録時点）：
+
+- ブランチ：`feature/intersection-order-control`
+- 直前の保存済みコミット：`ced04d5`（`origin/feature/intersection-order-control`へpush済み）
+- 今回の診断ファイルとメモは未コミット・未push
+- 未追跡：`diagnostics/order_control/tvt_baseline_snapshot_fork_probe.py`、`diagnostics/order_control.zip`（zipには触れていない）
+
+診断ファイル：
+
+- `diagnostics/order_control/tvt_baseline_snapshot_fork_probe.py`
+- 回帰テストではなく、正式driver前の恒久統合診断
+- real_W→fork_W、fork側のみcollector、`register_snapshot_fixed_visits()`、fork進行、baseline通知確認、固定集合外通知無視、real_W不変、参照分離
+- TVT制度処理は実装しない
+
+小規模World：
+
+- 単一time_value Node（`orig --[in]--> junction --[out]--> dest`）、単車線、link長200・速度20、`SNAPSHOT_T=20`
+- `set_order_control_for_nodes()`戻り値から`tvt_target_node_names`を一度だけ作成し引継ぎ
+
+結果要点（Terminal最終確認）：
+
+- 登録件数2
+- A：arrival 10、passage 21
+- B：arrival 21、passage 22
+- outside：inlink進入・Node到着（timestep 30）・Node通過を通常経路で確認。到着・通過通知後もcollector非登録（export件数2のまま）
+- real_W不変、参照分離、real outlink速度不変
+- ブロッカー：初期実装の`VEHICLES_RUNNING`未登録・`x_next`不整合を修正。最終方式は`VEHICLES_RUNNING`登録＋診断用`user_function`で入口固定、fork側のみ解除。診断専用人工配置（標準Link進入非経由）
+- fork 12 step、最終`fork_W.T==32`。ブロッカーは診断終了時`state=="end"`
+
+再レビューと補強：
+
+- 初回診断はoutsideがinlink進入だけで成功していた（到着・通過通知無視は未確認）
+- 到着・通過後の主キーrecord不存在確認、進捗bool、終了条件を追加
+
+Terminal確認（すべて成功）：
+
+- `python diagnostics/order_control/tvt_baseline_snapshot_fork_probe.py`
+- `python tests_order_control_baseline_snapshot.py`（59件）
+- `python tests_order_control_baseline_collector.py`
+- `python tests_order_control_baseline_collector_uxsim.py`
+- `python -m py_compile`（診断・snapshot・collector・uxsim）
+- `git diff --check`、新規診断ファイルの`git diff --no-index --check`
+
+未確認：多Node、制御方式混在、二段階観測、TVT制度処理、性能等
+
+次の作業：正式driver構造の設計（real_W/fork_W責任分離、collector設定、Node名引継ぎ、fork進行条件、baseline結果の受け渡し、real_W不変確認の範囲）
+
 ### フェーズ4-6R設計目標（実装前・設計時点の記録）
 
 （設計時点の目標。実装は上記フェーズ4-6R節・設計メモ **§1H.21** を参照。）
