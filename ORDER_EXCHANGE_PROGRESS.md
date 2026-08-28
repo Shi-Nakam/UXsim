@@ -4114,6 +4114,41 @@ Git状態（本記録時点）：
 - TVT制度、二段階観測、right_of_entry_vehicle選定、早期終了等は未実装
 - 次は小規模fork診断とsnapshot固定集合構築用の最小補助処理を検討（§25.15の第3回実装相当。直ちに着手済みではない）
 
+#### 2026-08-28：snapshot固定集合構築の具体設計とtimestep境界確認
+
+（設計メモ **§25.22** を参照。Terminalによる実コード確認、小規模実測、Cursorへの訂正提示と再調査を経て確定した設計記録。実装は未着手。）
+
+Git状態（本記録時点）：
+
+- ブランチ：`feature/intersection-order-control`
+- 直前の保存済みコミット：`bfb3933`（collector通知接続まで。`origin`へpush済み）
+- 今回のメモ更新は未コミット・未push
+- 未追跡ファイル：`diagnostics/order_control.zip`（触れていない）
+
+確定した設計要点：
+
+- Node集合は`set_order_control_for_nodes()`でtime_value設定時に得たNode一覧からNode名を一度だけ作り引き継ぐ。同じ集合を人が二度入力しない
+- fork側ではNode名から`fork_W.get_node(node_name)`でfork自身のNodeを取得する
+- 全対象Nodeを事前検証する。TVT対象は`order_control_eligible`かつ`order_control_type=="time_value"`のみ
+- `none`は標準UXsim。signalized UXsimは独立したtypeではない
+- snapshotは`fork_W.T == T`でtimestep T処理開始前（`W.T == T-1`解釈は誤り）。Tを1回処理後は`W.T == T+1`
+- timestep T到着Vehicleはsnapshot時点でB。`baseline_arrival_timestep`はT、`was_arrived_at_snapshot`はFalse
+- Aは正常なsnapshot境界ではincomingとinlinkの両方に存在。Aは`incoming_vehicles`から抽出
+- Bは各`inlink.vehicles`から抽出。AがB走査で再び見つかるのは正常（Bとして重複登録しない）
+- A未検出の到着済みinlink Vehicleは重大不整合（`ValueError`）
+- 全候補を一時的な登録予定データ（dict list）へ作り、検証成功後にのみ`collector.register_snapshot_visit()`へ登録
+- 第一候補：`uxsim/order_control_baseline_snapshot.py`の`register_snapshot_fixed_visits(fork_W, collector, *, target_node_names) -> int`
+
+小規模実測（標準入力Python診断、ファイル変更なし）で確認：
+
+- timesteps 0–9処理後`W.T==10`、timestep 10未処理
+- timestep 10を1回処理後`W.T==11`
+- 到着直後はincomingとinlinkの両方にVehicleが存在
+- B登録Vehicleの`baseline_arrival_timestep==10`、`was_arrived_at_snapshot is False`
+- 通過阻止後の正常exec終了時もincomingへ再登録され、inlink-only Aにはならない
+
+次の作業：§25.22に従い`snapshot`補助処理と`tests_order_control_baseline_snapshot.py`を実装する（未着手）。
+
 ### フェーズ4-6R設計目標（実装前・設計時点の記録）
 
 （設計時点の目標。実装は上記フェーズ4-6R節・設計メモ **§1H.21** を参照。）

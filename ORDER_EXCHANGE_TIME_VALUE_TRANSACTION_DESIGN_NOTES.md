@@ -3633,3 +3633,405 @@ Git操作は次の順序を守る。
 - 「第3回実装」という名称は§25.15の実装順序上の便宜的名称であり、恒久的なフェーズ名ではない
 - 直ちに着手済みではない
 - 二段階観測ドライバ、TVT制度処理、Node状態、早期終了は、その後の別作業である
+
+### 25.22 snapshot固定集合構築の具体設計
+
+記録日：2026-08-28
+
+状態：実装前設計である。snapshot固定集合を構築する補助処理とそのテストはまだ未実装である。
+
+本節は、Terminalによる実コード確認、小規模実測、Cursorへの訂正提示と再調査を経て確定した設計結果を記録する。§24の歴史的記述や§25.21までの実装結果は削除せず、本節で最新の確定事項を追記・訂正する。
+
+#### 25.22.1 位置づけ
+
+- §24のsnapshot固定集合設計を、現在実装済みのcollectorとUXsim通知接続へつなぐための具体設計である
+- collector本体と通知接続はコミット`bfb3933`までで実装・push済み
+- 今回設計するのは、fork Worldのsnapshot状態から固定visitを選び、collectorへ登録する補助処理である
+- 二段階観測、right_of_entry_vehicle選定、TVT制度処理、早期終了は今回の範囲外
+- 今回の補助処理はTVT対象Nodeだけを扱う
+- FCFS Node、BATCH Node、標準UXsim NodeでTVT制度処理を行うものではない
+
+#### 25.22.2 4方式比較との関係
+
+- 最終比較の基本は、signalized UXsim、FCFS、BATCH、time-value transactionの4方式
+- 1つのネットワーク内で方式を混在させる場合と、全比較対象Nodeを同じ方式へ設定したWorld同士を比較する場合の両方を想定する
+- 例として、全比較対象NodeをFCFSへ設定したケースと、全比較対象Nodeをtime_valueへ設定したケースを比較できる
+- `order_control_type="none"`は標準UXsim制御
+- signalized UXsimは独立した`order_control_type`ではなく、通常は`order_control_type="none"`のNodeに信号を設定するケース
+- TVT制度処理を行うのは`order_control_type="time_value"`のNodeだけ
+- collectorがBATCH、FCFS、通常transferへ接続されていることは、これらのNodeでTVT制度を実行することを意味しない
+
+#### 25.22.3 TVT対象Node集合の引継ぎ
+
+1. 研究用driverが、比較対象Nodeを`set_order_control_for_nodes()`で`time_value`へ設定する
+2. その戻り値であるNode一覧からNode名一覧を一度だけ作る
+3. 同じNode集合を人が改めて二度入力しない
+4. `real_W`をcopyして`fork_W`を作る
+5. real_WのNodeオブジェクトをforkへ直接渡さない
+6. Node名一覧をfork側のsnapshot補助処理へ引き継ぐ
+7. fork側で`fork_W.get_node(node_name)`によりfork自身のNodeを取得する
+
+補足：
+
+- 全比較対象Nodeをtime_valueにするケースでは、その全Node名が引き継がれる
+- 一部Nodeだけをtime_valueにする混在ケースにも同じ方法で対応できる
+- Node名一覧を自動的にWorld全体から再抽出する方式は初期実装では採用しない
+- 理由は、設定時に得たNode集合をそのまま使う方が実験意図を明示でき、同じ集合の再入力による食い違いを防げるため
+
+#### 25.22.4 対象Nodeの事前検証
+
+固定visit候補を調査する前に、Node名一覧全体を検証する。
+
+確認項目：
+
+- Node名一覧が空でない
+- 同じNode名が重複していない
+- 各Node名が空でない文字列
+- fork WorldにNodeが存在する
+- `order_control_eligible is True`
+- `order_control_type == "time_value"`
+
+方針：
+
+- 空集合、重複、存在しないNode名、非文字列、空文字列は`ValueError`
+- `fcfs`、`batch`、`none`のNodeが含まれていれば`ValueError`
+- `none`については信号あり・なしを区別せずTVT対象外
+- 全Nodeの検証を完了してからVehicle候補の調査へ進む
+- Node入力エラーによる途中登録を防ぐ
+
+#### 25.22.5 baseline開始timestep T
+
+- baseline開始timestepをTとする
+- snapshotは`fork_W.T == T`で、timestep Tの処理を開始する直前に作る
+- 「Timestep Tの処理開始前」は、Tより前の時刻で作るという意味ではなく、時刻番号はTだがTのmain loopをまだ実行していない状態
+- `W.T == T - 1`という過去のCursor解釈は誤りであり採用しない
+- snapshot固定集合構築後に初めてforkのtimestep Tを処理する
+- `exec_simulation(duration_t2=W.DELTAT)`でtimestep Tを1回処理すると、実行後は`W.T == T + 1`
+- `W.TIME == (T + 1) * W.DELTAT`
+- 補助処理へTを別引数として渡さず、呼出時点の`fork_W.T`をTとして扱う
+- driverは、`exec_simulation()`が正常に戻った後で、次の`exec_simulation()`を始める前に補助処理を呼ぶ
+
+#### 25.22.6 timestep T到着Vehicle
+
+- timestep Tの処理中に新たに対象Nodeへ到着するVehicleは、snapshot時点では未到着なのでB
+- Bとして固定visit登録する
+- timestep Tの`Vehicle.update()`で通常の到着経路を通る
+- collectorの`baseline_arrival_timestep`はTになる
+- `was_arrived_at_snapshot`はFalseのまま
+
+小規模実測（Terminalで実行した一時的な標準入力Python診断）で次を確認した：
+
+- snapshot時点は`W.T == 10`
+- Vehicleの到着情報はNone
+- timestep 10を処理後、`W.T == 11`
+- `baseline_arrival_timestep == 10`
+- `was_arrived_at_snapshot is False`
+
+#### 25.22.7 Aの定義と抽出元
+
+Aは、snapshot時点ですでに対象Nodeへ到着済みだが、まだ当該Nodeを通過していない固定visitである。
+
+Aの主な抽出元：
+
+- `target_node.incoming_vehicles`
+
+Aについて確認する条件：
+
+- `veh.state == "run"`
+- `veh.order_control_current_visit is not None`
+- current visitの`visit_id`が正しい
+- `current_visit["visit_id"] == veh.order_control_visit_id`
+- `current_visit["node"] is target_node`
+- `current_visit["inlink"]`が対象Nodeのinlink
+- `veh.link is current_visit["inlink"]`
+- Vehicleがそのinlinkの`vehicles`にも存在する
+- `arrival_time`と`arrival_tiebreaker`が両方非None
+- 片方だけ存在する状態は重大不整合
+- `route_next_link is not None`
+- `route_next_link.start_node is target_node`
+
+Aの登録値：
+
+- `vehicle_name=veh.name`
+- `vehicle_id=veh.id`
+- `node_name=target_node.name`
+- `inlink_name=current_visit["inlink"].name`
+- `visit_id=current_visit["visit_id"]`
+- `was_arrived_at_snapshot=True`
+- `baseline_arrival_timestep=int(round(arrival_time / fork_W.DELTAT))`
+- `arrival_tiebreaker=current_visit["arrival_tiebreaker"]`
+- `route_next_link_name=veh.route_next_link.name`
+- `baseline_passage_timestep=None`
+
+Aの到着timestepは、正常なtimestep境界では`fork_W.T`より前である。timestep Tに到着するVehicleはsnapshot時点ではBであるため。
+
+#### 25.22.8 Aのコンテナ状態に関する実測と訂正
+
+確認した実コード上の処理順序（1 timestep内）：
+
+1. `Node.transfer()`
+2. `Vehicle.carfollow()`
+3. `Vehicle.update()`
+
+`Node.transfer()`末尾で`incoming_vehicles`はいったん空になるが、通過できずinlink終端に残ったVehicleは、その後の同じtimestepの`Vehicle.update()`で再び`incoming_vehicles`へ追加される。
+
+`record_order_control_node_arrival()`は到着情報が既に存在すれば早期returnするが、`incoming_vehicles.append()`はその呼出しより前に完了している。
+
+小規模実測では、次を確認した。
+
+到着直後：
+
+- Vehicleは`node.incoming_vehicles`に存在
+- Vehicleは元の`inlink.vehicles`にも存在
+- `veh.link is inlink`
+- 到着情報は記録済み
+
+次のtimestepで通過を物理的に阻止した後も、正常な`exec_simulation()`終了時点では：
+
+- Vehicleは`node.incoming_vehicles`に再登録済み
+- Vehicleは元の`inlink.vehicles`にも存在
+- inlink-only Aにはならなかった
+
+過去の調査解釈の訂正：
+
+- `Node.transfer()`末尾でincomingがクリアされるため、正常なtimestep境界でinlink-only Aが残るという解釈は誤り
+- 正常な`exec_simulation()`停止境界では、到着済み・未通過Aはincomingとinlinkの両方に存在する
+- inlink-only Aは、transfer後・`Vehicle.update()`前のmain loop途中、例外中断、または手動transferだけを呼んだ中間状態では発生し得る
+- snapshot補助処理は、そのような中間状態を正常状態として受け入れない
+
+#### 25.22.9 Bの定義と抽出元
+
+Bは、snapshot時点で対象Nodeのinlink上にいるが、まだ対象Nodeへ到着していない固定visitである。
+
+Bの抽出元：
+
+- 対象Nodeの各`inlink.vehicles`
+
+Bについて確認する条件：
+
+- `veh.state == "run"`
+- `veh.link is inlink`
+- `veh.order_control_current_visit is not None`
+- current visitの`node`がtarget_node
+- current visitの`inlink`が走査中のinlink
+- current visitの`visit_id`が`veh.order_control_visit_id`と一致
+- `arrival_time`と`arrival_tiebreaker`が両方None
+- `veh not in target_node.incoming_vehicles`
+
+B登録時は、snapshot時点で`veh.route_next_link`が何らかの値を持っていても、collectorへは保存しない。
+
+Bの登録値：
+
+- `vehicle_name=veh.name`
+- `vehicle_id=veh.id`
+- `node_name=target_node.name`
+- `inlink_name=inlink.name`
+- `visit_id=current_visit["visit_id"]`
+- `was_arrived_at_snapshot=False`
+- `baseline_arrival_timestep=None`
+- `arrival_tiebreaker=None`
+- `route_next_link_name=None`
+- `baseline_passage_timestep=None`
+
+#### 25.22.10 AとBの重複防止
+
+処理順序：
+
+1. `node.incoming_vehicles`からAを調査する
+2. Aの登録予定データを一時listへ追加する
+3. Aとして追加したVehicle名を一時的な集合へ記録する
+4. 各inlinkの`inlink.vehicles`を走査する
+5. Aとして登録予定データへ追加済みのVehicleが再び見つかることは正常
+6. そのVehicleはBとして追加せずスキップする
+7. Aとして追加されていないVehicleについて、B条件を満たすものだけをBとして追加する
+8. Aとして追加されていないのに到着情報が両方存在するVehicleがinlink上で見つかった場合は、正常なsnapshot境界と矛盾するため`ValueError`
+9. 到着情報が片方だけ存在する場合も`ValueError`
+10. 全対象Nodeを通じて、同一Vehicleは最大1固定visit
+
+「登録予定データへ追加済み」とは、collectorへ登録済みという意味ではなく、全候補検証中の一時データへ追加済みという意味である。
+
+#### 25.22.11 対象外Vehicleと重大不整合
+
+正常に固定集合から除外するもの：
+
+- まだ出発していないVehicle
+- `state=="end"`
+- `state=="abort"`
+- trip-end処理対象
+- taxi mode
+- specified_route
+- 対象Nodeのinlink上にいないVehicle
+- current visitのNodeが別Node
+- 対象Nodeをすでに通過済みのVehicle
+
+ただし、`participates_in_order_exchange=False`は除外条件にしない。交通予測にはTVT参加者・非参加者の両方が必要である。
+
+重大不整合として停止するもの：
+
+- 対象Nodeのincomingまたはinlink上にいるのにcurrent visitがない
+- current visitの必須キー欠落
+- visit ID不一致
+- current visitのNode不一致
+- inlink不一致
+- `veh.link`とcurrent visit inlinkの不一致
+- arrival_timeとarrival_tiebreakerの片側欠落
+- Aでroute_next_linkがNone
+- Aでroute_next_link.start_nodeがtarget_nodeではない
+- 正常なsnapshot境界で、Aとして検出されていない到着済みVehicleがinlink上に存在
+- 同一Vehicleが複数固定visit候補になる
+
+正常な対象外Vehicleを、状態破損として扱わないよう注意する。
+
+#### 25.22.12 全候補検証後の登録
+
+第1段階：
+
+- 全対象Nodeを検証
+- 全A/B候補を抽出
+- current visitとUXsim状態を検証
+- collectorへ渡す登録予定データをプレーンなdictのlistとして作る
+- 同一Vehicle重複を検出
+- collectorはまだ変更しない
+
+第2段階：
+
+- 第1段階の全検証が成功した場合だけ、登録予定データを順番に`collector.register_snapshot_visit(**entry)`へ渡す
+
+補足：
+
+- 登録予定データは、`register_snapshot_visit()`の引数名と一致するdictとする第一候補
+- collector内部の可変dataclassは事前計画へ流用しない
+- 登録計画専用dataclassは初期実装では追加しない
+- collector側のvalidationを補助処理側へ全面複製しない
+- 補助処理側はUXsimオブジェクト状態とA/B分類を確認する
+- この構成により、Node・Vehicle検証中の部分登録を防ぐ
+
+#### 25.22.13 登録順序と戻り値
+
+第一候補の順序：
+
+- `set_order_control_for_nodes()`の返却Node順から作ったNode名順
+- 各Node内ではAを先に調査
+- BはNodeの各inlinkを安定した順序で走査
+- 各inlink内では`inlink.vehicles`の物理FIFO順
+
+ただし、この登録順に到着順位、通過順位、trade_rank等の制度上の意味を持たせない。
+
+初期実装の戻り値は、総登録件数`int`だけとする第一候補とする。
+
+Node別A/B件数、主キーlist、登録計画listは初期公開戻り値へ含めない。
+
+#### 25.22.14 補助処理の配置と最小構造
+
+第一候補の新規モジュール：
+
+- `uxsim/order_control_baseline_snapshot.py`
+
+第一候補の公開関数：
+
+`register_snapshot_fixed_visits(fork_W, collector, *, target_node_names) -> int`
+
+内部構造の第一候補：
+
+- `_resolve_and_validate_target_nodes`
+- `_build_snapshot_visit_registration_plan`
+- `register_snapshot_fixed_visits`
+
+A用とB用の小関数を過度に分割せず、登録計画構築処理内で明示的なforループとして記述する方針とする。
+
+collector本体へ追加しない理由：
+
+- collectorはUXsimオブジェクトに依存しない純粋な記録層
+- snapshot固定集合構築はVehicle、Node、Link、Worldの状態を読むUXsim依存処理
+- 責任を分離する必要がある
+
+`uxsim.py`本体へ埋め込まない理由：
+
+- TVT研究用のsnapshot構築ロジックをUXsim本体へ過度に混在させない
+- 将来の二段階観測driverから独立して再利用できるようにする
+
+#### 25.22.15 実装時に必要なテスト
+
+新規候補：
+
+- `tests_order_control_baseline_snapshot.py`
+
+少なくとも次を検証予定とする：
+
+- 空の対象Node名一覧
+- 重複Node名
+- 非文字列・空文字列
+- 存在しないNode
+- 非eligible Node
+- `fcfs`、`batch`、`none` Nodeの拒否
+- Aのみ
+- Bのみ
+- 同一NodeにAとB
+- 複数inlink
+- 複数time_value Node
+- Aがincomingとinlinkの両方に存在しても1件だけ登録
+- A未検出の到着済みinlink Vehicleを重大不整合として拒否
+- current visit欠落
+- visit ID不一致
+- Node不一致
+- inlink不一致
+- arrival情報片側欠落
+- Aのroute_next_link欠落
+- Aのroute_next_link.start_node不一致
+- 正常な対象外Vehicleの除外
+- `participates_in_order_exchange=False`のVehicleも固定集合へ含む
+- 全候補検証失敗時にcollectorが空のまま
+- timestep T到着VehicleがBとして登録される
+- timestep T処理後にbaseline_arrival_timestepがTになる
+- timestep T処理後にW.TがT+1になる
+- 登録後に固定集合外Vehicleが後からinlinkへ入ってもcollectorへ追加されない
+
+#### 25.22.16 小規模実測結果
+
+今回の一時的な標準入力Python診断（Terminalで実行。既存テストヘルパをimportし、ファイル変更なし）について記録する。
+
+実測で確認できた事項：
+
+- timesteps 0から9を処理後、`W.T == 10`
+- この時点でtimestep 10は未処理
+- timestep 10を1回処理後、`W.T == 11`
+- timestep 10で到着したVehicleは、到着直後にincomingとinlinkの両方に存在
+- baseline snapshotでBとして登録したVehicleの`baseline_arrival_timestep == 10`
+- `was_arrived_at_snapshot is False`
+- 通過を阻止した次timestep後も、正常なexec終了時にはVehicleがincomingへ再追加された
+- そのためinlink-only Aにはならなかった
+- 診断中の最初の容量カウンターだけによる通過阻止は、timestep更新で容量が回復して失敗した
+- その後、outlink入口をVehicleで物理的に塞ぐ診断へ修正した
+- 最終実測結果はAのincoming再登録とBのtimestep T到着記録を支持した
+- 標準入力スクリプトのみを使い、ファイル変更は行っていない
+- 実行後のGit状態は未追跡の`diagnostics/order_control.zip`だけ
+
+#### 25.22.17 未実装事項
+
+- `uxsim/order_control_baseline_snapshot.py`
+- `register_snapshot_fixed_visits`
+- snapshot固定集合構築の単体テスト
+- 小規模fork診断の恒久ファイル
+- real_Wからfork_Wを作りcollectorを設定する正式driver
+- 二段階観測driver
+- right_of_entry_vehicle選定
+- TVT制度処理
+- Node別制度状態
+- 早期終了
+- 通過順位
+- 支払い・補償
+- 性能測定
+
+#### 25.22.18 次の作業
+
+次の作業は、本節の設計に従って次を実装する。
+
+- `uxsim/order_control_baseline_snapshot.py`
+- `register_snapshot_fixed_visits`
+- 対象Nodeの事前検証
+- A/B登録予定データの構築
+- 全候補検証後のcollector登録
+- `tests_order_control_baseline_snapshot.py`
+- timestep T到着境界テスト
+
+まだ実装へ着手済みではない。
