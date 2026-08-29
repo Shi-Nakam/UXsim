@@ -4282,6 +4282,25 @@ Terminal確認（すべて成功）：
 
 次の作業：正式driver構造の設計（real_W/fork_W責任分離、collector設定、Node名引継ぎ、fork進行条件、baseline結果の受け渡し、real_W不変確認の範囲）
 
+#### 2026-08-29：TVT権利保有車両選定前の先頭非参加Vehicle先行確定の記録補修
+
+- 過去に確定済みだった、意思決定窓内 baseline 到着順位の先頭に連続する非参加 Vehicle の先行確定が、設計メモに明文化されていなかった
+- Terminal でリポジトリ内全 Markdown を検索し、処理順序の明示記載がないことを確認した
+- 新 §4.5 を正本として処理順序を補修した（`ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES.md`）
+- `n n p p n p n p p` の説明例を追加した
+- 意思決定窓内 Vehicle がすべて非参加の場合は、全 Vehicle を baseline 到着順位のまま確定し、権利保有車両を選定せず、TVT 検討不要とすることを明記した
+- 参加状態中立方式を維持し、参加・非参加を理由に同着順位の優劣を設けない
+- 同着順位規則は、既到着未確定 Vehicle、意思決定窓内 Vehicle、意思決定窓外 TVT 候補 Vehicle に共通する
+- §14.2 の `K_confirmed_before` を、既到着 Vehicle と先頭非参加 Vehicle の先行確定をすべて終えた後の確定順位ブロック末尾として整合させた（既到着の有無だけでは決めない）
+- 意思決定窓内 Vehicle がすべて非参加の場合は、TVT による新たな順位列を接続しない
+- 先頭非参加 Vehicle の先行確定後、それらを未確定範囲から除き、残る Vehicle の `baseline_rank` を 1 位から再構成することを明記した
+- 全非参加時は先行確定だけで処理を終了し、`r_assigned` や `K_confirmed_after` を用いた TVT 順位列接続処理を行わないことを明記した
+- §14.3 と §14.4 の既存確定範囲は変更していない
+- 正式 driver 設計前の記録漏れ修復である
+- 本記録時点では未コミット・未push
+- 最新保存済みコミットは `3b3448f` で、origin へ push 済み
+- `diagnostics/order_control.zip` には触れていない
+
 ### フェーズ4-6R設計目標（実装前・設計時点の記録）
 
 （設計時点の目標。実装は上記フェーズ4-6R節・設計メモ **§1H.21** を参照。）
