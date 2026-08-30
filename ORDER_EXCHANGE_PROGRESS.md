@@ -4282,6 +4282,29 @@ Terminal確認（すべて成功）：
 
 次の作業：正式driver構造の設計（real_W/fork_W責任分離、collector設定、Node名引継ぎ、fork進行条件、baseline結果の受け渡し、real_W不変確認の範囲）
 
+#### 2026-08-31：正式全World baseline driverの実装前設計
+
+- 正式 driver の最新設計を設計メモ **§25.25** へ記録した
+- 初期 driver は固定 horizon 一括実行
+- snapshot 固定集合 0 件は 0 step 正常終了
+- horizon 内の情報不足は実行異常ではない
+- 全固定 visit の通過完了を driver 成功条件にしない
+- `P` 取得だけでは Node の baseline 情報取得完了ではない
+- 候補 Vehicle 全員の必要情報を要求する
+- 一部情報だけを使った部分的 TVT を禁止する
+- 候補時間範囲を `P - 1` で固定し、再帰拡張しない
+- 進行済み fork を後から延長しない
+- World 作成時に baseline 用余白を確保する方向
+- World 終端回避用の追加 1 timestep 余白は未確定
+- result へ `target_node_names` を含める
+- driver と後続制度処理の責任を分離する
+- 早期終了の既存 §24.13 は今回変更していない
+- 正式 driver の Python 実装と専用テストは未着手
+- 次は World 終端時の `Analyzer.basic_analysis()` 影響確認
+- 最新保存済みコミットは `d3bb306` で origin へ push 済み
+- 本メモ更新は未コミット・未 push
+- `diagnostics/order_control.zip` には触れていない
+
 #### 2026-08-29：TVT権利保有車両選定前の先頭非参加Vehicle先行確定の記録補修
 
 - 過去に確定済みだった、意思決定窓内 baseline 到着順位の先頭に連続する非参加 Vehicle の先行確定が、設計メモに明文化されていなかった

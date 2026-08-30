@@ -1520,6 +1520,8 @@ K_fixed = max(K_last_buyer, K_decision_window)
 
 **意思決定窓外の未確定 Vehicle**は、上記の理由だけでは確定しない。
 
+TVT 候補 Vehicle の一部についてしか必要情報を取得できない場合、取得済み Vehicle だけで部分的 TVT を形成しない。この場合は baseline 情報を解決できなかった場合として、本節の既存処理に従う。詳細は §24.12 および §25.25 を参照する。
+
 ---
 
 ## 15. 経済評価と候補選択
@@ -1983,6 +1985,8 @@ World.copy()
 - fork と実World の参照独立性を確認した。
 
 診断スクリプト：`diagnostics/order_control/tvt_global_baseline_performance.py`
+
+**2026-08-31更新：** 初期正式 driver でも、固定 horizon の一括 forward を採用する実装前設計である。正式 driver の仕様は **§25.25** を正本とする。
 
 ### 23.3 初期性能測定（full TMAX 正本時代）
 
@@ -2513,7 +2517,7 @@ push時の更新範囲：
 ```
 candidate_expected_arrival_timestep
 <=
-right_holder_expected_passage_timestep - tau
+right_of_entry_expected_passage_timestep - tau
 ```
 
 現在の暫定値は次のとおりである。
@@ -2733,6 +2737,18 @@ candidate_expected_arrival_timestep <= P - 1
 - `P` のtimestep処理が完了してから候補範囲を確定する。
 - UXsimでは同一timestep内に通過処理が到着記録より先に行われるが、`P` と同じtimestepの到着は条件上候補外なので問題にならない。
 
+#### P取得後の情報充足条件
+
+- `P` を取得しただけでは、TVT 用 baseline 情報取得完了ではない。
+- `P - 1` までに到着する候補集合を確定する。
+- 候補全員の必要 baseline 情報が必要である。特に候補全員の baseline 予想通過 timestep が必要である。
+- `P - 1` に到着する Vehicle の通過は `P` より後になり得る。
+- 候補集合確定後も観測が必要になり得る。
+- 候補時間範囲は right_of_entry vehicle の `P - 1` で固定する。
+- 他候補の通過時刻を理由に再帰拡張しない。
+
+詳細は §25.25 を参照する。
+
 ### 24.12 Node別の概念状態
 
 実装上のenum名や属性名は確定せず、概念上、Nodeごとに次を区別する必要がある。
@@ -2751,6 +2767,19 @@ horizon終端時未解決
 - 一度完了したNodeを再判定する必要はない。
 - 完了済みNodeの後続通知は無視できる。
 - 具体的な保存構造と名称はcollector設計時に決める。
+
+補足（2026-08-31）：
+
+- `TVT用baseline情報取得完了` は、後続の TVT 形成などへ進むための baseline 情報が揃った状態である。TVT 形成や順位確定そのものが完了した状態ではない。
+- `P` 取得だけでは完了しない。
+- 候補全員の必要 baseline 情報が必要である。
+- 一部候補だけ情報が揃った場合は完了にしない。
+- 一部情報だけを使った部分的 TVT は行わない。
+- horizon 終端時に必要情報が不足していれば未解決である。
+- 未解決時の順位処理は §14.4 に従う。
+- 正式 driver は Node 状態を判定しない。
+
+詳細は §25.25 を参照する。
 
 ### 24.13 全World baselineの早期終了
 
@@ -2831,6 +2860,19 @@ other_vehicle_expected_arrival_timestep <= P - 1
 - 将来BATCHによる共通baseline利用
 
 **2026-08-27更新：** §24のsnapshot固定集合と二段階観測設計を受け、collectorの内部記録、索引、通知処理、読取機能、実装順序を **§25** に整理した。collector本体とUXsim接続はまだ未実装である。
+
+**2026-08-31更新：** 上記は 2026-08-27 時点の記録である。最新状態は次のとおり。
+
+- collector 本体は実装済み（§25.23 以降）。
+- UXsim 通知接続は実装済み。
+- snapshot 固定集合構築補助処理は実装済み。
+- 小規模 fork 統合診断は実装済み（§25.24）。
+- 正式 driver は §25.25 で実装前設計済み。Python 実装は未着手。
+- 早期終了の性能測定は引き続き未実装。
+- Node 別状態は引き続き未実装。
+- World 終端回避用追加 1 timestep 余白は未確定。
+
+詳細は §25.20 から §25.25 を参照する。
 
 ---
 
@@ -4961,3 +5003,650 @@ Terminalで次が成功した：
 - fork進行の開始・終了条件
 - baseline結果を次の処理へ渡す方法
 - real_W不変確認を本番driverでどこまで行うか
+
+**2026-08-31更新：** 上記「次の作業」として列挙されていた正式driver構造の設計を **§25.25** に記録した。正式driverの Python 実装はまだ開始していない。詳細は §25.25 を参照する。
+
+### 25.25 正式全World baseline driverの実装前設計
+
+記録日：2026-08-31
+
+本節を、初期正式driverの最新方針の正本とする。
+
+#### 25.25.1 位置づけ
+
+- snapshot固定集合collectorは実装済みである。
+- UXsimの到着・通過通知接続は実装済みである。
+- snapshot固定集合構築補助処理（`register_snapshot_fixed_visits()`）は実装済みである。
+- 小規模fork統合診断（`diagnostics/order_control/tvt_baseline_snapshot_fork_probe.py`）は実装・確認済みである。
+- 今回記録するのは、これらを正式な全World baseline入口へ接続する **driver** の実装前設計である。
+- 正式driverのコードと専用テストは未実装である。
+- 本節はコミット `d3bb306` を出発点として整理した。
+- `d3bb306` は origin へ push 済みである。
+- 今回の設計メモ更新は未コミット・未 push である。
+
+#### 25.25.2 初期正式driverの目的
+
+正式driverは、本物の交通世界を変えずに、複製した交通世界だけを指定された長さだけ進め、TVTを行わなかった場合の到着・通過の事実を集める入口である。指定した観察時間を正常に進めても、すべての交通情報が得られるとは限らない。情報が得られなかったことは装置の故障ではなく、取得できなかった事実として後続処理へ渡す。正式driverは順位確定やTVT形成を行わない。
+
+技術的な目的は次のとおりである。
+
+- `real_W` を変更しない。
+- `real_W` を copy して `fork_W` を作る。
+- `fork_W` だけへ fresh collector を設定する。
+- snapshot固定集合を登録する。
+- 呼出側が指定した baseline horizon だけ `fork_W` を進める。
+- TVTなし baseline の到着・進行先・通過情報を collector へ記録する。
+- collector と実行メタデータを結果として返す。
+- `fork_W` 自体は返さない。
+- 正式driverは TVT 制度処理を行わない。
+
+#### 25.25.3 初期版の実行方式
+
+snapshot固定集合が 1 件以上ある場合、初期正式driverは **固定 horizon を一括実行** する。
+
+概念上の実行は次のとおりである。
+
+```python
+fork_W.exec_simulation(
+    duration_t2=baseline_horizon_steps * fork_W.DELTAT
+)
+```
+
+これは設計上の概念例であり、本節の記録時点では Python 実装ではない。
+
+- `baseline_horizon_steps` は **観測長** である。
+- 全件情報取得まで進める処理の **最大上限** という意味ではない。
+- horizon 50 は現在の検討中心であり、正式な固定値ではない。
+- driver 内部へ 50 を埋め込まない。
+- Node 別状態を毎 timestep 判定しない。
+- 初期版では全 Node 完了による早期終了を実行しない（早期終了の詳細は §24.13 を参照。本節では変更しない）。
+- 指定 horizon の一括実行後に collector を後続へ渡す。
+- 一括実行後、実際に指定 step 数進んだことを確認する。
+
+事後確認条件：
+
+```text
+fork_W.T_after == fork_W.T_before + baseline_horizon_steps
+```
+
+#### 25.25.4 `baseline_horizon_steps`
+
+- 公開引数名の第一候補は `baseline_horizon_steps` である。
+- `bool` ではない `int` である。
+- 1 以上である。
+- 0 または負数は不正である。
+- 上限は初期 driver 内に固定しない。
+- 感度分析によって異なる値を指定できる。
+- horizon 不足時に自動短縮しない。
+
+空固定集合の 0 step 正常終了は、引数として horizon 0 を許可することとは別である。
+
+#### 25.25.5 対象Node名一覧
+
+- `target_node_names` は time_value 設定時に得た Node 集合から **一度だけ** 作る。
+- 同じ Node 集合を人が再入力しない。
+- driver 内部で `tuple` へ一度だけ固定する。
+- 登録と終了時件数確認に同じ `tuple` を使う。
+- 初期 driver の入力型第一候補は `list` または `tuple` である。
+- `str`、`bytes`、`set`、その他の一般 `Iterable` を初期 driver では受け付けない第一候補とする。
+- Node 名の存在、重複、空文字、eligibility、time_value 設定は snapshot 補助処理へ委譲する。
+- 登録時に保証済みの検証を driver で重複実装しない。
+
+#### 25.25.6 real_Wの入口条件と不変確認
+
+**入口条件：**
+
+- `real_W._order_control_baseline_collector` は `None` であることを要求する第一候補とする。
+- `real_W` へ collector を設定しない。
+
+**呼出前に保存する軽量情報：**
+
+- `real_W.T`
+- `real_W.TIME`
+- `real_W._order_control_baseline_collector`
+
+正常終了時に、これらが変化していないことを確認する。
+
+詳細な RNG、全 Vehicle、全 Node、全 Link の比較は、既存小規模 fork 診断と driver 専用テストの責任とする。
+
+公開引数 `verify_real_world_unchanged` は初期 API へ追加しない。
+
+#### 25.25.7 fork作成とcollector設定
+
+1. baseline 開始 timestep として `real_W.T` を保存する。
+2. `fork_W = real_W.copy()` を実行する。
+3. copy 直後の `fork_W.T` が baseline 開始 timestep と一致することを確認する。
+4. copy 直後の fork collector が `None` であることを確認する。
+5. fresh な `OrderControlBaselineCollector` を作る。
+6. `fork_W` だけへ collector を設定する。
+7. `real_W` の collector は `None` のままとする。
+
+`fork_W` は可変な内部状態であり、正式結果として返さない。
+
+#### 25.25.8 snapshot固定集合登録
+
+- `register_snapshot_fixed_visits()` を fork 進行前に 1 回だけ呼ぶ。
+- fresh な空 collector へ登録する。
+- 時刻 T の snapshot 状態を読む。
+- `fork_W.T == T` であり、timestep T はまだ処理されていない。
+- Node 名一覧は time_value 設定結果から得たものを使用する。
+- snapshot 固定集合外 Vehicle は後から追加しない。
+- collector が固定集合外通知を無視する既存仕様を維持する。
+- 登録件数を `registered_visit_count` として保存する。
+
+既存 `order_control_baseline_snapshot.py` の docstring は、本記録時点ではコード変更しない。
+
+推奨呼出順：
+
+```text
+real_Wを時刻Tまで通常実行
+→ real_W.TはTで、timestep Tは未処理
+→ real_W.copy()
+→ fork_Wのsnapshot固定集合を登録
+→ baseline forwardを開始
+```
+
+docstring の「`after fork_W.exec_simulation()` returns normally」が、上記の `real_W` 側通常実行後の状態を指す可能性がある。docstring の明確化要否は、将来のコード修正候補として残す。
+
+#### 25.25.9 登録件数の整合確認
+
+collector 公開 API を用いて、対象 Node 別 export 件数の合計を確認する。
+
+概念：
+
+```python
+sum(
+    len(collector.export_node_baseline_visits(node_name))
+    for node_name in target_node_names
+)
+```
+
+確認時点：
+
+1. snapshot 登録直後
+2. fixed horizon 終了後、または空固定集合による 0 step 終了時
+
+毎 timestep の件数確認は初期版では行わない。
+
+理由：
+
+- 固定集合の登録は snapshot 時の 1 回だけである。
+- 固定集合外通知は collector で無視される。
+- 毎 timestep 確認する必要性が低い。
+- 余計な実行負荷を避ける。
+
+登録件数と export 合計が一致しなければ重大な実行不整合とする。
+
+#### 25.25.10 空のsnapshot固定集合
+
+- `registered_visit_count == 0` は正常に起こり得る。
+- snapshot 固定集合は baseline 開始時点ですでに対象 inlink 上にいる Vehicle に限定される（§24.4）。
+- baseline 開始後に対象 inlink へ入った Vehicle は今回の固定集合へ追加しない。
+- 登録件数 0 なら、今回記録する対象 Vehicle は存在しない。
+- horizon を進めても collector の対象は増えない。
+- この場合、余白検査を行わない。
+- fork forward を行わない。
+- `fork_steps_executed = 0`
+- `final_fork_timestep = baseline_timestep_T`
+- 正常結果を返す。
+- これは情報不足や Node 未解決とは区別する。
+
+引数 `baseline_horizon_steps` 自体は、空固定集合の場合でも 1 以上の有効値を要求する。
+
+#### 25.25.11 forkの残り実行可能step数
+
+snapshot 固定集合が 1 件以上の場合、次を確認する第一候補とする。
+
+```text
+remaining_steps = fork_W.TSIZE - fork_W.T
+```
+
+現在確認済みの UXsim の意味：
+
+- `fork_W.T` は次に処理する timestep である。
+- `fork_W.T == fork_W.TSIZE` なら新しい step を処理できない。
+- `fork_W.T <= fork_W.TSIZE - 1` なら少なくとも 1 step 処理できる。
+
+World 終端へちょうど到達することを許す場合の基本的な完走条件候補：
+
+```text
+baseline_horizon_steps <= fork_W.TSIZE - fork_W.T
+```
+
+境界例：
+
+```text
+fork_W.T = 200
+fork_W.TSIZE = 250
+baseline_horizon_steps = 50
+```
+
+の場合、timestep 200 から 249 までの 50 step を処理し、終了後は `fork_W.T == 250` となる。
+
+ただし、この例では World 終端にちょうど到達するため、`simulation_terminated()` と `Analyzer.basic_analysis()` が実行される。
+
+この終端集計は baseline 収集には不要であり、追加負荷や予期しない影響の範囲を増やす可能性がある。
+
+したがって、初期 driver で World 終端へのちょうど到達を許可するか、少なくとも 1 timestep を残すかは、**まだ未確定** である。
+
+安全側の未確定候補：
+
+```text
+baseline_horizon_steps < fork_W.TSIZE - fork_W.T
+```
+
+追加 1 timestep を要求する場合の境界例：
+
+```text
+fork_W.T = 200
+fork_W.TSIZE = 251
+baseline_horizon_steps = 50
+```
+
+この場合、timestep 200 から 249 までを処理し、終了後 `fork_W.T == 250` で、World 終端まで 1 timestep 残る。
+
+**この厳密不等式を確定ルールとして扱わない。** `Analyzer.basic_analysis()` の詳細影響確認後に確定する未解決事項とする（§25.25.26 参照）。
+
+#### 25.25.12 horizon不足
+
+- snapshot 固定集合が 1 件以上の場合に残り step 数を検査する。
+- 指定 horizon を完走できない場合は、World 作成時の **実行可能期間不足** である。
+- 交通情報を取得できなかった状態とは異なる。
+- horizon 不足を理由に自動短縮しない。
+- horizon 不足時の例外型（`ValueError` または `RuntimeError`）は実装前に確定する。
+- 空固定集合の場合は forward しないため、残り step 数検査を行わない。
+
+#### 25.25.13 進行済みforkを後から延長しない
+
+初期正式driverは次を **行わない**。
+
+- `fork_W.TMAX` の後変更
+- `fork_W.TSIZE` の後変更
+- Link 内部配列の手動延長
+- Analyzer 内部状態の手動延長
+- `finalize_scenario()` の再実行
+- horizon の自動短縮
+- 現在状態を新規全 World へ手動移植
+- 通常 `exec_simulation()` を代替する専用 forward loop
+
+理由：
+
+- finalized かつ進行済み World を安全に延長する公開 API が確認できない。
+- `TSIZE` は `finalize_scenario()` で `TMAX` から構成される。
+- Link の `traveltime_actual` は当初の `TSIZE` に合わせて作られる。
+- `k_mat`、`q_mat`、`v_mat`、`tn_mat`、`dn_mat` 等は当初の `TMAX` を前提に作られる。
+- `Q_AREA`、`K_AREA` 等も当初設定に依存する。
+- `TMAX` または `TSIZE` だけを変更すると内部状態が一致しない。
+- `finalize_scenario()` の再実行は `T` と `TIME` を 0 へ戻す。
+- `finalize_scenario()` は内部配列、`RouteChoice`、`Analyzer` 等を再初期化する。
+- 手動延長は対象漏れと交通結果変化の危険が高い。
+- BATCH Level 2 は必要な `TMAX` を持つ mimic World を最初から新規構築しており、進行済み全 World fork の事後延長ではない。
+
+将来、専用配列延長 helper または全 World 再構築方式を研究する可能性は残すが、初期 driver へ含めない。
+
+#### 25.25.14 World作成時のbaseline用余白
+
+正式 driver 自身が fork を後から延長しないため、実験・シナリオ設計側で、最後の baseline 実行にも十分な将来計算余地を確保する必要がある。
+
+区別する概念：
+
+```text
+通常の研究評価期間
+
+新しいTVT判断を開始できる期間
+
+baseline forkが将来を計算するための余白
+
+Worldが技術的に進行できる期間
+```
+
+名称候補：
+
+```text
+T_evaluation_end
+H_max
+TSIZE
+```
+
+ただし、`T_evaluation_end` と `H_max` は正式名称・保存場所とも **未確定** である。
+
+World 終端到達を許す場合の概念候補：
+
+```text
+TSIZE >= T_evaluation_end + H_max
+```
+
+World 終端を避けて 1 timestep を残す場合の安全側候補：
+
+```text
+TSIZE >= T_evaluation_end + H_max + 1
+```
+
+いずれも、`T_evaluation_end` の境界定義と World 終端時の Analyzer 確認が未完了なので、**確定式として扱わない**。
+
+次を実験・評価設計上の未確定事項として記録する（§25.25.26 参照）。
+
+- `T_evaluation_end` の正式名称
+- `T_evaluation_end` の正確な境界定義
+- 保存場所
+- `H_max` の設定場所
+- horizon 感度分析との連動
+- `real_W` を余白期間まで進めるか
+- 余白期間を評価指標へ含めるか
+- `T_evaluation_end` 以降の新規 TVT 発動をどこで抑止するか
+- World 終端直前の最後の baseline をどう扱うか
+- 追加 1 timestep 余白を必須とするか
+
+#### 25.25.15 正常な情報不足
+
+指定 horizon を正常に完走しても、collector record で次が `None` のまま残り得る。
+
+- `baseline_arrival_timestep`
+- `arrival_tiebreaker`
+- `route_next_link_name`
+- `baseline_passage_timestep`
+
+また、次も正常に起こり得る。
+
+- Node ごとに全情報取得、一部情報取得、全情報未取得が混在する。
+- right_of_entry vehicle の baseline 予想通過 timestep `P` が得られない。
+- TVT 候補 Vehicle の一部または全部の baseline 予想通過 timestep が得られない。
+
+driver は次を行わない。
+
+- `None` の補完
+- 到着時刻や通過時刻の推測
+- `route_next_link` の推測または選び直し
+- 一部情報を完全情報として扱うこと
+- 全件情報取得を成功条件とすること
+
+horizon 完走後の情報不足は、driver の実行異常ではない。後続の Node 別 TVT 制度処理が解釈する。
+
+#### 25.25.16 `P`取得だけでは情報取得完了ではない
+
+制度上の明確化：
+
+- right_of_entry vehicle の baseline 予想通過 timestep を `P` とする。
+- `P` を取得しただけでは、Node の TVT 用 baseline 情報取得完了ではない。
+- `P - 1` までに到着すると予測される TVT 候補 Vehicle 集合を確定する必要がある。
+- 候補 Vehicle 全員について、TVT 形成以降に必要な baseline 情報が必要である。
+- 特に候補 Vehicle 全員の baseline 予想通過 timestep が必要である。
+- `P - 1` に到着する Vehicle の通過時刻が `P` より後になる可能性がある。
+- 候補集合を確定した後も、候補全員の通過情報を得るための観測が必要になり得る。
+- 候補時間範囲は right_of_entry vehicle の `P - 1` で固定する。
+- 他の候補 Vehicle の通過時刻を理由に候補時間範囲を再帰的に拡張しない。
+
+説明用語として **right_of_entry vehicle** を使用する。`right-holder` は使用しない。`right_of_entry_vehicle` は、コード識別子候補について明示的に説明する場合以外、説明用語として使用しない。
+
+#### 25.25.17 一部情報による部分的TVTの禁止
+
+制度上の確定事項：
+
+- TVT 候補 Vehicle 全員の必要情報が揃わなければ、その Node で TVT を形成しない。
+- 情報取得済み Vehicle だけを使った部分的な TVT は行わない。
+- 一部情報取得の場合も、全く情報を取得できない場合も、制度上は Node 未解決となり得る。
+
+説明例：
+
+```text
+baseline到着順位：
+A, B, C, D, E, F
+
+必要な通過情報を取得できたVehicle：
+A, B, E
+```
+
+A、B、E だけで TVT を形成すると、E が C、D より前へ移る可能性がある。C、D は E より先に到着しているにもかかわらず、順位を下げられることに対する補償を受けない可能性がある。したがって、A、B、E だけを使った部分的 TVT を形成しない。候補全員の必要情報が揃わなければ Node 未解決として扱う。
+
+未解決時は既存 §14.4 に従う。
+
+- 意思決定窓内の未確定 Vehicle 全体を baseline 到着順位で確定する。
+- 意思決定窓外の未確定 Vehicle は、未解決という理由だけでは確定しない。
+
+この説明例は制度理由の説明であり、新しい候補生成規則ではない。
+
+#### 25.25.18 `TVT用baseline情報取得完了`の意味
+
+`TVT用baseline情報取得完了` とは、後続の TVT 形成、局所仮想計算、経済評価などへ進むために必要な baseline 情報が揃った状態である。
+
+これは次が完了した意味 **ではない**。
+
+- TVT 形成
+- 局所仮想計算
+- 買い手・売り手選定
+- 経済評価
+- 支払い・補償
+- 順位確定
+- §14.3 または §14.4 の順位処理
+
+Node が情報取得完了になるためには、少なくとも次が必要である。
+
+- right_of_entry vehicle を制度側で特定できる
+- `P` を取得できる
+- `P - 1` に基づく候補集合を確定できる
+- 候補 Vehicle 全員の必要 baseline 情報が揃っている
+- 特に候補全員の baseline 予想通過 timestep が揃っている
+
+情報不足の場合は、horizon 終端時未解決として後続制度処理が扱う。正式 driver 自身は、この Node 状態を判定しない。
+
+#### 25.25.19 正式driverの処理順
+
+これは正式 driver の処理順であり、早期終了方式の処理順ではない。
+
+1. 入力を検証する。
+2. `real_W` の軽量不変確認用情報を保存する。
+3. `real_W` を copy して `fork_W` を作る。
+4. copy 直後の時刻と collector 状態を確認する。
+5. fresh collector を `fork_W` だけへ設定する。
+6. snapshot 固定集合を 1 回登録する。
+7. 登録件数と collector export 件数を照合する。
+8. 登録件数が 0 なら、残り step 数検査と forward を行わず 0 step 正常結果を返す。
+9. 登録件数が 1 以上なら、残り実行可能 step 数を確認する。
+10. 指定 horizon を完走できなければ設定不整合として停止する。
+11. 指定 horizon を 1 回の `exec_simulation()` で一括実行する。
+12. 実行後の `fork_W.T` が、実行前時刻＋指定 horizon と一致することを確認する。
+13. collector export 件数が登録時から変化していないことを確認する。
+14. `real_W` の `T`、`TIME`、collector が変化していないことを確認する。
+15. collector と実行メタデータを result として返す。
+16. `fork_W` は返さない。
+
+#### 25.25.20 result dataclass
+
+第一候補：
+
+```python
+@dataclass
+class OrderControlBaselineForkResult:
+    collector: OrderControlBaselineCollector
+    target_node_names: tuple[str, ...]
+    baseline_timestep_T: int
+    configured_horizon_steps: int
+    fork_steps_executed: int
+    final_fork_timestep: int
+    registered_visit_count: int
+```
+
+各フィールドの意味：
+
+- `collector`：snapshot 固定集合の取得済み・未取得 baseline 情報。
+- `target_node_names`：今回の結果に対応する対象 Node 名の固定 `tuple`。
+- `baseline_timestep_T`：snapshot 時点。次に処理する timestep。
+- `configured_horizon_steps`：呼出側が指定した観測長。
+- `fork_steps_executed`：実際に実行した step 数。
+- `final_fork_timestep`：forward 終了後の `fork_W.T`。
+- `registered_visit_count`：snapshot 固定集合の登録総数。
+
+- dataclass は非 frozen とする。
+- `horizon_reached` を含めない。
+- `early_terminated` を含めない。
+- Node 別状態を含めない。
+- `fork_W` を含めない。
+- 空固定集合は `registered_visit_count == 0` かつ `fork_steps_executed == 0`。
+- 通常実行は `fork_steps_executed == configured_horizon_steps`。
+
+`target_node_names` を含める理由：
+
+- 結果と対象 Node 集合を一体で保持する。
+- 後続処理が Node 一覧を再入力しない。
+- 結果と対象 Node 一覧の取り違えを防ぐ。
+- collector の確認対象を明確にする。
+- 入力順を維持する。
+
+#### 25.25.21 正式driverの責任
+
+- 入力の最小限の検証
+- `real_W` の copy
+- `fork_W` の作成
+- fresh collector の作成
+- `fork_W` だけへの collector 設定
+- snapshot 固定集合の登録
+- 登録件数の照合
+- 空固定集合の判定
+- 残り実行可能 step 数の確認
+- 固定 horizon 一括実行
+- 到着・通過記録の収集
+- fork の進行 step 数確認
+- collector 件数の不変確認
+- `real_W` の軽量不変確認
+- result 返却
+
+#### 25.25.22 正式driverが担当しないこと
+
+- 既到着 Vehicle の順位確定
+- timestep T 到着 Vehicle の制度処理
+- 意思決定窓内 Vehicle の制度上の抽出
+- baseline 到着順位の構成
+- 参加状態中立方式の適用
+- 先頭非参加 Vehicle の先行確定（§4.5）
+- `baseline_rank` の再構成
+- right_of_entry vehicle の選定
+- `P` の制度上の解釈
+- `P - 1` 候補範囲の確定
+- TVT 候補 Vehicle 集合の確定
+- 候補 Vehicle 全員の情報充足判定
+- 部分的 TVT 禁止の制度上の適用
+- Node 別の TVT 検討不要、情報取得完了、未解決判定
+- §14.4 fallback
+- TVT 成立・不成立処理
+- `trade_rank`
+- 局所仮想計算
+- 買い手・売り手選定
+- 経済評価
+- 支払い・補償
+- 実績との比較分析
+- 長期ログ
+- 早期終了
+
+これらは後続の Node 別 TVT 制度処理または将来の研究分析処理の責任である。
+
+#### 25.25.23 初期実装ファイル候補
+
+新規作成第一候補：
+
+- `uxsim/order_control_baseline_driver.py`
+- `tests_order_control_baseline_driver.py`
+
+変更不要の第一候補：
+
+- `uxsim/uxsim.py`
+- `uxsim/order_control_baseline_collector.py`
+- `uxsim/order_control_baseline_snapshot.py`
+- `uxsim/__init__.py`
+- 既存テスト
+- 既存診断
+- Markdown 以外のファイル
+
+正式 driver の直接 import 候補：
+
+```python
+from uxsim.order_control_baseline_driver import (
+    OrderControlBaselineForkResult,
+    run_snapshot_fixed_baseline_fork,
+)
+```
+
+既存 collector と snapshot が専用モジュールから直接 import されているため、初期版では `uxsim/__init__.py` を変更しない。
+
+#### 25.25.24 テスト責任
+
+将来の `tests_order_control_baseline_driver.py` で確認する事項：
+
+- `baseline_horizon_steps` の `bool` 拒否
+- 0 以下の拒否
+- `target_node_names` の形式不正
+- `real_W` に collector 設定済みの場合の拒否
+- fork 側だけ fresh collector
+- snapshot 登録 1 回
+- 空固定集合 0 step 正常終了
+- 1 件以上で固定 horizon 一括実行
+- 指定 step 数と実際の進行一致
+- `final_fork_timestep`
+- 未到着 record が残っても正常終了
+- 未通過 record が残っても正常終了
+- 全取得、一部取得、全未取得の混在でも driver は正常終了
+- 登録件数と export 件数の一致
+- 固定集合外 Vehicle が件数を増やさない
+- horizon 不足の検出
+- `real_W` の `T`、`TIME`、collector 不変
+- 複数回呼出しで fresh collector が独立
+- result の全フィールド
+- result へ `target_node_names` が含まれる
+- `fork_W` を返さない
+- World 終端回避条件は、未確定事項確定後に追加
+
+正式 driver テストへ含めない事項：
+
+- §4.5 の順位処理
+- right_of_entry vehicle 選定
+- Node 解決判定
+- 部分的 TVT 禁止の制度処理
+- §14.4 fallback
+- 経済評価
+- 早期終了
+
+これらは後続制度処理または将来の早期終了専用テストの責任である。
+
+#### 25.25.25 早期終了との関係
+
+- 既存 §24.13 に早期終了の設計骨格が保存されている。
+- Git 履歴調査では、現在の §24.11 から §24.13 より詳しい過去記録は確認できなかった。
+- 初期正式 driver は固定 horizon 一括実行を採用する。
+- 早期終了は今回の正式 driver 実装範囲外である。
+- 早期終了の将来採否と詳細設計は別作業である。
+- 既存 §24.13 本文は変更しない。
+- 既存の早期終了骨格を削除しない。
+- 未確認の処理順を過去の合意事項として追加しない。
+
+#### 25.25.26 未確定事項
+
+- World 終端へちょうど到達する horizon を許可するか
+- World 終端を避けるため 1 timestep の追加余白を必須とするか
+- その確認後の残り step 数条件が `<=` か `<` か
+- `T_evaluation_end` の正式名称
+- `T_evaluation_end` の境界定義
+- `T_evaluation_end` の保存場所
+- `H_max` の正式名称と設定場所
+- horizon 感度分析との余白連動
+- `real_W` を余白期間まで進めるか
+- 余白期間を研究評価へ含めるか
+- `T_evaluation_end` 以降の新 TVT 発動抑止位置
+- horizon 不足時の例外型
+- snapshot docstring の明確化要否
+- driver 関数の最終的な型注釈
+- World 終端回避条件のテスト方法
+- 早期終了の詳細設計と採否
+- TVT 順位状態と確定順位ブロックの実装
+
+#### 25.25.27 実装再開情報
+
+将来この作業を再開するときは、次を確認すればよい。
+
+- 正本は本 §25.25 である。
+- 既存実装は collector、通知接続、snapshot 固定集合登録まで完了している。
+- 既存恒久診断は `diagnostics/order_control/tvt_baseline_snapshot_fork_probe.py` である。
+- 最新保存済みコミットは `d3bb306` である。
+- 次の直接作業は World 終端時の `Analyzer.basic_analysis()` 影響確認である。
+- その結果により、1 timestep 追加余白と `<=` または `<` を確定する。
+- その後に正式 driver コードと専用テストを実装する。
+- 正式 driver 実装前に、早期終了の詳細設計へ戻らない。
+- `diagnostics/order_control.zip` は未追跡であり、触れない。
