@@ -4295,13 +4295,25 @@ Terminal確認（すべて成功）：
 - 候補時間範囲を `P - 1` で固定し、再帰拡張しない
 - 進行済み fork を後から延長しない
 - World 作成時に baseline 用余白を確保する方向
-- World 終端回避用の追加 1 timestep 余白は未確定
+- World 終端時に `simulation_terminated()` から `Analyzer.basic_analysis()` が実行されることを Terminal で確認した
+- baseline 収集には不要な終了集計である
+- 初期 driver は forward 終了後に 1 timestep 以上を残す
+- World 終端ちょうどへの到達を許可しない
+- 残り step 条件を次で確定した
+
+```text
+baseline_horizon_steps + 1 <= fork_W.TSIZE - fork_W.T
+```
+
+- 空固定集合は forward しないため、この余白検査を行わない
+- World 作成時は最大 horizon に加えて 1 timestep 余白を確保する方向（`TSIZE >= T_evaluation_end + H_max + 1`、名称・境界は未確定）
+- `T_evaluation_end` 等の名称・境界・評価設計は引き続き未確定
 - result へ `target_node_names` を含める
 - driver と後続制度処理の責任を分離する
 - 早期終了の既存 §24.13 は今回変更していない
 - 正式 driver の Python 実装と専用テストは未着手
-- 次は World 終端時の `Analyzer.basic_analysis()` 影響確認
-- 最新保存済みコミットは `d3bb306` で origin へ push 済み
+- 次は正式 driver の実装前最終確認または実装指示作成
+- 最新保存済みコミットは `b40cf23` で origin へ push 済み
 - 本メモ更新は未コミット・未 push
 - `diagnostics/order_control.zip` には触れていない
 

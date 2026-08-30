@@ -2870,7 +2870,7 @@ other_vehicle_expected_arrival_timestep <= P - 1
 - 正式 driver は §25.25 で実装前設計済み。Python 実装は未着手。
 - 早期終了の性能測定は引き続き未実装。
 - Node 別状態は引き続き未実装。
-- World 終端回避用追加 1 timestep 余白は未確定。
+- World 終端回避用追加 1 timestep 余白は §25.25.11 で確定（2026-08-31 追加確認）。
 
 詳細は §25.20 から §25.25 を参照する。
 
@@ -5062,6 +5062,10 @@ fork_W.exec_simulation(
 - 初期版では全 Node 完了による早期終了を実行しない（早期終了の詳細は §24.13 を参照。本節では変更しない）。
 - 指定 horizon の一括実行後に collector を後続へ渡す。
 - 一括実行後、実際に指定 step 数進んだことを確認する。
+- 一括実行は World 終端へ到達しない範囲で行う。
+- World 終端時の Analyzer 終了集計を baseline driver へ持ち込まない。
+
+詳細は §25.25.11 を参照する。
 
 事後確認条件：
 
@@ -5195,7 +5199,7 @@ sum(
 
 #### 25.25.11 forkの残り実行可能step数
 
-snapshot 固定集合が 1 件以上の場合、次を確認する第一候補とする。
+snapshot 固定集合が 1 件以上の場合、次を確認する。
 
 ```text
 remaining_steps = fork_W.TSIZE - fork_W.T
@@ -5207,35 +5211,47 @@ remaining_steps = fork_W.TSIZE - fork_W.T
 - `fork_W.T == fork_W.TSIZE` なら新しい step を処理できない。
 - `fork_W.T <= fork_W.TSIZE - 1` なら少なくとも 1 step 処理できる。
 
-World 終端へちょうど到達することを許す場合の基本的な完走条件候補：
+**2026-08-31確定：** snapshot 固定集合が 1 件以上の場合、指定 horizon に加えて **1 timestep 以上** を残せることを要求する。正式 driver の実行条件は次で確定する。
 
 ```text
-baseline_horizon_steps <= fork_W.TSIZE - fork_W.T
+baseline_horizon_steps + 1 <= fork_W.TSIZE - fork_W.T
 ```
 
-境界例：
-
-```text
-fork_W.T = 200
-fork_W.TSIZE = 250
-baseline_horizon_steps = 50
-```
-
-の場合、timestep 200 から 249 までの 50 step を処理し、終了後は `fork_W.T == 250` となる。
-
-ただし、この例では World 終端にちょうど到達するため、`simulation_terminated()` と `Analyzer.basic_analysis()` が実行される。
-
-この終端集計は baseline 収集には不要であり、追加負荷や予期しない影響の範囲を増やす可能性がある。
-
-したがって、初期 driver で World 終端へのちょうど到達を許可するか、少なくとも 1 timestep を残すかは、**まだ未確定** である。
-
-安全側の未確定候補：
+同値な厳密不等式：
 
 ```text
 baseline_horizon_steps < fork_W.TSIZE - fork_W.T
 ```
 
-追加 1 timestep を要求する場合の境界例：
+World 終端ちょうどへの到達は **許可しない**。horizon 終了後に `fork_W.T == fork_W.TSIZE` となる実行は許可しない。
+
+**確定理由（2026-08-31 Terminal 確認）：** baseline forward が World 終端へ到達すると、次が自動実行される。
+
+```text
+World.simulation_terminated()
+→ Analyzer.basic_analysis()
+→ od_to_pandas()
+```
+
+`Analyzer.basic_analysis()` は単なる終了表示ではなく、少なくとも次を計算して Analyzer 状態へ保存する。
+
+- 完了 trip 数
+- 全 trip 数
+- 総走行距離
+- 総旅行時間
+- 平均旅行時間
+- 総遅延
+- 平均遅延
+
+これらは baseline collector による到着・通過情報収集には不要である。World 終端へ到達しても collector 結果が壊れるという証拠は確認されていない。一方、次は確認できた。
+
+- baseline 収集に不要な終了時集計が追加実行される
+- 不要な計算負荷が生じる
+- fork の Analyzer 状態が変更される
+- baseline driver の責任外である終了後分析が実行される
+- 終了後分析に由来する例外や副作用の可能性を余計に持ち込む
+
+**正常境界例：**
 
 ```text
 fork_W.T = 200
@@ -5243,14 +5259,43 @@ fork_W.TSIZE = 251
 baseline_horizon_steps = 50
 ```
 
-この場合、timestep 200 から 249 までを処理し、終了後 `fork_W.T == 250` で、World 終端まで 1 timestep 残る。
+- `remaining_steps` は 51 である。
+- horizon 50 に加えて 1 timestep 残せる。
+- timestep 200 から 249 までの 50 step を処理する。
+- forward 終了後は `fork_W.T == 250` である。
+- `fork_W.TSIZE == 251` であり、World 終端まで 1 timestep 残る。
+- `simulation_terminated()` は実行されない。
+- `Analyzer.basic_analysis()` も実行されない。
 
-**この厳密不等式を確定ルールとして扱わない。** `Analyzer.basic_analysis()` の詳細影響確認後に確定する未解決事項とする（§25.25.26 参照）。
+**1 timestep 不足の境界例：**
+
+```text
+fork_W.T = 200
+fork_W.TSIZE = 250
+baseline_horizon_steps = 50
+```
+
+- `remaining_steps` は 50 である。
+- horizon 自体の 50 step は処理できるが、forward 終了後に `fork_W.T == fork_W.TSIZE` となる。
+- `simulation_terminated()` と `Analyzer.basic_analysis()` が実行される。
+- 正式 driver の契約上は 1 timestep 余白不足である。
+- forward 開始前に設定不整合として停止する。
+- horizon を 49 へ自動短縮しない。
+
+**歴史的記録：** 本節初版（2026-08-31 前半）では、`baseline_horizon_steps <= fork_W.TSIZE - fork_W.T` を候補とし、1 timestep 余白は未確定としていた。同日の追加 Terminal 確認により、上記条件へ確定した。
 
 #### 25.25.12 horizon不足
 
 - snapshot 固定集合が 1 件以上の場合に残り step 数を検査する。
-- 指定 horizon を完走できない場合は、World 作成時の **実行可能期間不足** である。
+- 次を満たさなければ **設定不整合** とする。
+
+```text
+baseline_horizon_steps + 1 <= fork_W.TSIZE - fork_W.T
+```
+
+- horizon step 数だけ実行可能でも、終了後の 1 timestep が残らなければ不足である。
+- World 終端へ到達する実行を許可しない。
+- 指定 horizon を完走できない場合、および 1 timestep 余白が不足する場合は、World 作成時の **実行可能期間不足** である。
 - 交通情報を取得できなかった状態とは異なる。
 - horizon 不足を理由に自動短縮しない。
 - horizon 不足時の例外型（`ValueError` または `RuntimeError`）は実装前に確定する。
@@ -5310,21 +5355,17 @@ TSIZE
 
 ただし、`T_evaluation_end` と `H_max` は正式名称・保存場所とも **未確定** である。
 
-World 終端到達を許す場合の概念候補：
-
-```text
-TSIZE >= T_evaluation_end + H_max
-```
-
-World 終端を避けて 1 timestep を残す場合の安全側候補：
+**2026-08-31確定：** baseline 終了後に 1 timestep 残す方針を採用する。現在の名称候補を使った概念式は次で統一する。
 
 ```text
 TSIZE >= T_evaluation_end + H_max + 1
 ```
 
-いずれも、`T_evaluation_end` の境界定義と World 終端時の Analyzer 確認が未完了なので、**確定式として扱わない**。
+式の `+1` は、baseline forward 終了後に World 終端へ到達させないための技術的余白である。
 
-次を実験・評価設計上の未確定事項として記録する（§25.25.26 参照）。
+**歴史的記録：** 本節初版では `TSIZE >= T_evaluation_end + H_max` を採用候補として記録していた。2026-08-31 の追加 Terminal 確認により、World 終端時の `simulation_terminated()` と `Analyzer.basic_analysis()` を避けるため、上記 `+1` 式を採用しなかった。
+
+`T_evaluation_end` の境界定義は引き続き未確定である。次を実験・評価設計上の未確定事項として記録する（§25.25.26 参照）。
 
 - `T_evaluation_end` の正式名称
 - `T_evaluation_end` の正確な境界定義
@@ -5334,8 +5375,6 @@ TSIZE >= T_evaluation_end + H_max + 1
 - `real_W` を余白期間まで進めるか
 - 余白期間を評価指標へ含めるか
 - `T_evaluation_end` 以降の新規 TVT 発動をどこで抑止するか
-- World 終端直前の最後の baseline をどう扱うか
-- 追加 1 timestep 余白を必須とするか
 
 #### 25.25.15 正常な情報不足
 
@@ -5441,14 +5480,27 @@ Node が情報取得完了になるためには、少なくとも次が必要で
 6. snapshot 固定集合を 1 回登録する。
 7. 登録件数と collector export 件数を照合する。
 8. 登録件数が 0 なら、残り step 数検査と forward を行わず 0 step 正常結果を返す。
-9. 登録件数が 1 以上なら、残り実行可能 step 数を確認する。
-10. 指定 horizon を完走できなければ設定不整合として停止する。
-11. 指定 horizon を 1 回の `exec_simulation()` で一括実行する。
+9. 登録件数が 1 以上なら、指定 horizon を実行した後にも 1 timestep を残せるか確認する（§25.25.11）。
+10. 条件不足なら forward 開始前に設定不整合として停止する。
+11. 条件充足時だけ、指定 horizon を 1 回の `exec_simulation()` で一括実行する。
 12. 実行後の `fork_W.T` が、実行前時刻＋指定 horizon と一致することを確認する。
-13. collector export 件数が登録時から変化していないことを確認する。
-14. `real_W` の `T`、`TIME`、collector が変化していないことを確認する。
-15. collector と実行メタデータを result として返す。
-16. `fork_W` は返さない。
+13. 実行後に `fork_W.T < fork_W.TSIZE` であることを確認する。
+14. collector export 件数が登録時から変化していないことを確認する。
+15. `real_W` の `T`、`TIME`、collector が変化していないことを確認する。
+16. collector と実行メタデータを result として返す。
+17. `fork_W` は返さない。
+
+事後確認条件：
+
+```text
+fork_W.T_after == fork_W.T_before + baseline_horizon_steps
+```
+
+かつ
+
+```text
+fork_W.T_after < fork_W.TSIZE
+```
 
 #### 25.25.20 result dataclass
 
@@ -5586,13 +5638,20 @@ from uxsim.order_control_baseline_driver import (
 - 全取得、一部取得、全未取得の混在でも driver は正常終了
 - 登録件数と export 件数の一致
 - 固定集合外 Vehicle が件数を増やさない
-- horizon 不足の検出
+- horizon 不足の検出（horizon step 数は実行可能だが終了後 1 timestep が残らない境界を含む）
+- horizon 実行後に 1 timestep 以上残る境界の成功
+- horizon step 数は実行可能だが、終了後の 1 timestep が残らない境界の拒否
+- 正常終了時に `fork_W.T_after < fork_W.TSIZE`
+- World 終端へ到達しないこと
+- `simulation_terminated()` を呼ばないこと
+- `Analyzer.basic_analysis()` を呼ばないこと
+- 空固定集合では余白不足でも 0 step 正常終了すること
+- horizon を自動短縮しないこと
 - `real_W` の `T`、`TIME`、collector 不変
 - 複数回呼出しで fresh collector が独立
 - result の全フィールド
 - result へ `target_node_names` が含まれる
 - `fork_W` を返さない
-- World 終端回避条件は、未確定事項確定後に追加
 
 正式 driver テストへ含めない事項：
 
@@ -5619,9 +5678,6 @@ from uxsim.order_control_baseline_driver import (
 
 #### 25.25.26 未確定事項
 
-- World 終端へちょうど到達する horizon を許可するか
-- World 終端を避けるため 1 timestep の追加余白を必須とするか
-- その確認後の残り step 数条件が `<=` か `<` か
 - `T_evaluation_end` の正式名称
 - `T_evaluation_end` の境界定義
 - `T_evaluation_end` の保存場所
@@ -5633,7 +5689,6 @@ from uxsim.order_control_baseline_driver import (
 - horizon 不足時の例外型
 - snapshot docstring の明確化要否
 - driver 関数の最終的な型注釈
-- World 終端回避条件のテスト方法
 - 早期終了の詳細設計と採否
 - TVT 順位状態と確定順位ブロックの実装
 
@@ -5644,9 +5699,10 @@ from uxsim.order_control_baseline_driver import (
 - 正本は本 §25.25 である。
 - 既存実装は collector、通知接続、snapshot 固定集合登録まで完了している。
 - 既存恒久診断は `diagnostics/order_control/tvt_baseline_snapshot_fork_probe.py` である。
-- 最新保存済みコミットは `d3bb306` である。
-- 次の直接作業は World 終端時の `Analyzer.basic_analysis()` 影響確認である。
-- その結果により、1 timestep 追加余白と `<=` または `<` を確定する。
-- その後に正式 driver コードと専用テストを実装する。
-- 正式 driver 実装前に、早期終了の詳細設計へ戻らない。
+- 最新保存済みコミットは `b40cf23` である（origin へ push 済み）。
+- World 終端時には `simulation_terminated()` から `Analyzer.basic_analysis()` が実行されることを Terminal で確認した。
+- baseline 収集に不要な終了集計を避けるため、forward 後に 1 timestep 以上を残す方針を確定した。
+- 残り step 条件は `baseline_horizon_steps + 1 <= fork_W.TSIZE - fork_W.T` である。
+- 次の直接作業は、正式 driver コードと専用テストの実装前最終確認、または実装指示の作成である。
+- 早期終了の詳細設計は今回扱わない。
 - `diagnostics/order_control.zip` は未追跡であり、触れない。
