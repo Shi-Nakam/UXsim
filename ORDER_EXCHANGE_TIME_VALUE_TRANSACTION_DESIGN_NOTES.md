@@ -7137,3 +7137,643 @@ copy 直後の各不整合で `RuntimeError`、登録件数不一致・実行 st
 - 最新保存済みコミットは `142d235`。
 - 今回のメモ更新は未コミット、未 push。
 - `diagnostics/order_control.zip` には触れない。
+
+**2026-09-01 更新：**
+
+- §25.25.28 に基づく固定 horizon 正式 driver の実装は完了した。
+- 実装・検証・独立監査・監査後テスト補強の記録は **§25.25.29** を参照する。
+- 上記「次は driver 本体、専用テスト、snapshot docstring 修正の実装」は完了済みである。
+- 今後の再開は **§25.25.29.23** を参照する。
+- §25.25.28 記録時点の最新保存済みコミットは `142d235` だった。
+- その後、§25.25.28 の実装可能な仕様を記録した `6d30a9f` が作成され、`origin/feature/intersection-order-control` へ push された。
+- §25.25.28 に基づく現在の未コミット実装は `6d30a9f` を基準としている。
+- 現在の実装・検証・独立監査結果と再開情報は **§25.25.29** を参照する。
+
+**コミット履歴の関係（2026-09-01 時点）：**
+
+| 区分 | 内容 |
+|------|------|
+| `142d235` | §25.25.28 作成前の保存済み状態 |
+| `6d30a9f` | §25.25.28 を含む、現在の実装の基準コミット |
+| 現在の作業ツリー | `6d30a9f` の上にある未コミットの driver 実装・テスト・docstring・メモ更新 |
+
+#### 25.25.29 正式driverの実装・検証・独立監査結果
+
+記録日：2026-09-01
+
+本 §25.25.29 を、§25.25.28 に基づく実装結果、テスト結果、初回レビュー、Cursor Grok 4.6 による独立監査、監査後のテスト補強、および今後の再開情報の **正本** とする。§25.25.28 は実装前仕様の正本として維持する。既存 §25.25.1 から §25.25.28 は削除しない。
+
+#### 25.25.29.1 実装の位置づけ
+
+**確定したこと：** §25.25.28 を実装前仕様の正本として、固定 horizon 正式 driver を実装した。
+
+**何を実装したか：** 既存の `World.copy()`、`OrderControlBaselineCollector`、`register_snapshot_fixed_visits()`、fork 側 `exec_simulation()` を正しい順序で接続する上位調整処理。`real_W` を進めず、copy した `fork_W` だけを指定 horizon 分進め、snapshot 開始時に固定した visit について到着・通過情報を collector へ記録する。
+
+**何を実装していないか：** 早期終了、TVT 形成、right_of_entry vehicle 選定、P-1 候補集合、局所仮想計算、経済評価、支払い、補償、順位確定。初期正式 driver は **固定 horizon 一括方式** のままである。
+
+**正常時：** horizon 内に到着・通過情報を取得できないことは正常な研究結果であり、driver 異常ではない。全固定 visit の通過完了を成功条件にしない。
+
+**検証の経緯：** 実装担当モデル（Composer 2.5）による初回実装・専用テスト作成の後、初回レビューでテスト実効性と例外メッセージを補修した。続いて、**同じ Cursor チャット内でモデルを Cursor Grok 4.6 へ変更**し、過去の完了報告・自己評価・テスト成功報告を正解とせず、§25.25.28 と実ファイルだけを根拠とする独立監査を行った。監査後、Moderate 指摘 Q1 から Q5 を専用テストへ補強した。
+
+非技術的には、本物の交通を変えず、複製交通だけを先へ進め、開始時点で観察対象だった Vehicle の将来到着・通過情報を集める正式な入口を実装した。実装とテストを同じモデルが作ると同じ思い込みが双方へ入り得るため、異なるモデルによる独立監査を追加し、「正しく見える」だけでなく設計と実ファイルの照合で確認した。
+
+#### 25.25.29.2 変更ファイル
+
+**新規作成：**
+
+| ファイル | 内容 |
+|----------|------|
+| `uxsim/order_control_baseline_driver.py` | 正式 driver 本体 |
+| `tests_order_control_baseline_driver.py` | 専用テスト |
+
+**既存ファイル変更：**
+
+| ファイル | 変更内容 |
+|----------|----------|
+| `uxsim/order_control_baseline_snapshot.py` | **docstring のみ**（登録順序の誤読防止） |
+
+**変更していない主要ファイル：**
+
+- `uxsim/uxsim.py`
+- `uxsim/order_control_baseline_collector.py`
+- `uxsim/analyzer.py`
+- `uxsim/__init__.py`
+- 既存テスト（collector、snapshot、collector_uxsim 等）
+- 既存診断（`diagnostics/order_control/tvt_baseline_snapshot_fork_probe.py` 等）
+
+新規 driver 本体は、初回実装確認時点で **312 行** だった（2026-09-01 時点の記録。将来の変更で変わり得る）。
+
+#### 25.25.29.3 公開API
+
+**実装済み result dataclass（非 frozen）：**
+
+```python
+@dataclass
+class OrderControlBaselineForkResult:
+    collector: OrderControlBaselineCollector
+    target_node_names: tuple[str, ...]
+    baseline_timestep_T: int
+    configured_horizon_steps: int
+    fork_steps_executed: int
+    final_fork_timestep: int
+    registered_visit_count: int
+```
+
+**実装済み公開関数：**
+
+```python
+def run_snapshot_fixed_baseline_fork(
+    real_W: World,
+    *,
+    target_node_names: list[str] | tuple[str, ...],
+    baseline_horizon_steps: int,
+) -> OrderControlBaselineForkResult:
+```
+
+**契約：**
+
+- `real_W` だけ positional。`target_node_names` と `baseline_horizon_steps` は keyword-only。
+- `uxsim.order_control_baseline_driver` から直接 import する（`uxsim/__init__.py` は変更していない）。
+- `fork_W`、`return_code`、`early_terminated`、Node 別制度状態は返さない。
+- 例外時は result を返さない。
+
+非技術的には、後続処理へ巨大な `fork_W` 全体を渡さず、観察記録と実行条件だけを明確な結果オブジェクトとして渡す API である。
+
+#### 25.25.29.4 driverの実際の処理順
+
+実装は §25.25.28 の 22 ステップと **変更なし** で対応する。
+
+| 順 | 処理 | 実装箇所（概略） |
+|----|------|------------------|
+| 1 | `target_node_names` の容器型確認 | `_validate_and_freeze_target_node_names` |
+| 2 | 空 list / 空 tuple 拒否 | 同上 |
+| 3 | `fixed_target_node_names` として tuple 固定 | 同上 |
+| 4 | `baseline_horizon_steps` の型・範囲確認 | `_validate_baseline_horizon_steps` |
+| 5 | `real_W._order_control_baseline_collector is None` 確認 | `run_snapshot_fixed_baseline_fork` 入口 |
+| 6 | `real_W` の T、TIME、collector 保存 | 同上 |
+| 7 | `baseline_timestep_T` 保存 | 同上 |
+| 8 | `real_W.copy()` | 同上 |
+| 9 | copy 直後の fork 確認 | `_validate_copied_fork` |
+| 10 | fresh collector 生成 | `OrderControlBaselineCollector()` |
+| 11 | `fork_W` だけへ collector 設定 | 同上 |
+| 12 | snapshot 固定集合登録 | `register_snapshot_fixed_visits` |
+| 13 | 登録直後の件数照合 | `_validate_registered_visit_count` |
+| 14 | 全対象 Node 合計 0 件 → real_W 不変確認後 0 step result | `_build_empty_baseline_result` |
+| 15 | 合計 ≥ 1 → horizon 後 1 timestep 余白検査 | `_validate_remaining_baseline_steps` |
+| 16 | forward 前 `fork_W.T` 保存 | `fork_timestep_before` |
+| 17 | `exec_simulation()` 1 回 | `fork_W.exec_simulation(duration_t2=...)` |
+| 18 | 指定 horizon 分の T 進行確認 | `_validate_completed_fork_forward`（第 1 段） |
+| 19 | World 終端非到達確認 | 同上（第 2 段） |
+| 20 | forward 後 collector 件数照合 | `_validate_registered_visit_count` |
+| 21 | `real_W` 不変確認 | `_validate_real_world_unchanged` |
+| 22 | 正常 result 返却 | `_build_completed_baseline_result` |
+
+非技術的には、入力を先に検査し、観察対象を確定してから必要な場合だけ仮想計算を進め、すべての確認に成功した後で結果を返す流れである。
+
+#### 25.25.29.5 入力validation
+
+##### target_node_names
+
+**受け付ける：** `list`、`tuple`（subclass 含む。`isinstance` による判定）。
+
+**拒否する：** `str`、`bytes`、`set`、`generator`、その他の一般 `Iterable`。空 list / 空 tuple は `World.copy()` 前に `ValueError`。
+
+**委譲：** 各 Node 名の意味的検証（存在、eligibility、重複等）は `register_snapshot_fixed_visits()` へ委譲。
+
+**空 Node 一覧の例外メッセージに含む情報：**
+
+- 少なくとも 1 つの対象 Node 名が必要
+- 空 Node 一覧は入力エラー
+- 非空 Node 一覧を指定した結果、全対象 Node 合計の登録 visit が 0 件となる正常ケースとは異なる
+
+##### baseline_horizon_steps
+
+**受け付ける：** bool ではない Python `int`、1 以上。
+
+**拒否する：** `True`、`False`、`0`、負数、`float`、NumPy 整数、その他の型。
+
+**例外メッセージ：** 実際の値（`value=...`）と型名（`type=...`）、および bool ではない Python int であること。
+
+**NumPy 整数拒否の理由：** 乗算できないためではない。既存 order-control 系の検証規則に合わせ、初期 API の受付型を Python `int` に限定して一貫性を保つため（§25.25.28.5 と同旨）。
+
+#### 25.25.29.6 real_Wとfork_Wの分離
+
+- `real_W._order_control_baseline_collector` は入口で `None` でなければならない。非 `None` なら copy 前に `ValueError`。
+- `real_W` へ collector を一時的にも設定しない。
+- copy 後：`fork_W is not real_W`、`fork_W.T == baseline_timestep_T`、`fork_W._order_control_baseline_collector is None` を確認。不一致は `RuntimeError`。
+- `World.copy()` 例外は変換せず伝播。copy 戻り値の `None` 確認は追加していない。
+- 正常終了時に `real_W.T`、`real_W.TIME`、`real_W._order_control_baseline_collector` の不変を確認。
+- 全 Vehicle、全 Node、全 Link、RNG の詳細比較は本番 driver へ入れていない。詳細な参照独立性は既存 fork 診断と専用テストの責任。
+
+非技術的には、本物の交通と複製交通を取り違えず、仮想計算が本物の進行時刻や記録設定を変えないことを守るための確認である。
+
+#### 25.25.29.7 collectorとsnapshot固定集合
+
+- copy 直後確認後に `OrderControlBaselineCollector()` を生成し、`fork_W` だけへ設定する。
+- driver が新規生成した collector の空状態を private 属性で重複検査しない。
+- `register_snapshot_fixed_visits()` を fork forward 前に **1 回だけ** 呼ぶ。
+- 戻り値は全対象 Node 合計の登録 visit 数。登録直後と forward 後に公開 export API で件数照合する。
+- snapshot 登録例外は原則そのまま伝播。登録失敗時に result を返さない。
+- 固定集合外通知では登録件数を増やさない（collector 既存契約に委譲。driver テストで接続を確認）。
+
+**登録順序の実証（event list）：** `test_register_snapshot_fixed_visits_called_once_before_exec_simulation` で `events == ["register", "exec"]` を確認した。
+
+非技術的には、仮想計算を始める前に観察対象を固定し、開始後に新しく現れた Vehicle を今回の観察対象へ混入させないためである。
+
+#### 25.25.29.8 全対象Node合計0件
+
+**0 step 正常終了条件：** `registered_visit_count == 0`（特定 Node ではなく **全対象 Node 合計**）。
+
+- 特定 Node だけ 0 件でも、他 Node に visit があれば固定 horizon を実行する（`test_partial_node_zero_still_forwards_when_other_node_has_visits`）。
+- 全対象 Node 合計 0 件の場合だけ、余白検査と `exec_simulation()` を省略し、`real_W` 不変を確認して通常と同じ dataclass を返す。
+- **全対象 Node 合計 0 件かつ World の残り step 数が horizon 後 1 timestep 余白を満たさない場合でも**、forward しないため正常終了する（監査後テストで直接確認。下記）。
+
+**0 件 result：**
+
+```python
+OrderControlBaselineForkResult(
+    collector=collector,
+    target_node_names=fixed_target_node_names,
+    baseline_timestep_T=baseline_timestep_T,
+    configured_horizon_steps=baseline_horizon_steps,
+    fork_steps_executed=0,
+    final_fork_timestep=baseline_timestep_T,
+    registered_visit_count=0,
+)
+```
+
+**監査後追加テスト `test_zero_total_registered_visits_skips_insufficient_margin_validation`：**
+
+| 設定 | 値 |
+|------|-----|
+| `tmax` | 250 |
+| `T` | 200 |
+| `horizon` | 50 |
+| `remaining_steps` | 50 |
+| `required_steps` | 51 |
+| Vehicle | なし |
+| `target_node_names` | 非空 |
+
+**確認：** `ValueError` なし、`registered_visit_count == 0`、`fork_steps_executed == 0`、`final_fork_timestep == 200`、`configured_horizon_steps == 50`、`exec_simulation()` 非呼出、`real_W` 不変。
+
+#### 25.25.29.9 horizon後の1 timestep余白
+
+- 全対象 Node 合計 ≥ 1 の場合だけ検査する。
+- 条件：`baseline_horizon_steps + 1 <= fork_W.TSIZE - fork_W.T`
+- 不足は `ValueError`。horizon を自動短縮しない。
+- 例外メッセージに `baseline_horizon_steps`、`remaining_steps`、`required_steps`、`fork_W.T`、`fork_W.TSIZE`、および World 終端前に少なくとも 1 timestep を残す旨を含む。
+
+**確認済みテスト：**
+
+- `test_succeeds_when_remaining_steps_equals_horizon_plus_one`（`remaining_steps == horizon + 1` で成功）
+- `test_rejects_when_remaining_steps_equals_horizon_only`（`remaining_steps == horizon` で `ValueError`）
+- `test_succeeds_with_sufficient_margin_example`（十分余白で成功）
+- `test_does_not_automatically_shorten_horizon`（自動短縮なし）
+- `test_simulation_terminated_not_called`、`test_analyzer_basic_analysis_not_called`（終端処理回避）
+
+**余白不足メッセージ（`test_rejects_when_remaining_steps_equals_horizon_only` で assert）：**
+
+- `baseline_horizon_steps=50`
+- `remaining_steps=50`
+- `required_steps=51`
+- `fork_W.T=200`
+- `fork_W.TSIZE=250`
+- World 終端前に少なくとも 1 timestep を残す契約
+
+#### 25.25.29.10 固定horizon一括実行
+
+```python
+fork_W.exec_simulation(
+    duration_t2=baseline_horizon_steps * fork_W.DELTAT
+)
+```
+
+- 呼出しは 1 回。1 timestep 反復ではない。早期終了なし。
+- `exec_simulation()` の戻り値は result へ保存せず、主要成功条件にもしない。T の進行を事後確認する。
+
+**専用テスト：** `test_calls_exec_simulation_once`、`test_exec_simulation_duration_matches_horizon`、`test_advances_timestep_by_configured_horizon`、`test_simulation_terminated_not_called`、`test_analyzer_basic_analysis_not_called`。
+
+#### 25.25.29.11 実行後の事後確認
+
+実装条件：
+
+```text
+fork_W.T == fork_timestep_before + baseline_horizon_steps
+fork_W.T < fork_W.TSIZE
+exported_visit_count == registered_visit_count  （forward 後）
+real_W.T / TIME / collector 不変  （正常終了時）
+```
+
+各不一致は `RuntimeError`。result はすべての事後確認後にだけ返す。
+
+**監査後補強で公開 driver 経路または専用分岐を追加確認：**
+
+- T が期待値より多く進んだ場合の拒否（`test_runtime_error_when_forward_advances_more_than_configured_horizon`）
+- forward 後に World 終端へ到達した異常を公開 driver が拒否（`test_runtime_error_when_public_driver_forward_reaches_world_termination`）
+- `real_W.TIME` だけ変更した場合の検出（`test_runtime_error_when_real_world_time_changes_before_success_return`）
+- `real_W._order_control_baseline_collector` だけ変更した場合の検出（`test_runtime_error_when_real_world_collector_changes_before_success_return`）
+
+##### World終端異常の検出順序
+
+本番 driver の `_validate_completed_fork_forward` は次の順で事後確認する。
+
+1. 指定 horizon 分の T 進行確認（`fork_W.T == fork_timestep_before + baseline_horizon_steps`）
+2. World 終端非到達確認（`fork_W.T < fork_W.TSIZE`）
+
+通常の事前余白条件を通過した場合、正しい期待終了時刻は少なくとも `TSIZE - 1` である。その状態から patched `exec_simulation()` が `fork_W.T` を `TSIZE` へ進めると、実際の T は期待終了 T より大きくなるため、**公開 driver では先に進行量不一致として `RuntimeError` になる**（メッセージ：`did not advance by baseline_horizon_steps`）。
+
+一方、次の終端専用条件：
+
+```text
+fork_W.T == expected_fork_timestep_after
+かつ
+fork_W.T >= fork_W.TSIZE
+```
+
+は、正常な事前余白条件と両立しない。この終端専用分岐は、内部 helper を直接呼ぶ既存テスト `test_runtime_error_when_world_reaches_termination_after_forward` が担当する。
+
+これは仕様変更ではなく、事前条件・事後確認順序・テスト責任の関係を明確にした記録である。
+
+#### 25.25.29.12 例外と部分結果
+
+**ValueError：** `target_node_names` 型不正、空 `target_node_names`、`baseline_horizon_steps` 型・範囲不正、`real_W` に collector 設定済み、1 timestep 余白不足。
+
+**RuntimeError：** copy 直後の内部不整合、登録件数不一致、T 進行不一致、World 終端到達、forward 後件数不一致、`real_W` 不変違反。
+
+**元例外を原則伝播：** `World.copy()`、collector 生成、snapshot 登録、`exec_simulation()`。
+
+**途中例外時：** result を返さない。部分 collector を返さない。rollback しない。自動再試行しない。別 fork を作らない。driver 本体の `real_W` 不変確認は **正常終了時だけ**。
+
+**専用テストで確認：** `exec_simulation()` 例外後にも `real_W` の T、TIME、collector が不変（`test_no_result_on_exec_simulation_exception` 強化後）。
+
+非技術的には、途中で中断された仮想調査を完成済み結果として返さず、元の失敗理由を隠さないための扱いである。
+
+#### 25.25.29.13 result
+
+**通常 result：**
+
+```python
+OrderControlBaselineForkResult(
+    collector=collector,
+    target_node_names=fixed_target_node_names,
+    baseline_timestep_T=baseline_timestep_T,
+    configured_horizon_steps=baseline_horizon_steps,
+    fork_steps_executed=baseline_horizon_steps,
+    final_fork_timestep=fork_W.T,
+    registered_visit_count=registered_visit_count,
+)
+```
+
+- `collector` に取得済み・未取得情報を保持。`target_node_names` は tuple。
+- `configured_horizon_steps` と `fork_steps_executed` を区別する。
+- 0 件時は `fork_steps_executed == 0`。通常時は `fork_steps_executed == configured_horizon_steps`。
+- 情報未取得は `None` のまま。全固定 visit の通過完了を成功条件にしない。
+- `fork_W` は返さない。result 取得後の collector と dataclass は可変（非 frozen は §25.25.28 で確定した仕様。後続が誤って変更しない責任を持つ）。
+
+独立監査では、dataclass 非 frozen 自体の専用テストがないことは **Minor** と判定し、今回の監査後補修対象にはしなかった。
+
+#### 25.25.29.14 snapshot docstring
+
+`uxsim/order_control_baseline_snapshot.py` の `register_snapshot_fixed_visits` の **docstring のみ** を修正した。
+
+**修正後の説明順：**
+
+```text
+real_W を baseline 開始時点 T まで通常実行
+→ real_W.copy()
+→ copy 直後の fork_W を渡す
+→ fork baseline forward 前に snapshot 登録
+```
+
+- `fork_W.T == T` では timestep T は未処理。
+- 関数本体、引数、戻り値、validation は変更していない。
+- 以前の「fork forward 後に登録する」と誤読できる表現を修正した。
+- 独立監査でも、変更が docstring のみであり、§25.25.28、snapshot 設計、fork probe と整合すると確認された。
+
+#### 25.25.29.15 内部helper
+
+| helper | 責任 |
+|--------|------|
+| `_validate_and_freeze_target_node_names` | 容器型、空拒否、tuple 固定 |
+| `_validate_baseline_horizon_steps` | horizon の型と範囲 |
+| `_count_exported_baseline_visits` | 対象 Node 別 export 件数の合計 |
+| `_validate_registered_visit_count` | 登録数と export 件数の照合 |
+| `_validate_copied_fork` | copy 直後の identity、T、collector |
+| `_validate_remaining_baseline_steps` | horizon 後の 1 timestep 余白 |
+| `_validate_completed_fork_forward` | T 進行と World 終端非到達 |
+| `_validate_real_world_unchanged` | `real_W` の T、TIME、collector |
+| `_build_empty_baseline_result` | 全対象 Node 合計 0 件の result |
+| `_build_completed_baseline_result` | 通常完了 result |
+
+helper 構成は §25.25.28.17 の第一候補どおり。短い高度な Python 表現へ詰め込まず、公開関数から処理順を追える構造を採用した。
+
+#### 25.25.29.16 初回専用テストと実装後補修
+
+**初回実装後：** 専用テスト **56 件**。
+
+**初回レビュー・補修後：** **60 件**。
+
+**初回実装・テスト作業中の補修（制度設計変更ではない）：**
+
+- `_junction_target_names` の typo 修正
+- `exec_simulation` mock の再帰・pickle 問題修正
+- `Analyzer.basic_analysis` と `simulation_terminated` の追跡方法修正
+- 未到着・未通過テストの World 配置調整
+- passage 記録テスト追加
+- World 終端テストを helper 直接検証へ調整
+- 未使用 import 削除
+
+**初回レビューで 60 件までに補修した内容：**
+
+- horizon 不正メッセージへ実際の値と型名を追加
+- 空 Node 一覧メッセージへ、全対象 Node 合計 0 件との違いを追加
+- snapshot 登録順序を event list で確認するテストへ強化
+- 固定集合外 Vehicle 通知を fork forward 中に発生させるテストへ変更
+- 登録直後の件数不一致テスト追加
+- forward 後の件数不一致テスト追加
+- `real_W` 不変違反テスト追加
+- `World.copy()` 元例外伝播テスト追加
+- 未取得情報テスト名を `test_succeeds_when_baseline_information_remains_unresolved` へ変更
+
+これらは正式 driver の制度設計変更ではなく、実装・テスト・診断の正確性を高める補修である。
+
+#### 25.25.29.17 Cursor Grok 4.6による独立監査
+
+**監査の実施方法：**
+
+- 実装担当時には **Composer 2.5** を使用していた。
+- ダブルチェックでは、**現在の Cursor チャット内でモデルを Cursor Grok 4.6 へ変更**した（新しい Cursor チャットは使用していない）。
+- 過去の完了報告、自己評価、テスト成功報告を正解として扱わないよう明示した。
+- §25.25.28 と実ファイルだけを根拠として監査した。
+- コード、テスト、診断、Markdown を変更せず、**テストや診断も実行しない静的監査**だった。
+
+**監査内容：**
+
+- 仕様から実装への順方向照合
+- 実装から仕様への逆方向照合
+- 全 60 テスト（当時）について、名前だけでなく準備状態、patch、mock、assertion を確認
+- mock と `World.copy()` の pickle の関係を確認
+- `real_W` 不変性の静的追跡
+- collector 件数照合の限界の検討
+- snapshot docstring 差分の確認
+- 変更範囲の確認
+- 反証型の境界検討
+
+**独立監査の判定：**
+
+| 区分 | 結果 |
+|------|------|
+| Critical 問題 | **なし** |
+| Major 問題 | **なし** |
+| 本番 driver と §25.25.28 | 公開契約、処理順、例外境界と **一致** |
+| snapshot 変更 | docstring のみ、仕様と整合 |
+| コミット前必須の本番コード修正 | **なし** |
+| Moderate | 回帰テストで直接固定されていない経路を指摘（Q1〜Q5） |
+| Minor | 限定的なテスト重複や未確認項目 |
+| 本番への追加 validation / identity 再照合 | **不要**（登録時保証済み不変条件の重複検査は行わない方針を維持） |
+
+非技術的には、実装とテストを作ったときと異なるモデルに、「正しいという報告を信用せず、設計と実ファイルを一から照合する」監査を行わせた。
+
+#### 25.25.29.18 独立監査後のテスト補強
+
+独立監査で本番 driver に Critical または Major 問題はなかった。将来の回帰を防ぐため、Moderate 指摘 **Q1 から Q5** をコミット前に補修した。**本番 driver、snapshot docstring、設計メモは変更せず、`tests_order_control_baseline_driver.py` だけ**を変更した。
+
+##### Q1：全対象 Node 合計 0 件で余白検査をスキップ
+
+**追加：** `test_zero_total_registered_visits_skips_insufficient_margin_validation`（詳細は §25.25.29.8）。
+
+##### Q2：T 過剰と World 終端異常
+
+**追加（いずれも公開 `run_snapshot_fixed_baseline_fork()` 経由）：**
+
+- `test_runtime_error_when_forward_advances_more_than_configured_horizon`
+- `test_runtime_error_when_public_driver_forward_reaches_world_termination`
+
+Q2-2 では進行量確認が World 終端確認より先のため、公開 driver は T 進行量不一致として拒否する。終端専用分岐は `test_runtime_error_when_world_reaches_termination_after_forward`（helper 直接）が担当する。
+
+##### Q3：real_W 不変確認
+
+**追加：**
+
+- `test_runtime_error_when_real_world_time_changes_before_success_return`（T と collector は変更しない）
+- `test_runtime_error_when_real_world_collector_changes_before_success_return`（T と TIME は変更しない）
+
+**強化：** `test_no_result_on_exec_simulation_exception`（例外後の `real_W` T / TIME / collector 不変）。
+
+人工的な変更は `finally` で復元する。
+
+##### Q4：余白不足メッセージ
+
+**強化：** `test_rejects_when_remaining_steps_equals_horizon_only`（§25.25.29.9 の必須値・意味を assert）。
+
+##### Q5：テスト名と確認内容の一致
+
+| 改名前 | 改名後 |
+|--------|--------|
+| `test_fork_world_is_distinct_from_real_world` | `test_zero_visit_run_leaves_real_world_unchanged` |
+
+同一オブジェクト copy の異常検出は `test_runtime_error_when_copy_returns_same_object` が担当する。
+
+#### 25.25.29.19 最終的な専用テスト構成
+
+**独立監査後補修を含む最終状態（2026-09-01）：**
+
+| 項目 | 値 |
+|------|-----|
+| `test_*` 関数定義数 | **65** |
+| `TESTS` 一覧要素数 | **65** |
+| `TESTS` 一覧にない `test_*` | なし |
+| `test_*` ではない `TESTS` 要素 | なし |
+| `TESTS` 重複 | なし |
+| `test_*` 関数名の重複定義 | なし |
+| 改名前 `test_fork_world_is_distinct_from_real_world` | 残っていない |
+| 改名後 `test_zero_visit_run_leaves_real_world_unchanged` | 定義・登録済み |
+| 実行結果 | **65 件すべて成功** |
+
+**主なテスト区分：** 入力 validation、copy と collector、snapshot 登録、全対象 Node 合計 0 件、1 timestep 余白、固定 horizon 一括実行、collector 結果、不整合と例外、result 契約。
+
+**重要テスト名（代表）：**
+
+- `test_register_snapshot_fixed_visits_called_once_before_exec_simulation`
+- `test_partial_node_zero_still_forwards_when_other_node_has_visits`
+- `test_zero_total_registered_visits_returns_zero_step_result`
+- `test_zero_total_registered_visits_skips_insufficient_margin_validation`
+- `test_succeeds_when_remaining_steps_equals_horizon_plus_one`
+- `test_rejects_when_remaining_steps_equals_horizon_only`
+- `test_runtime_error_when_forward_advances_more_than_configured_horizon`
+- `test_runtime_error_when_public_driver_forward_reaches_world_termination`
+- `test_simulation_terminated_not_called`
+- `test_analyzer_basic_analysis_not_called`
+- `test_succeeds_when_baseline_information_remains_unresolved`
+- `test_outside_fixed_set_vehicle_does_not_increase_count`
+- `test_runtime_error_when_registration_count_mismatch_after_snapshot_registration`
+- `test_runtime_error_when_registration_count_mismatch_after_baseline_forward`
+- `test_runtime_error_when_real_world_changes_before_success_return`
+- `test_runtime_error_when_real_world_time_changes_before_success_return`
+- `test_runtime_error_when_real_world_collector_changes_before_success_return`
+- `test_world_copy_propagates_original_exception`
+- `test_no_result_on_exec_simulation_exception`
+- `test_completed_result_fields`
+
+##### 監査で Minor と判断し、今回整理しなかった事項
+
+- snapshot 登録例外のテストに一部重複がある
+- 両方の情報が `None` となるシナリオに一部重複がある
+- 空 list と空 tuple のメッセージ assertion は完全には同一でない
+- 0 件 result で除外フィールドを再確認していない
+- keyword-only を `TypeError` で確認する専用テストがない
+- dataclass 非 frozen の専用テストがない
+
+これらは研究結果または主要な正式 driver 契約へ実質的な影響を与えない Minor 事項であり、今回のコミット前補修対象にはしなかった。
+
+#### 25.25.29.20 回帰テストと診断
+
+監査後補修後に実行済み（2026-09-01）：
+
+1. `python -m py_compile tests_order_control_baseline_driver.py`
+2. `python tests_order_control_baseline_driver.py`
+3. `python tests_order_control_baseline_collector.py`
+4. `python tests_order_control_baseline_snapshot.py`
+5. `python tests_order_control_baseline_collector_uxsim.py`
+6. `python diagnostics/order_control/tvt_baseline_snapshot_fork_probe.py`
+7. `git diff --check`
+8. `git status --short`
+
+**結果：**
+
+| 対象 | 結果 |
+|------|------|
+| driver tests | **65 件すべて成功** |
+| collector tests | 成功 |
+| snapshot tests | 成功 |
+| collector_uxsim tests | 成功 |
+| fork probe | 成功 |
+| py_compile | 成功 |
+| git diff --check | 成功 |
+
+初回実装時の driver モジュール import 確認も成功している。
+
+#### 25.25.29.21 欠陥探索レビュー結果
+
+- 初回実装レビューでテストの実効性と例外メッセージを補強した。
+- Cursor Grok 4.6 による独立監査を行った。
+- 独立監査で **Critical 問題は確認されなかった**。
+- 独立監査で **Major 問題は確認されなかった**。
+- 本番 driver の仕様違反は確認されなかった。
+- 独立監査で指摘された Moderate の回帰テスト不足（Q1〜Q5）をコミット前に補修した。
+- 補修後、専用テスト 65 件と関係テスト・診断が成功した。
+- 本番 driver を補修のために変更していない。
+- snapshot docstring を監査後補修で変更していない。
+- 登録時の保証を本番 driver で重複検査する変更を加えていない。
+- 初期 driver へ早期終了や TVT 制度処理を追加していない。
+- **現時点で、コミットを妨げる Critical または Major な未解決問題は確認されていない**（将来の変更で再確認が必要である）。
+
+#### 25.25.29.22 現在の変更範囲
+
+**本記録作業前の作業ツリー：**
+
+```text
+ M uxsim/order_control_baseline_snapshot.py
+?? tests_order_control_baseline_driver.py
+?? uxsim/order_control_baseline_driver.py
+?? diagnostics/order_control.zip
+```
+
+**本記録作業によりさらに変更：**
+
+- `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES.md`（§25.25.29 追加、§25.25.28.23 追記）
+- `ORDER_EXCHANGE_PROGRESS.md`（2026-09-01 エントリ追加）
+
+**明記：**
+
+- driver と driver テストは新規未追跡
+- snapshot は docstring だけの変更
+- ZIP は既存の未追跡ファイルであり未接触・コミット対象外
+- `uxsim.py`、collector、analyzer、`uxsim/__init__.py`、既存テスト、既存診断は変更していない
+- **git add、git commit、git push はまだ行っていない**
+
+**基準コミット（2026-09-01 時点）：**
+
+- 今回の未コミット実装およびメモ更新の基準となる最新保存済みコミットは `6d30a9f`（`Document implementation-ready specification for the fixed-horizon full-World baseline driver`）。
+- `6d30a9f` は `origin/feature/intersection-order-control` へ push 済みである。
+- driver、driver テスト、snapshot docstring、§25.25.29、進捗メモは、`6d30a9f` の上にある未コミット変更である。
+- `diagnostics/order_control.zip` は、その未コミット変更とは別の既存未追跡ファイルであり、今回のコミット対象外である。
+
+#### 25.25.29.23 実装再開情報
+
+**完了済み：**
+
+- 正式 driver 本体、snapshot docstring、専用テストの実装
+- 専用テスト 65 件と関係回帰テスト・診断の成功
+- 初回レビューで見つかった不足の補修
+- Cursor Grok 4.6 による独立監査
+- 独立監査の Moderate 指摘 Q1〜Q5 のコミット前テスト補強
+- 本記録（§25.25.29、進捗メモ 2026-09-01）
+
+**次の直接作業：**
+
+1. コード差分、テスト差分、docstring 差分、メモ差分、変更範囲の **最終確認**
+2. 確認後、`uxsim/order_control_baseline_driver.py`、`tests_order_control_baseline_driver.py`、snapshot docstring、設計メモ、進捗メモを **同じコミット** へ保存する
+3. コミット前に `git diff --check`、変更ファイル一覧、テスト件数（65）を再確認する
+4. コミット後に最新コミットと残存変更を確認する
+5. **git push はコミット確認後に別の指示で行う**
+
+**基準コミットとコミット対象（2026-09-01 時点）：**
+
+- 実装差分とメモ差分の最終確認を再開する場合の基準コミットは `6d30a9f` である。
+- `6d30a9f` から現在の作業ツリーに、正式 driver 本体、専用テスト、snapshot docstring、設計メモ、進捗メモの変更がある。
+- コミット対象は次の **5 ファイル** である。
+  - `uxsim/order_control_baseline_driver.py`
+  - `tests_order_control_baseline_driver.py`
+  - `uxsim/order_control_baseline_snapshot.py`
+  - `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES.md`
+  - `ORDER_EXCHANGE_PROGRESS.md`
+- `diagnostics/order_control.zip` はコミット対象に含めない。
+
+**再開時に最初に読む節：** §25.25.29 → §25.25.28（実装前仕様）→ `uxsim/order_control_baseline_driver.py` → `tests_order_control_baseline_driver.py`
+
+**行わないこと：**
+
+- `diagnostics/order_control.zip` をコミットしない
+- 次の制度実装（TVT 形成、早期終了等）へ自動的に進まない
+- 初期 driver へ早期終了を追加しない

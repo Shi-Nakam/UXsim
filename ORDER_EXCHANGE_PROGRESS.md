@@ -4368,6 +4368,34 @@ baseline_horizon_steps + 1 <= fork_W.TSIZE - fork_W.T
 - 本メモ更新は未コミット・未 push
 - `diagnostics/order_control.zip` には触れていない
 
+#### 2026-09-01：固定horizon正式driverを実装・検証・独立監査
+
+- §25.25.28 に従って固定 horizon 正式 driver を実装した
+- 新規 `uxsim/order_control_baseline_driver.py`（初回確認時 312 行。将来変わり得る）
+- 新規 `tests_order_control_baseline_driver.py`
+- `uxsim/order_control_baseline_snapshot.py` は **docstring のみ** 変更
+- 公開 API：`OrderControlBaselineForkResult`（7 フィールド、非 frozen）、`run_snapshot_fixed_baseline_fork`
+- `real_W` は変更せず `fork_W` だけ forward。collector は fork だけへ設定
+- snapshot 登録は forward 前に 1 回（event list で `register` → `exec` を確認）
+- 全対象 Node 合計 0 件だけ 0 step 正常終了。特定 Node だけ 0 件でも全体合計 ≥ 1 なら forward
+- 全対象 Node 合計 0 件では余白不足でも 0 step 正常終了（`test_zero_total_registered_visits_skips_insufficient_margin_validation`）
+- horizon 後の 1 timestep 余白：`baseline_horizon_steps + 1 <= TSIZE - T`
+- `exec_simulation()` を 1 回だけ実行。早期終了なし
+- 実行後に T 進行、World 終端、件数、`real_W` 不変を確認
+- 途中例外時に result と部分 collector を返さない
+- 初回専用テスト 56 件 → 初回レビュー後 60 件 → 独立監査後補修で **65 件**（すべて成功）
+- 実装担当は Composer 2.5。独立監査は **同じ Cursor チャット内でモデルを Cursor Grok 4.6 へ変更**（新チャットではない）
+- 独立監査は静的監査（過去の完了報告を根拠にせず §25.25.28 と実ファイルのみ照合）
+- **Critical 問題なし、Major 問題なし**。本番 driver は §25.25.28 と一致
+- Moderate 回帰テスト不足 Q1〜Q5 をコミット前に専用テストへ補強（本番 driver は変更していない）
+- collector / snapshot / collector_uxsim 既存テスト、fork probe、py_compile、`git diff --check` 成功
+- 現時点でコミットを妨げる Critical または Major 問題なし
+- 詳細は設計メモ **§25.25.29**
+- 次は差分と変更範囲の最終確認の後、同一コミットへ保存
+- 最新保存済みコミットは `6d30a9f`（origin へ push 済み）
+- 今回の実装・メモ更新は未コミット、未 push
+- `diagnostics/order_control.zip` は未接触、コミット対象外
+
 #### 2026-08-29：TVT権利保有車両選定前の先頭非参加Vehicle先行確定の記録補修
 
 - 過去に確定済みだった、意思決定窓内 baseline 到着順位の先頭に連続する非参加 Vehicle の先行確定が、設計メモに明文化されていなかった

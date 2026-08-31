@@ -30,9 +30,12 @@ def register_snapshot_fixed_visits(
     """
     Identify snapshot-fixed visits on TVT target nodes and register them on collector.
 
-    Call this only after ``fork_W.exec_simulation()`` returns normally and before the
-    next ``exec_simulation()`` call. At call time, ``fork_W.T`` is baseline timestep T
-    and timestep T has not been processed yet.
+    Call this after ``real_W`` has reached baseline start timestep T through normal
+    forward execution, then ``real_W.copy()`` has produced ``fork_W``. Pass the
+    copied ``fork_W`` immediately before fork baseline forward begins.
+
+    At call time, ``fork_W.T == T`` and timestep T has not been processed yet on
+    the fork World.
 
     The collector should be a fresh instance with no prior snapshot registrations.
     Registration entries are validated on a temporary empty collector before the
