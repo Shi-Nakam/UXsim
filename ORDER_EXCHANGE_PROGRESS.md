@@ -4340,6 +4340,34 @@ baseline_horizon_steps + 1 <= fork_W.TSIZE - fork_W.T
 - 本メモ更新は未コミット・未 push
 - `diagnostics/order_control.zip` には触れていない
 
+#### 2026-08-31：固定horizon正式driverの実装前残存設計を確定
+
+- 関連コードと既存メモを読み取り、実装に必要な残存事項を確定した
+- 最新正本は設計メモ **§25.25.28**
+- 関数名は `run_snapshot_fixed_baseline_fork`
+- `real_W` だけ positional。Node 一覧と horizon は keyword-only
+- `real_W: World` 型注釈
+- Node 一覧は `list` または `tuple` のみ。空 Node 一覧は入力エラー
+- Node の意味的検証は snapshot へ委譲
+- horizon は bool でない Python `int` で 1 以上
+- horizon 余白不足は `ValueError`。入力・設定不整合は `ValueError`、内部不整合は `RuntimeError`
+- copy、snapshot、forward の既存例外は原則伝播
+- collector は copy 後の fork だけへ設定
+- 登録直後と forward 後に件数照合
+- 0 step 正常終了は **全対象 Node 合計** の登録件数が 0 の場合だけ。特定 Node だけ 0 件でも全体合計 ≥ 1 なら forward する
+- 0 件時 result の各値と意味を確定した（§25.25.28.10、§25.25.28.16）
+- 途中例外では部分 result を返さない
+- `real_W` 軽量不変確認は正常終了時に行う。異常経路の `real_W` 不変は専用テストで確認
+- result は既存 7 フィールド（非 frozen）
+- snapshot docstring を実装時に明確化する（本体は変更しない）
+- 新規 `uxsim/order_control_baseline_driver.py` と `tests_order_control_baseline_driver.py` を作成する
+- `uxsim.py`、collector、`uxsim/__init__.py`、既存診断は変更しない
+- 初期 driver は固定 horizon 一括実行のまま。早期終了は初期実装範囲外
+- 次は driver 本体、専用テスト、snapshot docstring 修正の実装
+- 最新保存済みコミットは `142d235`
+- 本メモ更新は未コミット・未 push
+- `diagnostics/order_control.zip` には触れていない
+
 #### 2026-08-29：TVT権利保有車両選定前の先頭非参加Vehicle先行確定の記録補修
 
 - 過去に確定済みだった、意思決定窓内 baseline 到着順位の先頭に連続する非参加 Vehicle の先行確定が、設計メモに明文化されていなかった
