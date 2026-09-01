@@ -3275,6 +3275,8 @@ collector が担当しないこと：
 - **評価状態**（TVT 検討不要、P 待ち、baseline 情報取得完了、horizon 終端時未解決等）、**完了済み Node 集合**、**毎 timestep 走査方法**、**早期終了**関連、**実交通上の未確定 visit 登録タイミング**は、引き続き本節または §25.25.30 対象外として未確定または別作業である。
 - 過去の「TVT 順位状態全体が未確定」という記録は、**今回 §25.25.30 で確定した範囲**と**なお未確定の範囲**を分けて解釈する。誤りとして削除しない。
 
+**2026-09-02 更新：** 独立した順位状態部品は **§25.25.31** で実装・検証済みである。UXsim 本体または上位制度処理への接続は未実装である。TVT 候補選定と順位計算は未実装である。上記の「未確定」記述は、その記録時点の歴史的記録として残す。最新の実装・検証・監査結果の参照先は **§25.25.31** である。
+
 ### 24.14 TVTと将来BATCHの共通利用
 
 共通化するのは交通予測である。
@@ -6182,7 +6184,9 @@ from uxsim.order_control_baseline_driver import (
 - 性能上の採否と性能閾値
 - Node 状態の保存形式
   - 2026-09-01 更新：上記は本節記録時点の未確定事項である。その後、順位状態は §25.25.30 で確定した。Node 評価状態の保存形式は引き続き未確定である。
+  - **2026-09-02 更新：** 独立した順位状態部品は §25.25.31 で実装・検証済み。UXsim 本体または上位制度処理への接続は未実装。候補選定と順位計算は未実装。古い「未実装」は歴史的記録として残す。最新参照先は §25.25.31。
 - Node **評価**状態の保存形式（§24.12。順位状態は §25.25.30 で確定）
+  - **2026-09-02 更新：** 順位状態部品の実装・検証は §25.25.31。評価状態の保存形式は引き続き未確定。
 - 早期終了の実装配置（driver 拡張か別 driver か）
 - 毎 timestep の Node 走査方法
 - 性能評価用診断の具体 API
@@ -7119,6 +7123,8 @@ copy 直後の各不整合で `RuntimeError`、登録件数不一致・実行 st
 - **引き続き本節で未確定のまま、または §25.25.30 対象外：** Node 別**評価**状態、right_of_entry vehicle 選定、P-1 候補集合、TVT 形成、§14.4 fallback の判断、局所仮想計算、経済評価、支払い・補償、早期終了、実交通上の未確定 visit 登録タイミング、上位 TVT 制御の関数名・実装場所。
 - 最新の順位状態部品仕様の正本は **§25.25.30** を参照する。本節の未確定リストは、driver 実装前時点の歴史的記録として残す。
 
+**2026-09-02 更新：** 独立した順位状態部品は §25.25.31 で実装・検証済み。UXsim 本体または上位制度処理への接続は未実装。候補選定と順位計算は未実装。実装前仕様の正本は §25.25.30、実装・検証・監査結果の正本は §25.25.31。
+
 #### 25.25.28.23 実装再開情報
 
 **実装者が最初に確認するファイルと節（順序）：**
@@ -7810,11 +7816,15 @@ Q2-2 では進行量確認が World 終端確認より先のため、公開 driv
 - 最新の順位状態部品仕様は **§25.25.30** を参照する。
 - 本節の「次の直接作業」（正式 driver のコミット保存）は完了済みである。上記 `6d30a9f` 基準・5 ファイルコミット対象の記録は歴史的記録として残す。
 
+**2026-09-02 更新：** 順位状態本体と専用テストは §25.25.31 のとおり実装・検証済み。実装前仕様は §25.25.30、実装・検証・監査結果は §25.25.31。次の再開先は §25.25.31.26。
+
 #### 25.25.30 Node別TVT順位状態の実装前仕様
 
 **記録日：** 2026-09-01
 
 本 **§25.25.30** を、Node 別の確定順位ブロック、未確定 visit 集合、visit identity、状態更新 API、不変条件、例外、専用テストに関する**最新の正本**とする。
+
+**2026-09-02 更新：** 本節の実装・検証・独立監査・監査後補強・Copilot 確認結果の正本は **§25.25.31** である。§25.25.30 は実装前仕様として削除・置換せず維持する。
 
 - **§25.25.28** は正式 baseline driver の実装前仕様として維持する。
 - **§25.25.29** は正式 baseline driver の実装・検証・独立監査結果として維持する。
@@ -9076,3 +9086,466 @@ tests_order_control_tvt_node_rank_state.py
 - `diagnostics/order_control.zip` は未接触、コミット対象外
 
 実装完了後に、設計メモと進捗メモへ実装・テスト・レビュー結果を記録する方針とする。
+
+**2026-09-02 更新：**
+
+- 順位状態本体と専用テストを実装済み
+- 実装・検証・独立監査・監査後補強・Copilot 確認結果は **§25.25.31**
+- 現在の専用テストは **54 件**
+- Cursor Grok 4.6 の Moderate 2 件は補強済み
+- Copilot 確認後のテスト 1 件補強も完了
+- 次の再開先は **§25.25.31.26**
+- 古い「次は実装」という記録は、当時の記録として上記のまま残す
+
+#### 25.25.31 Node別TVT順位状態の実装・検証・独立監査結果
+
+**記録日：** 2026-09-02
+
+本 **§25.25.31** を、§25.25.30 に基づく Node 別 TVT 順位状態の実装、専用テスト、既存回帰確認、独立監査、監査後補強、Copilot による実ファイル確認に関する**最新の正本**とする。
+
+- **§25.25.30** は実装前仕様の正本として削除・置換せず維持する。
+- 既存の歴史的記録も削除しない。
+
+##### 25.25.31.1 位置づけ
+
+- **§25.25.30** を実装前仕様の正本として実装した。
+- Node 別 TVT 順位状態本体と専用テストを新規作成した。
+- 正式 baseline driver、collector、snapshot、`uxsim.py`、`uxsim/__init__.py` は変更していない。
+- **今回完成したのは Node 別 TVT 順位状態部品である。** TVT 候補選定や順位計算は完成していない。
+- 順位状態部品は、外部で決定された確定順を安全に保存する帳簿である。
+- 実装後、専用テスト、既存回帰テスト、診断、**Cursor Grok 4.6 による静的独立監査**、監査後補強を行った。
+- さらに、**Copilot 自身**も Terminal へ表示された本番コード全文と専用テスト全文を読んで確認した。
+- Copilot 確認後、テスト名と実際の入力位置が一致していなかった原子性テスト 1 件を補強した。
+
+**独立監査**（Grok 4.6）と **Copilot による追加確認**は同一の作業として混同しない。
+
+##### 25.25.31.2 実装・検証の非技術的な要約
+
+各 Node について、次の 2 種類の visit を区別して保存できる。
+
+1. すでに順位が確定し、後から変更してはいけない visit
+2. まだ順位が確定しておらず、今後の制度判断で順位を決める visit
+
+外部の TVT 制度処理が、**確定する順番どおりに並べた VisitKey の list または tuple** を渡すと、順位状態部品はその入力順を変えずに既存の確定順位ブロックの直後へ接続する。非技術的には、外部が「G、F、H の順」と決めた場合、帳簿が勝手に「F、G、H」へ並べ替えず、G、F、H の順で順位を保存する。
+
+- 部品は入力列を勝手に sort しない。
+- 既存の確定順位ブロック末尾の次から連番で追加する。
+- 複数件の登録または確定を行う際、本物の順位帳簿を直接変更する前に別の下書き帳簿を作る。下書きに問題がないことを確認できた場合だけ、本物の帳簿をまとめて置き換える。3 件を確定する依頼の 2 件目に問題があった場合、1 件目だけを確定済みとして残す事故を防ぐ。
+- 意思決定窓外の visit でも、未確定 visit として事前登録済みであれば、外部処理が決めた確定順の中に含めて保存できる。
+- 候補選定、取引順位計算、意思決定窓判定はこの部品の仕事ではない。
+
+##### 25.25.31.3 変更範囲
+
+**新規作成：**
+
+```text
+uxsim/order_control_tvt_node_rank_state.py
+tests_order_control_tvt_node_rank_state.py
+```
+
+**変更していないもの：**
+
+- `uxsim/uxsim.py`
+- baseline driver（`uxsim/order_control_baseline_driver.py`）
+- collector（`uxsim/order_control_baseline_collector.py`）
+- snapshot（`uxsim/order_control_baseline_snapshot.py`）
+- `uxsim/__init__.py`
+- 既存テスト
+- 既存診断
+
+`diagnostics/order_control.zip` は既存未追跡ファイルであり、未接触・コミット対象外である。
+
+##### 25.25.31.4 公開型と公開API
+
+```python
+OrderControlTvtVisitKey = tuple[str, int]
+```
+
+```python
+@dataclass(frozen=True)
+class OrderControlTvtConfirmResult:
+    k_confirmed_before: int
+    k_confirmed_after: int
+    newly_confirmed_count: int
+```
+
+```python
+class OrderControlTvtNodeRankState:
+    ...
+```
+
+公開 API は §25.25.30 どおり実装された。
+
+- `node_name`
+- `k_confirmed()`
+- `register_undetermined_visit()`
+- `register_undetermined_visits()`
+- `confirm_visits_in_order()`
+- `confirmed_visit_keys_in_order()`
+- `undetermined_visit_keys()`
+- `is_confirmed()`
+- `is_undetermined()`
+- `assigned_rank()`
+- `export_state()`
+
+- `OrderControlTvtConfirmResult` は **frozen**（作成後の確定操作結果を誤って書き換えないための設定）。
+- ConfirmResult は **3 フィールド**だけ。`confirmed_visit_keys` は追加していない。
+- 状態クラスは mutable な通常クラス。
+- `uxsim/__init__.py` から export していない。専用モジュールから直接 import する。
+- TVT 候補選定や順位計算を行う公開 API は追加していない。
+
+##### 25.25.31.5 内部状態
+
+```text
+_node_name
+_confirmed_visit_keys_in_order
+_confirmed_rank_by_visit_key
+_undetermined_visit_keys
+```
+
+- `_node_name` — 対象 Node 名
+- `_confirmed_visit_keys_in_order` — 確定順位 1 位から末尾までを順位順に保持する list
+- `_confirmed_rank_by_visit_key` — VisitKey から確定順位を取得する dict
+- `_undetermined_visit_keys` — まだ順位が確定していない VisitKey を保持する set
+
+- `K_confirmed` を別の mutable 属性として保存していない。
+- baseline 到着順位、Vehicle、Node、Link、World、collector への参照を保持していない。
+- 意思決定窓内外、参加・非参加、TVT 候補状態、制度ケースを保存していない。
+- 基本的な plain Python 値だけを保持する。
+
+##### 25.25.31.6 Node名とVisitKeyのvalidation
+
+**Node 名**
+
+- 非空 `str` を受け付ける。空文字列と `str` 以外は `ValueError`。
+- `strip()` による追加規則は設けていない（既存 order-control 系の方針と整合）。
+- 空白だけの文字列は現行仕様では非空 `str` として扱われる。独立監査でも、これを欠陥とは判定していない。
+
+**VisitKey**
+
+- 長さ 2 の tuple `(vehicle_name, visit_id)`。
+- `vehicle_name` は非空 `str`。`visit_id` は bool ではない Python `int` で 1 以上。
+- NumPy 整数を拒否。list 形式の VisitKey を拒否。tuple 以外を拒否。
+- 共通 private helper `_validate_visit_key` を各公開経路で使用する。
+
+VisitKey validation を行う公開経路：単数登録、複数登録、一括確定、`is_confirmed()`、`is_undetermined()`、`assigned_rank()`。
+
+##### 25.25.31.7 未確定visitの登録
+
+**単数登録**
+
+1. VisitKey を validation
+2. 確定済みか確認
+3. 未確定登録済みか確認
+4. すべて成功した後で set へ追加
+
+- 確定済み visit の未確定再登録は `ValueError`。既存未確定 visit の重複登録も `ValueError`。
+- 正常時は未確定 set だけを変更する。validation 前に状態を変更しない。
+
+**複数登録**
+
+- list または tuple のみを受け付け、入力を tuple へ固定する。
+- 全件 validation、入力内重複確認、現在状態との重複確認の後、ローカル候補 set を作り、成功時だけ正式 set へ反映する。
+- 空 list・空 tuple は no-op。失敗時は部分登録しない（rollback へ依存しない）。
+
+非技術的には、3 件の登録依頼の 2 件目に問題があっても、1 件目だけを帳簿へ登録した状態を残さない。
+
+##### 25.25.31.8 確定順に並べたVisitKey列の一括確定
+
+```text
+confirm_visits_in_order() へ渡す list または tuple の入力順が、そのまま新しい確定順位になる。
+```
+
+実装は入力列を sort しない。
+
+例（既存確定順位がない場合）：
+
+```text
+入力：vehicle_g, vehicle_f, vehicle_h
+確定順位：1 位 vehicle_g、2 位 vehicle_f、3 位 vehicle_h
+```
+
+既存の確定順位が 5 位まである場合は 6 位 vehicle_g、7 位 vehicle_f、8 位 vehicle_h となる。
+
+- Vehicle 名、visit ID、未確定 set の反復順、baseline 到着時刻、参加・非参加、意思決定窓内外で sort しない。
+- 現在の末尾の次から連番を付ける。
+- 入力 list を呼出後に変更しても、保存済みの順位状態へ影響しない。
+
+##### 25.25.31.9 再確定と未登録確定の区別
+
+- 確定済み判定を未登録判定より先に行う。
+- 再確定は `ValueError`（メッセージに VisitKey、確定済みであること、現在順位を含める）。
+- 未登録確定も `ValueError`（メッセージに VisitKey、未確定 visit として事前登録されていないことを含める）。
+- 両者は異なるメッセージ。いずれも失敗後の順位状態は不変。
+
+非技術的には、「一度順位が決まった visit」と「帳簿へまだ登録されていない visit」を、別の問題として知らせる仕組みである。
+
+##### 25.25.31.10 空列no-op
+
+- 複数登録の空 list・空 tuple は no-op。
+- 確定 API の空 list・空 tuple も no-op。状態不変。`k_confirmed_before == k_confirmed_after`、`newly_confirmed_count == 0`。
+- 空列 API の呼出しは制度処理上の必須手順ではない。確定対象がなければ、上位制度処理は API を呼ばずに終了してよい。空列が渡された場合も正常に結果を返す。
+
+##### 25.25.31.11 K_confirmedとConfirmResult
+
+- `k_confirmed()` は確定 list の長さから派生する。別の mutable フィールドへ保存しない。空なら 0。
+- 確定済み visit を状態存続中は削除しない。
+- 各 `ConfirmResult.k_confirmed_before` はその確定操作の直前値。各 `k_confirmed_after` は直後値。`newly_confirmed_count` はその操作で新たに確定した visit 数。
+- `newly_confirmed_count == k_confirmed_after - k_confirmed_before`。
+- 先行確定後、TVT 判断用の `K_confirmed_before` は状態から再取得する。古い ConfirmResult の before を固定利用しない。
+- ConfirmResult は 3 フィールドであり、`confirmed_visit_keys` を持たない。
+
+##### 25.25.31.12 ローカル更新候補と原子的更新
+
+非技術的には、本物の順位帳簿を直接変更する前に別の下書き帳簿を作り、下書きに問題がないことを確認できた場合だけ本物の帳簿をまとめて置き換える。
+
+技術的には：
+
+- 現在の list、dict、set をコピーする。
+- ローカル更新候補だけを変更し、検査する。
+- 検査成功後に正式な 3 属性へ反映する。
+- validation 中・候補検査中に正式状態を変更しない。rollback へ依存しない。
+- `ValueError` 時・`RuntimeError` 時ともに正式状態は不変。
+- 正式反映は 3 つの単純な属性代入で行われる。
+
+Copilot による本番コード確認では、候補検査後の正式反映中に通常発生する具体的な失敗経路は見つからず、複雑な rollback 処理は不要と判断した。
+
+##### 25.25.31.13 内部整合確認
+
+private helper の実名：`_verify_candidate_confirmed_state`
+
+少なくとも次を検査する：
+
+- 確定 list と順位 dict の件数一致
+- `k_confirmed_after` と確定 list 長の一致
+- list 上の 1 始まり位置と dict 順位の一致
+- 確定 list 内の VisitKey 重複なし
+- 確定 VisitKey が未確定候補 set に残っていない
+- 今回確定した VisitKey が未確定候補 set から除外済み
+- `newly_confirmed_count` と before/after 差分の一致
+
+内部不整合は `RuntimeError`。すべての読取 API で内部状態全体を全面再検査しない方針。
+
+今回確定分の未確定 set 除外確認は、確定 list と未確定 set の排他確認と一部重なるが、今回の更新対象を明示的に確認するためのものであり、コミットを妨げる重複ではないと Copilot が確認した。
+
+##### 25.25.31.14 読取API
+
+- `node_name` は読取専用 property。
+- 確定 VisitKey 列は tuple で返す。未確定 VisitKey 集合は frozenset で返す。内部 list や set を直接返さない。
+- `is_confirmed()`、`is_undetermined()`、`assigned_rank()`。各照会 API へ渡された VisitKey も validation する。
+- 確定済み VisitKey の `assigned_rank()` は 1 以上。未確定 VisitKey は `assigned_rank() is None`。
+- 正しい形式の未登録 VisitKey は `False`、`False`、`None`。
+- 読取のたびに内部状態全体を全面検査しない。
+
+##### 25.25.31.15 export_state
+
+top-level キーは 4 つ：`node_name`、`k_confirmed`、`confirmed_visits`、`undetermined_visits`。
+
+**confirmed_visits** — 確定順位の昇順（1 位から順）。各要素は新しい dict。キーは `vehicle_name`、`visit_id`、`assigned_rank` の 3 つだけ。
+
+**undetermined_visits** — 制度上の順位は持たない。診断とテストの安定化のためだけに固定 sort（第 1 キー `vehicle_name`、第 2 キー `visit_id`）。各要素は新しい dict。キーは `vehicle_name`、`visit_id` の 2 つだけ。
+
+- 毎回新しい top-level dict、list、各入れ子 dict を作る。export 結果を変更しても内部状態へ影響しない。
+- Vehicle、Node、Link、World への参照を含めない。VisitKey tuple を意味の分かる dict へ分解する。
+
+##### 25.25.31.16 意思決定窓外visitへの対応
+
+- 意思決定窓情報を状態へ保持しない。API へ渡さない。VisitKey にも意思決定窓内外の情報を追加していない。
+- 事前登録済みなら意思決定窓外 visit も確定可能。意思決定窓外であることを理由に拒否しない。
+- 専用テストは変数名とコメントだけで外部制度処理上の窓外候補と位置づけた。テスト内に意思決定窓判定ロジックを実装していない。
+- P-1 候補抽出、TVT 取引順位計算を実装していない。
+- 窓内外が混在する確定順の VisitKey 列も入力順どおりに保存できる。
+
+このテストが証明するのは順位状態部品の汎用的な保存能力であり、意思決定窓外候補の選定が正しいことを証明するテストではない。
+
+##### 25.25.31.17 制度責任の非混入
+
+実装していないもの：Vehicle 一覧の探索、Node や World の探索、inlink 探索、意思決定窓判定、baseline 順位構築、到着済み visit 選定、先頭連続非参加 visit 抽出、right_of_entry vehicle 選定、P、P-1、TVT 候補集合の形成、TVT 取引順位の計算、TVT 成立・不成立判断、§14.4 判断、最終確定 visit 列の作成、baseline driver 呼出し、Node 別評価状態、早期終了、経済評価、支払い・補償。
+
+状態部品は、外部から渡された**確定する順番どおりに並べた VisitKey の list または tuple**を保存するだけである。
+
+##### 25.25.31.18 専用テスト
+
+**初回実装時（52 件）**
+
+少なくとも次を確認した：公開型、初期化、Node 名、VisitKey、単数登録、複数登録、入力順の維持、連続順位、再確定と未登録の区別、段階的な `K_confirmed`、意思決定窓外 visit、ConfirmResult、読取 API、export、原子的更新、内部不整合の代表例、Node 間独立。
+
+**独立監査後（+2 件 → 54 件）**
+
+Cursor Grok 4.6 の独立監査で Moderate 2 件が見つかり、専用テストを 2 件追加した。
+
+- `test_confirm_runtime_error_during_candidate_verification_leaves_state_unchanged`
+- `test_export_undetermined_visits_sorts_same_vehicle_by_visit_id`
+
+**Copilot 確認後（件数 54 のまま、既存 1 件補強）**
+
+Copilot が本番コード全文と専用テスト全文を Terminal 表示で確認した際、`test_confirm_leaves_state_unchanged_when_middle_key_already_confirmed` についてテスト名と実際の入力位置の不一致を発見した。
+
+修正前は確定済み visit が入力列の先頭（`confirmed`、`pending` の 2 件構成）。
+
+修正後は次の 3 件構成：
+
+```text
+pending_first = ("veh_b", 1)          # 正常な未確定 visit
+already_confirmed_middle = ("veh_a", 1)  # 事前確定済み、入力列の途中
+pending_last = ("veh_c", 1)           # 正常な未確定 visit
+```
+
+確定 API への入力：`pending_first`、`already_confirmed_middle`、`pending_last`。
+
+- 本番 `confirm_visits_in_order()` を使用。
+- `ValueError` を確認。メッセージに `already confirmed` と対象 VisitKey を含む。
+- 失敗後に `_snapshot_state(state) == before`。
+- テスト件数は増やさず 54 件のまま。他のテストは変更していない。
+
+**現在のテスト構成（静的確認）**
+
+```text
+test definitions: 54
+TESTS entries: 54
+duplicate TESTS entries: []
+defined but not registered: []
+registered but not defined: []
+```
+
+専用テスト 54 件すべて成功。TESTS 一覧も 54 件。登録漏れ・余分・重複なし。AST で確認済み。
+
+##### 25.25.31.19 既存回帰テストと診断
+
+```text
+python -m py_compile uxsim/order_control_tvt_node_rank_state.py
+→ 成功
+
+python -m py_compile tests_order_control_tvt_node_rank_state.py
+→ 成功
+
+python tests_order_control_tvt_node_rank_state.py
+→ 初回 52 件成功
+→ 独立監査後の 2 件追加後 54 件成功
+→ Copilot 確認後の既存 1 件補強後も 54 件成功
+
+python tests_order_control_baseline_collector.py
+→ 成功
+
+python tests_order_control_baseline_snapshot.py
+→ 成功
+
+python tests_order_control_baseline_driver.py
+→ 65 件成功
+
+python tests_order_control_baseline_collector_uxsim.py
+→ 成功
+
+python diagnostics/order_control/tvt_baseline_snapshot_fork_probe.py
+→ 成功
+
+git diff --check
+→ 成功
+```
+
+Copilot 確認後の既存 1 件補強では、本番コードを変更していないため、既存回帰テストと診断は再実行せず、専用テストだけを再実行した。
+
+独立監査そのものは静的であり、監査中にはテスト、import、py_compile、診断を実行していない（実装担当の初回確認とは区別する）。
+
+##### 25.25.31.20 Cursor Grok 4.6による独立監査
+
+- 実装後に Cursor のモデルを Grok 4.6 へ切り替えた。同じ Cursor チャット内でモデルだけを切り替えた（新チャット、別開発者、完全に独立した第三者による監査とは記録しない）。
+- 実装担当の完了報告や 52 件成功を正解として扱わなかった。§25.25.30 と実ファイルだけを根拠にした。
+- **静的監査**を実施した。テスト、import、py_compile、診断は監査中には実行していない。
+- 本番コード全文と全 `test_*` を読み取った。AST でテスト定義と TESTS 一覧を照合した。
+- **Critical なし、Major なし。** コード上の到達可能な誤動作は見つからなかった。現状でコミット可と判定された。
+- Moderate 2 件は、現行本番コードの誤動作ではなく、将来の回帰を見逃すテスト不足だった。
+
+独立監査結果を、Copilot 自身の確認結果と混同しない。
+
+##### 25.25.31.21 独立監査後のテスト補強
+
+**Moderate 1** — 候補内部整合確認が `RuntimeError` となった場合に正式状態が更新前のまま維持されることを、本番 `confirm_visits_in_order()` 経由で証明するテストがなかった。
+
+追加：`test_confirm_runtime_error_during_candidate_verification_leaves_state_unchanged`
+
+- `_verify_candidate_confirmed_state` を実装モジュールの正しい名前空間で patch。
+- 本番 `confirm_visits_in_order()` を使用。既存確定 visit 1 件と未確定 visit 2 件を準備し、未確定 2 件を確定順に並べて入力。
+- helper が 1 回呼ばれ、意図した `RuntimeError`（メッセージ `forced candidate verification failure`）。
+- `k_confirmed()`、確定 visit 列、未確定集合、既存確定 visit の `assigned_rank()`、`export_state()` が不変。
+- 今回確定しようとした 2 件は未確定のまま。`OrderControlTvtConfirmResult` を返さない。patch は context manager で解除。
+
+非技術的には、下書き帳簿の検査で異常が起きても、本物の順位帳簿は一切変更されないことを、本番の確定 API を通して確認した。
+
+**Moderate 2** — `undetermined_visits` の固定 sort について、同じ `vehicle_name` で異なる `visit_id` を使った第 2 ソートキーの確認がなかった。
+
+追加：`test_export_undetermined_visits_sorts_same_vehicle_by_visit_id`
+
+- `vehicle_name` は `vehicle_same`。visit ID の登録順は 3、1、2。export の出力順は 1、2、3。
+- 期待 list を直接記述。実装と同じ sort 式をテスト側で使用していない。
+
+非技術的には、同じ Vehicle が複数回 Node を訪れた場合でも、診断出力が毎回 visit ID 順に安定することを確認した。
+
+**本番コードは、独立監査後に変更していない。**
+
+##### 25.25.31.22 Copilotによる実ファイル確認
+
+- Cursor の作業報告と Grok 4.6 の監査報告だけで完了としなかった。
+- 従来方針に従い、Copilot 自身も実ファイルを確認した。
+- Terminal へ本番コード全文を行番号付きで表示して確認した。
+- Terminal へ専用テスト全文を行番号付きで表示して確認した。
+- `TESTS` 一覧と直接実行部分も確認した。AST 照合結果も確認した。
+- 本番コードと専用テストを一行ごとに完全な再監査報告へまとめたわけではないが、公開契約、処理順、原子性、読取、export、責任範囲、主要テスト経路を実際のコードで確認した。
+- Cursor や Grok の報告だけを自身の直接確認と同一視しなかった。
+
+**本番コードで直接確認した事項：** 公開型 alias、ConfirmResult の 3 フィールドと frozen、状態クラス、Node 名 validation、VisitKey validation、bool と NumPy 整数の拒否、内部属性、`K_confirmed` を別属性へ保存していない、単数登録、複数登録、確定済み再確定と未登録確定の検査順、入力順による連番付与、ローカル更新候補、候補検査後の正式反映、空列 no-op、読取 API、export の 4 キー構造、undetermined の 2 段階 sort、制度処理の非混入。
+
+**専用テストで直接確認した事項：** 初期状態、Node 名、VisitKey、NumPy 整数拒否、単数登録、複数登録、部分登録防止、入力順維持、複数回の連続順位、再確定と未登録のメッセージ差、段階的 `K_confirmed`、意思決定窓外 visit、ConfirmResult、読取 API、export 構造、export 非漏洩、RuntimeError 時の本番経路による原子性、export 第 2 ソートキー、内部不整合の代表テスト、TESTS 一覧 54 件、直接実行時に TESTS を順番に呼ぶ構造。
+
+Copilot 確認では本番コードにコミットを妨げる問題は見つからなかった。
+
+##### 25.25.31.23 Copilot確認後の追加補強
+
+対象テスト：`test_confirm_leaves_state_unchanged_when_middle_key_already_confirmed`
+
+**修正前** — テスト名では「middle key already confirmed」とされていたが、実際の確定入力では確定済み visit が先頭（`confirmed`、`pending`）。逐次更新する誤実装でも先頭で停止すれば状態が変化しないため、途中まで書き込んだ状態を残さない退行を十分に検出できなかった。
+
+**修正後** — 3 件を `pending_first`、`already_confirmed_middle`、`pending_last` の順に並べた（`("veh_b", 1)`、`("veh_a", 1)`、`("veh_c", 1)`。`("veh_a", 1)` は事前に確定済み）。
+
+- 1 件目は正常な未確定 visit。2 件目は確定済み visit（入力列の明確な途中）。3 件目は正常な未確定 visit。
+- 本番 `confirm_visits_in_order()`、`ValueError`、メッセージに `already confirmed` と対象 VisitKey、`_snapshot_state(state) == before`。
+- 1 件目だけを確定した途中状態を残さないことを確認できるテストへ直した。
+
+維持したもの：テスト名変更なし、本番コード変更なし、他の 53 テスト変更なし、TESTS 一覧の順序変更なし、テスト総数 54 件、専用テスト 54 件成功、AST 照合で漏れ・余分・重複なし。既存回帰テストと診断は再実行していない。
+
+##### 25.25.31.24 現在の評価
+
+- Critical なし、Major なし。
+- Grok 4.6 監査で見つかった Moderate 2 件は専用テストで補強済み。
+- Copilot 確認で見つかったテスト入力位置の不一致 1 件も補強済み。
+- 本番コードの変更なし（監査後も Copilot 確認後も）。
+- 専用テスト 54 件成功。TESTS 一覧 54 件。AST 照合で漏れ・余分・重複なし。
+- 既存回帰テスト成功。baseline driver の 65 件成功。fork probe 成功。`git diff --check` 成功。
+- Copilot 自身も本番コードとテストを実ファイルで確認済み。
+- **コミットを妨げる問題なし。** 本番実装、専用テスト、設計メモ、進捗メモをコミット可能。
+
+##### 25.25.31.25 未実装事項
+
+意思決定窓検知、意思決定窓内 baseline 順位構築、到着済み visit 抽出、先頭連続非参加 visit 抽出、right_of_entry vehicle 選定、P 取得、P-1 条件、TVT 候補集合の形成、意思決定窓外候補の抽出、TVT 取引順位、TVT 成立・不成立判断、情報充足判定、§14.4 判断、最終確定 visit 列作成、最終確定 visit 列を状態部品へ渡す上位制度処理、baseline driver との接続、Node 別評価状態、実交通上の未確定 visit 登録タイミング、`uxsim.py` または World への接続、`World.copy()` 統合、早期終了、経済評価、支払い・補償。
+
+**今回の順位状態部品だけでは、TVT 候補選定や順位計算は完成しない。**
+
+##### 25.25.31.26 実装再開情報
+
+- 実装前仕様は **§25.25.30**
+- 実装・検証・監査・補強結果は **§25.25.31**
+- 最新保存済みコミットは **`f2c87a0`**（`origin/feature/intersection-order-control` へ push 済み）
+- 現在の実装、専用テスト、今回更新する Markdown は `f2c87a0` 上の未コミット変更
+- **コミット候補は 4 ファイル**（`diagnostics/order_control.zip` はコミット対象外）
+- 次の直接作業は差分確認、メモとの照合、コミット
+- push はコミット結果、最新コミット、残存変更を確認した後の別作業
+- 制度上の次の実装対象は、今回のコミット後に改めて特定する。候補選定や順位計算が完成したとは扱わない
+
+**コミット候補 4 ファイル：**
+
+```text
+uxsim/order_control_tvt_node_rank_state.py
+tests_order_control_tvt_node_rank_state.py
+ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES.md
+ORDER_EXCHANGE_PROGRESS.md
+```

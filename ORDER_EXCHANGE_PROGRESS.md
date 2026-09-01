@@ -4435,6 +4435,42 @@ baseline_horizon_steps + 1 <= fork_W.TSIZE - fork_W.T
 - 今回のメモ更新は未コミット、未 push
 - `diagnostics/order_control.zip` は未接触、コミット対象外
 
+#### 2026-09-02：Node別TVT順位状態を実装・検証し、独立監査後補強とCopilot確認まで完了
+
+- 正本は設計メモ **§25.25.31**。実装前仕様は **§25.25.30**
+- 新規本番ファイル：`uxsim/order_control_tvt_node_rank_state.py`
+- 新規専用テスト：`tests_order_control_tvt_node_rank_state.py`
+- 公開型：`OrderControlTvtVisitKey = tuple[str, int]`。状態クラス：`OrderControlTvtNodeRankState`
+- `OrderControlTvtConfirmResult` は frozen、3 フィールド（`k_confirmed_before`、`k_confirmed_after`、`newly_confirmed_count`）。`confirmed_visit_keys` なし
+- **確定する順番どおりに並べた VisitKey の list または tuple**を受け取り、入力順がそのまま確定順位になる。sort しない
+- 原子的更新（下書き帳簿検査後に本物をまとめて置換）。`ValueError` 時・`RuntimeError` 時ともに正式状態不変
+- `export_state()` は 4 キー（`node_name`、`k_confirmed`、`confirmed_visits`、`undetermined_visits`）。未確定は `vehicle_name`・`visit_id` の 2 段階 sort
+- 意思決定窓外 visit も事前登録済みなら確定可能。候補選定や順位計算は未実装
+- `uxsim.py`、baseline driver、collector、snapshot、`uxsim/__init__.py`、既存テスト、既存診断は変更していない
+
+**専用テスト：**
+
+- 初回実装完了時 **52 件**成功
+- **Cursor Grok 4.6** による静的独立監査（同じ Cursor チャット内でモデル切替。新チャットではない）。Critical なし、Major なし、Moderate 2 件
+- 独立監査後も**本番コード変更なし**。監査後に専用テスト 2 件を追加 → **54 件**
+  - `test_confirm_runtime_error_during_candidate_verification_leaves_state_unchanged`
+  - `test_export_undetermined_visits_sorts_same_vehicle_by_visit_id`
+- **Copilot 自身**も本番コード全文と専用テスト全文を Terminal 表示で確認（Cursor や Grok の報告だけを直接確認と同一視しなかった）
+- Copilot 確認で `test_confirm_leaves_state_unchanged_when_middle_key_already_confirmed` のテスト名と入力位置の不一致を 1 件発見。確定済み visit を 3 件中の 2 件目へ移して補強。補強後も専用テスト **54 件**成功
+- TESTS 一覧 54 件。AST 照合で漏れ・余分・重複なし
+
+**既存回帰テストと診断（初回実装・監査後補強時に実施）：**
+
+- collector、snapshot、baseline driver（65 件）、collector_uxsim、fork probe、py_compile、`git diff --check` 成功
+- Copilot 確認後の既存 1 件補強では本番コード未変更のため、既存回帰テストと診断は再実行せず専用テストのみ再実行
+
+**Git 状態：**
+
+- 最新保存済みコミットは **`f2c87a0`**（origin へ push 済み）
+- 今回の 4 ファイル（本番、専用テスト、設計メモ、進捗メモ）は未コミット、未 push
+- `diagnostics/order_control.zip` は未接触、コミット対象外
+- 次はコミット前最終確認（差分確認、メモとの照合、コミット）
+
 #### 2026-08-29：TVT権利保有車両選定前の先頭非参加Vehicle先行確定の記録補修
 
 - 過去に確定済みだった、意思決定窓内 baseline 到着順位の先頭に連続する非参加 Vehicle の先行確定が、設計メモに明文化されていなかった
