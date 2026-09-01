@@ -4396,6 +4396,45 @@ baseline_horizon_steps + 1 <= fork_W.TSIZE - fork_W.T
 - 今回の実装・メモ更新は未コミット、未 push
 - `diagnostics/order_control.zip` は未接触、コミット対象外
 
+#### 2026-09-01：Node別TVT順位状態の実装前仕様を確定
+
+- 正本は設計メモ **§25.25.30**
+- **実装可能な仕様として確定したのは順位状態部品**であり、TVT 候補 Vehicle の選定・順位計算ではない
+- 対象は確定順位ブロックと未確定 visit 集合
+- 評価状態を分離（順位帳簿と評価制御情報を混在させない）
+- 状態部品は制度判断を行わない
+- 外部が決定した有序 VisitKey 列を保存する
+- `K_confirmed_before` は先行確定（到着済み・先頭連続非参加）後に状態から再取得
+- `K_confirmed_after` は最終確定列接続後の確定ブロック末尾
+- 最終確定列には参加・非参加、取引順位、残余 baseline 順位が含まれ得る
+- TVT 成立時の取引順位部分には、意思決定窓外の候補 visit が含まれ得る。状態部品は事前登録済みであれば意思決定窓内外を区別せず確定できる
+- TVT 不成立の場合：先行確定後に残る意思決定窓内の未確定 visit が **1 件以上**あれば、baseline 順位による最終確定列を `K_confirmed_before` の後へ接続し、順位を確定する。残存 0 件なら接続対象の列は空である。空列の確定 API 呼出しは必須ではない。確定 API を呼ばずに処理を終了してよい。空列を渡した場合も no-op として正常に処理できる
+- TVT 形成に必要な情報を取得できない場合：§14.4 に従い、先行確定後に残る意思決定窓内の未確定 visit が **1 件以上**あれば、baseline 順位による最終確定列を接続し、順位を確定する。残存 0 件なら接続対象の列は空である。空列の確定 API 呼出しは必須ではない。確定 API を呼ばずに処理を終了してよい。空列を渡した場合も no-op として正常に処理できる。意思決定窓外の未確定 visit は、情報未取得だけを理由に確定しない
+- TVT 成立による窓外候補の確定と、情報未取得時の窓外非確定を区別する
+- TVT 候補集合と最終確定 visit 列を作る制度処理は別途設計・実装が必要
+- 意思決定窓内がすべて非参加の場合も専用アルゴリズムは設けない。意思決定窓内 baseline 順位の先頭から連続する非参加 visit を先行確定する共通処理を適用した結果、**意思決定窓内の全** visit が確定する。先行確定後の末尾を `K_confirmed_before` として再取得する。その後は**意思決定窓内に**未確定 visit と right_of_entry vehicle が存在しないため TVT を形成せず、後続の最終確定列は空であり、追加の確定順位列と制度処理上の `K_confirmed_after` を別途計算せずに処理を終了する。確定対象がないため `confirm_visits_in_order()` の呼出しは必須ではないが、空列を渡した場合も no-op として正常に処理できる。意思決定窓外の未確定 visit は残り得る
+- 確定済み visit は状態存続中削除しない
+- 独立クラス `OrderControlTvtNodeRankState` を将来の上位制御が Node 名別 dict で保持
+- Node、World、`uxsim.py` へ今回は追加しない
+- 状態は複数実 timestep をまたいで維持
+- 実交通上の未確定 visit 登録タイミングは今回対象外
+- VisitKey は `(vehicle_name, visit_id)`（collector / snapshot と同一）
+- 公開 alias は `OrderControlTvtVisitKey`
+- 状態クラスは `OrderControlTvtNodeRankState`
+- 確定結果型は `OrderControlTvtConfirmResult`（frozen、3 フィールド）
+- `confirmed_visit_keys` は採用しない
+- 不採用理由：入力列との重複、不要な参照保持、コードの単純性と可読性
+- mutable 通常クラスと list、dict、set を用いる
+- `K_confirmed` は確定ブロック長から派生（別 mutable フィールドへ重複保存しない）
+- 複数登録と一括確定は原子的更新（validation 失敗時は部分更新しない）
+- 入力・要求不正は `ValueError`、内部不整合は `RuntimeError`
+- 新規モジュール `uxsim/order_control_tvt_node_rank_state.py` と新規専用テスト `tests_order_control_tvt_node_rank_state.py` を予定
+- 既存 baseline 関連コード（driver、collector、snapshot、`uxsim.py`）は変更しない
+- 次は順位状態本体と専用テストの実装（それだけで TVT 候補順位計算が完成するわけではない）
+- 最新保存済みコミットは `bd24ad1`（origin へ push 済み）
+- 今回のメモ更新は未コミット、未 push
+- `diagnostics/order_control.zip` は未接触、コミット対象外
+
 #### 2026-08-29：TVT権利保有車両選定前の先頭非参加Vehicle先行確定の記録補修
 
 - 過去に確定済みだった、意思決定窓内 baseline 到着順位の先頭に連続する非参加 Vehicle の先行確定が、設計メモに明文化されていなかった

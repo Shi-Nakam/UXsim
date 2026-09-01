@@ -3267,6 +3267,14 @@ collector が担当しないこと：
 - 将来の作業は、未確定の実装形式と性能上の採用判断に限定する。
 - 初期固定 horizon driver の実装を先に進める現在方針は変更しない。
 
+**2026-09-01 更新：**
+
+- Node 別の**確定順位ブロック**と**未確定 visit 集合**について、実装前仕様を **§25.25.30** で確定した。
+- 本節記録時点の「Node 状態の enum、dataclass、dict 等の具体形式」は、**評価状態**（§24.12 の概念状態）と**順位状態**（§25.25.30）を区別して参照する。
+- **順位状態**（確定ブロック・未確定 visit・`VisitKey`・公開 API・不変条件）は **§25.25.30** を正本とする。
+- **評価状態**（TVT 検討不要、P 待ち、baseline 情報取得完了、horizon 終端時未解決等）、**完了済み Node 集合**、**毎 timestep 走査方法**、**早期終了**関連、**実交通上の未確定 visit 登録タイミング**は、引き続き本節または §25.25.30 対象外として未確定または別作業である。
+- 過去の「TVT 順位状態全体が未確定」という記録は、**今回 §25.25.30 で確定した範囲**と**なお未確定の範囲**を分けて解釈する。誤りとして削除しない。
+
 ### 24.14 TVTと将来BATCHの共通利用
 
 共通化するのは交通予測である。
@@ -6163,11 +6171,18 @@ from uxsim.order_control_baseline_driver import (
 - horizon 不足時の例外型 → `ValueError`（§25.25.28.11、§25.25.28.15）
 - snapshot docstring の明確化要否 → 実装時に docstring のみ明確化（§25.25.28.18）
 - driver 関数の最終的な型注釈 → `real_W: World`（§25.25.28.2）
+- 正式 baseline driver の実装 → **§25.25.28**（`order_control_baseline_driver.py`、§25.25.29 で実装・検証記録）
+
+**2026-09-01 更新：** 次の旧未確定事項は **§25.25.30** で解消済みである。
+
+- TVT 順位状態と確定順位ブロックの実装 → **§25.25.30**（Node 別確定順位ブロック・未確定 visit 集合・公開 API・専用テスト契約）
 
 **早期終了（詳細は §24.13.16 参照）：**
 
 - 性能上の採否と性能閾値
 - Node 状態の保存形式
+  - 2026-09-01 更新：上記は本節記録時点の未確定事項である。その後、順位状態は §25.25.30 で確定した。Node 評価状態の保存形式は引き続き未確定である。
+- Node **評価**状態の保存形式（§24.12。順位状態は §25.25.30 で確定）
 - 早期終了の実装配置（driver 拡張か別 driver か）
 - 毎 timestep の Node 走査方法
 - 性能評価用診断の具体 API
@@ -7096,6 +7111,14 @@ copy 直後の各不整合で `RuntimeError`、登録件数不一致・実行 st
 
 **これらが未確定でも、初期固定 horizon 正式 driver は実装可能である。**
 
+**2026-09-01 更新（歴史的記録の補足）：**
+
+- 本節記録時点では、TVT 順位状態・確定順位ブロック・Node 別制度状態の保存形式は「初期正式 driver 実装に直接不要なため未確定」とされていた。
+- 正式 baseline driver 完成（コミット `bd24ad1`）後、**Node 別の確定順位ブロックと未確定 visit 集合**について実装前仕様を **§25.25.30** で確定した。
+- **§25.25.30 で確定した範囲：** 順位状態部品（`OrderControlTvtNodeRankState`）、`VisitKey`、`K_confirmed`、登録・確定 API、不変条件、例外、専用テスト契約。
+- **引き続き本節で未確定のまま、または §25.25.30 対象外：** Node 別**評価**状態、right_of_entry vehicle 選定、P-1 候補集合、TVT 形成、§14.4 fallback の判断、局所仮想計算、経済評価、支払い・補償、早期終了、実交通上の未確定 visit 登録タイミング、上位 TVT 制御の関数名・実装場所。
+- 最新の順位状態部品仕様の正本は **§25.25.30** を参照する。本節の未確定リストは、driver 実装前時点の歴史的記録として残す。
+
 #### 25.25.28.23 実装再開情報
 
 **実装者が最初に確認するファイルと節（順序）：**
@@ -7777,3 +7800,1279 @@ Q2-2 では進行量確認が World 終端確認より先のため、公開 driv
 - `diagnostics/order_control.zip` をコミットしない
 - 次の制度実装（TVT 形成、早期終了等）へ自動的に進まない
 - 初期 driver へ早期終了を追加しない
+
+**2026-09-01 更新（正式 driver 保存後・順位状態仕様確定）：**
+
+- 正式 baseline driver はコミット `bd24ad1` として `origin/feature/intersection-order-control` へ push 済みである。
+- Node 別 TVT **順位状態**（確定順位ブロック・未確定 visit 集合）の実装前仕様を **§25.25.30** で確定した。
+- **次の直接作業：** §25.25.30 に従い `uxsim/order_control_tvt_node_rank_state.py` と `tests_order_control_tvt_node_rank_state.py` を実装する。
+- 評価状態、baseline driver 呼出管理、実交通上の未確定 visit 登録タイミング、uxsim.py 接続は §25.25.30 の対象外のままである。
+- 最新の順位状態部品仕様は **§25.25.30** を参照する。
+- 本節の「次の直接作業」（正式 driver のコミット保存）は完了済みである。上記 `6d30a9f` 基準・5 ファイルコミット対象の記録は歴史的記録として残す。
+
+#### 25.25.30 Node別TVT順位状態の実装前仕様
+
+**記録日：** 2026-09-01
+
+本 **§25.25.30** を、Node 別の確定順位ブロック、未確定 visit 集合、visit identity、状態更新 API、不変条件、例外、専用テストに関する**最新の正本**とする。
+
+- **§25.25.28** は正式 baseline driver の実装前仕様として維持する。
+- **§25.25.29** は正式 baseline driver の実装・検証・独立監査結果として維持する。
+- 既存の設計記録は削除しない。
+
+##### 25.25.30.1 位置づけ
+
+正式 baseline driver 完成後の次の制度実装へ進むため、Node 別の順位状態を独立部品として設計した。
+
+今回の部品は、**確定順位ブロック**と**未確定 visit 集合**を保存する。TVT 評価済みかどうかなどの**評価状態は保存しない**。外部制度処理が確定した visit 列を安全に保存する部品である。誰を、なぜ、どの制度ケースで確定するかは判断しない。状態部品は順位保存と整合性検査だけを担当する。
+
+- 正式 baseline driver、collector、snapshot は変更しない。
+- `uxsim.py` へ今回接続しない。
+- 早期終了は扱わない。
+
+非技術的には、各交差点（Node）について「順番が決まった車両」と「まだ順番が決まっていない車両」を分けて保存する**帳簿**である。ただし、順位の単位は Vehicle そのものではなく、**対象 Node についての特定 visit**（その Node への 1 回の通過・接近イベント）である。同一 Vehicle が同じ Node を複数回通過する場合、visit ごとに別の順位エントリとなる。
+
+**順位状態部品の能力（確定対象の範囲）：**
+
+- 順位状態部品は、確定対象を**意思決定窓内 visit だけ**に限定しない
+- **意思決定窓外**の visit でも、未確定 visit として**事前登録済み**なら、`confirm_visits_in_order()` の対象にできる
+- `confirm_visits_in_order()` は、意思決定窓内外を検査しない。参加・非参加も検査しない
+- 外部制度処理が渡した有序 VisitKey 列を、その順序のまま確定する
+- 確定 API が要求するのは、各 VisitKey が正しい形式で、確定済みではなく、**未確定集合へ事前登録済み**であること
+- 意思決定窓内外の区別は、順位状態部品の保存契約ではなく、**外部制度処理が最終確定 visit 列を作る際の制度判断**である
+
+非技術的には、順位帳簿は「この Vehicle が意思決定窓の内側か外側か」を判断せず、外部で確定した順番を書き込む。
+
+**§25.25.30 で実装可能な仕様として確定したもの：** Node 別 **TVT 順位状態部品**（確定順位ブロック、未確定 visit 集合、登録 API、一括確定 API、`K_confirmed`、原子的更新、読取・export、不変条件、例外、専用テスト契約）。
+
+**まだ実装可能な仕様として確定していないもの（本順位状態部品の外）：** 意思決定窓内 baseline 順位の構築、right_of_entry vehicle の選定、P の取得、P-1 条件による TVT 候補集合の形成、意思決定窓外を含む取引候補の選定、TVT 取引順位の計算、TVT 取引結果による最終確定 visit 列の作成、最終確定 visit 列を順位状態部品へ渡す上位制度処理、§14.4 を適用するかどうかの判断。
+
+「Node 別 TVT 順位状態を実装可能な仕様として確定した」という記述を、「TVT 候補 Vehicle の順位計算まで実装可能になった」という意味に**しない**。
+
+##### 25.25.30.2 対象範囲と対象外
+
+**今回含むもの：**
+
+- Node 別の確定順位ブロック
+- Node 別の未確定 visit 集合
+- 未確定 visit の明示的登録
+- 外部制度処理が決めた有序 visit 列の一括確定
+- `K_confirmed_before`
+- `K_confirmed_after`
+- visit identity
+- 読取 API
+- export API
+- 原子的更新
+- 不変条件
+- 例外
+- 専用テスト
+
+**今回含まないもの：**
+
+- 到着済み Vehicle の判定
+- baseline 到着順位の構築
+- 意思決定窓の検知
+- 先頭に連続する非参加 Vehicle の抽出
+- right_of_entry vehicle 選定
+- P 取得
+- P-1 候補集合
+- 候補 Vehicle 全員の情報充足判定
+- TVT 取引成立・不成立の判断
+- TVT 取引順位の計算
+- §14.4 を適用するかどうかの判断
+- 残余 baseline 順位の抽出
+- Node 別評価状態
+- 同一実 timestep 内の評価済み管理
+- baseline driver 呼出管理
+- 未確定 visit を実交通から収集するタイミング
+- `uxsim.py` への接続
+- `World.copy()` との統合
+- 早期終了
+- 経済評価
+- 支払い・補償
+- 意思決定窓外を含む取引候補の選定
+- TVT 取引結果による最終確定 visit 列の作成
+- 最終確定 visit 列を順位状態部品へ渡す上位制度処理
+
+**§25.25.30 で実装可能な仕様の範囲：** 上記「今回含むもの」は、**順位状態部品**の実装前仕様として確定した。「今回含まないもの」は、順位状態部品の外に残る別設計・別実装である。TVT 候補 Vehicle の抽出や取引順位の計算を、本節の確定だけで実装可能になったと解釈しない。
+
+**順位状態と評価状態を混同しない理由：** 順位状態は複数 timestep にわたって残る**順位帳簿**である。一度確定した順位は後から変更しない。一方、評価状態は「この timestep で処理済みか」などの**一時的な制御情報**である。両者を同一オブジェクトに混在させると、順位の不変性と評価の一時性が衝突し、二重確定や部分更新の事故を招く。本設計では順位帳簿だけを独立部品として切り出す。
+
+##### 25.25.30.3 確定順位ブロックと未確定 visit
+
+確定順位ブロックは、その Node について割当権利行使順位が確定した visit の、**1 位から始まる連続した順位列**である。
+
+- 順位は **1 始まり**
+- 空状態では確定順位なし（`k_confirmed() == 0`）
+- 最初に確定する visit は **1 位**
+- 確定順位は**連続**（欠番なし）
+- **欠番を許さない**（同じ事故防止：順位の飛び番号）
+- **順位重複を許さない**（同じ事故防止：2 台が同じ順位）
+- **同じ visit の二重確定を許さない**（同じ事故防止：1 回決まった順位の上書き）
+- **一度確定した順位は上書きしない**
+- **確定済み visit を未確定へ戻さない**
+- **確定済み visit と未確定 visit は排他的**（同じ visit が両方に同時所属しない）
+- **Node ごとに独立した状態**を持つ
+
+未確定 visit は、その Node で割当権利行使順位が**まだ確定していない** visit である。snapshot 固定集合、意思決定窓内 Vehicle、対象 inlink 上の全 Vehicle、到着済み Vehicle だけの集合とは**同一ではない**。**未確定 visit 集合は、意思決定窓内 visit だけの集合でもない。** 将来の TVT 制度処理によって候補となり得る**意思決定窓外**の visit も、外部から登録されれば未確定集合に含まれ得る。
+
+- snapshot 固定集合と未確定 visit 集合は**同一ではない**
+- TVT 候補集合と未確定 visit 集合も**同一ではない**
+- TVT 候補集合は、未確定 visit 集合などから外部制度処理が条件に従って選ぶ**部分集合**になり得る
+- 状態部品は TVT 候補集合を**作らない**
+- **どの**意思決定窓外 visit を未確定集合へ登録するか、および実交通上の登録タイミングは、今回の状態部品の**外**に残る（登録範囲そのものは本節で新たに確定しない）
+
+状態部品は、外部から登録された visit を未確定として保持するだけである。どの visit を登録するかは外部制度処理が決める。
+
+##### 25.25.30.4 段階的な順位確定と K_confirmed
+
+**K_confirmed** は、確定順位ブロックの**末尾順位**（確定済み visit 数）を表す。空状態では 0。
+
+**K_confirmed_before まで（TVT 判断直前）：**
+
+1. 意思決定窓の検知時点で、到着済みと判断された未確定 visit を外部制度処理が選ぶ
+2. その有序 visit 列を状態部品へ渡して**先行確定**する
+3. 意思決定窓内 baseline 順位の先頭に連続する非参加 visit を外部制度処理が選ぶ
+4. その有序 visit 列を状態部品へ渡して**先行確定**する
+5. すべての先行確定を反映した後、状態から現在の確定ブロック末尾を**再取得**する
+6. この再取得値が、TVT 判断直前の **`K_confirmed_before`**
+7. **意思決定窓内**の baseline 順位に残る未確定 visit のうち、最上位の**参加** visit を right_of_entry vehicle として外部制度処理が選ぶ（§4.5。参加・非参加を理由に同着順位の優劣を付けず、既存の baseline 順位を用いる）。意思決定窓**外**の未確定 visit から right_of_entry vehicle を選ばない
+8. right_of_entry vehicle が存在しなければ TVT を形成しない
+9. TVT 判断後に接続する新しい確定 visit 列がなければ、そのまま処理を終了する
+
+**重要：** `K_confirmed_before` を、意思決定窓検知**前**から固定された値として扱ってはいけない。先行確定操作の古い戻り値（`ConfirmResult.k_confirmed_before` 等）を、後続の `K_confirmed_before` として固定利用してはいけない。TVT 判断直前に、必ず現在の状態から再取得する。これにより、先行確定の反映漏れや古い値参照による順位欠落を防ぐ。
+
+**意思決定窓内がすべて非参加の場合（§4.5・§14.2）：** 全非参加専用の確定アルゴリズムは設けない。手順 3〜4 の**共通処理**（意思決定窓内 baseline 順位の先頭から連続する非参加 visit の先行確定）を適用した結果、**意思決定窓内の全** visit が先行確定される。手順 5〜6 で得た末尾が `K_confirmed_before` である。手順 7 の時点で**意思決定窓内に**未確定 visit が残らない（共通の先頭連続非参加 visit 確定処理の結果、意思決定窓内の全 visit が確定し、意思決定窓内には未確定 visit が残らない）ため、意思決定窓内に right_of_entry vehicle となる未確定参加 visit が存在せず、手順 8 により TVT を形成しない。手順 9 により追加の確定 visit 列（後続の最終確定列は**空**）を接続せず、制度処理上の `K_confirmed_after` も別途計算せずに処理を終了する。処理終了時の確定順位ブロック末尾は `K_confirmed_before` で表す。
+
+**全非参加時に確定する「全 visit」の範囲：** 意思決定窓**内**の全 visit である。Node に関係する現在および将来の全 visit、snapshot 固定集合全体、後の timestep で意思決定窓へ入る visit を確定する意味ではない。**意思決定窓外**の未確定 visit は残り得る。
+
+全非参加時に特別な K の計算方式は設けない。確定対象の visit 列が空の場合、`confirm_visits_in_order()` を呼ぶことは必須ではない。確定対象がなければ、確定 API を呼ばずに処理を終了してよい。`confirm_visits_in_order()` へ空の list または tuple を渡すこと自体は許可する。空列が渡された場合、状態を変更せず、`k_confirmed_before` と `k_confirmed_after` が等しく、`newly_confirmed_count` が 0 の結果を返す。
+
+非技術的には、先頭から非参加 visit が連続していればその順番を確定する既存ルールを通常どおり最後まで適用する。意思決定窓内の全 Vehicle が非参加なら、その共通ルールだけで**意思決定窓内の**順番がすべて確定し、意思決定窓内に取引を始める未確定参加 visit も後から順番を決める未確定 visit も残らないため、そのまま処理が終了する。意思決定窓外には未確定 visit が残り得る。全非参加だけを別の特別な方法で処理するのではない。
+
+**K_confirmed_after まで（最終確定後）：**
+
+TVT 判断後に接続する最終確定 visit 列が存在する場合のみ、次を行う。
+
+1. 外部制度処理が、今回さらに確定する全 visit の**最終的な順序列**を作る
+2. 状態部品が、その列を確定ブロック末尾の次から接続する
+3. 接続後の確定順位ブロック末尾が **`K_confirmed_after`**
+
+更新式：
+
+```text
+K_confirmed_after
+=
+K_confirmed_before
++
+今回新たに接続した visit 数
+```
+
+ただし、ここでいう `K_confirmed_before` は、**最終確定 visit 列を接続する直前**に状態から取得した値である。
+
+TVT 判断後に接続する最終確定 visit 列が存在しない場合（全非参加など、共通の先行確定後に**意思決定窓内に**未確定 visit が残らない場合）は、上記手順 9 のとおり制度処理上の `K_confirmed_after` を別途計算しない。処理終了時の確定順位ブロック末尾は、先行確定後の `K_confirmed_before` で表す。残存する意思決定窓内の未確定 visit が 0 件なら、接続対象の列は空である。空列の確定 API 呼出しは必須ではない。確定 API を呼ばずに処理を終了してよい。空列を `confirm_visits_in_order()` へ渡した場合も no-op として正常に処理できる。
+
+##### 25.25.30.5 状態部品へ渡す確定 visit 列
+
+状態部品へ渡される列は、**未確定参加 Vehicle だけの列ではない**。外部制度処理が決めた有序 visit 列であり、制度ケースにより **先行確定列**（§25.25.30.4）として渡される場合と、TVT 判断後に **`K_confirmed_before` の次から接続する最終確定列**として渡される場合がある。後者は、
+
+```text
+今回新たに確定順位ブロックへ接続する全 visit の最終的な有序列
+```
+
+である。
+
+次の visit が、TVT 判断後の**最終確定列**として外部制度処理から状態部品へ渡される（**先行確定後に意思決定窓内に未確定 visit が残らない場合**——全非参加を含む——は最終確定列は**空**であり、下記 §25.25.30.4 手順 9 のとおり接続しない）。
+
+**TVT 取引不成立：** right_of_entry vehicle が存在し TVT を検討したが取引が不成立となった場合を含む。先行確定後に**意思決定窓内**に未確定 visit が **1 件以上**残っていれば、それらを baseline 順位で並べた最終確定列を `K_confirmed_before` の後へ接続し、順位を確定する。残存する意思決定窓内の未確定 visit が **0 件**なら、接続対象の列は空である。空列の確定 API 呼出しは必須ではない。確定 API を呼ばずに処理を終了してよい。空列を渡した場合も no-op として正常に処理できる。参加・非参加の両方を含み得る。
+
+**TVT 形成に必要な情報を取得できない：** 部分的 TVT は行わない。§14.4 に従い、先行確定後に残る**意思決定窓内**の未確定 visit が **1 件以上**あれば、それらを baseline 順位で並べた最終確定列を接続し、順位を確定する。残存する意思決定窓内の未確定 visit が **0 件**なら、接続対象の列は空である。空列の確定 API 呼出しは必須ではない。確定 API を呼ばずに処理を終了してよい。空列を渡した場合も no-op として正常に処理できる。意思決定窓**外**の未確定 visit は、**情報未取得だけを理由に**列へ含めない。
+
+**TVT 成立と情報未取得の区別（意思決定窓外 visit）：**
+
+| 制度ケース | 意思決定窓外 visit の扱い |
+|-----------|-------------------------|
+| **TVT 取引成立** | TVT 候補集合と取引結果に基づき、意思決定窓外の候補 visit まで最終確定列へ含まれ、順位確定される**場合がある**（TVT 取引結果に基づく正式な順位確定） |
+| **情報未取得（§14.4）** | 意思決定窓外の未確定 visit を、**情報を取得できなかったという理由だけでは確定しない** |
+
+意思決定窓外 visit を**常に**確定するとも、**常に**確定しないとも記録しない。確定理由と制度ケースによって異なる。
+
+**意思決定窓内がすべて非参加（§4.5・§14.2）：** 全非参加専用の先行確定列を別に作るのではない。手順 3〜4 の共通処理「意思決定窓内 baseline 順位の**先頭に連続する非参加 visit**の先行確定」を適用すると、この場合は「先頭に連続する非参加 visit」が結果として意思決定窓内の**全** visit となり、その列が通常どおり先行確定列として状態部品へ渡される（baseline 到着順位のまま）。すべての先行確定を反映した後の末尾が `K_confirmed_before` である。共通処理後に**意思決定窓内に**未確定 visit が残らないため、意思決定窓内に right_of_entry vehicle となる未確定参加 visit が存在せず、TVT を形成しない。`K_confirmed_before` の後へ新しい確定 visit 列を接続せず、制度処理上の `K_confirmed_after` も別途計算しない。意思決定窓外の未確定 visit は残り得る。
+
+**全非参加と一般的な TVT 不成立の関係（専用アルゴリズムは設けない）：**
+
+| | 全非参加 | 一般的な TVT 不成立 |
+|---|---------|-------------------|
+| 共通処理 | 先頭連続非参加 visit 先行確定により、**意思決定窓内の全** visit が先行確定 | 同左（該当する場合） |
+| 手順 7 後 | 意思決定窓**内**に未確定参加 visit が残らない | 意思決定窓**内**に未確定 visit が残り得る |
+| right_of_entry | 存在しない | 存在し TVT を検討したが不成立 |
+| 後続最終確定列 | **空**（空列の確定 API 呼出しは必須ではない） | 残存 visit が 1 件以上なら baseline 順位で**確定** |
+
+両者の違いは専用アルゴリズムの有無ではなく、共通処理後の**意思決定窓内**の状態と TVT 検討の有無である。
+
+**TVT 取引成立：** TVT 取引結果による順位部分を含む。**TVT 取引順位部分**には、意思決定窓内の visit だけでなく、P-1 条件などによって TVT 候補となった**意思決定窓外**の visit も含まれ得る。意思決定窓外の候補 visit が実際に最終確定列へ含まれるかは、**外部の TVT 制度処理**が取引結果に従って決める。順位状態部品は、意思決定窓外であることを理由にその VisitKey を**拒否しない**。ただし、その VisitKey は未確定集合へ**事前登録済み**でなければならない。
+
+取引当事者の最後尾順位が意思決定窓内の最後尾より前なら、その後ろに残る意思決定窓内の未確定 visit を baseline 順位で接続する。したがって、外部制度処理が完成させる最終確定列は、概念的に次の組合せになり得る（**固定的な列構造として状態部品へ要求しない**）。
+
+```text
+TVT 取引順位部分
+  - 意思決定窓内の取引関係 visit
+  - TVT 候補となった意思決定窓外の visit を含み得る
++
+必要な場合の残余意思決定窓内 baseline 順位部分
+```
+
+状態部品が受け取るのは、外部制度処理が完成させた **1 本の有序 VisitKey 列**である。状態部品は、その列のどこまでが取引順位部分で、どこからが残余 baseline 部分かを**判定または保存しない**。
+
+残余部分にも参加・非参加の両方が含まれ得る。最終確定列全体にも、意思決定窓内外・参加・非参加の visit が混在し得る。
+
+状態部品は、各 visit が取引順位、baseline 順位、参加、非参加、意思決定窓内外のどれに由来するかを**判断しない**。渡された順序を保持して接続するだけである。参加 Vehicle だけを確定対象だと誤解しないよう、外部処理が渡す列をそのまま受け入れる設計とする。
+
+##### 25.25.30.6 確定済み visit の保持方針
+
+- 順位状態オブジェクトが存続する間、**確定済み visit を削除しない**
+- Node 通過後も**確定履歴として保持**する
+- 未確定 visit は、確定時に未確定集合から除外する
+- 通過済みなのに未確定の visit を検出する責任は**上位制度処理**に置く
+- 状態部品は Vehicle の交通状態を探索しない
+- 確定済み順位は **1 位から連続**して保持する
+- 現在の確定ブロック末尾は確定 visit 数と一致する
+- **`K_confirmed` を別の mutable フィールドとして重複保存しない**
+
+これは将来の作り直しを予定した設計ではない。**現在の正式な研究設計**として採用する。長期実験で記録数が増える可能性は、順位状態の**正しさ**とは分け、将来の**性能評価事項**として扱う。
+
+##### 25.25.30.7 保存場所と状態の寿命
+
+- **独立した Node 順位状態クラス**を作る
+- 将来の上位 TVT 制御が **Node 名別 dict** で保持する
+- 今回は **Node 属性へ追加しない**
+- 今回は **World 属性へ追加しない**
+- **`uxsim.py` を変更しない**
+- 順位状態オブジェクトは **1 回の TVT 判断終了時に破棄しない**
+- **複数の実 timestep** をまたいで維持する
+- 上位 TVT 制御が対象 World の順位を管理する期間、状態を保持する
+- `real_W` または `fork_W` 自体を状態オブジェクトへ保持しない
+- Vehicle、Node、Link オブジェクトへの参照を保持しない
+- **plain な Node 名と visit identity だけ**を保持する
+- `World.copy()` との統合は今回対象外
+
+概念：
+
+```text
+rank_states_by_node_name
+  "junction_a" -> OrderControlTvtNodeRankState
+  "junction_b" -> OrderControlTvtNodeRankState
+```
+
+「上位 TVT 制御」は、将来 TVT 処理を順番に呼ぶまとめ役を意味する。その関数名、クラス名、実装場所は今回確定しない。
+
+非技術的には、各 Node の順位帳簿を Node 本体へ直接埋め込まず、将来の TVT 管理処理が Node 名別に保管する。これにより、シミュレーション本体（Node、World）と順位帳簿の責務を分離する。
+
+##### 25.25.30.8 未確定 visit 登録 API と登録タイミングの境界
+
+順位状態オブジェクトは、外部から明示的に渡された visit を未確定集合へ登録する API を持つ。
+
+状態オブジェクト自身は次を**行わない**：
+
+- Vehicle 一覧の探索
+- Node の探索
+- inlink の探索
+- snapshot 固定集合からの抽出
+- 意思決定窓の判定
+- 到着済み判定
+- 登録対象 visit の制度判断
+
+登録 API を実交通上のどの時点で呼ぶかは、**今回の状態部品の外**に残す。次の 2 方式のどちらにも、今回の登録 API を利用できる。
+
+- current visit 生成時に登録する方式
+- TVT 評価開始時に上位制御が対象 visit を一括登録する方式
+
+今回、どちらを採用するかは**決めない**。各方式に残る接続上の問題は、状態部品を実装するだけでは解決しない。
+
+状態部品が保証するのは、渡された visit を**重複や部分更新なし**で登録することである。
+
+**未確定 visit 集合と登録対象の範囲：**
+
+- 未確定 visit 集合は、意思決定窓内 visit だけの集合ではない（§25.25.30.3 参照）
+- 意思決定窓外の visit も、外部から明示的に渡されれば登録され得る
+- snapshot 固定集合からの自動抽出、TVT 候補集合の自動形成、意思決定窓の判定は行わない
+- どの意思決定窓外 visit をいつ登録するかは、今回の状態部品の外に残る
+
+##### 25.25.30.9 VisitKey
+
+公開型 alias として次を採用する。
+
+```python
+OrderControlTvtVisitKey = tuple[str, int]
+```
+
+意味：
+
+```text
+(vehicle_name, visit_id)
+```
+
+「公開型 alias」とは、`tuple[str, int]` という一般的な型に、TVT 用 visit 識別子であることが分かる名前を付け、他のモジュールからも使用可能にすることである。
+
+**validation：**
+
+- value は長さ 2 の tuple
+- `vehicle_name` は非空 `str`
+- `visit_id` は bool ではない Python `int`
+- `visit_id` は **1 以上**
+- 同一 Node 順位状態内で VisitKey は一意
+- 同一 `vehicle_name` でも `visit_id` が異なれば別 visit
+- 同一 VisitKey を確定済みと未確定の両方へ置かない
+- Vehicle ID は VisitKey へ含めない
+- Node 名は Node 別状態が保持するため VisitKey へ含めない
+
+collector および snapshot と同じ `(vehicle_name, visit_id)` を使う理由：既存 order-control 基盤（collector、snapshot、fork probe）と visit identity を統一し、別の識別子体系を導入する混乱を防ぐためである。
+
+##### 25.25.30.10 公開型と公開 API
+
+**モジュール名：**
+
+```text
+uxsim/order_control_tvt_node_rank_state.py
+```
+
+**公開状態クラス名：**
+
+```text
+OrderControlTvtNodeRankState
+```
+
+**公開確定結果型：**
+
+```text
+OrderControlTvtConfirmResult
+```
+
+**公開型 alias：**
+
+```text
+OrderControlTvtVisitKey
+```
+
+**公開 API：**
+
+```python
+OrderControlTvtVisitKey = tuple[str, int]
+```
+
+```python
+@dataclass(frozen=True)
+class OrderControlTvtConfirmResult:
+    k_confirmed_before: int
+    k_confirmed_after: int
+    newly_confirmed_count: int
+```
+
+`confirmed_visit_keys` は結果型へ**含めない**。理由：
+
+- 確定対象の visit 列は呼出側がすでに保持している
+- 結果型へ同じ列を複製する必須性がない
+- 大きな確定列では余分な tuple 作成と参照保持が生じ得る
+- コードと結果型を必要以上に複雑にしない
+- 結果型は、更新前末尾、更新後末尾、更新件数だけで十分に意味が分かる
+- 計算時間とメモリへの不要な負荷を避ける
+- Python 初学者が理解しやすい単純な結果型を優先する
+
+負荷が常に大きいと断定しない。現時点では明確な利点が小さいため、重複フィールドを採用しないという判断である。
+
+`frozen=True` の意味：確定操作の結果を作成後に書き換えられないようにする設定である。状態本体は今後も更新されるため mutable だが、一回の確定操作の結果は後から変更する必要がないため、frozen とする。誤った再代入による `K_confirmed` 参照事故を防ぐ。
+
+**状態クラスの正式なシグネチャ：**
+
+```python
+class OrderControlTvtNodeRankState:
+    def __init__(self, node_name: str) -> None:
+        ...
+```
+
+**公開読取・更新 API：**
+
+```python
+@property
+def node_name(self) -> str:
+    ...
+```
+
+```python
+def k_confirmed(self) -> int:
+    ...
+```
+
+```python
+def register_undetermined_visit(
+    self,
+    visit_key: OrderControlTvtVisitKey,
+) -> None:
+    ...
+```
+
+```python
+def register_undetermined_visits(
+    self,
+    visit_keys: list[OrderControlTvtVisitKey]
+    | tuple[OrderControlTvtVisitKey, ...],
+) -> None:
+    ...
+```
+
+```python
+def confirm_visits_in_order(
+    self,
+    visit_keys_in_order: list[OrderControlTvtVisitKey]
+    | tuple[OrderControlTvtVisitKey, ...],
+) -> OrderControlTvtConfirmResult:
+    ...
+```
+
+```python
+def confirmed_visit_keys_in_order(
+    self,
+) -> tuple[OrderControlTvtVisitKey, ...]:
+    ...
+```
+
+```python
+def undetermined_visit_keys(
+    self,
+) -> frozenset[OrderControlTvtVisitKey]:
+    ...
+```
+
+```python
+def is_confirmed(
+    self,
+    visit_key: OrderControlTvtVisitKey,
+) -> bool:
+    ...
+```
+
+```python
+def is_undetermined(
+    self,
+    visit_key: OrderControlTvtVisitKey,
+) -> bool:
+    ...
+```
+
+```python
+def assigned_rank(
+    self,
+    visit_key: OrderControlTvtVisitKey,
+) -> int | None:
+    ...
+```
+
+```python
+def export_state(self) -> dict[str, object]:
+    ...
+```
+
+実装時に既存 Python バージョンとの型注釈上の整合が必要な場合は、意味を変えない範囲で表記を調整できる。
+
+##### 25.25.30.11 内部データ構造
+
+状態本体は **mutable な通常クラス**とする。
+
+**内部データ構造：**
+
+- `_node_name: str`
+- `_confirmed_visit_keys_in_order: list[OrderControlTvtVisitKey]`
+- `_confirmed_rank_by_visit_key: dict[OrderControlTvtVisitKey, int]`
+- `_undetermined_visit_keys: set[OrderControlTvtVisitKey]`
+
+各構造の役割：
+
+- **list** は確定順位順を保持する（1 位から末尾まで）
+- **dict** は VisitKey から確定順位を O(1) で取得する
+- **set** は未確定 visit の重複検出と所属確認に使う
+
+未確定集合の登録順は保持しない。baseline 順位は外部制度処理が必要な時点で構築するため、未確定集合自体に順序は不要である。
+
+`K_confirmed` は別フィールドとして保存しない。確定ブロックの長さから派生させる。これにより、ブロックと K の値が食い違う二重管理を防ぐ。
+
+内部 list、dict、set を公開 API から**直接返さない**。基本的な Python の list、dict、set、tuple、str、int だけを保持し、Vehicle、Node、World への参照を持たせないため、**pickle 可能**な構造とする。
+
+##### 25.25.30.12 未確定 visit の登録
+
+単数登録と複数一括登録を提供する。
+
+**単数登録（`register_undetermined_visit`）：**
+
+渡された VisitKey を validation し、次を確認する。
+
+- すでに未確定集合へ登録されていない
+- すでに確定済みではない
+
+問題がなければ未確定集合へ追加する。
+
+**複数一括登録（`register_undetermined_visits`）：**
+
+受け付ける容器型は **list または tuple**。set や generator などの一般 Iterable は受け付けず、既存 order-control API との一貫性を保つため list または tuple に限定する。
+
+次の順序で処理する。
+
+1. 容器型を確認する
+2. tuple へ固定する
+3. 全 VisitKey を validation する
+4. 入力列内重複を確認する
+5. 既存未確定集合との重複を確認する
+6. 確定済み visit の混入を確認する
+7. 全件に問題がなければ一括追加する（§25.25.30.17 のローカル更新候補方式に従う）
+
+空の list または tuple は **no-op** とする。一件でも不正なら、**どの visit も登録しない**（部分登録を防ぐ）。
+
+##### 25.25.30.13 visit 列の一括確定
+
+`confirm_visits_in_order()` は、外部制度処理が決めた有序 VisitKey 列を受け取る。
+
+受け付ける容器型は **list または tuple** とする。
+
+次の順序で処理する。
+
+1. 容器型が list または tuple であることを確認する
+2. 入力を tuple へ固定する
+3. 全 VisitKey の型と内容を validation する
+4. 入力列内の VisitKey 重複を確認する
+5. 各 VisitKey が**すでに確定済みでない**ことを確認する
+6. 確定済みでない各 VisitKey が**未確定集合に登録済み**であることを確認する
+7. 全件の入力・操作要求 validation に成功した後、現在の `k_confirmed_before` を取得する
+8. 更新後に使用する確定 list、順位 dict、未確定 set の**ローカル更新候補**を作成する（§25.25.30.17 参照）
+9. 渡された順序のまま、`k_confirmed_before + 1` から連番で更新候補へ接続する
+10. 対象 VisitKey を更新候補の未確定 set から除外する
+11. 更新候補から `k_confirmed_after` を計算する
+12. 更新候補について必要最小限の内部整合を確認する（§25.25.30.17・§25.25.30.18 参照）
+13. 整合確認に成功した場合だけ、更新候補を正式な内部状態へ一括反映する
+14. `OrderControlTvtConfirmResult` を返す
+
+**検査順序の理由：** 確定済み visit は未確定集合から除外されるため、未確定集合の有無を先に確認すると、再確定要求と未登録要求を区別できない。確定済みかどうかを**先に**確認し、確定済みでなければ未確定登録済みかを確認する。
+
+**例外の区別（いずれも `ValueError`、メッセージは別）：**
+
+**確定済み visit の再確定：** すでに `_confirmed_rank_by_visit_key` に存在する VisitKey が入力された場合。メッセージには少なくとも次を含める。
+
+- 対象 VisitKey
+- すでに確定済みであること
+- 現在の確定順位
+
+**未登録 visit の確定要求：** 確定済みではなく、未確定集合にも存在しない VisitKey が入力された場合。メッセージには少なくとも次を含める。
+
+- 対象 VisitKey
+- 未確定 visit として事前登録されていないこと
+
+再確定と未登録を同じ一般的なエラーメッセージへまとめない。
+
+空の list または tuple は **no-op** である。空の場合も結果を返す。
+
+```text
+k_confirmed_before == k_confirmed_after
+newly_confirmed_count == 0
+```
+
+状態は変化しない。
+
+**制度処理との関係（空列）：** 確定対象の visit 列が空の場合、`confirm_visits_in_order()` を呼ぶことは必須ではない。確定対象がなければ、確定 API を呼ばずに処理を終了してよい。`confirm_visits_in_order()` へ空の list または tuple を渡すこと自体は許可する。
+
+状態部品は、渡された列の制度的な並びが正しいかを**再判定しない**。外部制度処理が決めた順序をそのまま接続する。
+
+**`confirm_visits_in_order()` が確認する項目：**
+
+- 入力容器型
+- VisitKey の型と内容
+- 入力列内重複
+- 確定済みか
+- 未確定集合へ登録済みか
+
+**`confirm_visits_in_order()` が確認しない項目：**
+
+- 意思決定窓内か外か
+- TVT 参加 Vehicle か非参加 Vehicle か
+- TVT 候補集合に含まれるか
+- P-1 条件を満たすか
+- 取引順位部分か残余 baseline 部分か
+- TVT 成立、不成立、情報未取得のどのケースか
+
+これらを確認しない理由：確定列の制度的な正しさは**外部制度処理**が保証し、順位状態部品はそれを**安全に保存する**責任だけを持つためである。
+
+##### 25.25.30.14 ConfirmResult
+
+次の 3 フィールドで確定する。
+
+```python
+@dataclass(frozen=True)
+class OrderControlTvtConfirmResult:
+    k_confirmed_before: int
+    k_confirmed_after: int
+    newly_confirmed_count: int
+```
+
+各フィールドの意味：
+
+- **`k_confirmed_before`** — その一括確定操作の直前の確定ブロック末尾
+- **`k_confirmed_after`** — その一括確定操作の直後の確定ブロック末尾
+- **`newly_confirmed_count`** — その操作で新たに確定した visit 数
+
+整合条件：
+
+```text
+newly_confirmed_count
+==
+k_confirmed_after - k_confirmed_before
+```
+
+`confirmed_visit_keys` を含めない理由：入力列は呼出側がすでに保持しており、結果へ同じ情報を重複して持たせる明確な必要性がない。大きな確定列では余分な tuple 作成と参照保持が生じ得る。結果型は更新前末尾・更新後末尾・更新件数だけで十分に意味が分かり、Python 初学者にも理解しやすい。
+
+`frozen=True` は、一回の確定操作の記録を後から誤って書き換えないためである。
+
+##### 25.25.30.15 K_confirmed の取得と整合条件
+
+`k_confirmed()` は現在の確定順位ブロック末尾を返す。空状態では **0**。
+
+確定済み visit を削除せず、順位を 1 位から連続して保持するため、次が成立する。
+
+```text
+k_confirmed()
+==
+len(_confirmed_visit_keys_in_order)
+==
+len(_confirmed_rank_by_visit_key)
+```
+
+別の mutable フィールドへ `K_confirmed` を保存しない。これにより、ブロックと K の値が食い違う可能性を減らす。
+
+先行確定操作の後に、TVT 判断用の `K_confirmed_before` を必要とする場合は、必ず次のように**現在値を再取得**する。
+
+```python
+k_confirmed_before = rank_state.k_confirmed()
+```
+
+先行確定操作の古い `ConfirmResult.k_confirmed_before` を使用してはいけない。
+
+##### 25.25.30.16 読取 API と export
+
+**確定 visit 列：** `confirmed_visit_keys_in_order()` は、1 位から順位順に並んだ VisitKey の **tuple** を返す。内部 list を直接返さない。
+
+**未確定 visit 集合：** `undetermined_visit_keys()` は **frozenset** を返す。内部 set を直接返さない。未確定 visit には制度上の順序を持たせない。
+
+**所属確認と確定順位（`is_confirmed()`、`is_undetermined()`、`assigned_rank()`）：**
+
+これら 3 API は、受け取った VisitKey について**型と内容の validation を行う**。不正な VisitKey を渡した場合は **`ValueError`** とする。
+
+正しい形式だが状態へ未登録の VisitKey の場合は次とする。
+
+```text
+is_confirmed() == False
+is_undetermined() == False
+assigned_rank() is None
+```
+
+確定済み VisitKey では `is_confirmed() == True`、`assigned_rank()` は 1 以上。未確定 VisitKey では `is_undetermined() == True`、`assigned_rank()` は `None`。未確定と未登録を区別する場合は `is_undetermined()` を併用する。
+
+**読取時の再検査方針：** 「登録・更新時に保証済みの不変条件を読取時に全面再検査しない」とは、内部 list、dict、set **全体**を毎回再検査しないという意味である。読取 API へ新たに渡された VisitKey 自体の validation を省略する意味ではない。
+
+**export：** `export_state()` の公開シグネチャは次で確定する。
+
+```python
+def export_state(self) -> dict[str, object]:
+    ...
+```
+
+既存 Python バージョンとの整合で必要な場合だけ、意味を変えない範囲で型注釈表記を調整できる。
+
+返却形式を次で確定する。
+
+```python
+{
+    "node_name": str,
+    "k_confirmed": int,
+    "confirmed_visits": [
+        {
+            "vehicle_name": str,
+            "visit_id": int,
+            "assigned_rank": int,
+        },
+        ...
+    ],
+    "undetermined_visits": [
+        {
+            "vehicle_name": str,
+            "visit_id": int,
+        },
+        ...
+    ],
+}
+```
+
+**`node_name`：** 状態オブジェクトの Node 名。
+
+**`k_confirmed`：** 現在の確定順位ブロック末尾。空状態では 0。
+
+**`confirmed_visits`：** 確定順位の昇順、すなわち 1 位から順に並べる。各要素は新しく作成した dict とし、次を含める。
+
+- `vehicle_name`
+- `visit_id`
+- `assigned_rank`（1 以上の連続順位）
+
+**`undetermined_visits`：** 制度上の順位は持たない。診断・テスト出力を安定させるため、次の順で固定 sort する。
+
+1. `vehicle_name`
+2. `visit_id`
+
+各要素は新しく作成した dict とし、次を含める。
+
+- `vehicle_name`
+- `visit_id`
+
+**可変状態の非漏洩：** export 結果の次を呼出側が変更しても、内部状態へ影響してはいけない。
+
+- 最上位 dict
+- `confirmed_visits` の list
+- `confirmed_visits` 内の各 dict
+- `undetermined_visits` の list
+- `undetermined_visits` 内の各 dict
+
+Vehicle、Node、Link、World オブジェクトを含めない。
+
+VisitKey の tuple をそのまま含める形式ではなく、キー名の分かる plain dict へ分解する。非技術的には、診断出力を見た人が tuple の 1 番目と 2 番目の意味を覚えていなくても、Vehicle 名、visit ID、順位を理解できるようにするためである。
+
+##### 25.25.30.17 更新の原子性
+
+未確定 visit の複数登録と visit 列の一括確定は、次の方針で確定する。
+
+- 入力全体を先に tuple へ固定する
+- 全件を先に validation する
+- 入力内重複を検査する
+- 現在状態との矛盾を確認する
+- 全件に問題がない場合だけ状態を更新する
+- 一件でも問題があれば**正式な内部状態を変更しない**
+- rollback を必要とする途中更新を作らない
+
+非技術的には、5 件を確定する依頼の 4 件目に問題があった場合、最初の 3 件だけを確定済みにして状態を残さないための設計である。validation 途中で一部だけ状態が更新される事故を防ぐ。
+
+**ローカル更新候補方式（一括更新の正式方式）：**
+
+更新前の内部状態から、更新に必要なローカル候補を作る。概念名は次のとおり（正式な属性名ではなく、処理を説明する概念名。実装時には意味の分かるローカル変数名を使用する）。
+
+```python
+candidate_confirmed_visit_keys_in_order
+candidate_confirmed_rank_by_visit_key
+candidate_undetermined_visit_keys
+```
+
+処理順序：
+
+1. 呼出入力と操作要求を全件 validation する
+2. 現在状態を基にローカル更新候補を作る
+3. ローカル更新候補だけを変更する
+4. ローカル更新候補の必要最小限の内部整合を確認する（§25.25.30.18）
+5. すべて成功した場合だけ、内部 list、dict、set を更新候補へ一括で置き換える
+6. 結果を返す
+
+これにより、入力不正だけでなく、更新候補の内部整合確認で `RuntimeError` となった場合も、**正式な内部状態を更新前のまま維持**する。非技術的には、5 件を確定する処理の途中や、更新候補の検査中に問題が見つかっても、最初の数件だけが確定済みとして残る事故を防ぐ方式である。
+
+**単数登録（`register_undetermined_visit`）：** 1 件だけの単純更新。VisitKey validation、既存未確定との重複、確定済みとの重複をすべて確認した後にだけ set へ追加する。
+
+**複数登録（`register_undetermined_visits`）：** 入力全体を tuple へ固定し、全件 validation と重複確認に成功した後でのみ一括追加する。既存 set を直接変更しながら validation しない。必要ならローカル更新候補 set を作り、その候補の確認後に正式 set へ反映する。
+
+**確定操作（`confirm_visits_in_order`）：** 正式な内部 list、dict、set を**直接変更しながら**更新後検査を行わない。更新候補の検査成功後に、正式な内部状態へ一括反映する。
+
+**性能と可読性：** この方式は更新時に list、dict、set のコピーを作る可能性がある。ただし、今回の順位状態では次を優先する。
+
+- 研究結果の正確性
+- 部分更新を残さないこと
+- 実装者が処理順を追いやすいこと
+- rollback 処理を追加しないこと
+
+高度な差分更新や複雑な rollback より、明示的なローカル候補を作る方式を採用する。長期・大規模実験で更新候補生成の負荷が問題になるかは、実測に基づく性能評価事項として分けて扱う。
+
+**更新候補に対して確認する必要最小限の内部整合（登録・確定の更新候補反映前）：**
+
+```text
+len(candidate_confirmed_visit_keys_in_order)
+==
+len(candidate_confirmed_rank_by_visit_key)
+```
+
+```text
+candidate_k_confirmed_after
+==
+len(candidate_confirmed_visit_keys_in_order)
+```
+
+順位順 list の各 VisitKey について、1 始まりの位置と rank dict の順位が一致すること：
+
+```text
+candidate_confirmed_rank_by_visit_key[visit_key]
+==
+position
+```
+
+（`position` は 1 から始まる順位）
+
+- 確定 list 内の VisitKey に重複がないこと
+- 確定 list 内の VisitKey が未確定候補 set に存在しないこと
+- 今回確定したすべての VisitKey が未確定候補 set から除外されていること
+
+`OrderControlTvtConfirmResult` について次が成立すること：
+
+```text
+newly_confirmed_count
+==
+k_confirmed_after - k_confirmed_before
+```
+
+更新候補のこれらの不整合は **`RuntimeError`** とする。
+
+すべての読取操作で全状態を全面再検査しない。内部整合確認は、状態を変更する登録・確定処理の適切な節目で行う。
+
+##### 25.25.30.18 不変条件
+
+- Node 名は非空 `str`
+- VisitKey は長さ 2 の tuple
+- `vehicle_name` は非空 `str`
+- `visit_id` は bool ではない Python `int` で 1 以上
+- 確定順位は **1 から連続**
+- 確定順位に**欠番がない**
+- 確定順位に**重複がない**
+- 確定 VisitKey に**重複がない**
+- 未確定 VisitKey に**重複がない**
+- 同じ VisitKey が確定済みと未確定の**両方に存在しない**
+- 確定ブロック末尾と確定件数が**一致**
+- 一度確定した順位は**上書きしない**
+- 確定操作は**未確定登録済み VisitKey だけ**を対象にする
+- 空確定操作は状態を変えない
+- validation 失敗時は状態を**部分変更しない**
+
+**検査の責任分担：**
+
+| タイミング | 検査内容 |
+|-----------|---------|
+| 生成時 | Node 名 |
+| VisitKey 受付時 | VisitKey の型と内容 |
+| 登録時 | 重複、確定済みとの排他 |
+| 確定時 | 入力列内重複、**確定済みでないこと（先）**、**未確定登録済みであること（後）**、一括更新 |
+| 更新候補反映前 | §25.25.30.17 の必要最小限の内部整合 |
+| 読取時（`is_confirmed` / `is_undetermined` / `assigned_rank`） | 渡された VisitKey の型と内容。内部 list、dict、set 全体の全面再検査はしない |
+| 読取時（その他） | 登録・更新時に保証済みの不変条件を**全面再検査しない** |
+
+##### 25.25.30.19 ValueError と RuntimeError
+
+**ValueError** — 呼出側が渡した入力または操作要求が契約に合わない場合。
+
+少なくとも次を `ValueError` とする：
+
+- Node 名が不正
+- VisitKey の型または内容が不正
+- 複数登録 API の容器型が不正
+- 確定 API の容器型が不正
+- 未確定 VisitKey の重複登録
+- 確定済み VisitKey の未確定再登録
+- 確定済み VisitKey の再確定（対象 VisitKey、確定済みであること、現在の確定順位をメッセージに含める）
+- 未登録 VisitKey の確定要求（対象 VisitKey、未確定として事前登録されていないことをメッセージに含める。再確定と同じ一般的メッセージにまとめない）
+- 同じ登録要求内の VisitKey 重複
+- 同じ確定要求内の VisitKey 重複
+
+- 読取 API（`is_confirmed`、`is_undetermined`、`assigned_rank`）への不正 VisitKey
+
+**RuntimeError** — 状態部品内部で、本来発生しない不整合を検出した場合。
+
+少なくとも次を **`RuntimeError`** とする：
+
+- confirmed list と rank dict の件数不一致
+- confirmed list と rank dict の VisitKey 不一致（順位対応不一致を含む）
+- 確定順位の欠番
+- 確定順位の重複
+- 確定 VisitKey が未確定集合にも残る
+- 更新後の末尾順位と確定件数が一致しない
+- `ConfirmResult` の件数差分が一致しない（`newly_confirmed_count != k_confirmed_after - k_confirmed_before`）
+
+`RuntimeError` は、呼出側が入力を直せば解決する通常の契約違反ではなく、順位状態の**内部破壊**を示す重大な異常である。
+
+通過済みなのに未確定の visit を検出する責任は、交通状態を知る**上位制度処理**へ置く。状態部品自身は Vehicle の通過状態を探索しない。
+
+##### 25.25.30.20 K_confirmed の具体例
+
+**例 1：先行確定後に TVT 判断用 K_confirmed_before を再取得**
+
+開始時：
+
+```text
+1位 A
+2位 B
+```
+
+現在の末尾：
+
+```text
+k_confirmed = 2
+```
+
+到着済み visit として C、D を先行確定：
+
+```text
+3位 C
+4位 D
+```
+
+次に、先頭連続非参加 visit として E を先行確定：
+
+```text
+5位 E
+```
+
+TVT 判断直前に状態から再取得：
+
+```text
+K_confirmed_before = 5
+```
+
+その後、外部制度処理が最終確定列を作る：
+
+```text
+G
+F
+H
+```
+
+この列には TVT 取引順位と残余 baseline 順位が含まれ得る。
+
+状態部品が接続：
+
+```text
+6位 G
+7位 F
+8位 H
+```
+
+結果：
+
+```text
+K_confirmed_after = 8
+newly_confirmed_count = 3
+```
+
+状態部品は、G、F、H がどの制度的理由でこの順序になったかを判断しない。
+
+**例 2：TVT 不成立または情報未取得**
+
+先行確定後：
+
+```text
+K_confirmed_before = 4
+```
+
+外部処理が意思決定窓内の残る未確定 visit を baseline 順で作る：
+
+```text
+J
+K
+L
+```
+
+状態部品が接続：
+
+```text
+5位 J
+6位 K
+7位 L
+```
+
+結果：
+
+```text
+K_confirmed_after = 7
+newly_confirmed_count = 3
+```
+
+**例 3：TVT 成立後の残余 baseline 順位**
+
+先行確定後：
+
+```text
+K_confirmed_before = 3
+```
+
+外部処理が作る最終確定列：
+
+```text
+TVT 取引順位部分：N、M
+残余 baseline 部分：O、P
+```
+
+状態部品へ渡す一つの有序列：
+
+```text
+N
+M
+O
+P
+```
+
+状態部品が接続：
+
+```text
+4位 N
+5位 M
+6位 O
+7位 P
+```
+
+結果：
+
+```text
+K_confirmed_after = 7
+newly_confirmed_count = 4
+```
+
+**例 4：空の確定要求**
+
+開始時：
+
+```text
+k_confirmed = 5
+```
+
+空列を確定：
+
+```text
+[]
+```
+
+結果：
+
+```text
+k_confirmed_before = 5
+k_confirmed_after = 5
+newly_confirmed_count = 0
+```
+
+状態は変化しない。
+
+`confirm_visits_in_order()` へ空の list または tuple を渡すことは許可される。空列の確定 API 呼出しは必須ではない。
+
+**例 5：意思決定窓内がすべて非参加（共通処理の自然な終了）**
+
+意思決定窓内 baseline 順位が次のとおりで、すべて非参加 visit であるとする。
+
+```text
+A（非参加）
+B（非参加）
+C（非参加）
+```
+
+先行確定開始時：
+
+```text
+k_confirmed = 2
+```
+
+共通処理（先頭から連続する非参加 visit の先行確定）により、A、B、C を先行確定列として接続：
+
+```text
+3位 A
+4位 B
+5位 C
+```
+
+TVT 判断直前に状態から再取得：
+
+```text
+K_confirmed_before = 5
+```
+
+未確定 visit は**意思決定窓内に**残らないため right_of_entry vehicle は存在せず、TVT を形成しない。接続する最終確定 visit 列はないため、制度処理上の `K_confirmed_after` を別途計算せず、確定 API を呼ばずに処理を終了する。確定対象がないため呼出しは必須ではないが、`confirm_visits_in_order([])` を呼んだ場合も no-op として正常に処理できる。処理終了時の末尾は `K_confirmed_before = 5` である（意思決定窓外の未確定 visit は残り得る）。
+
+**例 6：TVT 成立時に意思決定窓外候補 visit を含む最終確定列**
+
+本例は、TVT 候補の選定規則や取引順位計算を状態部品が行うという意味ではない。外部制度処理が完成させた列を、状態部品が保存できることを示す。
+
+先行確定後：
+
+```text
+K_confirmed_before = 3
+```
+
+外部制度処理が作った最終確定列（すべて未確定集合へ事前登録済み）：
+
+```text
+Q  意思決定窓内の取引関係 visit
+R  意思決定窓外の TVT 候補 visit（外部制度処理上、窓外候補を表す VisitKey）
+S  意思決定窓内の取引関係 visit
+T  残余の意思決定窓内 baseline 順位 visit
+```
+
+状態部品は窓内外や順位の由来を判断せず、1 本の有序列として接続：
+
+```text
+4位 Q
+5位 R
+6位 S
+7位 T
+```
+
+結果：
+
+```text
+K_confirmed_after = 7
+newly_confirmed_count = 4
+```
+
+##### 25.25.30.21 専用テスト契約
+
+新規テストファイル：
+
+```text
+tests_order_control_tvt_node_rank_state.py
+```
+
+既存 order-control テストと同じ直接実行形式を使用する。
+
+- `test_*` 関数
+- `TESTS` 一覧
+- `if __name__ == "__main__":`
+- リポジトリルートから直接実行可能
+- `TESTS` 一覧と `test_*` 定義数を照合
+- 重複テスト名を拒否
+
+**少なくとも次をテストする：**
+
+**初期化：** 正常な Node 名、空 Node 名拒否、非文字列 Node 名拒否、空確定ブロック、空未確定集合、`k_confirmed() == 0`
+
+**VisitKey：** 正常な vehicle_name と visit_id、空 vehicle_name 拒否、非文字列 vehicle_name 拒否、bool の visit_id 拒否、非 int visit_id 拒否、0 以下の visit_id 拒否、tuple 以外拒否、長さ 2 以外の tuple 拒否、同じ vehicle_name で異なる visit_id を別 visit として扱う
+
+**未確定 visit 登録：** 単数登録、複数一括登録、空列 no-op、入力列内重複拒否、既存未確定 VisitKey の再登録拒否、確定済み VisitKey の再登録拒否、validation 失敗時に部分登録しない、Node 間状態の独立
+
+**一括確定：** 空列 no-op、1 件確定、複数 visit 確定、入力順を保持、最初の順位が 1、既存末尾の次から連番、`k_confirmed_before`、`k_confirmed_after`、`newly_confirmed_count`、`newly_confirmed_count == after - before`、確定後に未確定集合から除外、未登録 VisitKey の確定拒否、確定済み VisitKey の再確定拒否、入力列内重複拒否、validation 失敗時に状態不変、複数回の確定操作で連番維持、先行確定後に `k_confirmed()` を再取得できる、TVT 判断後の最終確定列を同じ API で接続できる、参加・非参加や制度理由を状態部品が要求しない
+
+**再確定と未登録の区別：**
+
+- 確定済み VisitKey の再確定は、確定済みであることと現在順位が分かる `ValueError`
+- 一度も未確定登録されていない VisitKey の確定要求は、未登録であることが分かる `ValueError`
+- 両者のメッセージを区別する
+
+**意思決定窓外 visit を含む確定列：**
+
+- 意思決定窓内 visit と意思決定窓外 visit を表す VisitKey を未確定集合へ事前登録する（VisitKey 自体は窓内外情報を持たない。テスト名・コメントで「外部制度処理上、窓外候補を表す VisitKey」と位置づける）
+- 状態部品自体には意思決定窓情報を渡さない
+- 外部で完成済みと仮定した有序 VisitKey 列を `confirm_visits_in_order()` へ渡す
+- 入力順のまま連続順位が付く
+- 意思決定窓外の visit も、窓外であることを理由に拒否されない
+- `k_confirmed_before`、`k_confirmed_after`、`newly_confirmed_count`
+- 確定後に対象 visit が未確定集合から除外される
+- テスト内で意思決定窓の判定、P-1 候補抽出、TVT 取引順位計算、§14.4 判断を実装しない
+
+非技術的には、順位帳簿が窓内外を判断せず、外部で決まった順番をそのまま安全に保存できることを確認するテストである。
+
+**ローカル更新候補と原子性：**
+
+- 複数登録の入力不正時に正式状態が完全に不変
+- 複数登録の重複時に正式状態が完全に不変
+- 一括確定の途中要素が未登録でも正式状態が完全に不変
+- 一括確定入力に確定済み VisitKey が混入しても正式状態が完全に不変
+- 更新候補の内部整合検査で `RuntimeError` となる人工条件を作れる場合、正式状態が更新前のまま
+- rollback 処理に依存していないこと
+
+**ConfirmResult：** frozen である、3 フィールドだけを持つ、`confirmed_visit_keys` を持たない、空操作の値、通常操作の値
+
+**読取 API：** 確定 VisitKey を順位順で返す、内部 list を漏らさない、未確定 VisitKey を frozenset で返す、内部 set を漏らさない、`is_confirmed()`、`is_undetermined()`、`assigned_rank()`、未確定の assigned_rank は None、未登録の assigned_rank は None、不正 VisitKey を `is_confirmed()` へ渡すと `ValueError`、不正 VisitKey を `is_undetermined()` へ渡すと `ValueError`、不正 VisitKey を `assigned_rank()` へ渡すと `ValueError`、正しい形式の未登録 VisitKey では False、False、None
+
+**export の正確な構造：**
+
+- top-level キーが次の 4 つである：`node_name`、`k_confirmed`、`confirmed_visits`、`undetermined_visits`
+- `confirmed_visits` の各 dict が次の 3 キーを持つ：`vehicle_name`、`visit_id`、`assigned_rank`
+- `undetermined_visits` の各 dict が次の 2 キーを持つ：`vehicle_name`、`visit_id`
+- `confirmed_visits` が `assigned_rank` 昇順
+- `undetermined_visits` が `vehicle_name`、`visit_id` の固定順
+- 入れ子の list や dict を変更しても内部状態に影響しない
+- Vehicle、Node、Link、World 参照を含まない
+
+**内部不整合（`RuntimeError`、必要最小限）：** private 状態を人工的に壊すテストは代表例だけに限定する。少なくとも次を記録する。
+
+- confirmed list と rank dict の件数不一致
+- confirmed list と rank dict の順位対応不一致
+- 確定 VisitKey が未確定集合にも存在
+- 更新後の `ConfirmResult` 差分不一致を検出する責任
+
+本番 API から作れない内部不整合を過度に細分化しない。
+
+**制度処理との境界（状態部品のテストへ含めない）：** 到着済み Vehicle の選定、非参加 Vehicle の抽出、baseline 順位 sort、right_of_entry 選定、TVT 成立判断、P-1 候補集合、§14.4 判断、取引順位の算出。状態部品のテストでは、外部制度処理が作った有序 VisitKey 列を安全に保存できることだけを確認する。
+
+##### 25.25.30.22 実装ファイルと変更範囲
+
+**新規作成：**
+
+- `uxsim/order_control_tvt_node_rank_state.py`
+- `tests_order_control_tvt_node_rank_state.py`
+
+**実装時に変更しない：**
+
+- `uxsim/uxsim.py`
+- `uxsim/order_control_baseline_driver.py`
+- `uxsim/order_control_baseline_collector.py`
+- `uxsim/order_control_baseline_snapshot.py`
+- `uxsim/__init__.py`
+- 既存テスト
+- 既存診断
+
+状態部品は専用モジュールから直接 import する。
+
+実装中に既存ファイルの動作変更が必要と判明した場合は、勝手に変更範囲を広げず、作業を停止して理由を報告する方針とする。
+
+##### 25.25.30.23 今回の状態部品が判断しない事項
+
+- 到着済み visit を誰とするか
+- 先頭連続非参加 visit を誰とするか
+- 意思決定窓内 baseline 順位
+- 意思決定窓内外の判定
+- 意思決定窓外の TVT 候補 visit の抽出
+- P-1 条件の判定
+- TVT 候補集合の形成
+- 意思決定窓外候補を最終確定列へ含めるかどうか
+- TVT 取引結果による順位計算
+- right_of_entry vehicle
+- TVT を形成するか
+- TVT が成立したか
+- どの Vehicle が取引当事者か
+- P
+- P-1 候補集合
+- 情報充足
+- §14.4 を使うか
+- 残余 baseline 順位
+- 参加・非参加状態
+- 意思決定窓内がすべて非参加かどうかの判定（上位制度処理が共通の先頭連続非参加処理を適用し、残存未確定 visit の有無で自然に終了する）
+- 通過済み未確定の検出
+- 実交通上の未確定 visit 登録タイミング
+- Node 別評価状態
+- baseline driver 呼出
+- 早期終了
+
+状態部品へ渡される確定列は、外部制度処理が**最終決定したもの**として扱う。
+
+##### 25.25.30.24 実装再開情報
+
+- **§25.25.30 で実装可能な仕様として確定したのは、Node 別 TVT 順位状態部品である**
+- TVT 候補 visit の抽出、P-1 条件、意思決定窓外候補を含む取引順位の計算、最終確定 visit 列の作成、状態部品への接続処理は、**今回の実装範囲外**であり、**別途設計・実装が必要**である
+- 順位状態部品自体は、未確定集合へ事前登録済みであれば、**意思決定窓内外を区別せず**、外部から渡された有序 VisitKey 列を確定できる
+- **次の直接作業：** 順位状態本体と専用テストの実装
+- **次の実装によって TVT 候補順位計算まで完成するわけではない**
+- 状態部品実装後、候補選定や制度処理の次段階を改めて設計する
+- Node 別 TVT 順位状態の実装前仕様は **§25.25.30** で確定した
+- 新規モジュールは `uxsim/order_control_tvt_node_rank_state.py`
+- 新規テストは `tests_order_control_tvt_node_rank_state.py`
+- `uxsim.py`、baseline driver、collector、snapshot、`uxsim/__init__.py` は変更しない
+- 実装中に制度判断を状態部品へ追加しない
+- 状態部品は外部が決定した有序 VisitKey 列の保存だけを担当する
+- `K_confirmed_before` は先行確定後に状態から再取得する
+- 最終確定列を参加 Vehicle だけに限定しない
+- `OrderControlTvtConfirmResult` は **3 フィールド**
+- `confirmed_visit_keys` は採用しない
+- 最新保存済みコミットは **`bd24ad1`**
+- `bd24ad1` は `origin/feature/intersection-order-control` へ push 済み
+- 今回のメモ更新は**未コミット、未 push**
+- `diagnostics/order_control.zip` は未接触、コミット対象外
+
+実装完了後に、設計メモと進捗メモへ実装・テスト・レビュー結果を記録する方針とする。
