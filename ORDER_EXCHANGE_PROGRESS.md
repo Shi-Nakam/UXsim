@@ -4550,6 +4550,37 @@ baseline_horizon_steps + 1 <= fork_W.TSIZE - fork_W.T
 - 結果型固有テストでは直接構築可。順位計算テストは公開関数経由
 - 次は補修後の完成仕様再確認。Python コードはまだ変更していない
 
+- 次は補修後の完成仕様再確認。Python コードはまだ変更していない
+
+#### 2026-09-03：非参加VehicleなしTVT取引順位計算とFIFO検査を実装
+
+- 正本参照先は設計メモ **§25.25.33**（実装結果）。実装前仕様は **§25.25.32.20**
+- 新規本番モジュール `uxsim/order_control_tvt_trade_rank.py`
+- 新規専用テスト `tests_order_control_tvt_trade_rank.py`
+- 公開結果クラス `OrderControlTvtNoNonparticipantTradeRankResult`
+- 公開順位計算関数 `build_tvt_trade_rank_without_nonparticipants`
+- 公開 FIFO 関数 `preserves_inlink_fifo`
+- `baseline_order` から `baseline_rank` を内部生成
+- `buyers_sorted[-1]` から最後の買い手を取得（`max(...)` 生成式は使用しない）
+- 売り手後方買い手数は明示的 for ループ（`sum(...)` 生成式は使用しない）
+- 売り手後退式：売り手 baseline 順位 + 後方買い手数
+- 取引範囲外 visit の baseline 順位不変
+- 結果クラスの防御コピー、キーワード専用コンストラクター、tuple 専用入力契約
+- 外部入力不正は `ValueError`、内部不整合は `RuntimeError`、FIFO 違反は `False`
+- FIFO 検査は順位計算と別公開関数
+- 専用テスト **115 件**成功。`TESTS` 登録 115 件、一意 115 件。AST による一覧確認あり
+- 指定した既存回帰テストすべて成功。fork probe 成功
+- Copilot の実ファイル確認で見つけた仕様不一致（list 誤受理、内部順位の例外区分）と可読性上の問題を修正
+- テストが別の異常で先に停止する問題を修正（売り手後退式・取引範囲外の狙い撃ち検証）
+- 不足していたコンストラクター契約テストと FIFO `trade_order` 重複テストを追加
+- **独立静的監査は実施していない。** Copilot 直接確認と全テスト結果を踏まえ、追加効果が限定的と判断して今回は省略した（**§25.25.33.15**）
+- 候補生成側は未実装。TVT 全体として全候補を評価可能な状態ではない
+- 既存 Python、既存テスト、既存診断は未変更
+- `diagnostics/order_control.zip` は未接触・対象外
+- 最新保存済み・push 済みコミットは **`050d3c9`**（実装前仕様）
+- 新規 Python 2 ファイルと Markdown 2 ファイルは未コミット
+- 次は **§25.25.33** と本進捗記録の確認、変更対象 4 ファイルの確認、メモを含む `document` コミット
+
 #### 2026-08-29：TVT権利保有車両選定前の先頭非参加Vehicle先行確定の記録補修
 
 - 過去に確定済みだった、意思決定窓内 baseline 到着順位の先頭に連続する非参加 Vehicle の先行確定が、設計メモに明文化されていなかった

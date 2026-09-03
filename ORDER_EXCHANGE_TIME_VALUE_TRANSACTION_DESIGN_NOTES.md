@@ -11214,3 +11214,538 @@ tests_order_control_tvt_trade_rank.py
 ```
 
 **2026-09-03 更新：** Copilot による完成実装前仕様の確認で、結果クラスのコンストラクター契約が不足していることを確認した。**§25.25.32.20** 第 8 節・第 9 節・第 18 節・第 27 節へ、完全なキーワード専用コンストラクター、最小 validation、防御コピー、直接構築テストの範囲を補足した。次の直接作業は、補修後の **§25.25.32.20** の再確認である。
+
+#### 25.25.33 非参加VehicleなしTVT取引順位計算の実装結果
+
+**2026-09-03 更新：** **§25.25.32.20** を唯一の最新実装前仕様として実装した。本節 **§25.25.33** を実装結果の正本とする。実装前仕様は **§25.25.32.20** を維持する。
+
+##### 25.25.33.1 実装範囲
+
+- **§25.25.32.20** を唯一の最新実装前仕様として実装した
+- 非参加 Vehicle なしの一つの具体的取引候補を対象とする
+- 完成済み `baseline_order` と選択済み `buyers` から取引後順位を構築する
+- FIFO 検査は順位計算とは別の公開関数として実装した
+- Node 別順位状態、collector、World、Node、Vehicle を変更しない独立計算部品である
+- 非参加 Vehicle ありの順位計算は実装していない
+- 候補生成 4 方式（TVT-SB、TVT-MH、TVT-SP、TVT-MP）は実装していない
+- 上位処理との接続は実装していない
+- 局所仮想計算と経済評価は実装していない
+
+非技術的には、候補生成側が選んだ一つの買い手集合について、baseline 順位から取引後順位を計算し、完成した結果票を返す独立部品を実装した。FIFO 検査は別公開関数とする。今回実装したのは順位計算と FIFO 検査であり、買い手集合候補を生成する処理ではない。TVT 全体として、各方式で認められる買い手集合候補を漏れなく生成できる状態にはまだ達していない。
+
+##### 25.25.33.2 作成したファイル
+
+次の新規 2 ファイルだけを作成した。
+
+```text
+uxsim/order_control_tvt_trade_rank.py
+tests_order_control_tvt_trade_rank.py
+```
+
+既存 Python ファイル、既存テスト、既存診断は変更していない。
+
+##### 25.25.33.3 公開構造
+
+本番モジュール：
+
+```text
+uxsim/order_control_tvt_trade_rank.py
+```
+
+公開結果クラス：
+
+```python
+OrderControlTvtNoNonparticipantTradeRankResult
+```
+
+公開順位計算関数：
+
+```python
+build_tvt_trade_rank_without_nonparticipants
+```
+
+公開 FIFO 検査関数：
+
+```python
+preserves_inlink_fifo
+```
+
+VisitKey 型：
+
+```python
+from uxsim.order_control_tvt_node_rank_state import (
+    OrderControlTvtVisitKey,
+)
+```
+
+既存モジュール `order_control_tvt_node_rank_state.py` の private helper は import せず、新規モジュール内に同じ VisitKey 契約の private helper を実装した。
+
+##### 25.25.33.4 VisitKeyと入力validation
+
+実装した VisitKey 条件：
+
+- 長さ 2 の tuple
+- 第 1 要素は非空 str の `vehicle_name`
+- 第 2 要素は通常の Python int の `visit_id`
+- bool を拒否
+- NumPy 整数を拒否（本番モジュールで NumPy を import せず、`type(visit_id) is int` で通常の Python int のみ受け入れる）
+- `visit_id` は 1 以上
+- list 形式の VisitKey を拒否
+
+private helper と役割：
+
+```text
+_validate_visit_key
+- VisitKey の形式確認
+
+_require_tuple_container
+- 結果クラスの tuple 専用入力確認
+
+_require_list_or_tuple_container
+- 公開関数の list または tuple 入力確認
+
+_validate_visit_key_sequence
+- VisitKey 列の validation、空許可、重複確認
+
+_find_duplicate_visit_keys
+- VisitKey 重複の検出
+
+_require_non_empty_str
+- 非空文字列の確認
+
+_require_python_int_rank
+- 外部から渡された順位値の確認
+
+_validate_internal_trade_rank_value
+- 計算後の内部順位値確認
+```
+
+非技術的には、外部から渡された材料の不正と、計算後に発生した内部異常を区別するため、外部入力用と内部確認用の順位検査を分けた。
+
+##### 25.25.33.5 結果クラス
+
+- キーワード専用コンストラクター（位置引数不可）
+- `buyers_sorted` は非空 tuple
+- `sellers_sorted` は tuple で、空 tuple を認める
+- `last_buyer_rank` は 1 以上の Python int
+- `trade_order` は非空 tuple
+- `trade_rank_by_visit_key` は非空 dict
+- 順位 dict は防御コピー（`dict(trade_rank_by_visit_key)`）
+- 結果クラスの通常の利用経路は公開順位計算関数から受け取ること
+- 結果型固有テストでは直接構築を認める
+- コンストラクターは最低限の型・形式 validation だけを行う
+- 完全な内部整合確認は結果クラス構築前に実施する
+
+読取専用 property：
+
+```text
+buyers_sorted
+sellers_sorted
+last_buyer_rank
+trade_order
+```
+
+読取メソッド：
+
+```text
+assigned_rank()
+trade_rank_items()
+```
+
+`assigned_rank()` は、結果に存在しない VisitKey へ `None` を返さず `ValueError` とする。
+
+`trade_rank_items()` は、取引後順位昇順の変更不能 tuple を返す。
+
+次は実装していない：
+
+```text
+export_state()
+to_dict()
+更新用公開メソッド
+property setter
+```
+
+結果クラスの docstring は次へ修正済みである。
+
+```python
+"""Trade-rank result for one candidate without non-participating vehicles."""
+```
+
+##### 25.25.33.6 順位計算の実装
+
+処理順：
+
+```text
+1. baseline_order を validation して tuple へ固定
+2. baseline_order から 1 始まりの baseline_rank を生成
+3. buyers を validation して tuple へ固定
+4. 全買い手が baseline_order に存在することを確認
+5. buyers を baseline 順位順へ並べて buyers_sorted を作る
+6. buyers_sorted の最後の買い手を last_buyer とする
+7. last_buyer の baseline 順位を last_buyer_rank とする
+8. baseline 先頭から last_buyer_rank までを trade_scope とする
+9. trade_scope 内の非買い手を sellers_sorted として抽出
+10. 買い手へ 1 位から連続順位を付ける
+11. 売り手へ売り手後退式による順位を付ける
+12. trade_scope 外 visit へ baseline 順位をそのまま付ける
+13. trade_rank から trade_order を派生させる
+14. ローカル結果の内部整合を確認
+15. 成功後に結果オブジェクトを一度だけ作る
+16. 完成した結果オブジェクトを返す
+```
+
+`baseline_order` を唯一の baseline 順位入力とし、`baseline_rank` を内部生成している。`buyers` の入力順は制度上の順位として使用していない。
+
+##### 25.25.33.7 売り手後退式
+
+実装した式：
+
+```text
+売り手の取引後順位
+=
+売り手の baseline 順位
++
+その売り手より baseline で後ろにいた買い手数
+```
+
+可読性を優先し、各売り手について次のように買い手を一台ずつ確認している。
+
+```python
+buyers_behind = 0
+
+for buyer in buyers_sorted:
+    buyer_baseline_rank = baseline_rank[buyer]
+
+    if buyer_baseline_rank > seller_baseline_rank:
+        buyers_behind += 1
+```
+
+非技術的には、売り手よりもともと前にいた買い手は、その売り手を追い越さないため、売り手を後退させない。売り手よりもともと後ろにいた買い手が前進する場合だけ、その人数分だけ売り手を後退させる。
+
+##### 25.25.33.8 内部整合確認
+
+次の private helper を実装した。
+
+```python
+_verify_local_trade_rank_state
+```
+
+確認内容：
+
+- `trade_rank` の VisitKey 集合が `baseline_order` と一致
+- `trade_order` の VisitKey 集合と件数が `baseline_order` と一致
+- 順位値は通常の Python int
+- 順位値は 1 以上
+- 順位は 1 から件数まで連続
+- 重複なし
+- 欠番なし
+- `trade_order` の位置と `trade_rank` が一致
+- 買い手と売り手が重複しない
+- 買い手と売り手の和集合が `trade_scope` と一致
+- 買い手間の baseline 相対順
+- 売り手間の baseline 相対順
+- `buyers_sorted` が空でない
+- `last_buyer_rank` が正しい
+- `trade_scope` が正しい
+- 買い手順位が 1 位から連続
+- 売り手後退式が正しい
+- 取引範囲外 visit が baseline 順位を維持
+
+内部整合確認後にだけ結果オブジェクトを作る。
+
+##### 25.25.33.9 例外区分
+
+```text
+外部入力またはコンストラクター入力の契約違反
+→ ValueError
+
+入力確認後に見つかった重大な計算内部の不整合
+→ RuntimeError
+
+FIFO 違反
+→ False
+```
+
+入力確認後の内部順位値不正について、専用の `_validate_internal_trade_rank_value()` から `RuntimeError` を出すよう修正した。コンストラクター等への外部入力不正は `_require_python_int_rank()` 等で引き続き `ValueError` とする。
+
+##### 25.25.33.10 FIFO検査
+
+- `preserves_inlink_fifo()` を別公開関数として実装
+- 取引前後の順序列は、どちらも `trade_scope` に対応する
+- 取引前後の件数と VisitKey 集合が一致する必要がある
+- 検査対象 VisitKey 全件の inlink 情報が必要
+- 検査対象外の余分な inlink 情報は受け入れて無視
+- 各 inlink について、取引前後の VisitKey 順序を明示的な for ループで抽出
+- 1 本でも相対順が異なれば `False`
+- 全対象 inlink で相対順が同じなら `True`
+- FIFO 違反を例外にしない
+- 同じ候補を別順位へ作り直さない
+
+複数 inlink のうち 1 本だけ逆転する場合も `False` である。
+
+##### 25.25.33.11 可読性のための実装判断
+
+- 研究コードでは短さより可読性を優先
+- `buyers_sorted` はすでに baseline 順位順なので、最後の買い手を次で取得
+
+```python
+last_buyer = buyers_sorted[-1]
+last_buyer_rank = baseline_rank[last_buyer]
+```
+
+- `max(...)` 生成式は使用しない
+- 売り手より後ろの買い手数は明示的な for ループで数える
+- `sum(...)` 生成式は使用しない
+- FIFO 検査でも、各 inlink の visit 列を明示的な for ループで構成
+- 過度に短い内包表記や高度な Python テクニックへまとめていない
+- 変数名から交通上の意味を読み取りやすくした
+
+##### 25.25.33.12 実装確認中に発見した不一致と修正
+
+Copilot による実ファイル確認で、少なくとも次を発見・修正した。
+
+**コンストラクターの tuple 契約**
+
+発見：
+
+- `tuple(...)` へ先に変換していたため、list を誤って受け入れていた
+
+修正：
+
+- `_require_tuple_container()` を追加
+- tuple であることを先に確認
+- `buyers_sorted`、`sellers_sorted`、`trade_order` への list を `ValueError`
+- `sellers_sorted=()` は引き続き許容
+
+**内部順位値の例外区分**
+
+発見：
+
+- 内部整合確認で入力検査用 helper を使い、内部異常が `ValueError` となる可能性があった
+
+修正：
+
+- `_validate_internal_trade_rank_value()` を追加
+- bool、非 int、0 以下の内部順位を `RuntimeError`
+
+**可読性**
+
+修正：
+
+- 売り手後方買い手数を `sum(...)` 生成式から明示的な for ループへ変更
+- 最後の買い手順位を `max(...)` 生成式から `buyers_sorted[-1]` による取得へ変更
+- 内部確認側も同じ明示的処理へ変更
+- 空の `buyers_sorted` は偶発的な `IndexError` ではなく明示的な `RuntimeError`
+
+**docstring**
+
+修正：
+
+- 非参加 Vehicle なしの候補であることを明確化
+
+**テストの検出対象**
+
+発見：
+
+- 売り手後退式不一致テストに順位重複が混在
+- 取引範囲外順位変化テストに順位重複が混在
+- 狙った検査まで到達せず、別の検査で停止する可能性があった
+
+修正：
+
+- 売り手後退式だけを壊す順位へ変更し、`seller retreat formula` のメッセージを確認
+- 取引範囲外順位だけを壊す順位へ変更し、`outside trade_scope` のメッセージを確認
+
+**不足していた契約テスト**
+
+追加：
+
+- `sellers_sorted` の不正 VisitKey
+- `sellers_sorted` の重複
+- `last_buyer_rank=0`
+- `trade_order` の不正 VisitKey
+- `trade_order` の重複
+- `trade_rank_by_visit_key` が dict 以外
+- 順位 dict の不正 VisitKey
+- 順位値が非 int
+- 順位値が 0
+- FIFO の `trade_order` 内重複
+
+##### 25.25.33.13 専用テスト
+
+- 専用テストファイルは `tests_order_control_tvt_trade_rank.py`
+- 最終テスト件数は **115 件**
+- 全 115 件成功
+- `TESTS` 登録数 115
+- 一意な登録数 115
+- 未登録なし
+- 重複登録なし
+- 不存在登録なし
+- AST による `TESTS` 一覧確認あり
+
+主なテスト分類：
+
+- 順位計算正常系
+- 結果クラス
+- 入力変更からの隔離
+- 順位計算入力異常
+- 内部不整合
+- 公開関数経由の内部異常
+- FIFO 正常系
+- FIFO 違反
+- FIFO 入力異常
+- 順位計算結果と FIFO 検査の接続例
+
+実行結果：
+
+```text
+Order-control TVT trade rank tests passed (115 tests).
+Registered TESTS: 115 Unique: 115
+```
+
+##### 25.25.33.14 既存回帰確認
+
+実行済み結果：
+
+```text
+python tests_order_control_tvt_node_rank_state.py
+→ 54 tests passed
+
+python tests_order_control_baseline_collector.py
+→ passed
+
+python tests_order_control_baseline_snapshot.py
+→ passed
+
+python tests_order_control_baseline_driver.py
+→ 65 tests passed
+
+python tests_order_control_baseline_collector_uxsim.py
+→ passed
+
+python diagnostics/order_control/tvt_baseline_snapshot_fork_probe.py
+→ passed
+```
+
+fork probe では少なくとも次を確認できた。
+
+- fixed visit の到着・通過記録
+- fixed 集合外 Vehicle を collector へ記録しない
+- real World が変更されない
+- 参照独立性
+- blocker の一貫した処理
+- real outlink speed が変更されない
+
+次も記録する。
+
+```text
+python -m py_compile uxsim/order_control_tvt_trade_rank.py
+→ success
+
+python -m py_compile tests_order_control_tvt_trade_rank.py
+→ success
+
+git diff --check
+→ 問題なし
+```
+
+##### 25.25.33.15 独立静的監査の判断
+
+```text
+独立静的監査は実施しなかった。
+```
+
+省略理由（非技術的）：
+
+```text
+本番コード全文と専用テスト全文をCopilotが直接確認し、
+その確認で見つかった仕様不一致、可読性上の問題、
+およびテストが別の異常で先に停止する問題を修正した。
+
+修正後、専用テスト115件、TESTS登録確認、
+指定した既存回帰テスト、fork probeがすべて成功した。
+
+この段階で別の独立静的監査を追加しても、
+既に行った確認との重複が大きく、
+得られる追加効果は限定的と判断した。
+```
+
+次も明記する。
+
+- 独立静的監査を忘れて未実施にしたのではない
+- Copilot による直接確認と全確認結果を踏まえて、今回は不要と判断して省略した
+- 独立静的監査を実施したとは記録しない
+- 将来のより複雑な上位処理でも不要と決めたわけではない
+
+将来、独立静的監査の実施を改めて検討する例（必要性を再評価する条件。確定方針ではない）：
+
+- 複数の既存モジュールへ接続する場合
+- World、Node、Vehicle 等の既存状態を変更する場合
+- TVT-SB、TVT-MH、TVT-SP、TVT-MP の候補生成を実装する場合
+- 候補評価、経済評価、候補採用まで一体化する場合
+- 複雑な状態遷移を扱う場合
+
+##### 25.25.33.16 変更していない範囲
+
+- 既存 Python ファイルは変更していない（本実装時点では新規 2 ファイルのみ作成）
+- 既存テストは変更していない
+- 既存診断は変更していない
+- `uxsim/__init__.py` は変更していない
+- collector、snapshot、driver は変更していない
+- Node 別順位状態部品は変更していない
+- 非参加 Vehicle ありコードは追加していない
+- `diagnostics/order_control.zip` は未接触・対象外
+
+##### 25.25.33.17 未実装の上位処理
+
+重要な未実装境界：
+
+- 今回実装した順位計算関数は、選択済みの一つの `buyers` を受け取る
+- 買い手集合候補を生成する処理は未実装
+- TVT-SB、TVT-MH、TVT-SP、TVT-MP の各方式で認められる買い手集合候補を列挙する処理は未実装
+- 各 inlink の物理的先頭から prefix を生成する処理は未実装
+- 有効な買い手集合候補を取りこぼさないことは、将来の候補生成部品と専用テストで保証する必要がある
+- 「すべての組合せ」は全 Vehicle の任意部分集合ではなく、各方式の候補生成規則によって許された組合せを意味する
+- 現時点で TVT 全体が全候補を評価できる状態になったとは記録しない
+- 候補生成側が ready であるとは記録しない
+
+##### 25.25.33.18 実装完了判断
+
+```text
+非参加Vehicleなしの一つの具体的取引候補について、
+選択済みbuyersから取引後順位を構築し、
+trade_scope内の同一inlink FIFOを検査する独立部品は、
+実装、専用テスト、既存回帰確認まで完了した。
+```
+
+ただし、次も併記する。
+
+```text
+これはTVT候補生成、候補評価、局所仮想計算、
+経済評価、順位状態への接続まで完了したという意味ではない。
+```
+
+独立静的監査は、**§25.25.33.15** の判断により今回は実施していないため、実装完了判断の条件へ含めない。
+
+##### 25.25.33.19 Git状態と実装再開情報
+
+- 最新保存済み・push 済みコミットは **`050d3c9`**
+- **`050d3c9`** は実装前仕様を保存したコミット
+- 現在、新規 Python 2 ファイルが未追跡
+- 今回のメモ化により、設計メモと進捗メモが再び未コミット変更になる
+- `diagnostics/order_control.zip` は既存未追跡、未接触、対象外
+- まだ git add、git commit、git push を行っていない
+- 次の直接作業は、今回追加した **§25.25.33** と進捗記録の Copilot 確認
+- 確認後、変更対象 4 ファイルを確認する
+- その後、メモを含むコミット名へ `document` を含めてコミットする
+- コミット結果、最新コミット、残存変更を確認した後、別作業で push する
+- 候補生成部品の設計・実装にはまだ進まない
+- 次の研究実装対象は、今回の実装記録と保存完了後に改めて決める
+
+現在の未追跡ファイル：
+
+```text
+diagnostics/order_control.zip
+tests_order_control_tvt_trade_rank.py
+uxsim/order_control_tvt_trade_rank.py
+```
