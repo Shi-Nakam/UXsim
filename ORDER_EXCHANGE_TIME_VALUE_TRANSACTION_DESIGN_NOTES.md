@@ -9549,3 +9549,1668 @@ tests_order_control_tvt_node_rank_state.py
 ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES.md
 ORDER_EXCHANGE_PROGRESS.md
 ```
+
+#### 25.25.32 非参加VehicleなしTVT取引順位計算の中間設計
+
+**記録日：** 2026-09-03
+
+本 **§25.25.32** は、非参加 Vehicle なしの §11 取引順位計算について、2026-09-03 時点で合意した**中間設計**を記録する。実装前仕様の完成版ではない。
+
+- **§11** の既存制度設計は削除・置換しない。
+- 既存の歴史的記録も削除しない。
+
+##### 25.25.32.1 位置づけ
+
+- Node 別 TVT 順位状態部品は **§25.25.31** で実装・検証済みである。
+- 次に検討中なのは、**非参加 Vehicle なし**の §11 取引順位計算である。
+- 今回は中間設計の記録であり、まだ実装前仕様の完成ではない。
+- 候補生成、FIFO 境界、結果型の具体構造などに未確定事項が残る。
+- 中間設計を記録した後、残る論点を限定して完成させる。
+
+##### 25.25.32.2 今回の実装対象
+
+今回の対象は次に限定する。
+
+```text
+非参加Vehicleが存在しない一つの具体的取引候補について、
+完成済みbaseline_orderと選択済みbuyersから取引後順位を計算する。
+```
+
+非技術的には、候補を探す部品ではなく、候補生成側が選んだ一組の買い手について順位を計算する部品である。
+
+**今回の順位計算部品の対象外：**
+
+- collector からの記録取得
+- 未確定 visit 抽出
+- 意思決定窓判定
+- right_of_entry vehicle 選定
+- P および P-1 条件
+- TVT 候補 Vehicle 抽出
+- 各 inlink の prefix 生成
+- TVT-SB、TVT-MH、TVT-SP、TVT-MP による買い手集合候補の列挙
+- 局所仮想計算
+- 経済評価
+- 最終候補の採用
+- 最終確定 visit 列の作成
+- 順位状態部品への接続
+- 非参加 Vehicle ありの順位計算
+
+##### 25.25.32.3 将来の非参加Vehicleあり方式との関係
+
+- **非参加 Vehicle なし**と**非参加 Vehicle あり**は、当面、**別コード・別アプローチ**で実装する。
+- 非参加 Vehicle なしは、§11 の直接的な trade_rank 方式を用いる。可読性を優先し、将来方式を先取りした複雑な条件分岐を加えない。
+- 非参加 Vehicle ありは、固定順位枠等を用いる別アプローチを予定する。非参加 Vehicle あり・複数買い手一般形は未完成である。
+- 非参加 Vehicle ありコードを既存実装へどう追加・統合するかは未確定である。
+
+**将来の可能性（現時点の推測であり、確定方針ではない）：**
+
+```text
+非参加Vehicleありの一般形アルゴリズムが完成すれば、
+非参加Vehicle数0として非参加Vehicleなしのケースも
+包含できる可能性がある。
+```
+
+**未確定のまま残す事項：**
+
+- 非参加なし専用方式を将来廃止するか
+- 参照実装として残すか
+- 両方式の結果が非参加 0 件で常に一致するか
+- 共通 API へ統合するか
+- 上位処理で切り替えるか
+
+##### 25.25.32.4 collectorと上位制度処理との責任分担
+
+- 実装済み collector は引き続き baseline 情報源として使用する。
+- `export_node_baseline_visits(node_name)` は Node 別の plain dict 列を返す。
+- collector の返却順には制度上の baseline 順位の意味を持たせない。
+- 上位制度処理が collector 記録から今回の対象 visit を選ぶ。
+- 上位制度処理が先行確定済み visit を除外する。
+- 上位制度処理が正式な規則で `baseline_order` を作る。
+- §11 順位計算関数へ collector オブジェクトそのものは渡さない。
+- §11 順位計算関数は World、Node、Vehicle、collector へ直接依存しない。
+
+**baseline 順位の正式な sort 規則：**
+
+```text
+1. baseline予想到着timestep
+2. 固定arrival_tiebreaker
+3. Vehicle ID
+```
+
+参加・非参加は baseline 順位の決定に使用しない。
+
+非技術的には、collector は順位材料を保存する記録係、上位制度処理は正式な順番を作る担当、§11 順位計算は完成済みの順番から取引後順位を作る担当である。
+
+##### 25.25.32.5 baseline_orderとbaseline_rank
+
+**合意済み事項：**
+
+- `baseline_order` を §11 関数における**唯一の baseline 順位入力**とする。
+- `baseline_rank` は外部入力にしない。
+- `baseline_rank` は、重複のない `baseline_order` から関数内部で 1 始まりとして派生させる。
+- `baseline_order` と `baseline_rank` を外部から二重に受け取らない。これにより、順位列と順位 dict が食い違う二重管理を防ぐ。
+
+**設計用の概念コード（2026-09-03 に新たに合意した実装前設計。過去の §11 疑似コードから発見された既存方針ではない）：**
+
+```python
+baseline_rank = {}
+
+for rank, visit_key in enumerate(
+    baseline_order,
+    start=1,
+):
+    baseline_rank[visit_key] = rank
+```
+
+**歴史的記録：** 過去の §11 疑似コードは、`baseline_order` と `baseline_rank` の両方を準備済み入力としていた。
+
+##### 25.25.32.6 inlink別物理順との区別
+
+- `baseline_order` は Node 全体の baseline 順位である。
+- 各 inlink の物理的な Vehicle 順とは別の情報である。
+- 各 inlink の物理的先頭から prefix を生成するには、inlink 別物理順が必要である。
+- inlink 別物理順は**買い手候補生成側**で扱う。
+- §11 順位計算部品は prefix 生成を行わない。
+
+**処理関係：**
+
+```text
+inlink別物理順
+→ 各inlinkの先頭からprefixを選ぶ
+→ 選択したprefixを買い手集合へ統合する
+→ baseline_orderを基準に買い手を並べ直す
+→ §11の取引順位を計算する
+```
+
+非技術的には、道路ごとの並びを使って候補を選び、交差点全体の baseline 順を使って選ばれた買い手を並べ直す。
+
+##### 25.25.32.7 一つの具体的取引候補とbuyers
+
+- `buyers` は最初から制度全体で一つに決まっているものではない。
+- TVT-SB、MH、SP、MP 等の候補生成処理が、複数の買い手集合候補を作る。
+- §11 順位計算関数は、**一つの具体的取引候補ごと**に呼ばれる。
+- この関数を呼ぶ時点では、当該候補の `buyers` は選択済みである。
+- `buyers` は list または tuple。関数冒頭で tuple へ固定する。
+- 空の `buyers` は具体的取引候補ではないため `ValueError`。
+- VisitKey 不正、入力内重複、`baseline_order` に存在しない買い手も拒否する。
+- `buyers` の入力順には制度上の順位を持たせない。関数内部で `baseline_order` に従って `buyers_sorted` を作る。
+
+**候補生成側が保証する事項（§11 順位計算関数は再判断しない）：**
+
+- 買い手が TVT 参加 Vehicle
+- P-1 条件等を満たす
+- 正しい inlink prefix から選ばれた
+- right_of_entry vehicle と同じ inlink を買い手候補 inlink にしていない
+- 当該候補に非参加 Vehicle が含まれない
+
+##### 25.25.32.8 非参加Vehicleなしの順位計算
+
+**処理の骨格：**
+
+1. `baseline_order` を tuple へ固定する
+2. `baseline_order` から 1 始まりの `baseline_rank` を作る
+3. `buyers` を tuple へ固定する
+4. `buyers` を baseline 順位順に並べて `buyers_sorted` を作る
+5. 最後の買い手の baseline 順位を `last_buyer_rank` とする
+6. baseline 先頭から `last_buyer_rank` までを `trade_scope` とする
+7. `trade_scope` 内の非買い手 visit を `sellers_sorted` として抽出する
+8. 買い手へ 1 位から連続順位を付ける
+9. 各売り手へ後退後順位を付ける
+10. 取引範囲外 visit は baseline 順位を維持する
+11. `trade_rank` から `trade_order` を派生させる
+12. 結果を返す
+
+**明記事項：**
+
+- 買い手間の baseline 相対順を**確実に**維持する。「できるだけ維持」ではない。
+- 売り手間の baseline 相対順を**確実に**維持する。
+- 取引範囲外 visit は baseline 順位を維持する。
+- `trade_rank` は取引後順位の正本である。
+- `trade_order` は `trade_rank` から派生する順位列である。
+
+##### 25.25.32.9 売り手の後退順位
+
+既存 §11.3 および §11.6 の合意済みロジック：
+
+```text
+売り手の取引後順位
+=
+売り手のbaseline順位
++
+その売り手よりbaselineで後ろにいた買い手数
+```
+
+**概念コード：**
+
+```python
+for seller in sellers_sorted:
+    seller_baseline_rank = baseline_rank[seller]
+
+    buyers_behind = sum(
+        1
+        for buyer in buyers_sorted
+        if baseline_rank[buyer] > seller_baseline_rank
+    )
+
+    trade_rank[seller] = (
+        seller_baseline_rank
+        + buyers_behind
+    )
+```
+
+非技術的には、もともと売り手より前にいた買い手はその売り手を追い越さないため、売り手を後退させない。売り手より baseline で後ろにいた買い手が前進する場合だけ、その買い手数だけ売り手を後退させる。
+
+##### 25.25.32.10 結果へ含める情報
+
+現時点で、結果へ含める必要があると合意した情報：
+
+```text
+buyers_sorted
+sellers_sorted
+last_buyer_rank
+trade_rank
+trade_order
+```
+
+**各意味：**
+
+- `buyers_sorted` — baseline 相対順に並べた買い手列
+- `sellers_sorted` — baseline 相対順を確実に維持した売り手列
+- `last_buyer_rank` — 当該候補で最も後ろにいる買い手の、未確定範囲内 baseline 順位
+- `trade_rank` — VisitKey から 1 始まりの取引後順位への対応。取引後順位の正本
+- `trade_order` — `trade_rank` から派生する取引後順位列。FIFO 検査、局所仮想計算、診断等で使用し得る
+
+これは格納方法まで確定したという意味ではない。特に `trade_rank` を外部へ安全かつ効率的に公開する方法は未確定である。
+
+##### 25.25.32.11 結果へ含めない情報
+
+現時点で結果型へ重複して持たせない情報：
+
+```text
+baseline_order
+baseline_rank
+trade_scope
+```
+
+**理由：**
+
+- `baseline_order` は呼出側が保持する入力
+- `baseline_rank` は `baseline_order` から内部派生する補助辞書
+- `trade_scope` は `baseline_order` と `last_buyer_rank` から一意に切り出せる
+- 同じ順位情報や VisitKey 列の不要な重複保持を避ける
+
+##### 25.25.32.12 命名
+
+**合意済み候補：**
+
+結果クラス名：
+
+```python
+OrderControlTvtNoNonparticipantTradeRankResult
+```
+
+公開関数名：
+
+```python
+build_tvt_trade_rank_without_nonparticipants
+```
+
+名前から次を区別できる：
+
+- 非参加 Vehicle なし専用
+- TVT 候補生成ではない
+- 一つの具体的取引候補の取引後順位を構築する
+- 経済評価結果ではない
+
+将来の非参加 Vehicle あり関数名や共通関数名は、まだ決めない。
+
+##### 25.25.32.13 未確定事項
+
+次を未確定のまま記録する。
+
+- 結果型を frozen dataclass にするか専用通常クラスにするか
+- `trade_rank` の内部格納形式
+- `trade_rank` を安全に公開する読取 API
+- 特定 VisitKey の順位検索性能
+- 候補上限が 30、50 等へ増えた場合の扱い
+- 結果を完全な変更不能構造にする範囲
+- `export_state` 等の診断 API が必要か
+- `ValueError` と `RuntimeError` の詳細な境界
+- 計算後の内部整合確認
+- FIFO 検査を同じ公開関数へ含めるか
+- FIFO 検査を別部品にするか
+- FIFO 検査に必要な inlink 情報の正式入力
+- FIFO 違反の結果形式
+- 専用テスト契約
+- 実装モジュール名
+- 非参加 Vehicle あり一般形との将来統合方法
+
+先ほど一時的に提案した、private dict を持つ frozen dataclass または通常クラスは、まだ正式採用していない。初期候補順位上限 10 だけを根拠として、tuple だけの順位格納へ決めない。
+
+**2026-09-03 更新：**
+
+- 結果型の最終構造は **§25.25.32.16** で確定した
+- 専用通常クラスを採用した。frozen dataclass は不採用
+- private な順位 dict を防御コピーして保持する
+- `assigned_rank()` は対象外 VisitKey に `None` を返さず `ValueError` とする
+- `trade_rank_items()` で順位順の変更不能 tuple を返す
+- `export_state()` 等の export API は初期実装へ追加しない
+- 残る未確定事項は例外・内部不変条件、FIFO 境界、テスト契約・実装配置
+- **（2026-09-03 追記）** 例外と内部不変条件は **§25.25.32.17** で確定した
+- 入力契約違反は `ValueError`、入力確認後の重大な計算結果不整合は `RuntimeError`
+- FIFO 違反は `RuntimeError` ではない
+- 失敗時は結果オブジェクトを返さない
+- この部品は既存状態を変更しないため rollback 不要
+- 残る未確定事項は FIFO 境界、専用テスト契約、実装配置
+- **（2026-09-03 追記）** FIFO 検査との責任境界は **§25.25.32.18** で確定した
+- 順位計算と FIFO 検査は別公開関数
+- FIFO 検査対象は未確定範囲全体ではなく `trade_scope`
+- 取引前は `trade_scope`、取引後は `trade_order` 先頭から `last_buyer_rank` 件
+- 検査対象 inlink は `trade_scope` から特定
+- FIFO 維持は `True`、FIFO 違反は `False`（`ValueError` または `RuntimeError` ではない）
+- 結果型へ inlink 情報を追加しない。inlink 対応は上位処理が渡す
+- 残る未確定事項は専用テスト契約と実装配置
+- inlink 対応 dict に余分な VisitKey がある場合の扱いだけ、最後の項目で確定する
+- **（2026-09-03 追記）** 最後の残作業は **§25.25.32.19** で完了した
+- 全設計項目が確定した
+- **§25.25.32.20** が唯一の最新実装正本である
+- 過去の未確定一覧は中間設計時点の歴史的記録として残す
+- 非参加 Vehicle あり一般形との統合方法は引き続き未確定である
+
+##### 25.25.32.14 実装前仕様完成までの残作業
+
+残る検討は次の **4 項目**だけに限定する。新しい大分類を追加して検討範囲を無制限に広げない。
+
+```text
+1. 結果型の最終構造
+2. 例外と内部不変条件
+3. FIFO検査との責任境界
+4. 専用テスト契約と実装配置
+```
+
+**1. 結果型の最終構造** — `trade_rank` の高速検索、外部変更防止、必要最小限の読取 API、結果型の可読性
+
+**2. 例外と内部不変条件** — 入力契約違反を `ValueError`、本来起きない計算結果不整合を `RuntimeError`、登録時または入力時に保証済みの条件を不要に重複検査しない
+
+**3. FIFO検査との責任境界** — 順位計算と FIFO 検査を同一関数にするか分離するか、inlink 情報をどこで扱うか、FIFO 違反を正常な候補棄却としてどう返すか
+
+**4. 専用テスト契約と実装配置** — 正常例、複数買い手、売り手後退式、買い手間・売り手間の baseline 相対順、入力不正、順位重複・欠番なし、FIFO 境界、新規モジュールとテストファイル
+
+この 4 項目を完了した時点で、実装前仕様を完成とする。
+
+**2026-09-03 更新：**
+
+- 第 1 項目「結果型の最終構造」は **§25.25.32.16** で完了した
+- 残る検討は **3 項目**である
+- 次は「例外と内部不変条件」である
+- 新しい大分類を追加しない
+- **（2026-09-03 追記）** 「例外と内部不変条件」は **§25.25.32.17** で完了した
+- 残る検討は **2 項目**である
+- 次は「FIFO 検査との責任境界」である
+- **（2026-09-03 追記）** FIFO 検査との責任境界は **§25.25.32.18** で完了した
+- 残る検討は **1 項目**である
+- 次は「専用テスト契約と実装配置」である
+- **（2026-09-03 追記）** 最後の項目は **§25.25.32.19** で完了した
+- 残る 4 項目はすべて完了した
+- **§25.25.32.20** で完成仕様を自己完結形に統合した
+- 次は実装前の最終照合である
+- 新しい設計項目を追加しない
+
+##### 25.25.32.15 実装再開情報
+
+- 最新保存済みコミットは **`88cfc05`**
+- `88cfc05` は `origin/feature/intersection-order-control` へ push 済み
+- 現在の作業ツリーでは、本 §25.25.32 の追加により `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES.md` および `ORDER_EXCHANGE_PROGRESS.md` が未コミットの変更となっている。これらとは別に、既存未追跡の `diagnostics/order_control.zip` が残っている
+- Markdown 2 ファイルは今回の中間設計記録による変更である
+- `diagnostics/order_control.zip` は既存未追跡ファイルである
+- `diagnostics/order_control.zip` は未接触・コミット対象外である
+- Python コード、テスト、診断は変更していない
+- 今回の Markdown 変更は未コミット・未 push である
+- **次の直接作業：** 結果型の最終構造の検討
+- その後は、残る 4 項目を順に完了する
+- 4 項目終了後、完成した実装前仕様をメモへ記録する
+- その後に実装指示を作成する
+- **まだ Python コードを変更しない**
+- 非参加 Vehicle あり一般形を実装しない
+- 候補生成 4 方式を今回の順位計算部品へ混入させない
+
+**2026-09-03 更新：** 結果型の最終構造は **§25.25.32.16** で確定した。次の直接作業は「例外と内部不変条件」の検討である。
+
+**2026-09-03 更新：** 例外と内部不変条件は **§25.25.32.17** で確定した。次の直接作業は「FIFO 検査との責任境界」の検討である。
+
+**2026-09-03 更新：** FIFO 検査との責任境界は **§25.25.32.18** で確定した。次の直接作業は「専用テスト契約と実装配置」の検討である。
+
+**2026-09-03 更新：** 専用テスト契約と実装配置は **§25.25.32.19** で確定した。残る設計 4 項目はすべて完了した。実装に使用する唯一の最新正本は **§25.25.32.20** である。最新再開情報は **§25.25.32.21** を参照する。
+
+##### 25.25.32.16 結果型の最終構造
+
+本節は、「実装前仕様完成までの残作業」のうち、第 1 項目「結果型の最終構造」の確定記録である。
+
+**1. 結果型の役割**
+
+結果型は、一つの具体的取引候補について、非参加 Vehicle なしの §11 順位計算を完了した結果を保持する「結果票」である。非技術的には、順位計算が終わった後に、誰が買い手か・誰が売り手か・最後の買い手は baseline で何位だったか・取引後はどの順番になるか・各 visit は取引後に何位になるかをまとめて保存する。
+
+結果型は次を行わない。
+
+- TVT 候補 Vehicle の抽出
+- 買い手集合候補の生成
+- 最終候補の採用
+- 局所仮想計算
+- 経済評価
+- 順位状態部品への確定反映
+- 非参加 Vehicle ありの順位計算
+
+結果票は作成後に読むためのものであり、買い手、売り手、取引後順序、取引後順位を後から変更するための正式な操作は設けない。一つの具体的取引候補について計算が完了した閉じた結果である。
+
+**2. 結果クラス**
+
+名称：
+
+```python
+OrderControlTvtNoNonparticipantTradeRankResult
+```
+
+結果型は、private な順位辞書と必要最小限の読取 API を持つ**専用の通常クラス**とする。`frozen=True` の dataclass は採用しない。
+
+理由：
+
+- 順位検索用 dict を内部に保持する必要がある
+- `frozen=True` だけでは dict 内部まで変更不能にならない
+- 専用通常クラスなら、内部 dict を隠して読取 API だけを公開できる
+- 保存情報と読取方法を初学者が上から追いやすい
+
+完全に強制された不変オブジェクトとは表現せず、通常の公開 API からは読取専用の結果オブジェクトと位置づける。
+
+**3. 内部属性**
+
+```python
+_buyers_sorted: tuple[OrderControlTvtVisitKey, ...]
+_sellers_sorted: tuple[OrderControlTvtVisitKey, ...]
+_last_buyer_rank: int
+_trade_order: tuple[OrderControlTvtVisitKey, ...]
+_trade_rank_by_visit_key: dict[OrderControlTvtVisitKey, int]
+```
+
+- `_buyers_sorted` — baseline 相対順に並べた買い手一覧
+- `_sellers_sorted` — baseline 相対順を確実に維持した売り手一覧
+- `_last_buyer_rank` — 当該候補で最も後ろにいる買い手の baseline 順位
+- `_trade_order` — 取引後順位順に並べた visit 一覧
+- `_trade_rank_by_visit_key` — 特定 visit の取引後順位を素早く調べる内部順位表
+
+**4. 外部変更の防止**
+
+- 買い手列、売り手列、取引後順序は tuple として保持する
+- 最後の買い手順位は int として保持する
+- 順位 dict は構築時に防御コピーする。呼出側から渡された dict をそのまま保持しない
+- 内部順位 dict を直接返さない
+- 結果を更新する公開メソッドを設けない
+- property へ setter を設けない
+
+「setter を設けない」の非技術的な意味：
+
+```text
+一度作った結果について、外部から買い手、売り手、最後の買い手順位、
+取引後順序などを別の内容へ書き換えるための正式な操作を用意しない。
+```
+
+private 属性へ強引にアクセスする行為まで防止する高度な仕組みは、初期実装へ追加しない。
+
+**5. 公開 property**
+
+```python
+@property
+def buyers_sorted(
+    self,
+) -> tuple[OrderControlTvtVisitKey, ...]:
+    ...
+```
+
+```python
+@property
+def sellers_sorted(
+    self,
+) -> tuple[OrderControlTvtVisitKey, ...]:
+    ...
+```
+
+```python
+@property
+def last_buyer_rank(self) -> int:
+    ...
+```
+
+```python
+@property
+def trade_order(
+    self,
+) -> tuple[OrderControlTvtVisitKey, ...]:
+    ...
+```
+
+これらは結果を読むためのものであり、外部から変更するためのものではない。
+
+**6. 特定 visit の順位を読む API**
+
+```python
+def assigned_rank(
+    self,
+    visit_key: OrderControlTvtVisitKey,
+) -> int:
+    ...
+```
+
+動作：
+
+- 結果に含まれる VisitKey → 1 以上の取引後順位を返す
+- 不正な形式の VisitKey → `ValueError`
+- 正しい形式だが結果に含まれない VisitKey → `ValueError`
+
+`None` は返さない。
+
+非技術的な理由：
+
+```text
+この結果票では、計算対象visit全員に取引後順位がある。
+存在しないvisitへの問い合わせは、別の候補結果を誤って参照したか、
+後続処理に不整合がある可能性を示す。
+「順位なし」として処理を続けると問題を隠すため、明確に停止する。
+```
+
+**Node 別順位状態部品との違い：**
+
+- **Node 別順位状態部品** — 継続的に変化する帳簿。未確定 visit に順位がないことは正常にあり得る。`assigned_rank()` が `None` を返す場合がある
+- **今回の一候補分の順位計算結果** — 計算完了後の閉じた結果。計算対象 visit 全員に 1 以上の順位がある。対象外 visit を正常な「順位なし」として扱わない
+
+**7. 全順位を読む API**
+
+```python
+def trade_rank_items(
+    self,
+) -> tuple[
+    tuple[OrderControlTvtVisitKey, int],
+    ...,
+]:
+    ...
+```
+
+返却順は取引後順位の昇順とする。
+
+例：
+
+```python
+(
+    (("vehicle_b", 1), 1),
+    (("vehicle_c", 1), 2),
+    (("vehicle_a", 1), 3),
+)
+```
+
+非技術的には、順位表全体を確認する場合に、順位順の書換え不能な一覧を受け取る API である。内部 dict そのものは返さない。
+
+**8. 検索性能**
+
+- 特定 VisitKey の順位検索には内部 dict を使用する
+- 全 VisitKey を先頭から探さず、辞書から直接取得する
+- 候補順位上限が 10、30、50 へ変わっても、tuple を毎回線形探索する方式にはしない
+- `trade_rank_items()` は全件取得なので、順位数に比例する
+- 候補数、Node 数、timestep 数を含む性能は実装後に実測する
+
+**9. export API**
+
+初期実装では次を追加しない。
+
+```text
+export_state()
+to_dict()
+```
+
+理由：`buyers_sorted`、`sellers_sorted`、`last_buyer_rank`、`trade_order`、`assigned_rank()`、`trade_rank_items()` によって、初期実装で必要な情報を取得できるため。
+
+非技術的には、同じ結果を別形式で取り出す追加機能を先に増やさず、診断や保存で明確に必要となった時点で追加を検討する。
+
+**10. 完了判断**
+
+```text
+実装前仕様完成までの残作業のうち、
+第1項目「結果型の最終構造」は完了した。
+```
+
+残る項目：
+
+```text
+1. 例外と内部不変条件
+2. FIFO検査との責任境界
+3. 専用テスト契約と実装配置
+```
+
+##### 25.25.32.17 例外と内部不変条件
+
+本節は、「実装前仕様完成までの残作業」のうち、「例外と内部不変条件」の確定記録である。
+
+**1. 問題の区分**
+
+非技術的には、次の 2 種類の問題を区別する。
+
+- **材料に問題がある** → この材料では計算できない
+- **正しい材料から、あり得ない完成品ができた** → 計算処理そのものに問題がある可能性が高い
+
+技術的区分：
+
+```text
+入力契約違反
+→ ValueError
+
+入力確認後に見つかった、本来発生しない計算結果の不整合
+→ RuntimeError
+```
+
+FIFO 違反は、ここでいう内部不整合には含めない。FIFO 違反は制度上あり得る正常な候補棄却であり、具体的な扱いは次の検討項目「FIFO 検査との責任境界」で決める。
+
+**2. ValueError とする入力契約違反**
+
+**baseline_order**
+
+- list または tuple ではない
+- 空の list または tuple
+- 各要素が正しい VisitKey ではない
+- 同じ VisitKey が入力内で重複している
+
+**buyers**
+
+- list または tuple ではない
+- 空の list または tuple
+- 各要素が正しい VisitKey ではない
+- 同じ VisitKey が入力内で重複している
+- `baseline_order` に存在しない VisitKey を含む
+
+**結果型の `assigned_rank()`**
+
+- VisitKey の形式が不正
+- 正しい形式だが、その結果に含まれていない VisitKey
+
+対象外 VisitKey には `None` を返さず `ValueError` とする §25.25.32.16 の判断を維持する。
+
+**3. VisitKey validation**
+
+VisitKey は、実装済みの Node 別 TVT 順位状態部品と同じ意味を使用する。
+
+```python
+OrderControlTvtVisitKey = tuple[str, int]
+```
+
+条件：長さ 2 の tuple、第 1 要素は非空 `str` の `vehicle_name`、第 2 要素は bool ではない Python `int` の `visit_id`（1 以上）、list 形式の VisitKey を拒否、NumPy 整数を拒否。
+
+既存モジュールの private helper を別モジュールから直接利用するか、新規モジュール側に同等の helper を置くかは、実装配置の検討で決める。この段階では private helper の共有方法を新たに確定しない。
+
+**4. baseline_order の入力確認**
+
+処理順：
+
+1. 容器が list または tuple か確認
+2. tuple へ固定
+3. 空でないことを確認
+4. 全 VisitKey を validation
+5. 入力内重複を確認
+6. 重複のない確定済み tuple を、今回の baseline 順位列として使用
+7. この tuple から 1 始まりの `baseline_rank` を内部生成
+
+`baseline_order` が本当に正式な 3 キー（baseline 予想到着 timestep、固定 arrival_tiebreaker、Vehicle ID）で並べられたかは、上位制度処理が保証する。§11 順位計算関数は、この sort 処理をやり直さない。
+
+**5. buyers の入力確認**
+
+処理順：
+
+1. 容器が list または tuple か確認
+2. tuple へ固定
+3. 空でないことを確認
+4. 全 VisitKey を validation
+5. 入力内重複を確認
+6. 全買い手が `baseline_order` に存在することを確認
+7. `baseline_rank` に従って `buyers_sorted` を作る
+
+候補生成側が保証済みの次は、この関数で再検査しない。
+
+- 買い手が TVT 参加 Vehicle であること
+- P-1 等の候補条件を満たすこと
+- 正しい inlink prefix から選択されたこと
+- right_of_entry vehicle と同じ inlink を買い手候補 inlink にしていないこと
+- 当該候補に非参加 Vehicle が存在しないこと
+
+非技術的には、順位計算関数は「選ばれた買い手の制度上の資格」を再審査せず、「渡された買い手から正しい順位を作れるか」に責任を限定する。
+
+**6. ローカル計算**
+
+入力確認完了後、次をすべてローカル変数として作る。
+
+```text
+baseline_rank
+buyers_sorted
+last_buyer_rank
+trade_scope
+buyer_set
+sellers_sorted
+trade_rank
+trade_order
+```
+
+結果型を先に作ってから徐々に書き換える方式にはしない。入力確認と順位計算を完了し、内部整合確認にも成功した後で、完成した値から結果オブジェクトを一度だけ作る。
+
+**7. RuntimeError とする内部不整合**
+
+入力確認後には本来発生しない内部不整合として、少なくとも次を検査する。
+
+**VisitKey 集合**
+
+- `trade_rank` の VisitKey 集合が `baseline_order` の VisitKey 集合と一致しない
+- `trade_order` の VisitKey 集合が `baseline_order` の VisitKey 集合と一致しない
+- `trade_order` の件数が `baseline_order` の件数と一致しない
+
+**取引後順位**
+
+- 同じ取引後順位を複数 VisitKey へ付けている
+- 取引後順位に欠番がある
+- 取引後順位が 1 から `baseline_order` の件数までの範囲外
+- `trade_rank` の順位値が bool ではない Python int でない
+- `trade_order` の位置と `trade_rank` の順位が一致しない
+
+取引後順位の集合は、次と一致する必要がある。
+
+```python
+set(
+    range(
+        1,
+        len(baseline_order) + 1,
+    )
+)
+```
+
+**買い手と売り手**
+
+- `buyers_sorted` と `sellers_sorted` が重複する
+- `buyers_sorted` の集合と `sellers_sorted` の集合を合わせても、`trade_scope` の集合と一致しない
+- `buyers_sorted` の順序が baseline 相対順と一致しない
+- `sellers_sorted` の順序が baseline 相対順と一致しない
+
+**last_buyer_rank と trade_scope**
+
+- `last_buyer_rank` が 1 以上でない
+- `last_buyer_rank` が `baseline_order` の件数を超える
+- `last_buyer_rank` が、`buyers_sorted` 内で最も後ろにいる買い手の baseline 順位と一致しない
+- `trade_scope` が `baseline_order` 先頭から `last_buyer_rank` までの範囲と一致しない
+
+**売り手後退式**
+
+各売り手について、次の式と実際の `trade_rank` が一致することを確認する。
+
+```text
+売り手の取引後順位
+=
+売り手のbaseline順位
++
+その売り手よりbaselineで後ろにいた買い手数
+```
+
+```python
+expected_seller_rank = (
+    baseline_rank[seller]
+    + sum(
+        1
+        for buyer in buyers_sorted
+        if baseline_rank[buyer] > baseline_rank[seller]
+    )
+)
+```
+
+実際の `trade_rank[seller]` が期待値と一致しなければ `RuntimeError` とする。
+
+**8. 買い手順位の確認**
+
+買い手には、`buyers_sorted` の順番どおり、1 位から連続順位が付いている必要がある。
+
+```python
+for expected_rank, buyer in enumerate(
+    buyers_sorted,
+    start=1,
+):
+    if trade_rank[buyer] != expected_rank:
+        raise RuntimeError(...)
+```
+
+非技術的には、baseline 順で並べた買い手を、その順番のまま取引後 1 位、2 位、3 位へ配置できているかを確認する。
+
+**9. 取引範囲外 visit**
+
+`trade_scope` 外の VisitKey は、baseline 順位を維持する必要がある。
+
+```text
+trade_rank[visit_key]
+=
+baseline_rank[visit_key]
+```
+
+一致しなければ `RuntimeError` とする。非技術的には、今回の具体的取引によって並べ替える範囲より後ろの visit を、誤って移動させていないことを確認する。
+
+**10. 検査の処理順**
+
+```text
+全入力を確認する
+↓
+入力をtupleへ固定する
+↓
+baseline_rankを内部生成する
+↓
+ローカル変数だけで順位結果を計算する
+↓
+完成したローカル順位結果の内部整合を確認する
+↓
+すべて成功した場合だけ結果オブジェクトを作る
+↓
+完成した結果オブジェクトを返す
+```
+
+入力確認前または内部整合確認前に、結果オブジェクトを外部へ返さない。
+
+**11. 失敗時の結果**
+
+非技術的には：
+
+```text
+この部品は既存の順位帳簿へ書き込まず、新しい結果票を作るだけである。
+
+途中で問題が起きた場合は、作りかけの結果票を捨てて何も返さない。
+
+最後まで成功した場合だけ、完成した結果票を返す。
+
+既存の順位帳簿には触れていないため、失敗後に元の帳簿を戻す処理は必要ない。
+```
+
+技術的には：
+
+- `ValueError` 時は結果オブジェクトを返さない
+- `RuntimeError` 時も結果オブジェクトを返さない
+- Node 別 TVT 順位状態を変更しない
+- collector を変更しない
+- World、Node、Vehicle を変更しない
+- rollback 処理へ依存しない
+- 部分的な結果を返さない
+
+**12. 必要最小限の実行時検査**
+
+研究コードでは正しさを優先するが、登録時または入力確認で保証済みの条件を、同じ処理中に不必要に何度も検査しない。
+
+一方、次は原因不明の誤順位を防ぐ重大な内部不整合なので、計算完了時に確認する。
+
+- VisitKey 集合不一致
+- 順位重複
+- 順位欠番
+- 順位範囲外
+- `trade_order` と `trade_rank` の不一致
+- 買い手と売り手の重複または不足
+- 買い手間・売り手間の baseline 相対順違反
+- 売り手後退式との不一致
+- 取引範囲外 visit の順位変化
+
+検査処理は、読みやすさを優先し、過度に短い内包表記や高度な Python テクニックへまとめない。
+
+**13. FIFO 違反との区別**
+
+- FIFO 違反は順位重複や欠番とは異なる
+- 完成した取引後順位が構造上正しくても、同一 inlink の物理順を逆転させる場合がある
+- FIFO 違反は制度上あり得る正常な候補棄却である
+- FIFO 違反を `RuntimeError` にしない
+- FIFO 違反時の返却方法は、次の「FIFO 検査との責任境界」で決める
+- 本節では FIFO 検査の入力、関数、返却型を確定しない
+
+**14. この項目の完了判断**
+
+```text
+実装前仕様完成までの残作業のうち、
+「例外と内部不変条件」は完了した。
+```
+
+残る項目：
+
+```text
+1. FIFO検査との責任境界
+2. 専用テスト契約と実装配置
+```
+
+##### 25.25.32.18 FIFO検査との責任境界
+
+本節は、「実装前仕様完成までの残作業」のうち、「FIFO 検査との責任境界」の確定記録である。
+
+**1. 順位計算と FIFO 検査の分離**
+
+非技術的には、次の役割分担である。
+
+```text
+順位計算部品
+→ 計算上矛盾のない順位表を作る
+
+FIFO検査部品
+→ その順位表が道路上の前後関係を逆転させないか確認する
+```
+
+確定事項：
+
+- 非参加 Vehicle なしの順位計算と FIFO 検査は、**別の公開関数**とする
+- `build_tvt_trade_rank_without_nonparticipants()` は取引後順位を構築する
+- 順位計算関数の内部へ FIFO 検査を混在させない
+- FIFO 検査は、順位計算完了後の結果を受けて実施する
+- 順位計算結果が構造上正しくても、同一 inlink FIFO に違反する候補は正常に存在し得る
+- 順位計算の内部不整合と FIFO 違反を混同しない
+
+**2. trade_scope の定義**
+
+非技術的には、今回の具体的取引によって実際に順位を組み替える範囲である。
+
+```text
+当該具体的取引候補について、
+baseline_orderの先頭から、
+baseline順位が最も後ろにある買い手までの連続範囲。
+```
+
+```python
+trade_scope = baseline_order[:last_buyer_rank]
+```
+
+`last_buyer_rank` は 1 始まりの baseline 順位であり、Python のスライス終端へそのまま使用することで、最後の買い手を含む範囲になる。
+
+例：`baseline_order` が A、B、C、D、E、買い手が B・D、最後の買い手が D（baseline 4 位）の場合、`trade_scope` は A、B、C、D。E は取引範囲外で baseline 順位を維持する。
+
+**3. FIFO 検査の比較範囲**
+
+```text
+取引前の比較範囲：
+trade_scope
+
+取引後の比較範囲：
+trade_orderの先頭からlast_buyer_rank件
+```
+
+```python
+trade_order_within_scope = trade_order[:last_buyer_rank]
+```
+
+現在の未確定範囲全体を FIFO 検査へ渡す案は採用しない。
+
+理由：`trade_scope` 外の visit は baseline 順位を維持する。今回実際に順位を組み替えた範囲だけを検査すればよい。不要な後続 visit を検査対象へ含めない。既存 §13.3 の、FIFO 検査は取引によって順位を構成し直した範囲を対象とする方針と一致する。処理が単純であり、追加の計算負荷は小さい。未確定範囲全体を検査する場合より確認対象が小さくなる。
+
+**4. 検査対象 inlink の特定**
+
+検査対象となる inlink は、**`trade_scope` 内の VisitKey** に対応する inlink 名から特定する。取引後範囲から inlink を特定する必要はない。
+
+非技術的には、今回の取引範囲に含まれる visit が走行している道路だけを確認する。
+
+上位処理が次の対応を FIFO 検査へ渡す。
+
+```python
+inlink_name_by_visit_key: dict[
+    OrderControlTvtVisitKey,
+    str,
+]
+```
+
+順位計算結果型へ `inlink_name` を追加しない。
+
+理由：inlink 情報は順位計算結果そのものではない。上位制度処理は collector 等から inlink 情報を取得できる。順位計算結果型を FIFO 検査専用情報で膨らませない。将来、別の順位構築方式からも同じ FIFO 検査を利用できる余地を残す。
+
+**5. FIFO 検査関数**
+
+既存 §13.7 と整合する公開関数名：
+
+```python
+preserves_inlink_fifo
+```
+
+概念的な入力：
+
+```python
+def preserves_inlink_fifo(
+    baseline_order_within_scope:
+        list[OrderControlTvtVisitKey]
+        | tuple[OrderControlTvtVisitKey, ...],
+    trade_order_within_scope:
+        list[OrderControlTvtVisitKey]
+        | tuple[OrderControlTvtVisitKey, ...],
+    inlink_name_by_visit_key: dict[
+        OrderControlTvtVisitKey,
+        str,
+    ],
+) -> bool:
+    ...
+```
+
+引数名は実装前仕様完成時に、可読性を損なわない範囲で `baseline_order`、`trade_order`、`inlink_name_by_visit_key` へ簡略化してもよい。ただし docstring で、両順序列が `trade_scope` に対応する範囲であることを明記する。
+
+**6. FIFO 検査の処理**
+
+1. 取引前順序列を tuple へ固定する
+2. 取引後順序列を tuple へ固定する
+3. 両方の VisitKey を validation する
+4. 両方の VisitKey 集合と件数が一致することを確認する
+5. 対象 VisitKey 全件に inlink 名があることを確認する
+6. `trade_scope` 内の VisitKey から、関係する inlink 名の集合を作る
+7. 各 inlink について、取引前順序列から同じ inlink の VisitKey だけを順番に抽出する
+8. 同じ inlink について、取引後順序列から VisitKey だけを順番に抽出する
+9. 両方の順序を比較する
+10. 一つでも異なれば `False`
+11. すべて一致すれば `True`
+
+非技術的には、各道路について、取引前後の Vehicle の並びを抜き出し、前後関係が同じかを確認する。
+
+**7. 正常な戻り値**
+
+戻り値は `bool` とする。
+
+```text
+True
+→ 全対象inlinkでFIFOを維持している
+→ 当該候補の後続評価を継続できる
+
+False
+→ 少なくとも一つのinlinkでFIFOを逆転している
+→ 当該具体的取引候補を正常に棄却する
+```
+
+FIFO 違反を `ValueError` または `RuntimeError` にしない。FIFO 違反は、正しい入力と正しい順位計算からも生じ得る、制度上の正常な候補棄却だからである。
+
+**8. FIFO 入力の問題**
+
+FIFO 検査に必要な材料そのものに問題がある場合は `ValueError` とする。
+
+少なくとも次を含む。
+
+- 取引前順序列が list または tuple ではない
+- 取引後順序列が list または tuple ではない
+- いずれかの順序列が空
+- VisitKey の形式が不正
+- 順序列内に VisitKey 重複がある
+- 取引前後の件数が異なる
+- 取引前後の VisitKey 集合が異なる
+- `inlink_name_by_visit_key` が dict ではない
+- 対象 VisitKey に対応する inlink 名がない
+- 対象 VisitKey の inlink 名が非空 `str` ではない
+
+余分な VisitKey についての inlink 情報が dict に含まれている場合の扱いは、専用テスト契約と実装配置の最終設計で確定する。この点だけを未確定として残す。
+
+**9. RuntimeError との区別**
+
+FIFO 検査においても、入力確認後に本来起きない内部不整合が判明した場合だけ `RuntimeError` とする。ただし、初期実装では、入力確認後の処理は単純な抽出と比較である。不必要に多数の `RuntimeError` 条件を追加しない。FIFO 違反そのものは、必ず `False` として返す。
+
+**10. 同じ候補を並べ直さない**
+
+- 一つの具体的取引候補について、順位計算は一度だけ行う
+- 完成した順位について FIFO 検査を一度行う
+- FIFO 違反なら、その候補を棄却する
+- 同じ候補について、FIFO を満たすまで別の順位配置を繰り返さない
+- 順位を変えて再試行する処理は実装しない
+
+非技術的には、物理条件に合わない候補を無理に修正して採用せず、その候補は不採用とし、別の具体的取引候補を評価する。
+
+**11. 確定順位ブロックとの接続部**
+
+既存 §13.3 の方針を維持する。
+
+- 既存の確定順位ブロックと新しい確定順位列の接続部だけを対象とする追加 FIFO 検査は行わない
+- FIFO 検査は、今回の取引によって順位を構成し直した範囲を対象とする
+- 順位状態部品への接続処理は、今回の FIFO 検査関数の責任外
+
+**12. 棄却理由の記録**
+
+`preserves_inlink_fifo()` の初期戻り値は `bool` だけとする。FIFO 棄却数、棄却率、対象 inlink、詳細な棄却理由の記録は、上位の候補評価または診断側の責任とする。初期 FIFO 検査関数へ、複雑な結果クラスや診断ログを追加しない。
+
+既存 §13.5 の将来方針は維持する：FIFO 棄却数・棄却率・棄却理由の記録、実装後の負荷実測、棄却率が高い場合だけ事前除外を検討する。
+
+**13. 将来の非参加 Vehicle あり方式との関係**
+
+FIFO 検査関数は、非参加 Vehicle なし専用の順位計算関数とは分離する。将来、非参加 Vehicle ありの別方式で作られた取引後順位についても、同じ入力契約を満たす場合は再利用できる可能性がある。ただし、これは再利用可能性を残す設計であり、非参加 Vehicle あり一般形が完成した、または同じ FIFO 関数を必ず使うことが確定したという意味ではない。
+
+**14. この項目の完了判断**
+
+```text
+実装前仕様完成までの残作業のうち、
+「FIFO検査との責任境界」は完了した。
+```
+
+残る項目：
+
+```text
+専用テスト契約と実装配置
+```
+
+##### 25.25.32.19 専用テスト契約と実装配置
+
+**記録日：** 2026-09-03
+
+本節は、「実装前仕様完成までの残作業」のうち、最後の項目「専用テスト契約と実装配置」の確定記録である。
+
+**1. 本番モジュール**
+
+新規作成する本番ファイル：
+
+```text
+uxsim/order_control_tvt_trade_rank.py
+```
+
+このモジュールへ、少なくとも次を配置する。
+
+```python
+OrderControlTvtNoNonparticipantTradeRankResult
+build_tvt_trade_rank_without_nonparticipants
+preserves_inlink_fifo
+```
+
+順位計算と FIFO 検査は、同じ専用モジュール内の**別公開関数**とする。順位計算関数の内部へ FIFO 検査を混在させない。
+
+同じモジュールへ配置する理由：どちらも一つの具体的取引候補の取引後順位に関係する。同じ VisitKey 契約を使用する。順位計算の直後に FIFO 検査へ接続する。現時点で複数モジュールへ分割する明確な必要性がない。別公開関数にすることで責任は分離できる。
+
+**2. 専用テストファイル**
+
+```text
+tests_order_control_tvt_trade_rank.py
+```
+
+リポジトリ直下から直接実行できる形式とする。既存の研究用専用テストと同様に、全 `test_*` 関数を `TESTS` 一覧へ明示的に登録し、直接実行時に順番に呼び出す。テスト件数は実装前に固定しない。必要な契約を漏れなく検証することを優先する。
+
+**3. VisitKey 型**
+
+```python
+from uxsim.order_control_tvt_node_rank_state import (
+    OrderControlTvtVisitKey,
+)
+```
+
+既存モジュールの private validation helper は import しない。新しいモジュール内に、同じ VisitKey 契約を確認する private helper を配置する。
+
+非技術的には、VisitKey の意味と受入規則は関連部品で統一する。ただし、一方の部品の内部専用処理を別の部品が直接利用すると、元の部品の内部構造を変更しただけで別の部品まで壊れる可能性がある。そのため、公開された VisitKey 型は共有するが、private な内部処理は直接結び付けない。
+
+VisitKey の条件：長さ 2 の tuple。第 1 要素は非空 `str` の `vehicle_name`。第 2 要素は bool ではない Python `int` の `visit_id`（1 以上）。list 形式の VisitKey を拒否。NumPy 整数の visit ID を拒否。
+
+NumPy 整数を拒否する非技術的な理由：visit ID の種類を通常の Python 整数へ統一し、保存・比較・型判定で予想外の違いが生じるのを防ぐ。既存の Node 別順位状態部品と新しい順位計算部品で、同じ VisitKey に対する受入規則が食い違わないようにする。
+
+**4. 余分な inlink 対応情報**
+
+`inlink_name_by_visit_key` に、今回の FIFO 検査対象ではない余分な VisitKey が含まれていても、受け入れて無視する。
+
+非技術的には、上位処理が Node 全体の visit と道路の対応表を持っている場合、今回使う visit だけの小さな対応表へ作り直す必要はない。今回検査する visit の道路情報がすべてそろっていればよく、無関係な visit の情報が余分に載っているだけではエラーにしない。
+
+- 検査対象 VisitKey の inlink 情報がない → `ValueError`
+- 検査対象 VisitKey の inlink 名が非空 `str` ではない → `ValueError`
+- 検査対象外の VisitKey が余分に存在する → 受け入れて無視
+- 検査対象外の余分な項目の値 → 使用しない。validation しない
+
+**5. 必須テストの分類**
+
+**順位計算正常系** — 単一買い手、複数買い手、`buyers` の入力順と baseline 順位順が異なる例、`buyers_sorted` が baseline 相対順、買い手間・売り手間の baseline 相対順維持、買い手に 1 位から連続順位、`last_buyer_rank` 正しい、売り手後退（買い手 0 台・1 台・複数台）、売り手後退式と具体期待値一致、取引範囲外 visit が baseline 順位維持、複数取引範囲外 visit の相対順維持、取引後順位 1 から件数まで連続、重複なし、欠番なし、範囲外なし、`trade_order` と `assigned_rank()` 一致、`trade_rank_items()` が順位昇順。期待値はテスト内へ直接記述。実装と同じ式や sort で期待値を生成しない。
+
+**結果型** — 各公開列は tuple、`last_buyer_rank` は正しい 1 始まり Python int、`assigned_rank()` は 1 以上の Python int、不正・対象外 VisitKey は `ValueError`（`None` を返さない）、`trade_rank_items()` は順位昇順の `(VisitKey, rank)` tuple、内部 dict を直接返さない、更新用公開メソッドなし、setter なし、`export_state()` / `to_dict()` を持たない。
+
+**外部変更からの隔離** — 入力 list を変更しても結果不変、結果へ渡す dict を変更しても結果不変、`trade_rank_items()` 返却値を変更しても内部不変、関数が入力を変更しない。
+
+**入力異常** — `baseline_order` / `buyers` の容器不正、空列、VisitKey 不正（空 vehicle_name、非 str、bool visit_id、非 int、0、負数、NumPy 整数、list 形式、重複）、`buyers` に baseline 外買い手。すべて `ValueError`。
+
+**内部不整合** — 順位重複、欠番、VisitKey 集合不一致、売り手後退式不一致、取引範囲外 visit の順位変化は `RuntimeError`。少なくとも 1 件は本番公開順位計算関数経由で、内部異常時に結果オブジェクトを返さないことを確認する。
+
+**FIFO 正常系** — 単一 inlink 順序同じで `True`、複数 inlink すべて維持で `True`、inlink 間だけ入れ替わり各 inlink 内同じで `True`、同一 inlink に 1 件だけなら違反にならない、余分 inlink 情報があっても受け入れ・影響なし。
+
+**FIFO 違反** — 単一 inlink で 2 件逆転 `False`、複数 inlink のうち 1 本だけ逆転 `False`、複数 inlink で複数本逆転 `False`、例外を投げず `False` を返す、同じ候補の順位を作り直さない。
+
+**FIFO 入力異常** — 容器不正、空列、VisitKey 不正、NumPy 整数、重複、前後件数・集合不一致、dict 以外、inlink 欠落、inlink 名が空文字列または非 str。すべて `ValueError`。
+
+**6. 既存状態を変更しないこと** — Node 別 TVT 順位状態、collector、World、Node、Vehicle を変更しない。入力 list・tuple・dict を変更しない。エラー時に部分的な結果を返さない。
+
+**7. 今回変更しないファイル** — `uxsim/uxsim.py`、`uxsim/__init__.py`、baseline collector / snapshot / driver、`uxsim/order_control_tvt_node_rank_state.py`、既存全テスト、既存全診断、その他 Python、非参加 Vehicle ありコード。
+
+**8. 非参加 Vehicle あり方式との境界** — 非参加 Vehicle あり順位計算を今回のモジュールへ追加しない。将来方式を先取りした条件分岐を追加しない。一般形が非参加 0 を包含する可能性は推測であり確定方針ではない。専用関数の将来廃止・参照実装残存・共通 API 統合は未確定。FIFO 関数の将来再利用可能性は残すが確定事項ではない。
+
+**9. 完了判断**
+
+```text
+実装前仕様完成までの最後の残作業である
+「専用テスト契約と実装配置」は完了した。
+```
+
+##### 25.25.32.20 非参加VehicleなしTVT取引順位計算の完成実装前仕様
+
+**記録日：** 2026-09-03
+
+```text
+本§25.25.32.20を、非参加VehicleなしTVT取引順位計算の
+実装に使用する唯一の最新正本とする。
+
+実装者は、中間記録から不足事項を推測して補ってはならない。
+
+本節と過去の中間記録が食い違う場合は、本節を優先する。
+```
+
+§25.25.32.1 から §25.25.32.19 は検討経緯と歴史的記録として残す。制度上の背景確認の参照先として §11、§13、§14 を示してよいが、公開 API・入力・出力・処理順・validation・例外・内部確認・FIFO・テスト契約は**本節内に完全収録**する。
+
+**1. 目的**
+
+非参加 Vehicle が存在しない一つの具体的取引候補について、完成済みの `baseline_order` と選択済みの `buyers` から取引後順位を構築する。
+
+非技術的には、候補生成側が選んだ買い手について、誰を前へ進め、誰を何位後退させるかを計算し、後続処理が利用できる完成した結果票を作る。
+
+**2. 実装対象**
+
+- 非参加 Vehicle なし、一つの具体的取引候補
+- 買い手集合は候補生成側で選択済み
+- baseline 順位列は上位制度処理が完成済み
+- 取引後順位構築、結果オブジェクト構築
+- 別公開関数による FIFO 検査
+
+**3. 対象外**
+
+collector からの記録取得、baseline 順位の 3 キー sort、未確定 visit 抽出、意思決定窓判定、right_of_entry vehicle 選定、P・P-1、TVT 候補 Vehicle 抽出、inlink 別 prefix 生成、TVT-SB/MH/SP/MP の候補列挙、参加・非参加判定、局所仮想計算、経済評価、最終候補採用、最終確定 visit 列、順位状態部品への接続、非参加 Vehicle あり順位計算。
+
+**4. 新規ファイル**
+
+```text
+uxsim/order_control_tvt_trade_rank.py
+tests_order_control_tvt_trade_rank.py
+```
+
+**5. import**
+
+```python
+from __future__ import annotations
+
+from typing import Any
+
+from uxsim.order_control_tvt_node_rank_state import (
+    OrderControlTvtVisitKey,
+)
+```
+
+不要な外部依存を追加しない。NumPy を本番モジュールから import して型判定しない。`type(visit_id) is not int` により NumPy 整数を拒否する。
+
+**6. VisitKey 契約**
+
+`OrderControlTvtVisitKey = tuple[str, int]`。長さ 2 の tuple。第 1 要素は非空 `str` の `vehicle_name`。第 2 要素は `type(visit_id) is int` かつ `visit_id >= 1`（bool は拒否）。list 形式を拒否。NumPy 整数を拒否。いずれか違反は `ValueError`。
+
+**7. private helper**
+
+新規モジュール内に、次の役割を持つ private helper を設ける（具体名は可読性優先）。
+
+- VisitKey を validation する helper
+- list または tuple の VisitKey 列を validation して tuple へ固定する helper
+- VisitKey 列内の重複を検出する helper
+- 順位計算後のローカル候補を検査する helper
+
+`uxsim/order_control_tvt_node_rank_state` の private helper は import しない。
+
+**8. 結果クラスの完全な契約**
+
+本節には、結果票へ保存する内部属性、読取専用 property、順位取得 API、および**キーワード専用コンストラクター**（第 9 節）を含む。
+
+```python
+class OrderControlTvtNoNonparticipantTradeRankResult:
+    _buyers_sorted: tuple[OrderControlTvtVisitKey, ...]
+    _sellers_sorted: tuple[OrderControlTvtVisitKey, ...]
+    _last_buyer_rank: int
+    _trade_order: tuple[OrderControlTvtVisitKey, ...]
+    _trade_rank_by_visit_key: dict[OrderControlTvtVisitKey, int]
+```
+
+読取専用 property：`buyers_sorted`、`sellers_sorted`、`last_buyer_rank`、`trade_order`。
+
+```python
+def assigned_rank(self, visit_key: OrderControlTvtVisitKey) -> int: ...
+def trade_rank_items(
+    self,
+) -> tuple[tuple[OrderControlTvtVisitKey, int], ...]: ...
+```
+
+`assigned_rank()`：不正 VisitKey → `ValueError`。対象外 VisitKey → `ValueError`（`None` を返さない）。対象 VisitKey → 1 以上の Python int。
+
+`trade_rank_items()`：取引後順位昇順の tuple。内部 dict を返さない。
+
+持たないもの：`export_state()`、`to_dict()`、更新用公開メソッド、property setter。
+
+**9. 結果クラスの構築**
+
+順位計算関数が入力確認・順位計算・内部整合確認をすべて終えた後で、一度だけ構築する。渡す列は tuple 固定。順位 dict は新しい dict へ防御コピー。呼出側またはローカル dict と参照共有しない。通常の利用経路は公開順位計算関数から結果を受け取ること。コンストラクターで内部整合確認を全面的に重複実行しない。重大不整合は構築前の private helper で検出する。
+
+**完全なコンストラクター**
+
+```python
+def __init__(
+    self,
+    *,
+    buyers_sorted: tuple[OrderControlTvtVisitKey, ...],
+    sellers_sorted: tuple[OrderControlTvtVisitKey, ...],
+    last_buyer_rank: int,
+    trade_order: tuple[OrderControlTvtVisitKey, ...],
+    trade_rank_by_visit_key: dict[
+        OrderControlTvtVisitKey,
+        int,
+    ],
+) -> None:
+    ...
+```
+
+`*` より後ろの引数は、すべてキーワード名を付けて渡す。
+
+```python
+result = OrderControlTvtNoNonparticipantTradeRankResult(
+    buyers_sorted=buyers_sorted,
+    sellers_sorted=sellers_sorted,
+    last_buyer_rank=last_buyer_rank,
+    trade_order=trade_order,
+    trade_rank_by_visit_key=trade_rank,
+)
+```
+
+非技術的な理由：同じような VisitKey 列が複数あるため、位置だけで値を渡すと買い手列・売り手列・取引後順序を取り違える危険がある。各値に名前を付けて渡すことで、何を結果票へ保存しているかを明確にする。
+
+**コンストラクターの通常の呼出元**
+
+通常の利用経路では、次の公開順位計算関数だけが、完成した計算結果から結果オブジェクトを作る。
+
+```python
+build_tvt_trade_rank_without_nonparticipants()
+```
+
+上位制度処理は、結果クラスを直接組み立てるのではなく、公開順位計算関数を呼び、その戻り値として結果オブジェクトを受け取る。
+
+非技術的な理由：上位処理が結果票を直接作ると、順位計算や内部確認を通っていない不完全な結果票を作れてしまう可能性がある。通常は、順位計算と確認を完了した関数だけが結果票を作る。
+
+Python 言語上、コンストラクターを完全に外部呼出禁止にはしない。高度なアクセス制御や特殊な factory 限定機構は追加しない。
+
+**コンストラクター内の保存処理**
+
+```python
+self._buyers_sorted = tuple(buyers_sorted)
+self._sellers_sorted = tuple(sellers_sorted)
+self._last_buyer_rank = last_buyer_rank
+self._trade_order = tuple(trade_order)
+self._trade_rank_by_visit_key = dict(
+    trade_rank_by_visit_key,
+)
+```
+
+非技術的な意味：完成した結果票が、作成元の list や dict と同じ入れ物を共有しないようにする。結果票を作った後に、作成元の値が書き換えられても、完成済みの結果票が変化しないようにする。
+
+**tuple 引数の扱い**
+
+公開順位計算関数は、コンストラクターを呼ぶ前に、`buyers_sorted`、`sellers_sorted`、`trade_order` を tuple として完成させる。コンストラクターでも `tuple(...)` を使用して保持する。この `tuple(...)` は、順位計算のやり直しや全面的な validation ではなく、結果クラスが tuple を保持することを明確にするための処理である。VisitKey 自体も tuple と str・int だけで構成されるため、Vehicle、Node、Link、World 等の mutable オブジェクトを保持しない。
+
+**順位 dict の防御コピー**
+
+コンストラクターは、受け取った `trade_rank_by_visit_key` をそのまま保持せず、必ず新しい dict へコピーする。
+
+```python
+self._trade_rank_by_visit_key = dict(
+    trade_rank_by_visit_key,
+)
+```
+
+非技術的な理由：結果票を作った後に、計算側が元の順位表を書き換えても、完成済みの結果票の順位が変わらないようにする。
+
+**コンストラクターで行う最小確認**
+
+通常の利用経路では、結果クラス構築前に private helper で完全な内部整合確認を終えている。そのため、コンストラクターで順位計算と同じ全面的な検査を繰り返さない。
+
+ただし、結果クラスは Python 上、直接呼び出すこともできるため、次の最低限の型・形式確認は行う。
+
+- **buyers_sorted**：tuple であること、空でないこと、全要素が正しい VisitKey であること、重複がないこと
+- **sellers_sorted**：tuple であること、**空 tuple を認めること**、全要素が正しい VisitKey であること、重複がないこと（売り手 0 件の候補は構造上あり得る）
+- **last_buyer_rank**：bool ではない Python int、1 以上
+- **trade_order**：tuple であること、空でないこと、全要素が正しい VisitKey であること、重複がないこと
+- **trade_rank_by_visit_key**：dict であること、空でないこと、全キーが正しい VisitKey であること、全順位値が bool ではない Python int であること、全順位値が 1 以上であること
+
+これらのコンストラクター入力契約違反は `ValueError` とする。
+
+**コンストラクターで重複しない検査**
+
+次は公開順位計算関数内で結果構築前に行う private helper の責務である。コンストラクターで全面的に繰り返さない。
+
+- `buyers_sorted` と `sellers_sorted` の集合関係
+- それらの和集合と `trade_scope` の一致
+- baseline 相対順
+- `last_buyer_rank` と最後の買い手の対応
+- 売り手後退式
+- 取引範囲外 visit の順位不変
+- 順位重複、欠番、範囲
+- `trade_order` と `trade_rank` の完全対応
+- `baseline_order` との集合一致
+
+非技術的な理由：完成時の詳細検査は、結果票を作る直前にすでに完了している。同じ検査を結果票の入口でも全面的に繰り返すと処理が重複し、どちらが本当の検査責任を持つか分かりにくくなる。結果票の入口では、直接渡された値が最低限正しい種類と形だけを確認する。
+
+**直接構築と専用テスト**
+
+専用テストでは、次の目的により結果クラスを直接構築してよい。
+
+- コンストラクターが防御コピーすること
+- 公開 property が tuple を返すこと
+- `assigned_rank()` の動作
+- `trade_rank_items()` の動作
+- コンストラクターの最低限の `ValueError` 契約
+- setter・更新用公開メソッドがないこと
+- `export_state()` や `to_dict()` がないこと
+
+順位計算結果全体の正しさを確認するテストでは、結果クラスを直接組み立てず、次の公開関数を使用する。
+
+```python
+build_tvt_trade_rank_without_nonparticipants()
+```
+
+非技術的な理由：結果票そのものの入れ物を検査する場合は、結果票を直接作って確認してよい。順位計算が正しいかを確認する場合は、実際の利用手順と同じ順位計算関数を通す。
+
+**10. 順位計算関数の完全なシグネチャ**
+
+```python
+def build_tvt_trade_rank_without_nonparticipants(
+    baseline_order:
+        list[OrderControlTvtVisitKey]
+        | tuple[OrderControlTvtVisitKey, ...],
+    buyers:
+        list[OrderControlTvtVisitKey]
+        | tuple[OrderControlTvtVisitKey, ...],
+) -> OrderControlTvtNoNonparticipantTradeRankResult:
+    ...
+```
+
+**11. baseline_order**
+
+唯一の baseline 順位入力。list または tuple。空不可。VisitKey 重複不可。関数冒頭で tuple 固定。上位処理が正式な 3 キー sort を保証。順位計算関数は sort をやり直さない。
+
+正式 sort 規則（背景）：1. baseline 予想到着 timestep、2. 固定 arrival_tiebreaker、3. Vehicle ID。参加・非参加は使用しない。
+
+**12. buyers**
+
+一候補分の選択済み買い手。list または tuple。空不可。重複不可。全買い手が `baseline_order` 内に存在。入力順に制度上の順位を持たせない。`baseline_rank` に従い `buyers_sorted` を作る。参加条件・prefix 条件は候補生成側が保証し、本関数は再検査しない。
+
+**13. baseline_rank の内部生成**
+
+```python
+baseline_rank: dict[OrderControlTvtVisitKey, int] = {}
+
+for rank, visit_key in enumerate(
+    baseline_order_tuple,
+    start=1,
+):
+    baseline_rank[visit_key] = rank
+```
+
+外部入力にしない。
+
+**14. 順位計算の完全な処理順**
+
+1. `baseline_order` の容器型確認
+2. tuple 固定
+3. 空でないこと確認
+4. 全 VisitKey validation
+5. 入力内重複確認
+6. `baseline_rank` を 1 始まりで内部生成
+7. `buyers` の容器型確認
+8. tuple 固定
+9. 空でないこと確認
+10. 全 VisitKey validation
+11. 入力内重複確認
+12. 全買い手が `baseline_order` 内に存在すること確認
+13. `buyers_sorted` を baseline 順位順に作成
+14. `last_buyer_rank` = 最後の買い手の baseline 順位
+15. `trade_scope = baseline_order_tuple[:last_buyer_rank]`
+16. `buyer_set` を補助集合として作成
+17. `trade_scope` 内の非買い手を baseline 順のまま `sellers_sorted` へ抽出
+18. `buyers_sorted` へ 1 位から連続順位を付与（`trade_rank`）
+19. 各 seller へ売り手後退式による順位を付与
+20. `trade_scope` 外 VisitKey へ baseline 順位をそのまま付与
+21. `trade_rank` の順位値で `baseline_order_tuple` を並べ `trade_order` を作成
+22. ローカル候補の内部整合を private helper で確認
+23. すべて成功後に結果オブジェクトを一度だけ構築
+24. 完成した結果オブジェクトを返す
+
+**15. 売り手後退式**
+
+```python
+for seller in sellers_sorted:
+    seller_baseline_rank = baseline_rank[seller]
+
+    buyers_behind = sum(
+        1
+        for buyer in buyers_sorted
+        if baseline_rank[buyer] > seller_baseline_rank
+    )
+
+    trade_rank[seller] = (
+        seller_baseline_rank
+        + buyers_behind
+    )
+```
+
+非技術的には、売り手よりもともと前にいた買い手はその売り手を追い越さないため後退させない。売り手よりもともと後ろにいた買い手が前進する場合だけ、その人数分だけ売り手が後退する。
+
+買い手順位：`buyers_sorted` の i 番目の買い手へ順位 i（1 始まり連続）。
+
+**16. 取引範囲外 visit**
+
+`trade_scope` 外の VisitKey について `trade_rank[visit_key] == baseline_rank[visit_key]`。取引範囲外 visit を動かさない。
+
+**17. 内部整合確認**
+
+結果構築前に private helper で確認：`trade_rank`・`trade_order` の VisitKey 集合と件数が `baseline_order` と一致。順位値は bool ではない Python int。1 から件数まで連続、重複なし、欠番なし。`trade_order` の各位置と `trade_rank` 一致。`buyers_sorted` と `sellers_sorted` は重複せず、和集合が `trade_scope` と一致。両者は baseline 相対順。`last_buyer_rank`・`trade_scope` が正しい。買い手順位 1 から連続。売り手後退式一致。取引範囲外 visit の順位が baseline と一致。
+
+**18. ValueError（順位計算）**
+
+- `baseline_order`：list/tuple 以外、空、VisitKey 不正、重複
+- `buyers`：list/tuple 以外、空、VisitKey 不正、重複、`baseline_order` に存在しない買い手
+- `assigned_rank()`：VisitKey 不正、結果に含まれない VisitKey
+
+VisitKey 不正の内訳：tuple 以外、長さ 2 以外、空 `vehicle_name`、非 str `vehicle_name`、`type(visit_id) is not int`、visit_id < 1、list 形式、NumPy 整数。
+
+**結果クラスの直接構築**
+
+- `buyers_sorted` が tuple ではない、空、`buyers_sorted` の VisitKey 不正または重複
+- `sellers_sorted` が tuple ではない、`sellers_sorted` の VisitKey 不正または重複（**空 tuple は正常**）
+- `last_buyer_rank` が bool または Python int 以外、1 未満
+- `trade_order` が tuple ではない、空、`trade_order` の VisitKey 不正または重複
+- `trade_rank_by_visit_key` が dict ではない、空
+- 順位 dict の VisitKey 不正
+- 順位値が bool または Python int 以外、1 未満
+
+**19. RuntimeError（順位計算）**
+
+入力確認後の重大な内部不整合のみ。例：VisitKey 集合不一致、順位重複・欠番・範囲外、`trade_order` と `trade_rank` 不一致、買い手・売り手の重複または不足、baseline 相対順違反、`last_buyer_rank` / `trade_scope` 不一致、買い手連続順位不一致、売り手後退式不一致、取引範囲外 visit の順位変化。FIFO 違反は含めない。
+
+**20. 失敗時の扱い**
+
+非技術的には、既存帳簿を書き換えず新しい結果票を作るだけ。失敗時は作りかけを捨て、結果を返さない。`ValueError` / `RuntimeError` 時は結果オブジェクトを返さない。Node 別 TVT 順位状態、collector、World、Node、Vehicle を変更しない。rollback 不要。部分的な結果を返さない。
+
+**21. FIFO 検査関数の完全なシグネチャ**
+
+```python
+def preserves_inlink_fifo(
+    baseline_order:
+        list[OrderControlTvtVisitKey]
+        | tuple[OrderControlTvtVisitKey, ...],
+    trade_order:
+        list[OrderControlTvtVisitKey]
+        | tuple[OrderControlTvtVisitKey, ...],
+    inlink_name_by_visit_key: dict[
+        OrderControlTvtVisitKey,
+        str,
+    ],
+) -> bool:
+    ...
+```
+
+docstring で、`baseline_order` と `trade_order` はどちらも `trade_scope` に対応する取引前後の順序列であると明記する。
+
+呼出側は `trade_scope` と `result.trade_order[:result.last_buyer_rank]` を渡す。
+
+**22. FIFO 検査入力（ValueError）**
+
+- `baseline_order` / `trade_order`：list または tuple 以外、空、VisitKey 不正、重複
+- 取引前後の件数不一致、VisitKey 集合不一致
+- `inlink_name_by_visit_key` が dict 以外
+- `baseline_order` 内の全 VisitKey について inlink 名が存在し、非空 `str` であること
+
+検査対象外の余分な VisitKey が dict に含まれていても受け入れて無視する。余分な項目の値は使用・validation しない。
+
+**23. FIFO 検査の完全な処理順**
+
+1. `baseline_order` 容器型確認 → tuple 固定 → 空でない → VisitKey validation → 重複確認
+2. `trade_order` 容器型確認 → tuple 固定 → 空でない → VisitKey validation → 重複確認
+3. 件数一致、VisitKey 集合一致
+4. `inlink_name_by_visit_key` が dict であること確認
+5. `baseline_order` 内全 VisitKey の inlink 情報確認（非空 str）
+6. `baseline_order` 内 VisitKey から対象 inlink 集合を作成
+7. 各 inlink について取引前順序を抽出（順序維持）
+8. 各 inlink について取引後順序を抽出（順序維持）
+9. 一つでも異なれば `False`
+10. すべて一致すれば `True`
+
+**24. FIFO の True と False**
+
+`True` → 全対象 inlink で相対順維持。後続候補評価を継続。
+
+`False` → 少なくとも 1 本の inlink で相対順逆転（複数 inlink のうち 1 本だけでも `False`）。当該具体的取引候補を正常に棄却。例外にしない。
+
+**25. 余分な inlink 対応情報**
+
+検査対象 VisitKey の inlink 欠落・非空 str 違反は `ValueError`。検査対象外の余分な VisitKey は受け入れて無視。
+
+**26. 既存状態の非変更**
+
+順位計算・FIFO 検査は Node 別 TVT 順位状態、collector、World、Node、Vehicle を変更しない。入力 list・tuple・dict を変更しない。
+
+**27. 専用テスト契約**
+
+`tests_order_control_tvt_trade_rank.py`。全 `test_*` を `TESTS` 一覧へ登録し直接実行。
+
+**順位計算正常系**：単一・複数買い手、入力順と baseline 順が異なる例、`buyers_sorted` baseline 相対順、買い手間・売り手間相対順維持、連続買い手順位、`last_buyer_rank`、売り手後退（0/1/複数買い手）、後退式と期待値一致、取引範囲外 baseline 維持、順位連続・重複なし・欠番なし、`trade_order` と `assigned_rank()` 一致、`trade_rank_items()` 昇順。期待値はテスト内直接記述。
+
+**結果型**：tuple 返却、`assigned_rank()` の int、対象外は `ValueError`、`trade_rank_items()` 構造、更新 API なし、export なし。完全なキーワード専用コンストラクター。位置引数による構築を認めない。各コンストラクター引数の最低限の `ValueError`。`sellers_sorted` の空 tuple を認める。順位 dict の防御コピー。順位計算正常系は公開順位計算関数経由。結果型固有の確認は直接構築を認める。
+
+**外部変更隔離**：入力 list 変更後も結果不変、dict 変更後も結果不変、返却 tuple 変更後も内部不変。
+
+**入力異常**：§18 の全 `ValueError` 契約。
+
+**内部不整合**：§19 の `RuntimeError` 契約。少なくとも 1 件は公開 `build_tvt_trade_rank_without_nonparticipants()` 経由で結果を返さないこと。
+
+**FIFO 正常系**：単一 inlink 内順序同じで `True`、複数 inlink すべて維持で `True`、inlink 間だけ入れ替わり各 inlink 内同じで `True`、同一 inlink に VisitKey 1 件だけなら違反にならない、余分 inlink 情報があっても受け入れ・結果へ影響なし。
+
+**FIFO 違反**：単一 inlink で 2 件逆転 `False`、複数 inlink のうち 1 本だけ逆転 `False`、複数 inlink で複数本逆転 `False`、例外を投げず `False`、同じ候補の順位を作り直さない。
+
+**FIFO 入力異常**：取引前後順序列の容器不正、空列、VisitKey 不正、NumPy 整数、重複、前後件数・集合不一致、`inlink_name_by_visit_key` が dict 以外、検査対象 VisitKey の inlink 欠落、inlink 名が空文字列または非 str。すべて `ValueError`。
+
+**既存状態非変更**：コードまたはテストで保証。
+
+**28. 変更禁止範囲**
+
+`uxsim/uxsim.py`、`uxsim/__init__.py`、`uxsim/order_control_baseline_collector.py`、`uxsim/order_control_baseline_snapshot.py`、`uxsim/order_control_baseline_driver.py`、`uxsim/order_control_tvt_node_rank_state.py`、既存全テスト、既存全診断、その他 Python、非参加 Vehicle ありコード。
+
+**29. 実行コマンド**
+
+実装後に少なくとも次を実行する。
+
+```bash
+python -m py_compile uxsim/order_control_tvt_trade_rank.py
+python -m py_compile tests_order_control_tvt_trade_rank.py
+python tests_order_control_tvt_trade_rank.py
+python tests_order_control_tvt_node_rank_state.py
+python tests_order_control_baseline_collector.py
+python tests_order_control_baseline_snapshot.py
+python tests_order_control_baseline_driver.py
+python tests_order_control_baseline_collector_uxsim.py
+python diagnostics/order_control/tvt_baseline_snapshot_fork_probe.py
+git diff --check
+git status --short
+```
+
+`diagnostics/order_control.zip` は開かず、変更せず、実行対象にせず、コミット対象に含めない。
+
+**30. 実装完了条件**
+
+新規本番モジュールと専用テスト、py_compile 成功、専用テスト成功、既存回帰テスト成功、ValueError / RuntimeError / FIFO True・False 契約確認、売り手後退式・相対順・取引範囲外不変・外部変更防止確認、TESTS 一覧の漏れ・重複確認、`git diff --check` 成功、Copilot 自身による実ファイル確認、必要に応じた独立静的監査、実装結果のメモ化、変更対象確認、ZIP 対象外確認。
+
+**31. 非参加 Vehicle あり方式との境界**
+
+非参加 Vehicle あり順位計算を本モジュールへ追加しない。将来方式を先取りした条件分岐を追加しない。一般形が非参加 0 を包含する可能性は推測であり確定方針ではない。専用関数の将来廃止・参照実装残存・共通 API 統合は未確定。`preserves_inlink_fifo` の将来再利用可能性は残すが確定事項ではない。同一候補の順位を FIFO 成立まで作り直さない。
+
+##### 25.25.32.21 実装再開情報
+
+- 最新保存済みコミットは **`88cfc05`**（`origin/feature/intersection-order-control` へ push 済み）
+- 設計メモと進捗メモが未コミット変更
+- `diagnostics/order_control.zip` は既存未追跡、未接触、対象外
+- **§25.25.32.20** が唯一の最新実装正本
+- 次の直接作業：§25.25.32.20 と既存コードの最終照合
+- 照合後、Cursor 向け実装指示を作成
+- 実装対象は新規 2 ファイルのみ
+- 既存 Python ファイルは変更しない
+- 実装後に専用テストと §25.25.32.20 第 29 節の回帰テストを実行
+- 実装結果は別の新節へ記録
+- メモを含むコミット名には `document` を含める
+- コミットと push は別作業
+
+**実装対象：**
+
+```text
+uxsim/order_control_tvt_trade_rank.py
+tests_order_control_tvt_trade_rank.py
+```
+
+**2026-09-03 更新：** Copilot による完成実装前仕様の確認で、結果クラスのコンストラクター契約が不足していることを確認した。**§25.25.32.20** 第 8 節・第 9 節・第 18 節・第 27 節へ、完全なキーワード専用コンストラクター、最小 validation、防御コピー、直接構築テストの範囲を補足した。次の直接作業は、補修後の **§25.25.32.20** の再確認である。

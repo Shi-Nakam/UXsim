@@ -4471,6 +4471,85 @@ baseline_horizon_steps + 1 <= fork_W.TSIZE - fork_W.T
 - `diagnostics/order_control.zip` は未接触、コミット対象外
 - 次はコミット前最終確認（差分確認、メモとの照合、コミット）
 
+#### 2026-09-03：非参加VehicleなしTVT取引順位計算の中間設計を記録
+
+- 正本参照先は設計メモ **§25.25.32**
+- まだ**中間設計**であり、実装前仕様は未完成
+- 今回の対象は**非参加 Vehicle なし**の**一候補分**の順位計算（候補生成ではない）
+- collector は baseline 情報源として使用する。§11 関数は collector へ直接依存しない
+- `baseline_order` を唯一の baseline 順位入力とする。`baseline_rank` は内部派生
+- inlink 別物理順は候補生成側で別途扱う
+- `buyers` は候補生成済みの一候補分。関数内部で `baseline_order` に従い `buyers_sorted` を作る
+- 買い手間・売り手間の baseline 相対順を**確実に**維持する
+- 売り手は自分より baseline で後ろにいた買い手数だけ後退（§11.3・§11.6）
+- 結果へ含める 5 項目：`buyers_sorted`、`sellers_sorted`、`last_buyer_rank`、`trade_rank`、`trade_order`
+- 結果へ含めない 3 項目：`baseline_order`、`baseline_rank`、`trade_scope`
+- 合意した命名：`OrderControlTvtNoNonparticipantTradeRankResult`、`build_tvt_trade_rank_without_nonparticipants`
+- 結果型の具体構造、FIFO 境界は未確定
+- 残る検討は 4 項目（結果型、例外、FIFO 境界、専用テスト契約）
+- 将来の非参加あり一般形が非参加 0 件を包含する可能性は**推測**であり未確定
+- 最新保存済みコミットは **`88cfc05`**（origin へ push 済み）
+- `diagnostics/order_control.zip` は未接触、対象外
+- コード変更なし
+
+**2026-09-03 追記（結果型の最終構造確定）：**
+
+- 結果型の最終構造を **§25.25.32.16** で確定
+- 専用通常クラス（`OrderControlTvtNoNonparticipantTradeRankResult`）。通常の公開 API から読取専用
+- 内部順位 dict（`_trade_rank_by_visit_key`）は防御コピー。mutable な順位 dict を直接公開しない
+- `assigned_rank()` で特定 visit の順位を取得。結果に存在しない VisitKey は `None` ではなく `ValueError`
+- `trade_rank_items()` で順位順の変更不能 tuple を取得
+- 公開列（`buyers_sorted`、`sellers_sorted`、`trade_order`）は tuple。更新用公開メソッドなし
+- `export_state()` / `to_dict()` は初期実装へ追加しない
+- 第 1 項目「結果型の最終構造」完了。残る検討は 3 項目。次は例外と内部不変条件
+
+**2026-09-03 追記（例外と内部不変条件確定）：**
+
+- 例外と内部不変条件を **§25.25.32.17** で確定
+- 入力契約違反は `ValueError`、計算後の重大な内部不整合は `RuntimeError`
+- FIFO 違反は `RuntimeError` にしない
+- 入力確認後、ローカル変数だけで順位を計算。内部整合確認成功後に結果オブジェクトを一度だけ作る
+- 失敗時は結果オブジェクトを返さない。部分的な結果を返さない
+- 既存の順位帳簿、collector、World、Node、Vehicle は変更しない。rollback 処理は不要
+- 合意済みの売り手後退式も内部確認対象
+- 第 2 項目「例外と内部不変条件」完了。残る検討は 2 項目。次は FIFO 検査との責任境界
+
+**2026-09-03 追記（FIFO検査との責任境界確定）：**
+
+- FIFO 検査との責任境界を **§25.25.32.18** で確定
+- 順位計算と FIFO 検査は分離（別公開関数）
+- FIFO 検査範囲は `trade_scope`（未確定範囲全体を検査する案は不採用）
+- 取引前は `trade_scope`、取引後は `trade_order` 先頭から `last_buyer_rank` 件
+- 検査対象 inlink は `trade_scope` から特定。inlink 情報は上位処理が渡す
+- 順位計算結果型へ inlink 情報を追加しない
+- FIFO 維持は `True`、FIFO 違反は `False`（正常な候補棄却。例外ではない）
+- 同じ候補の順位を作り直さない。確定順位ブロックとの接続部は追加検査しない
+- 棄却数・棄却率などは上位評価・診断側
+- 第 3 項目「FIFO 検査との責任境界」完了。残る検討は専用テスト契約と実装配置だけ。次の直接作業も同項目
+
+**2026-09-03 追記（専用テスト契約と完成実装前仕様）：**
+
+- 最後の残作業を **§25.25.32.19** で確定
+- 本番モジュール `uxsim/order_control_tvt_trade_rank.py`、専用テスト `tests_order_control_tvt_trade_rank.py`
+- 公開クラス `OrderControlTvtNoNonparticipantTradeRankResult`、順位計算 `build_tvt_trade_rank_without_nonparticipants`、FIFO `preserves_inlink_fifo`
+- VisitKey 型は既存モジュールから共有。private helper は共有しない
+- NumPy 整数拒否。余分な inlink 情報は無視
+- 複数 inlink のうち 1 本でも逆転なら `False`
+- 内部異常時に壊れた結果を返さないテスト（少なくとも 1 件は公開関数経由）
+- **§25.25.32.20** を自己完結型の唯一の最新実装正本として追加
+- 実装者は中間記録から推測しない。全設計項目完了
+- Python コードは未変更。次は実装前の最終照合
+- 最新保存済みコミット **`88cfc05`**。Markdown 2 ファイルは未コミット・未 push。ZIP 未接触・対象外
+
+**2026-09-03 追記（コンストラクター契約補修）：**
+
+- Copilot 確認でコンストラクター契約不足を発見。**§25.25.32.20** を補修
+- キーワード専用コンストラクター、列は tuple として保持、順位 dict は防御コピー
+- コンストラクターは最低限の型・形式確認。完全な内部整合確認は構築前 helper の責任
+- `sellers_sorted` の空 tuple を認める
+- 結果型固有テストでは直接構築可。順位計算テストは公開関数経由
+- 次は補修後の完成仕様再確認。Python コードはまだ変更していない
+
 #### 2026-08-29：TVT権利保有車両選定前の先頭非参加Vehicle先行確定の記録補修
 
 - 過去に確定済みだった、意思決定窓内 baseline 到着順位の先頭に連続する非参加 Vehicle の先行確定が、設計メモに明文化されていなかった
