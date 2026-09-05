@@ -1099,6 +1099,53 @@ def test_records_arrival_for_not_yet_arrived_vehicle_after_forward():
     assert snapshot["baseline_arrival_timestep"] is not None
 
 
+def test_preserves_t_plus_6_arrival_record_after_full_horizon():
+    W = _build_time_value_junction_world(tmax=300)
+    snapshot_T = 5
+    horizon = 30
+    expected_arrival_timestep = snapshot_T + 6
+
+    W.T = snapshot_T
+    vehicle = W.addVehicle(
+        "orig",
+        "dest",
+        0,
+        name="t_plus_6_arrival_vehicle",
+    )
+    _advance_until_on_inlink(vehicle, "in")
+    _place_not_yet_arrived_vehicle_at_snapshot(
+        W,
+        vehicle,
+        inlink_name="in",
+        snapshot_timestep=snapshot_T,
+        x_position=60.0,
+    )
+
+    before = _real_world_snapshot(W)
+
+    result = run_snapshot_fixed_baseline_fork(
+        W,
+        target_node_names=_junction_target_nodes(),
+        baseline_horizon_steps=horizon,
+    )
+
+    visit = result.collector.get_baseline_visit_snapshot(
+        vehicle.name,
+        vehicle.order_control_visit_id,
+    )
+
+    assert visit is not None
+    assert visit["was_arrived_at_snapshot"] is False
+    assert visit["baseline_arrival_timestep"] == expected_arrival_timestep
+    assert result.baseline_timestep_T == snapshot_T
+    assert result.configured_horizon_steps == horizon
+    assert result.fork_steps_executed == horizon
+    assert result.final_fork_timestep == snapshot_T + horizon
+    assert result.final_fork_timestep > expected_arrival_timestep
+
+    _assert_real_world_unchanged(W, before)
+
+
 def test_leaves_none_for_non_arriving_vehicle():
     W = _build_time_value_junction_world(tmax=300)
     snapshot_T = 5
@@ -1888,6 +1935,7 @@ TESTS = [
     test_analyzer_basic_analysis_not_called,
     test_preserves_arrived_vehicle_snapshot_information,
     test_records_arrival_for_not_yet_arrived_vehicle_after_forward,
+    test_preserves_t_plus_6_arrival_record_after_full_horizon,
     test_leaves_none_for_non_arriving_vehicle,
     test_leaves_passage_none_for_arrived_not_passed,
     test_records_passage_when_vehicle_passes,
