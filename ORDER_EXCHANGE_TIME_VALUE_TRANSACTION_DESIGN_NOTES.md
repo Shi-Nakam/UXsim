@@ -14327,6 +14327,8 @@ def align_snapshot_undetermined_visits_with_node_baseline(
 
 ただし、直ちに実装指示へ進まず、メモの追加内容と差分を先に確認する。
 
+**2026-09-06 更新（本小節末尾の「実装完了記録」を正本）：** 上記は実装判断前の当時の再開地点として残す。第 1 部品の実装完了記録と次の再開地点は、本小節末尾の **「実装完了記録」** を参照する。
+
 ###### Git状態と再開情報（§25.25.34.30）
 
 - 最新保存済み・push 済みコミットは **`767aa04`**
@@ -14335,3 +14337,166 @@ def align_snapshot_undetermined_visits_with_node_baseline(
 - `ORDER_EXCHANGE_PROGRESS.md` は今回変更しない
 - `diagnostics/order_control.zip` は既存未追跡、未接触、対象外
 - git add、git commit、git push はまだ行わない
+
+###### 実装完了記録
+
+**2026-09-06 更新：** §25.25.34.30 で確定した collector 起点の照合結果契約を、副作用のない独立部品として実装した。本小節 **§25.25.34.30** の「実装完了記録」を、この部品の実装正本とする。
+
+**新規本番ファイル**
+
+- `uxsim/order_control_tvt_baseline_alignment.py`
+
+**新規専用テスト**
+
+- `tests_order_control_tvt_baseline_alignment.py`
+
+**実装した frozen dataclass**
+
+```python
+@dataclass(frozen=True)
+class OrderControlTvtResolvedUndeterminedVisit:
+    visit_key: OrderControlTvtVisitKey
+    baseline_arrival_timestep: int
+    arrival_tiebreaker: int | float
+    vehicle_id: int
+
+@dataclass(frozen=True)
+class OrderControlTvtSnapshotUndeterminedAlignmentResult:
+    node_name: str
+    resolved_undetermined_visits: tuple[
+        OrderControlTvtResolvedUndeterminedVisit, ...
+    ]
+    unresolved_undetermined_visits: tuple[
+        OrderControlTvtVisitKey, ...
+    ]
+    unregistered_collector_visit_keys: tuple[
+        OrderControlTvtVisitKey, ...
+    ]
+```
+
+`OrderControlTvtSnapshotUndeterminedAlignmentResult` には、保存フィールドを追加せず、次の property を実装した。
+
+```python
+@property
+def all_collector_undetermined_arrivals_resolved(self) -> bool:
+    return len(self.unresolved_undetermined_visits) == 0
+
+@property
+def has_unregistered_collector_visits(self) -> bool:
+    return len(self.unregistered_collector_visit_keys) > 0
+```
+
+**実装した関数**
+
+```python
+def align_snapshot_undetermined_visits_with_node_baseline(
+    *,
+    node_name: str,
+    node_baseline_visit_records: list[dict],
+    node_rank_state: OrderControlTvtNodeRankState,
+) -> OrderControlTvtSnapshotUndeterminedAlignmentResult:
+    ...
+```
+
+- `node_baseline_visit_records` は `OrderControlBaselineCollector.export_node_baseline_visits(node_name)` の返却値を想定する。
+
+**実装で維持した設計要点**
+
+- **処理起点**は、今回の Node 別 collector 記録である。
+- **順位台帳の未確定集合全体を起点にしていない。**
+- 分類対象は、今回の Node 別 collector 記録と当該 Node 順位台帳の未確定 Visit 集合の交差である。
+- **正式な到着順**は、次の 3 キーの昇順である。
+  1. `baseline_arrival_timestep`
+  2. `arrival_tiebreaker`
+  3. `vehicle_id`
+- **確定済み Visit** は結果へ含めない。
+- **順位台帳にのみ存在する Visit** は結果へ含めない。
+- **台帳未登録 Visit** は `unregistered_collector_visit_keys` へ分ける。
+- **B 型 Visit**（`was_arrived_at_snapshot=False`）で到着 2 項目（`baseline_arrival_timestep`、`arrival_tiebreaker`）が両方 `None` の場合は、**正常な未解決**として `unresolved_undetermined_visits` へ入れる。
+- **A 型 Visit**（`was_arrived_at_snapshot=True`）で到着 2 項目が両方 `None` の場合は、**異常**（collector 登録契約または入力状態の重大不整合）として `ValueError` で停止する。
+- 到着 2 項目の**片方だけが `None`** の場合も、**異常**（collector 契約破損）として `ValueError` で停止する。
+- **副作用のない処理**である。入力 `list[dict]`、各 record dict、`node_rank_state`、順位台帳の確定済み集合・未確定集合を変更しない。
+- **順位登録、順位確定、意思決定窓抽出、権利保有車両選定は行わない。**
+
+**未確定事項（実装後も維持）**
+
+- **未確定 Visit 登録タイミング**は、今回も未確定のままである（§25.25.30.8）。
+- `unregistered_collector_visit_keys` を正常な一時状態とみなすか、TVT 検討のブロッキング条件とするかは、**未確定**である。
+
+**実行済み確認**
+
+- `python tests_order_control_tvt_baseline_alignment.py` — **25 tests passed**
+- `python tests_order_control_tvt_node_rank_state.py` — **54 tests passed**
+- `python tests_order_control_baseline_collector.py` — **全件 passed**
+- 新規 2 ファイルの `py_compile` — **成功**
+- `pytest` による新規専用テスト — **25 件成功**
+- 新規 2 ファイルに対する `git diff --no-index --check` — **問題なし**
+- **既存ファイルは変更されていない**
+- `diagnostics/order_control.zip` — **既存未追跡、未接触**
+
+**Git 状態（実装完了時点）**
+
+- 最新保存済み・push 済みコミットは **`ffb5068`**
+- 新規 Python 2 ファイルは未コミット
+- 既存 Python コード、既存テスト、診断は変更していない
+- `diagnostics/order_control.zip` は既存未追跡、未接触、対象外
+- git add、git commit、git push はまだ行わない
+
+**次の再開地点（実装完了後）**
+
+到着済み相当 Visit の先行順位確定を、直ちに実装する前提とはしない。
+
+**今回の第 1 部品が直接報告する未解決の範囲**
+
+今回の第 1 部品が直接報告するのは、次の条件を**すべて**満たす Visit について、対象 Node への到着予測が得られなかったという事実である。
+
+- 今回の Node 別 collector 記録に含まれる
+- 順位台帳で未確定である
+- snapshot 時点では未到着の B 型 Visit である
+- `baseline_arrival_timestep` と `arrival_tiebreaker` が両方 `None` である
+
+これらは `unresolved_undetermined_visits` として返される。
+
+**第 1 部品の未解決と研究全体の TVT 中止方針の接続**
+
+研究全体では、全 World baseline 仮想計算から TVT 検討に必要な情報が 1 件でも得られない場合、その Node では TVT 検討を進めない。
+
+今回の第 1 部品が返す `unresolved_undetermined_visits` は、その研究全体の中止判断で確認すべき未解決情報の**一種類**である。
+
+今回の第 1 部品だけで、TVT 検討に必要な全 World baseline 情報のすべてが解決したかを判定するわけではない。
+
+**上位処理で次に確認する内容**
+
+上位処理では、少なくとも次を区別して扱う必要がある。
+
+- **`unresolved_undetermined_visits` が 1 件以上ある場合**
+  - 今回の collector 対象かつ順位未確定の Visit について、対象 Node への到着予測が得られていない
+  - したがって、当該 Node の TVT 検討を進めない判断へ接続する
+
+- **`unregistered_collector_visit_keys` が 1 件以上ある場合**
+  - 順位台帳への未確定 Visit 登録タイミングが未確定であるため、現段階では直ちに正常または異常と決めない
+  - 登録タイミングの制度設計後に、TVT 検討を妨げる条件とするか判断する
+
+- **上記以外の全 World baseline 必要情報**
+  - `route_next_link_name` や `baseline_passage_timestep` など、後続の TVT 検討で必要となる別の情報については、対応する後続処理で未解決の有無を確認する
+  - 今回の第 1 部品の `all_collector_undetermined_arrivals_resolved` だけで、全必要情報が揃ったとは判断しない
+
+**`all_collector_undetermined_arrivals_resolved` の限定された意味（再確認）**
+
+この property は、今回の Node 別 collector 記録に含まれ、順位台帳で未確定である Visit について、対象 Node への到着予測がすべて得られたかだけを示す。
+
+この property は、次を**意味しない**。
+
+- 全 World baseline 仮想計算で必要な情報がすべて得られた
+- 当該 Node で TVT 検討を続けてよい
+- 台帳未登録 Visit が存在しない
+- passage 予測や `route_next_link` 情報がすべて得られた
+
+**補修後の再開順序**
+
+次は、次の順序で確認した後、到着済み相当・順位未確定 Visit の抽出と先行順位確定へ進めるか判断する。
+
+1. 第 1 部品が返す `unresolved_undetermined_visits` を、上位処理の TVT 検討中止判断へどう接続するか確認する
+2. `unregistered_collector_visit_keys` の扱いが未確定 Visit 登録タイミング（§25.25.30.8）に依存することを保持する
+3. 今回の第 1 部品だけで全 World baseline 必要情報の完全解決を判定しない
+4. この確認の後、`resolved_undetermined_visits` から `baseline_arrival_timestep <= T` の到着済み相当・順位未確定 Visit の抽出と先行順位確定へ進めるか判断する

@@ -4673,6 +4673,101 @@ baseline_horizon_steps + 1 <= fork_W.TSIZE - fork_W.T
 - `diagnostics/order_control.zip` は未接触・対象外
 - git add、git commit、git push は未実行
 
+##### 2026-09-06追記：Node別baseline collector記録とNode別順位台帳の照合第1部品を実装
+
+詳細正本は設計メモ **§25.25.34.30** の「実装完了記録」。
+
+- 全 World baseline 仮想計算で今回調べた Visit を、実 World 側の順位台帳と照合し、次の 3 種類へ整理する独立部品を実装した
+  1. 順位未確定で、対象 Node への到着予測が得られた Visit
+  2. 順位未確定で、仮想計算期間内に対象 Node への到着予測が得られなかった Visit
+  3. collector には存在するが、順位台帳へ登録されていない Visit
+- 新規本番ファイル：`uxsim/order_control_tvt_baseline_alignment.py`
+- 新規専用テスト：`tests_order_control_tvt_baseline_alignment.py`
+- 実装した frozen dataclass：`OrderControlTvtResolvedUndeterminedVisit`、`OrderControlTvtSnapshotUndeterminedAlignmentResult`
+- 実装した関数：`align_snapshot_undetermined_visits_with_node_baseline`
+- 処理起点は今回の Node 別 collector 記録である
+- 順位台帳の未確定集合全体を起点にしていない
+- 正式な到着順は次の 3 キー昇順である
+  1. `baseline_arrival_timestep`
+  2. `arrival_tiebreaker`
+  3. `vehicle_id`
+- 確定済み Visit は結果へ含めない
+- 順位台帳にのみ存在する Visit は結果へ含めない
+- 台帳未登録 Visit は `unregistered_collector_visit_keys` へ分ける
+- B 型 Visit で到着 2 項目が両方 `None` の場合は正常な未解決として扱う
+- A 型 Visit で到着 2 項目が両方 `None` の場合は異常として扱う
+- 到着 2 項目の片方だけが `None` の場合は異常として扱う
+- 入力 record と順位台帳を変更しない副作用のない処理である
+- 順位登録、順位確定、意思決定窓抽出、権利保有車両選定は行わない
+- 未確定 Visit 登録タイミングは未確定のままである
+- `unregistered_collector_visit_keys` を正常な一時状態とみなすか、ブロッキング条件とするかは未確定である
+- `python tests_order_control_tvt_baseline_alignment.py` — **25 tests passed**
+- `python tests_order_control_tvt_node_rank_state.py` — **54 tests passed**
+- `python tests_order_control_baseline_collector.py` — **全件 passed**
+- 新規 2 ファイルの `py_compile` 成功
+- `pytest` による新規専用テスト 25 件成功
+- 新規 2 ファイルに対する `git diff --no-index --check` は問題なし
+- 既存ファイルは変更されていない
+- `diagnostics/order_control.zip` は既存未追跡、未接触
+- 最新保存済み・push 済みコミットは **`ffb5068`**
+- 新規 Python 2 ファイルは未コミット
+- git add、git commit、git push は未実行
+
+**次の再開地点（実装完了後）：**
+
+到着済み相当 Visit の先行順位確定を、直ちに実装する前提とはしない。
+
+**今回の第 1 部品が直接報告する未解決の範囲**
+
+今回の第 1 部品が直接報告するのは、次の条件をすべて満たす Visit について、対象 Node への到着予測が得られなかったという事実である。
+
+- 今回の Node 別 collector 記録に含まれる
+- 順位台帳で未確定である
+- snapshot 時点では未到着の B 型 Visit である
+- `baseline_arrival_timestep` と `arrival_tiebreaker` が両方 `None` である
+
+これらは `unresolved_undetermined_visits` として返される。
+
+**第 1 部品の未解決と研究全体の TVT 中止方針の接続**
+
+研究全体では、全 World baseline 仮想計算から TVT 検討に必要な情報が 1 件でも得られない場合、その Node では TVT 検討を進めない。
+
+今回の第 1 部品が返す `unresolved_undetermined_visits` は、その研究全体の中止判断で確認すべき未解決情報の一種類である。
+
+今回の第 1 部品だけで、TVT 検討に必要な全 World baseline 情報のすべてが解決したかを判定するわけではない。
+
+**上位処理で次に確認する内容**
+
+上位処理では、少なくとも次を区別して扱う必要がある。
+
+- `unresolved_undetermined_visits` が 1 件以上ある場合
+  - 今回の collector 対象かつ順位未確定の Visit について、対象 Node への到着予測が得られていない
+  - したがって、当該 Node の TVT 検討を進めない判断へ接続する
+- `unregistered_collector_visit_keys` が 1 件以上ある場合
+  - 順位台帳への未確定 Visit 登録タイミングが未確定であるため、現段階では直ちに正常または異常と決めない
+  - 登録タイミングの制度設計後に、TVT 検討を妨げる条件とするか判断する
+- 上記以外の全 World baseline 必要情報
+  - `route_next_link_name` や `baseline_passage_timestep` など、後続の TVT 検討で必要となる別の情報については、対応する後続処理で未解決の有無を確認する
+  - 今回の第 1 部品の `all_collector_undetermined_arrivals_resolved` だけで、全必要情報が揃ったとは判断しない
+
+**`all_collector_undetermined_arrivals_resolved` の限定された意味（再確認）**
+
+この property は、今回の Node 別 collector 記録に含まれ、順位台帳で未確定である Visit について、対象 Node への到着予測がすべて得られたかだけを示す。
+
+この property は、次を意味しない。
+
+- 全 World baseline 仮想計算で必要な情報がすべて得られた
+- 当該 Node で TVT 検討を続けてよい
+- 台帳未登録 Visit が存在しない
+- passage 予測や `route_next_link` 情報がすべて得られた
+
+**補修後の再開順序**
+
+1. 第 1 部品が返す `unresolved_undetermined_visits` を、上位処理の TVT 検討中止判断へどう接続するか確認する
+2. `unregistered_collector_visit_keys` の扱いが未確定 Visit 登録タイミングに依存することを保持する
+3. 今回の第 1 部品だけで全 World baseline 必要情報の完全解決を判定しない
+4. この確認の後、到着済み相当・順位未確定 Visit の抽出と先行順位確定へ進めるか判断する
+
 #### 2026-08-29：TVT権利保有車両選定前の先頭非参加Vehicle先行確定の記録補修
 
 - 過去に確定済みだった、意思決定窓内 baseline 到着順位の先頭に連続する非参加 Vehicle の先行確定が、設計メモに明文化されていなかった
