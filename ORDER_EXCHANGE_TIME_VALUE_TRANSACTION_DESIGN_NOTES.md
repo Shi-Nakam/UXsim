@@ -14713,3 +14713,190 @@ snapshot 処理で保証済みの入力内重複を、防御的という理由�
 その後、snapshot 固定 Visit 集合を実 World 側上位 TVT 制御へ渡し、Node 別順位台帳へ登録するための**最小の接続方法**を検討する。
 
 まだ権利保有車両選定部品の実装へは進まない。
+
+##### 25.25.34.32 snapshot固定Visit登録計画のprepare/apply分割
+
+**2026-09-07 更新：** `order_control_baseline_snapshot.py` の snapshot 固定 Visit 処理を、概念上 **prepare**（構築・検証）と **apply**（collector 登録）の 2 段階へ分割する方針を確定した。本小節 **§25.25.34.31** を、未確定 Visit 登録タイミングと接続原則の正本とする。本小節 **§25.25.34.32** を、snapshot 部品内部の prepare/apply 分割と変更不能な計画型の正本とする。上位 TVT 制御、baseline driver、順位台帳登録 helper の接続方法は、本小節では**まだ確定しない**。
+
+###### 今回確定する目的
+
+- snapshot 固定 Visit 集合を**一度だけ**構築する
+- 順位台帳登録対象と collector 登録対象が、**同じ検証済み計画**から得られるようにする
+- 上位処理が snapshot 固定集合を**独自に再構築しない**
+- prepare と apply の**間**に、実 World 側順位台帳への登録処理を置けるようにする（§25.25.34.31 の接続順 5〜7）
+- callback や hook を使わず、処理順をコード上で**明示**できるようにする
+- 現在の第 1 部品（§25.25.34.30）は**変更しない**
+
+###### prepareの責務
+
+**prepare** は、次を行う段階である。
+
+- 対象 Node を解決・検証する（既存 `_resolve_and_validate_target_nodes` 相当）
+- `fork_W` の snapshot 時点の状態から、snapshot 固定 Visit 集合を**一度だけ**構築する（既存 `_build_snapshot_visit_registration_plan` 相当）
+- collector へ登録可能な内容であることを、**既存 snapshot 契約**（§25.22、§25.25.29.7）に従って検証する（空 collector への dry-run 登録による検証を含む）
+- 検証済みの**変更不能**な snapshot 登録計画を返す
+- **collector を変更しない**
+- **順位台帳を変更しない**
+
+prepare は、制度判断（どの Visit を順位管理対象とするか、未確定登録するか）を行わない。構築・検証と計画の返却だけを担当する。
+
+###### applyの責務
+
+**apply** は、次を行う段階である。
+
+- prepare で作られた**検証済み** snapshot 登録計画を受け取る
+- 計画に含まれる Visit を collector へ登録する（既存 `register_snapshot_visit` 呼出し相当）
+- snapshot 固定集合を**再構築しない**
+- **順位台帳を変更しない**
+
+apply は、渡された計画を信頼し、collector 登録だけを担当する。計画の再検証は prepare の責務である。
+
+###### 推奨する変更不能な計画型
+
+実装前の型候補として、次の 2 種類の **frozen dataclass** を採用する。
+
+```python
+@dataclass(frozen=True)
+class OrderControlBaselineSnapshotVisitEntry:
+    vehicle_name: str
+    vehicle_id: int
+    node_name: str
+    inlink_name: str
+    visit_id: int
+    was_arrived_at_snapshot: bool
+    baseline_arrival_timestep: int | None
+    arrival_tiebreaker: int | float | None
+    route_next_link_name: str | None
+    baseline_passage_timestep: int | None
+
+    @property
+    def visit_key(self) -> OrderControlTvtVisitKey:
+        return (self.vehicle_name, self.visit_id)
+
+
+@dataclass(frozen=True)
+class OrderControlBaselineSnapshotRegistrationPlan:
+    baseline_timestep_T: int
+    target_node_names: tuple[str, ...]
+    entries: tuple[OrderControlBaselineSnapshotVisitEntry, ...]
+```
+
+**`OrderControlBaselineSnapshotVisitEntry` の意味（初学者向け）：**
+
+- snapshot 固定 Visit **1 件分**の登録内容を表す
+- 現在の内部実装 `list[dict]` の **1 要素**に相当する
+- `Vehicle`、`Node`、`Link`、`World` の**オブジェクト参照を含めない**
+- **文字列、数値、bool、`None` だけ**を保持する
+- `visit_key` は、その Visit を順位台帳で識別するための `(vehicle_name, visit_id)` である（§25.25.30.9）
+
+**`OrderControlBaselineSnapshotRegistrationPlan` の意味（初学者向け）：**
+
+- **1 回の snapshot** で固定された Visit **全体**の、検証済み登録計画を表す
+- `entries` は**変更不能な tuple** とする（`frozen=True` の dataclass 内でも、要素列自体を tuple にしておく）
+- **同じ計画**を、順位台帳登録と collector 登録の**両方**へ使う
+- 計画内の並び順は、**制度上の順位ではない**（§25.22.13）
+
+`frozen=True` により、prepare 後に計画が誤って書き換えられない。上位処理が「一覧を作ったあとで別の一覧を使う」事故を防ぐ。
+
+###### 計画へ保持する情報
+
+collector 登録に必要な既存 **10 項目**は、すべて `OrderControlBaselineSnapshotVisitEntry` へ保持する。
+
+| フィールド | collector 登録 |
+|-----------|----------------|
+| `vehicle_name` | 使用 |
+| `vehicle_id` | 使用 |
+| `node_name` | 使用 |
+| `inlink_name` | 使用 |
+| `visit_id` | 使用 |
+| `was_arrived_at_snapshot` | 使用 |
+| `baseline_arrival_timestep` | 使用 |
+| `arrival_tiebreaker` | 使用 |
+| `route_next_link_name` | 使用 |
+| `baseline_passage_timestep` | 使用 |
+
+順位台帳登録で使用するのは、各 entry の次の情報**だけ**である（§25.25.34.31）。
+
+- `node_name`
+- `visit_key`（`vehicle_name` と `visit_id` の組）
+
+順位台帳へ、次を**保存しない**（§25.25.34.31、§25.25.30.7）。
+
+- `Vehicle` オブジェクト
+- `Node` オブジェクト
+- `Link` オブジェクト
+- `fork_W`
+- `collector`
+- baseline 予測 record 全体
+
+###### Node別VisitKeyの取得
+
+検証済み計画から、**Node ごとの VisitKey 列**を取得できる必要がある。上位処理は、計画全体を走査して Node 名ごとに VisitKey を集め、順位台帳への未確定登録に使う。
+
+ただし、正式な **property 名**または **helper 関数名**は、本小節では**まだ確定しない**。
+
+**Node 別 VisitKey 列の順序について：**
+
+- **順位確定順を意味しない**
+- **正式 baseline 到着順位を意味しない**（§25.22.13）
+- **テストと診断の再現性**のために、計画内の固定順を維持する（`target_node_names` 順、各 Node 内は既存構築順：A 型を先、B 型は inlink 走査順）
+- 順位台帳への未確定登録は**集合登録**であり、この順序から順位を付けない（§25.25.30.3、§25.25.34.31）
+
+###### 既存APIの維持
+
+現在の `register_snapshot_fixed_visits(fork_W, collector, *, target_node_names) -> int` について、次の方針を採用する。
+
+- 現在の**外部契約**と返り値 **`int`**（総登録件数）を**維持**する（§25.22.13、§25.25.29.7）
+- 内部では **prepare** と **apply** を順に呼ぶ**薄いラッパー**へ変更できる
+- 既存の呼出側（baseline driver、診断スクリプト、既存テスト）を**不要に壊さない**
+- 上位接続時には、外部で **prepare 済みの同じ計画**を **apply** できる**別経路**が必要になる（§25.25.34.31 の接続順）
+- **具体的な公開関数名**と **driver への接続方法**は、本小節では**まだ確定しない**
+
+`_build_snapshot_visit_registration_plan` の先頭アンダースコアを外すだけでは、公開契約として不十分である。入力検証、変更不能な返り値、collector dry-run 検証の包含は prepare の責務として明示する。
+
+###### 採用しない方式
+
+次は**採用しない**。
+
+- `register_snapshot_fixed_visits` の返り値を `int` から別形式へ**破壊的に変更**する
+- snapshot 固定集合を上位処理と driver で**2 回構築**する
+- driver へ順位台帳登録 **callback** を渡す
+- 上位処理が driver 前半の copy、snapshot 構築、collector 設定を**複製**する
+- **mutable な `list[dict]`** を公開契約としてそのまま返す
+- snapshot 計画の構築順を**正式 baseline 到着順位**として扱う
+
+###### 今回まだ確定しない事項
+
+本小節では、次を**確定しない**。
+
+- prepare 関数の正式名称
+- apply 関数の正式名称
+- Node 別 VisitKey 取得 helper の正式名称
+- 順位台帳登録 helper のファイル配置と名称
+- baseline driver の具体的な拡張方法
+- optional plan 引数を使うか、別エントリポイントを作るか
+- 上位 TVT 制御クラスの名称と配置
+- 権利保有車両選定
+- 既到着 Visit の先行順位確定
+- 先頭連続非参加 Visit の確定
+- 権利保有車両の通過予想 timestep `P` の取得
+- TVT 候補 Vehicle 集合
+- 候補全員の通過予想情報
+- 局所仮想計算
+- 経済条件評価
+
+###### Git状態と再開情報（§25.25.34.32）
+
+- 最新保存済み・push 済みコミットは **`101297b`**
+- 今回は設計メモのみを更新する
+- Python コード、テスト、進捗メモ、診断は変更しない
+- `diagnostics/order_control.zip` は既存未追跡、未接触、対象外
+- git add、git commit、git push はまだ行わない
+
+**次の再開地点**
+
+今回記録した snapshot 登録計画の prepare/apply 分割について、追加差分と既存 snapshot 契約との整合を確認する。
+
+その後、まず `order_control_baseline_snapshot.py` の**内部に限って**、変更不能な計画型、prepare、apply、既存 `register_snapshot_fixed_visits` のラッパー化を実装するか判断する。
+
+baseline driver や順位台帳登録との**実際の接続**には、まだ進まない。
