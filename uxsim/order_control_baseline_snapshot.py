@@ -9,8 +9,10 @@ pass validation. Institutional TVT logic stays outside this module.
 from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
+from dataclasses import dataclass
 
 from uxsim.order_control_baseline_collector import OrderControlBaselineCollector
+from uxsim.order_control_tvt_node_rank_state import OrderControlTvtVisitKey
 
 _CURRENT_VISIT_REQUIRED_KEYS = (
     "visit_id",
@@ -19,6 +21,95 @@ _CURRENT_VISIT_REQUIRED_KEYS = (
     "arrival_time",
     "arrival_tiebreaker",
 )
+
+
+@dataclass(frozen=True)
+class OrderControlBaselineSnapshotVisitEntry:
+    """One snapshot-fixed visit registration entry (scalar fields only)."""
+
+    vehicle_name: str
+    vehicle_id: int
+    node_name: str
+    inlink_name: str
+    visit_id: int
+    was_arrived_at_snapshot: bool
+    baseline_arrival_timestep: int | None
+    arrival_tiebreaker: int | float | None
+    route_next_link_name: str | None
+    baseline_passage_timestep: int | None
+
+    @property
+    def visit_key(self) -> OrderControlTvtVisitKey:
+        return (self.vehicle_name, self.visit_id)
+
+
+@dataclass(frozen=True)
+class OrderControlBaselineSnapshotRegistrationPlan:
+    """Validated snapshot-fixed visit registration plan for one baseline fork."""
+
+    baseline_timestep_T: int
+    target_node_names: tuple[str, ...]
+    entries: tuple[OrderControlBaselineSnapshotVisitEntry, ...]
+
+
+def prepare_snapshot_fixed_visit_registration_plan(
+    fork_W,
+    *,
+    target_node_names,
+) -> OrderControlBaselineSnapshotRegistrationPlan:
+    """
+    Build and validate a snapshot-fixed visit registration plan without side effects.
+
+    Resolves target nodes, builds the snapshot-fixed visit set once, validates each
+    entry against collector registration rules on a temporary empty collector, and
+    returns an immutable plan. Does not modify fork_W, any formal collector, or any
+    rank ledger.
+    """
+    target_nodes = _resolve_and_validate_target_nodes(fork_W, target_node_names)
+    fixed_target_node_names = tuple(node_name for node_name, _ in target_nodes)
+    registration_plan_dicts = _build_snapshot_visit_registration_plan(
+        fork_W, target_nodes
+    )
+    entries = tuple(
+        _visit_entry_from_registration_dict(registration_entry)
+        for registration_entry in registration_plan_dicts
+    )
+    plan = OrderControlBaselineSnapshotRegistrationPlan(
+        baseline_timestep_T=fork_W.T,
+        target_node_names=fixed_target_node_names,
+        entries=entries,
+    )
+    validation_collector = OrderControlBaselineCollector()
+    for entry in plan.entries:
+        _register_visit_entry_on_collector(entry, validation_collector)
+    return plan
+
+
+def apply_snapshot_fixed_visit_registration_plan(
+    plan: OrderControlBaselineSnapshotRegistrationPlan,
+    collector: OrderControlBaselineCollector,
+) -> int:
+    """
+    Register every entry from a validated snapshot plan onto a collector.
+
+    Does not rebuild the snapshot-fixed visit set or modify fork_W or any rank ledger.
+    Expects ``plan`` to have been produced and validated by
+    ``prepare_snapshot_fixed_visit_registration_plan``.
+    """
+    if not isinstance(plan, OrderControlBaselineSnapshotRegistrationPlan):
+        raise ValueError(
+            "plan must be an OrderControlBaselineSnapshotRegistrationPlan; "
+            f"got {type(plan).__name__}."
+        )
+    if not isinstance(collector, OrderControlBaselineCollector):
+        raise ValueError(
+            "collector must be an OrderControlBaselineCollector; "
+            f"got {type(collector).__name__}."
+        )
+
+    for entry in plan.entries:
+        _register_visit_entry_on_collector(entry, collector)
+    return len(plan.entries)
 
 
 def register_snapshot_fixed_visits(
@@ -59,16 +150,46 @@ def register_snapshot_fixed_visits(
     int
         Total number of snapshot-fixed visits registered.
     """
-    target_nodes = _resolve_and_validate_target_nodes(fork_W, target_node_names)
-    registration_plan = _build_snapshot_visit_registration_plan(
-        fork_W, target_nodes
+    plan = prepare_snapshot_fixed_visit_registration_plan(
+        fork_W,
+        target_node_names=target_node_names,
     )
-    validation_collector = OrderControlBaselineCollector()
-    for registration_entry in registration_plan:
-        validation_collector.register_snapshot_visit(**registration_entry)
-    for registration_entry in registration_plan:
-        collector.register_snapshot_visit(**registration_entry)
-    return len(registration_plan)
+    return apply_snapshot_fixed_visit_registration_plan(plan, collector)
+
+
+def _visit_entry_from_registration_dict(
+    registration_entry: dict,
+) -> OrderControlBaselineSnapshotVisitEntry:
+    return OrderControlBaselineSnapshotVisitEntry(
+        vehicle_name=registration_entry["vehicle_name"],
+        vehicle_id=registration_entry["vehicle_id"],
+        node_name=registration_entry["node_name"],
+        inlink_name=registration_entry["inlink_name"],
+        visit_id=registration_entry["visit_id"],
+        was_arrived_at_snapshot=registration_entry["was_arrived_at_snapshot"],
+        baseline_arrival_timestep=registration_entry["baseline_arrival_timestep"],
+        arrival_tiebreaker=registration_entry["arrival_tiebreaker"],
+        route_next_link_name=registration_entry["route_next_link_name"],
+        baseline_passage_timestep=registration_entry["baseline_passage_timestep"],
+    )
+
+
+def _register_visit_entry_on_collector(
+    entry: OrderControlBaselineSnapshotVisitEntry,
+    collector: OrderControlBaselineCollector,
+) -> None:
+    collector.register_snapshot_visit(
+        vehicle_name=entry.vehicle_name,
+        vehicle_id=entry.vehicle_id,
+        node_name=entry.node_name,
+        inlink_name=entry.inlink_name,
+        visit_id=entry.visit_id,
+        was_arrived_at_snapshot=entry.was_arrived_at_snapshot,
+        baseline_arrival_timestep=entry.baseline_arrival_timestep,
+        arrival_tiebreaker=entry.arrival_tiebreaker,
+        route_next_link_name=entry.route_next_link_name,
+        baseline_passage_timestep=entry.baseline_passage_timestep,
+    )
 
 
 def _resolve_and_validate_target_nodes(fork_W, target_node_names) -> list[tuple[str, object]]:

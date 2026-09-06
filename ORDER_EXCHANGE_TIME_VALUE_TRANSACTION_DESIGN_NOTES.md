@@ -14900,3 +14900,183 @@ collector 登録に必要な既存 **10 項目**は、すべて `OrderControlBas
 その後、まず `order_control_baseline_snapshot.py` の**内部に限って**、変更不能な計画型、prepare、apply、既存 `register_snapshot_fixed_visits` のラッパー化を実装するか判断する。
 
 baseline driver や順位台帳登録との**実際の接続**には、まだ進まない。
+
+**2026-09-07 更新：** 上記「次の再開地点」は、prepare/apply 分割を**実装する前**の記録として本文を削除せず残す。本小節 **§25.25.34.32** の実装完了記録と次の再開地点の最新正本は、下記 **「実装完了記録（§25.25.34.32）」** を参照する。
+
+###### 実装完了記録（§25.25.34.32）
+
+**2026-09-07 更新：** `order_control_baseline_snapshot.py` に、§25.25.34.32 で確定した prepare/apply 分割と変更不能な計画型を実装した。本節を、snapshot 部品内部の prepare/apply 実装結果の最新正本とする。上位 TVT 制御、baseline driver、順位台帳登録 helper の接続は、引き続き未実装である。
+
+**変更した本番ファイル**
+
+- `uxsim/order_control_baseline_snapshot.py`
+
+**更新したテストファイル**
+
+- `tests_order_control_baseline_snapshot.py`
+
+**実装した変更不能な型**
+
+- `OrderControlBaselineSnapshotVisitEntry`
+- `OrderControlBaselineSnapshotRegistrationPlan`
+
+**`OrderControlBaselineSnapshotVisitEntry` の内容**
+
+- snapshot 固定 Visit **1 件分**の collector 登録内容を保持する
+- collector 登録に必要な既存 **10 項目**を保持する
+- `Vehicle`、`Node`、`Link`、`World`、`collector` 等のオブジェクト参照を保持しない
+- **frozen dataclass** である
+- `visit_key` は保存フィールドではなく、`vehicle_name` と `visit_id` から **property** で導出する
+
+**`OrderControlBaselineSnapshotRegistrationPlan` の内容**
+
+- **1 回の** snapshot 固定 Visit 集合全体を表す
+- `baseline_timestep_T` を保持する
+- `target_node_names` を **tuple** で保持する
+- `entries` を **tuple** で保持する
+- **frozen dataclass** である
+- 計画内の並び順は、正式 baseline 到着順位や順位確定順を**意味しない**（§25.22.13）
+
+**実装した prepare 関数**
+
+正式名称：`prepare_snapshot_fixed_visit_registration_plan`
+
+責務：
+
+- 対象 Node を既存契約に従って解決・検証する
+- `fork_W` の snapshot 時点から snapshot 固定 Visit 集合を**一度だけ**構築する
+- 内部の登録 dict を変更不能な `VisitEntry` へ変換する
+- `entries` を tuple として `RegistrationPlan` へ格納する
+- 空の `OrderControlBaselineCollector` を使って既存登録契約に適合することを **dry-run** 検証する
+- 検証済み計画を返す
+
+prepare が変更しないもの：
+
+- `fork_W`
+- 正式 collector
+- 順位台帳
+- `Vehicle`
+- `Node`
+- `Link`
+
+**実装した apply 関数**
+
+正式名称：`apply_snapshot_fixed_visit_registration_plan`
+
+責務：
+
+- prepare 済みの `RegistrationPlan` を受け取る
+- `plan.entries` を順に collector へ登録する
+- 登録件数を **int** で返す
+
+apply が行わないこと：
+
+- snapshot 固定集合の再構築
+- `fork_W` の走査
+- 対象 Node の再解決
+- prepare と同じ dry-run 検証の繰り返し
+- 順位台帳への登録
+- baseline 仮想計算
+- 権利保有車両選定
+
+**既存 API の維持**
+
+次の既存関数の外部シグネチャと返り値 **int** を維持した。
+
+```python
+register_snapshot_fixed_visits(
+    fork_W,
+    collector,
+    *,
+    target_node_names,
+) -> int
+```
+
+内部は次の薄いラッパーへ変更した。
+
+1. `prepare_snapshot_fixed_visit_registration_plan` を **1 回**呼ぶ
+2. 得られた同じ `plan` を `apply_snapshot_fixed_visit_registration_plan` へ渡す
+3. apply が返した登録件数を返す
+
+これにより、既存 baseline driver、診断、既存テストを**変更せず**に互換性を維持した。
+
+**snapshot 固定集合を一度だけ構築する保証**
+
+- prepare 内で `_build_snapshot_visit_registration_plan` を **1 回だけ**呼ぶ
+- apply は `plan.entries` を使用し、snapshot 固定集合を**再構築しない**
+- `register_snapshot_fixed_visits` も prepare を **1 回だけ**呼ぶ
+- 上位処理と driver による二重構築は、**まだ導入していない**
+
+**Node 別 VisitKey 専用 helper**
+
+今回は**追加していない**。
+
+理由：
+
+- `plan.entries` を明示的に走査できる
+- 各 entry に `visit_key` property がある
+- 正式な helper 名と配置は引き続き未確定
+- 必要性が明確になる前に API を増やさない
+
+**A 型・B 型および既存内容の維持**
+
+- A 型の `was_arrived_at_snapshot` は `True`
+- A 型の `baseline_arrival_timestep`、`arrival_tiebreaker`、`route_next_link_name` を維持
+- B 型の `was_arrived_at_snapshot` は `False`
+- B 型の `baseline_arrival_timestep`、`arrival_tiebreaker`、`route_next_link_name` は `None`
+- `baseline_passage_timestep` は snapshot 登録時には `None`
+- `vehicle_name`、`vehicle_id`、`node_name`、`inlink_name`、`visit_id` を変更しない
+- 既存 snapshot 構築順を維持する
+- 構築順を順位として使用しない
+
+**テスト結果**
+
+| 実行 | 結果 |
+|------|------|
+| `python -m py_compile`（変更した Python ファイル） | 成功 |
+| `python tests_order_control_baseline_snapshot.py` | **83 テスト**成功 |
+| `python tests_order_control_baseline_driver.py` | **66 テスト**成功 |
+| `python tests_order_control_baseline_collector.py` | 成功 |
+| `pytest`（上記 3 ファイル） | **182 passed** |
+| `git diff --check` | 問題なし |
+
+prepare/apply 関連として **24 件**のテストを追加し、既存 **59 件**を維持した（合計 83 件）。
+
+**baseline driver との互換性**
+
+- baseline driver は今回**変更していない**
+- 従来どおり `register_snapshot_fixed_visits` を使用する
+- baseline driver の既存 **66 テスト**がすべて成功した
+- prepare 済み `plan` を driver へ外部から渡す実接続は、**まだ行っていない**
+
+**今回実装していないもの**
+
+- 実 World 側順位台帳への登録 helper
+- baseline driver への `RegistrationPlan` 受渡し
+- baseline driver の新しいエントリポイント
+- 上位 TVT 制御
+- callback または hook
+- rollback API
+- Node 別 VisitKey 取得 helper
+- 権利保有車両選定
+- 既到着 Visit の先行順位確定
+- 先頭連続非参加 Visit の順位確定
+- 権利保有車両の通過予想 timestep `P` の取得
+- TVT 候補 Vehicle 集合
+- 候補全員の通過情報確認
+- 第 1 部品の変更
+
+**Git 状態（実装完了記録時点）**
+
+- 作業開始時点の最新保存済み・push 済みコミットは **`9327344`**
+- 本番・テストの変更は `order_control_baseline_snapshot.py` と `tests_order_control_baseline_snapshot.py` の 2 ファイル
+- `diagnostics/order_control.zip` は既存未追跡、未接触、対象外
+- 本実装記録追記時点では、Python 変更は未コミットの作業ツリーに存在する
+- git add、git commit、git push は、本 Markdown 追記時点ではまだ行わない
+
+**次の再開地点（実装完了後）**
+
+1. 今回実装した prepare/apply 分割と変更不能な snapshot 登録計画について、追加メモとコード差分の最終整合を確認する
+2. その後、検証済み `RegistrationPlan` に含まれる Node 名と VisitKey を使い、実 World 側の Node 別順位台帳へ未登録 Visit を一括登録する**薄い helper** の責務と配置を検討する
+3. baseline driver への実接続は、その helper の設計後に**別途**検討する
+4. 権利保有車両選定へは**まだ進まない**

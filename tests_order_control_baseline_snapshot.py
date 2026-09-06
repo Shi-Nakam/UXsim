@@ -5,9 +5,18 @@
 #
 # Requires uxsim to be importable (e.g. pip install -e .).
 
+from dataclasses import FrozenInstanceError
+from unittest.mock import patch
+
 from uxsim import World
 from uxsim.order_control_baseline_collector import OrderControlBaselineCollector
-from uxsim.order_control_baseline_snapshot import register_snapshot_fixed_visits
+from uxsim.order_control_baseline_snapshot import (
+    OrderControlBaselineSnapshotRegistrationPlan,
+    OrderControlBaselineSnapshotVisitEntry,
+    apply_snapshot_fixed_visit_registration_plan,
+    prepare_snapshot_fixed_visit_registration_plan,
+    register_snapshot_fixed_visits,
+)
 
 
 def _prepare_network(W):
@@ -1618,6 +1627,443 @@ def test_rejects_not_yet_arrived_vehicle_reappearing_on_different_node():
     assert _collector_is_empty(collector)
 
 
+# --- prepare / apply split (design memo §25.25.34.32) ---
+
+
+def _build_prepare_apply_arrived_world():
+    W = _build_time_value_junction_world(name="prepare_apply_arrived")
+    snapshot_T = 20
+    W.T = snapshot_T
+    vehicle = W.addVehicle("orig", "dest", 0, name="prepare_apply_arrived")
+    _advance_until_on_inlink(vehicle, "in")
+    _place_arrived_vehicle_at_snapshot(
+        W,
+        vehicle,
+        inlink_name="in",
+        target_node_name="junction",
+        outlink_name="out",
+        arrival_timestep=10,
+        snapshot_timestep=snapshot_T,
+    )
+    return W, vehicle
+
+
+def _build_prepare_apply_mixed_world():
+    W = _build_time_value_merge_world()
+    snapshot_T = 20
+    W.T = snapshot_T
+    arrived_vehicle = W.addVehicle("orig1", "dest", 0, name="arrived_on_merge_prepare_apply")
+    not_yet_arrived_vehicle = W.addVehicle(
+        "orig2", "dest", 0, name="not_yet_arrived_on_merge_prepare_apply"
+    )
+    _advance_until_on_inlink(arrived_vehicle, "link1")
+    _advance_until_on_inlink(not_yet_arrived_vehicle, "link2")
+    _place_arrived_vehicle_at_snapshot(
+        W,
+        arrived_vehicle,
+        inlink_name="link1",
+        target_node_name="merge",
+        outlink_name="out",
+        arrival_timestep=10,
+        snapshot_timestep=snapshot_T,
+    )
+    _place_not_yet_arrived_vehicle_at_snapshot(
+        W,
+        not_yet_arrived_vehicle,
+        inlink_name="link2",
+        snapshot_timestep=snapshot_T,
+    )
+    return W, arrived_vehicle, not_yet_arrived_vehicle
+
+
+def test_prepare_returns_registration_plan():
+    W, _vehicle = _build_prepare_apply_arrived_world()
+    plan = prepare_snapshot_fixed_visit_registration_plan(
+        W, target_node_names=["junction"]
+    )
+    assert isinstance(plan, OrderControlBaselineSnapshotRegistrationPlan)
+
+
+def test_plan_and_entry_are_frozen_dataclasses():
+    W, _vehicle = _build_prepare_apply_arrived_world()
+    plan = prepare_snapshot_fixed_visit_registration_plan(
+        W, target_node_names=["junction"]
+    )
+    assert plan.__dataclass_params__.frozen is True
+    entry = plan.entries[0]
+    assert isinstance(entry, OrderControlBaselineSnapshotVisitEntry)
+    assert entry.__dataclass_params__.frozen is True
+
+
+def test_plan_target_node_names_and_entries_are_tuples():
+    W = _build_two_time_value_nodes_world()
+    plan = prepare_snapshot_fixed_visit_registration_plan(
+        W, target_node_names=["junction_a", "junction_b"]
+    )
+    assert isinstance(plan.target_node_names, tuple)
+    assert plan.target_node_names == ("junction_a", "junction_b")
+    assert isinstance(plan.entries, tuple)
+
+
+def test_entry_visit_key_derived_from_vehicle_name_and_visit_id():
+    W, vehicle = _build_prepare_apply_arrived_world()
+    plan = prepare_snapshot_fixed_visit_registration_plan(
+        W, target_node_names=["junction"]
+    )
+    entry = plan.entries[0]
+    assert entry.visit_key == (vehicle.name, vehicle.order_control_visit_id)
+    assert entry.visit_key == (entry.vehicle_name, entry.visit_id)
+
+
+def test_entry_fields_contain_no_world_object_references():
+    W, _vehicle = _build_prepare_apply_arrived_world()
+    plan = prepare_snapshot_fixed_visit_registration_plan(
+        W, target_node_names=["junction"]
+    )
+    entry = plan.entries[0]
+    allowed_types = (str, int, bool, float, type(None))
+    for field_name in (
+        "vehicle_name",
+        "vehicle_id",
+        "node_name",
+        "inlink_name",
+        "visit_id",
+        "was_arrived_at_snapshot",
+        "baseline_arrival_timestep",
+        "arrival_tiebreaker",
+        "route_next_link_name",
+        "baseline_passage_timestep",
+    ):
+        value = getattr(entry, field_name)
+        assert isinstance(value, allowed_types), (
+            f"{field_name}={value!r} has unexpected type {type(value).__name__}"
+        )
+
+
+def test_prepare_does_not_modify_formal_collector():
+    W, _vehicle = _build_prepare_apply_arrived_world()
+    collector = _new_collector()
+    prepare_snapshot_fixed_visit_registration_plan(
+        W, target_node_names=["junction"]
+    )
+    assert collector.export_node_baseline_visits("junction") == []
+
+
+def test_prepare_does_not_modify_fork_world():
+    W, vehicle = _build_prepare_apply_arrived_world()
+    world_state_before = (
+        W.T,
+        vehicle.state,
+        vehicle.link.name,
+        vehicle.route_next_link.name,
+        vehicle.order_control_visit_id,
+    )
+    prepare_snapshot_fixed_visit_registration_plan(
+        W, target_node_names=["junction"]
+    )
+    world_state_after = (
+        W.T,
+        vehicle.state,
+        vehicle.link.name,
+        vehicle.route_next_link.name,
+        vehicle.order_control_visit_id,
+    )
+    assert world_state_before == world_state_after
+
+
+def test_prepare_builds_snapshot_plan_only_once():
+    W, _vehicle = _build_prepare_apply_arrived_world()
+    build_call_count = 0
+    original_build = (
+        __import__(
+            "uxsim.order_control_baseline_snapshot",
+            fromlist=["_build_snapshot_visit_registration_plan"],
+        )._build_snapshot_visit_registration_plan
+    )
+
+    def counting_build(fork_W, target_nodes):
+        nonlocal build_call_count
+        build_call_count += 1
+        return original_build(fork_W, target_nodes)
+
+    with patch(
+        "uxsim.order_control_baseline_snapshot._build_snapshot_visit_registration_plan",
+        side_effect=counting_build,
+    ):
+        prepare_snapshot_fixed_visit_registration_plan(
+            W, target_node_names=["junction"]
+        )
+    assert build_call_count == 1
+
+
+def test_prepare_runs_empty_collector_dry_run_validation():
+    W, _vehicle = _build_prepare_apply_arrived_world()
+    register_call_count = 0
+    original_register = OrderControlBaselineCollector.register_snapshot_visit
+
+    def counting_register(self, **kwargs):
+        nonlocal register_call_count
+        register_call_count += 1
+        return original_register(self, **kwargs)
+
+    with patch.object(
+        OrderControlBaselineCollector,
+        "register_snapshot_visit",
+        counting_register,
+    ):
+        prepare_snapshot_fixed_visit_registration_plan(
+            W, target_node_names=["junction"]
+        )
+    assert register_call_count == 1
+
+
+def test_prepare_invalid_input_raises_without_returning_plan():
+    W, vehicle = _build_prepare_apply_arrived_world()
+    vehicle.route_next_link = None
+    try:
+        prepare_snapshot_fixed_visit_registration_plan(
+            W, target_node_names=["junction"]
+        )
+        raise AssertionError("Expected ValueError from prepare")
+    except ValueError as exc:
+        assert "route_next_link=None" in str(exc)
+
+
+def test_apply_registers_all_plan_entries_on_collector():
+    W, vehicle = _build_prepare_apply_arrived_world()
+    plan = prepare_snapshot_fixed_visit_registration_plan(
+        W, target_node_names=["junction"]
+    )
+    collector = _new_collector()
+    count = apply_snapshot_fixed_visit_registration_plan(plan, collector)
+    assert count == 1
+    snapshot = collector.get_baseline_visit_snapshot(
+        vehicle.name, vehicle.order_control_visit_id
+    )
+    assert snapshot is not None
+    assert snapshot["node_name"] == "junction"
+
+
+def test_apply_returns_registration_count_int():
+    W, _arrived_vehicle, _not_yet_arrived_vehicle = _build_prepare_apply_mixed_world()
+    plan = prepare_snapshot_fixed_visit_registration_plan(
+        W, target_node_names=["merge"]
+    )
+    collector = _new_collector()
+    count = apply_snapshot_fixed_visit_registration_plan(plan, collector)
+    assert isinstance(count, int)
+    assert count == 2
+
+
+def test_apply_does_not_rebuild_snapshot_plan():
+    W, _vehicle = _build_prepare_apply_arrived_world()
+    plan = prepare_snapshot_fixed_visit_registration_plan(
+        W, target_node_names=["junction"]
+    )
+    build_call_count = 0
+    original_build = (
+        __import__(
+            "uxsim.order_control_baseline_snapshot",
+            fromlist=["_build_snapshot_visit_registration_plan"],
+        )._build_snapshot_visit_registration_plan
+    )
+
+    def counting_build(fork_W, target_nodes):
+        nonlocal build_call_count
+        build_call_count += 1
+        return original_build(fork_W, target_nodes)
+
+    collector = _new_collector()
+    with patch(
+        "uxsim.order_control_baseline_snapshot._build_snapshot_visit_registration_plan",
+        side_effect=counting_build,
+    ):
+        apply_snapshot_fixed_visit_registration_plan(plan, collector)
+    assert build_call_count == 0
+
+
+def test_apply_does_not_modify_plan():
+    W, _vehicle = _build_prepare_apply_arrived_world()
+    plan = prepare_snapshot_fixed_visit_registration_plan(
+        W, target_node_names=["junction"]
+    )
+    entries_before = plan.entries
+    collector = _new_collector()
+    apply_snapshot_fixed_visit_registration_plan(plan, collector)
+    assert plan.entries is entries_before
+
+
+def test_apply_rejects_non_plan_input():
+    collector = _new_collector()
+    try:
+        apply_snapshot_fixed_visit_registration_plan({"not": "a plan"}, collector)
+        raise AssertionError("Expected ValueError for invalid plan type")
+    except ValueError as exc:
+        assert "OrderControlBaselineSnapshotRegistrationPlan" in str(exc)
+
+
+def test_plan_fields_are_immutable_after_prepare():
+    W, _vehicle = _build_prepare_apply_arrived_world()
+    plan = prepare_snapshot_fixed_visit_registration_plan(
+        W, target_node_names=["junction"]
+    )
+    try:
+        plan.baseline_timestep_T = 99
+        raise AssertionError("Expected FrozenInstanceError when mutating plan")
+    except FrozenInstanceError:
+        pass
+    try:
+        plan.entries[0].vehicle_name = "mutated"
+        raise AssertionError("Expected FrozenInstanceError when mutating entry")
+    except FrozenInstanceError:
+        pass
+
+
+def test_register_snapshot_fixed_visits_still_returns_int():
+    W, _vehicle = _build_prepare_apply_arrived_world()
+    collector = _new_collector()
+    count = register_snapshot_fixed_visits(
+        W, collector, target_node_names=["junction"]
+    )
+    assert isinstance(count, int)
+    assert count == 1
+
+
+def test_register_snapshot_fixed_visits_calls_prepare_and_apply_once_each():
+    W, _vehicle = _build_prepare_apply_arrived_world()
+    collector = _new_collector()
+    prepare_call_count = 0
+    apply_call_count = 0
+    original_prepare = prepare_snapshot_fixed_visit_registration_plan
+    original_apply = apply_snapshot_fixed_visit_registration_plan
+
+    def counting_prepare(fork_W, *, target_node_names):
+        nonlocal prepare_call_count
+        prepare_call_count += 1
+        return original_prepare(fork_W, target_node_names=target_node_names)
+
+    def counting_apply(plan, collector_arg):
+        nonlocal apply_call_count
+        apply_call_count += 1
+        return original_apply(plan, collector_arg)
+
+    with patch(
+        "uxsim.order_control_baseline_snapshot.prepare_snapshot_fixed_visit_registration_plan",
+        side_effect=counting_prepare,
+    ), patch(
+        "uxsim.order_control_baseline_snapshot.apply_snapshot_fixed_visit_registration_plan",
+        side_effect=counting_apply,
+    ):
+        register_snapshot_fixed_visits(
+            W, collector, target_node_names=["junction"]
+        )
+    assert prepare_call_count == 1
+    assert apply_call_count == 1
+
+
+def test_prepare_then_apply_matches_existing_arrived_registration_content():
+    W, vehicle = _build_prepare_apply_arrived_world()
+    plan = prepare_snapshot_fixed_visit_registration_plan(
+        W, target_node_names=["junction"]
+    )
+    collector = _new_collector()
+    apply_snapshot_fixed_visit_registration_plan(plan, collector)
+    entry = plan.entries[0]
+    snapshot = collector.get_baseline_visit_snapshot(
+        vehicle.name, vehicle.order_control_visit_id
+    )
+    assert entry.was_arrived_at_snapshot is True
+    assert snapshot["was_arrived_at_snapshot"] is True
+    assert entry.baseline_arrival_timestep == 10
+    assert snapshot["baseline_arrival_timestep"] == 10
+    assert entry.arrival_tiebreaker == 0.25
+    assert snapshot["arrival_tiebreaker"] == 0.25
+    assert entry.route_next_link_name == "out"
+    assert snapshot["route_next_link_name"] == "out"
+    assert entry.baseline_passage_timestep is None
+    assert snapshot["baseline_passage_timestep"] is None
+
+
+def test_prepare_then_apply_matches_existing_not_yet_arrived_registration_content():
+    W = _build_time_value_junction_world(name="prepare_apply_b_only")
+    snapshot_T = 20
+    W.T = snapshot_T
+    vehicle = W.addVehicle("orig", "dest", 0, name="prepare_apply_b_only")
+    _advance_until_on_inlink(vehicle, "in")
+    _place_not_yet_arrived_vehicle_at_snapshot(
+        W, vehicle, inlink_name="in", snapshot_timestep=snapshot_T
+    )
+    plan = prepare_snapshot_fixed_visit_registration_plan(
+        W, target_node_names=["junction"]
+    )
+    collector = _new_collector()
+    apply_snapshot_fixed_visit_registration_plan(plan, collector)
+    entry = plan.entries[0]
+    snapshot = collector.get_baseline_visit_snapshot(
+        vehicle.name, vehicle.order_control_visit_id
+    )
+    assert entry.was_arrived_at_snapshot is False
+    assert snapshot["was_arrived_at_snapshot"] is False
+    assert entry.baseline_arrival_timestep is None
+    assert snapshot["baseline_arrival_timestep"] is None
+    assert entry.arrival_tiebreaker is None
+    assert snapshot["arrival_tiebreaker"] is None
+    assert entry.route_next_link_name is None
+    assert snapshot["route_next_link_name"] is None
+
+
+def test_prepare_preserves_existing_construction_order():
+    W, arrived_vehicle, not_yet_arrived_vehicle = _build_prepare_apply_mixed_world()
+    plan = prepare_snapshot_fixed_visit_registration_plan(
+        W, target_node_names=["merge"]
+    )
+    assert len(plan.entries) == 2
+    assert plan.entries[0].vehicle_name == arrived_vehicle.name
+    assert plan.entries[0].was_arrived_at_snapshot is True
+    assert plan.entries[1].vehicle_name == not_yet_arrived_vehicle.name
+    assert plan.entries[1].was_arrived_at_snapshot is False
+
+
+def test_empty_snapshot_plan_prepare_and_apply_return_zero():
+    W = _build_two_time_value_nodes_world()
+    plan = prepare_snapshot_fixed_visit_registration_plan(
+        W, target_node_names=["junction_a", "junction_b"]
+    )
+    assert plan.entries == ()
+    collector = _new_collector()
+    count = apply_snapshot_fixed_visit_registration_plan(plan, collector)
+    assert count == 0
+    assert collector.export_node_baseline_visits("junction_a") == []
+    assert collector.export_node_baseline_visits("junction_b") == []
+
+
+def test_prepare_failure_leaves_formal_collector_empty():
+    W, vehicle = _build_prepare_apply_arrived_world()
+    vehicle.route_next_link = None
+    collector = _new_collector()
+    try:
+        prepare_snapshot_fixed_visit_registration_plan(
+            W, target_node_names=["junction"]
+        )
+        raise AssertionError("Expected ValueError from prepare")
+    except ValueError:
+        pass
+    assert collector.export_node_baseline_visits("junction") == []
+
+
+def test_prepare_failure_before_apply_leaves_formal_collector_empty():
+    W, vehicle = _build_prepare_apply_arrived_world()
+    vehicle.route_next_link = None
+    collector = _new_collector()
+    _expect_value_error(
+        lambda: register_snapshot_fixed_visits(
+            W, collector, target_node_names=["junction"]
+        ),
+        "route_next_link=None",
+    )
+    assert collector.export_node_baseline_visits("junction") == []
+
+
 TESTS = [
     test_rejects_empty_target_node_names,
     test_rejects_duplicate_target_node_names,
@@ -1678,6 +2124,30 @@ TESTS = [
     test_does_not_skip_participates_false_vehicle_on_inlink,
     test_timestep_T_not_yet_arrived_vehicle_registers_then_arrives_on_exec,
     test_registration_does_not_add_later_inlink_vehicle_to_collector,
+    test_prepare_returns_registration_plan,
+    test_plan_and_entry_are_frozen_dataclasses,
+    test_plan_target_node_names_and_entries_are_tuples,
+    test_entry_visit_key_derived_from_vehicle_name_and_visit_id,
+    test_entry_fields_contain_no_world_object_references,
+    test_prepare_does_not_modify_formal_collector,
+    test_prepare_does_not_modify_fork_world,
+    test_prepare_builds_snapshot_plan_only_once,
+    test_prepare_runs_empty_collector_dry_run_validation,
+    test_prepare_invalid_input_raises_without_returning_plan,
+    test_apply_registers_all_plan_entries_on_collector,
+    test_apply_returns_registration_count_int,
+    test_apply_does_not_rebuild_snapshot_plan,
+    test_apply_does_not_modify_plan,
+    test_apply_rejects_non_plan_input,
+    test_plan_fields_are_immutable_after_prepare,
+    test_register_snapshot_fixed_visits_still_returns_int,
+    test_register_snapshot_fixed_visits_calls_prepare_and_apply_once_each,
+    test_prepare_then_apply_matches_existing_arrived_registration_content,
+    test_prepare_then_apply_matches_existing_not_yet_arrived_registration_content,
+    test_prepare_preserves_existing_construction_order,
+    test_empty_snapshot_plan_prepare_and_apply_return_zero,
+    test_prepare_failure_leaves_formal_collector_empty,
+    test_prepare_failure_before_apply_leaves_formal_collector_empty,
 ]
 
 

@@ -4768,6 +4768,62 @@ baseline_horizon_steps + 1 <= fork_W.TSIZE - fork_W.T
 3. 今回の第 1 部品だけで全 World baseline 必要情報の完全解決を判定しない
 4. この確認の後、到着済み相当・順位未確定 Visit の抽出と先行順位確定へ進めるか判断する
 
+##### 2026-09-07追記：snapshot固定Visit登録計画のprepare/apply分割を実装
+
+詳細正本は設計メモ **§25.25.34.32** の「実装完了記録」。
+
+- snapshot 固定 Visit 登録処理を **prepare** と **apply** へ分割した
+- 変更不能な `OrderControlBaselineSnapshotVisitEntry` と `OrderControlBaselineSnapshotRegistrationPlan` を実装した
+- snapshot 固定 Visit 集合を**一度だけ**構築する
+- 同じ `plan` を、後続の順位台帳登録と collector 登録で**共有できる**構造にした
+- 現時点では collector 登録にだけ **apply** を使用している
+- 従来の `register_snapshot_fixed_visits` の外部契約と返り値 **int** を維持した
+- baseline driver は変更せず、既存 **66 テスト**が成功した
+- prepare/apply 関連 **24 件**を追加し、snapshot テストは合計 **83 件**成功した
+- `pytest` では関連 3 ファイル合計 **182 件**成功した
+- 順位台帳登録 helper と driver 接続は**未実装**
+- 次は順位台帳登録 helper の責務と配置を検討する
+
+**実装した公開 API**
+
+- `prepare_snapshot_fixed_visit_registration_plan(fork_W, *, target_node_names) -> OrderControlBaselineSnapshotRegistrationPlan`
+- `apply_snapshot_fixed_visit_registration_plan(plan, collector) -> int`
+- `register_snapshot_fixed_visits(...)` — 内部で prepare → apply の薄いラッパー（外部契約維持）
+
+**変更ファイル**
+
+- `uxsim/order_control_baseline_snapshot.py`
+- `tests_order_control_baseline_snapshot.py`
+
+**テスト結果**
+
+| 実行 | 結果 |
+|------|------|
+| `python -m py_compile` | 成功 |
+| `python tests_order_control_baseline_snapshot.py` | 83 テスト成功 |
+| `python tests_order_control_baseline_driver.py` | 66 テスト成功 |
+| `python tests_order_control_baseline_collector.py` | 成功 |
+| `pytest`（上記 3 ファイル） | 182 passed |
+| `git diff --check` | 問題なし |
+
+**今回実装していないもの**
+
+- 実 World 側順位台帳への登録 helper
+- baseline driver への `RegistrationPlan` 受渡し
+- 上位 TVT 制御、callback/hook、rollback
+- 権利保有車両選定以降のすべて
+
+**Git 状態**
+
+- 作業開始時点の最新保存済み・push 済みコミットは **`9327344`**
+- Python 2 ファイルは未コミットの作業ツリーに存在する
+- `diagnostics/order_control.zip` は既存未追跡、未接触、対象外
+- git add、git commit、git push は未実行
+
+**次の再開地点**
+
+検証済み `RegistrationPlan` の Node 名と VisitKey を使い、実 World 側 Node 別順位台帳へ未登録 Visit を一括登録する薄い helper の責務と配置を検討する。baseline driver への実接続はその後に別途検討する。
+
 #### 2026-08-29：TVT権利保有車両選定前の先頭非参加Vehicle先行確定の記録補修
 
 - 過去に確定済みだった、意思決定窓内 baseline 到着順位の先頭に連続する非参加 Vehicle の先行確定が、設計メモに明文化されていなかった
