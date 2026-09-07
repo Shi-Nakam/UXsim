@@ -16593,3 +16593,438 @@ unregistered_collector_visit_keys must be empty after baseline fork alignment fo
 1. 到着タイムステップが **`T` 以下**である、既到着かつ順位未確定の Visit を、Node 別 alignment 結果から抽出し、`confirm_visits_in_order` で順位確定する処理を設計・実装する
 2. その処理は、本小節で実装した `OrderControlTvtBaselineForkAlignmentResult` を入力として受け取る上位処理として配置する
 3. 先頭連続非参加 Visit 処理と権利保有車両選定には**まだ進まない**
+
+##### 25.25.34.38 既到着かつ順位未確定 Visit の先行順位確定（実装前設計）
+
+**2026-09-08 更新：** baseline fork後のNode別alignment結果を入力として、到着タイムステップがbaseline開始時点 `T` 以下であり、順位台帳で未確定であるVisitを、正式baseline到着順のまま先行順位確定する後段処理の実装前仕様を確定した。本小節 **§25.25.34.38** を、この既到着かつ順位未確定Visitの先行順位確定処理の責務・配置・入出力・処理順の最新正本とする。baseline fork後のNode別alignment接続の実装完了記録は **§25.25.34.37** を参照する。
+
+**非技術的な説明**
+
+baseline 開始時点 **T** ですでに到着している Vehicle は、順位交換の起点にしない。到着タイムステップが **T 以下**であり、順位台帳では未確定の Visit を、到着順のまま確定順位ブロックへ追加する。これにより、その後は未到着の順位未確定 Visit を使って、先頭連続非参加 Visit 処理と権利保有車両選定へ進められる。今回の処理では、先頭連続非参加 Visit 処理と権利保有車両選定は行わない。既存の baseline fork や alignment をやり直す必要はなく、既存実装の後戻りではない。
+
+**1. 新しい専用モジュール**
+
+- ファイル: `uxsim/order_control_tvt_arrived_undetermined_confirmation.py`
+- `OrderControlTvtBaselineForkAlignmentResult`（alignment 結果）を入力として、既到着 Visit を順位確定する**独立した後段モジュール**とする
+- baseline fork、alignment、順位状態部品の既存責務は変更しない
+
+**2. 新しい公開関数**
+
+- `confirm_already_arrived_undetermined_visits`
+
+**3. 引数**
+
+- `alignment_fork_result: OrderControlTvtBaselineForkAlignmentResult`
+- `rank_states_by_node_name: Mapping[str, OrderControlTvtNodeRankState]`
+- `baseline_timestep_T` を別引数に**しない**。`T` は `alignment_fork_result.fork_result.baseline_timestep_T` から取得する
+- `real_W` を受け取らない
+- baseline fork や alignment を再実行しない
+- `rank_states_by_node_name` は呼出側所有とし、新しい関数は生成・保持・置換・所有しない
+
+**4. 既到着 Vehicle の定義**
+
+- baseline 開始時点を **T** とする
+- **到着タイムステップが T 以下**の Vehicle すべてが既到着 Vehicle である
+- それ以外の別種類の既到着 Vehicle は想定しない
+- 参加・非参加を問わず同じ定義を使う
+- 「到着時点」ではなく、正確に **「到着タイムステップ」** と記載する
+
+**5. 抽出対象**
+
+各 Node の `alignment_result.resolved_undetermined_visits` のうち、
+
+`baseline_arrival_timestep <= T`
+
+を満たす Visit を抽出する。
+
+- 境界値 **`baseline_arrival_timestep == T`** を必ず含める
+- snapshot 時点で既到着の A 型は、現在の snapshot 登録コード上、到着タイムステップが **T 未満**である
+- snapshot 時点では未到着の B 型が fork の最初の処理で到着タイムステップ **T** となった場合も、既到着として確定する
+- `was_arrived_at_snapshot` を後続抽出条件に**使用しない**
+- `baseline_arrival_timestep < T+1` のような言い換えを**使用しない**
+- 参加・非参加属性を抽出条件に**使用しない**
+
+**6. 順位確定順**
+
+- `resolved_undetermined_visits` は、既存 alignment 契約によって、`baseline_arrival_timestep` → `arrival_tiebreaker` → `vehicle_id` の昇順である
+- 新しい処理では**再ソートしない**
+- resolved 列の既存順を維持して、対象 Visit の `VisitKey` 列を作る
+- Vehicle 名または `VisitKey` の文字列順を**使用しない**
+- 参加状態を順位決定に**使用しない**
+
+**7. Node 対応と処理順**
+
+- `fork_result.target_node_names` の順に処理する
+- 同じ位置の `alignment_results` 要素を使用する
+- `target_node_names` の Node 名と `alignment_result.node_name` が一致することを、重大不整合の必要最小限の確認として検証する
+- Node 名不一致なら、その Node の順位確定前に `RuntimeError` を送出する
+- alignment 結果を Node 名辞書へ再構成しない
+
+**8. `confirm_visits_in_order`**
+
+- 対応する `rank_states_by_node_name[node_name]` へ、抽出した `VisitKey` tuple を渡す
+- Node ごとに正確に **1 回**呼ぶ
+- 渡した順がそのまま新しい確定順位になる
+- 既存確定順位ブロック末尾の次から連続して追加される
+- 入力内重複、確定済み Visit 混入、未登録 Visit 混入の検証は、既存 `confirm_visits_in_order` へ委ねる
+- 呼出側で同じ検証を重複実装しない
+- 1 回の confirm 呼出し内では、既存 API の原子性を利用する
+
+**9. 既到着 Visit が 0 件の Node**
+
+- 空の `VisitKey` tuple でも `confirm_visits_in_order` を Node ごとに **1 回**呼ぶ
+- 空入力は既存 API で正式に許可された no-op である
+- `k_confirmed_before` と `k_confirmed_after` は同じ
+- `newly_confirmed_count` は 0
+- 順位状態は変更されない
+- 0 件だけを理由に confirm 呼出しを省略する分岐を**設けない**
+- 既存設計では空列時の呼出しは必須ではないが、今回の上位処理では Node ごとの直線的な処理と呼出回数を維持するため、1 回呼ぶ方針を採用する
+
+**10. `unresolved_undetermined_visits`**
+
+- unresolved は、到着タイムステップを持たない正常な B 型未解決 Visit である
+- 既到着 Visit の抽出対象に**含めない**
+- unresolved が非空でも、resolved 列に存在する到着タイムステップが T 以下の既到着 Visit は順位確定する
+- unresolved 自体は未確定のまま残す
+- unresolved 非空を理由とする TVT 続行・中止判断は、今回の処理では**行わない**
+- 既到着確定を行うことと、その後の TVT を続行してよいことを**混同しない**
+
+**11. 複数 Node 時**
+
+- `fork_result.target_node_names` 順に Node を処理する
+- Node ごとに `confirm_visits_in_order` を 1 回呼ぶ
+- Node A の確定成功後、Node B で失敗した場合、Node A の正常な確定を **rollback しない**
+- Node B の confirm は 1 回の呼出し内で原子的なので、失敗時に Node B の部分確定を残さない
+- Node B より後の Node は処理しない
+- 特別な複数 Node 横断 rollback API を追加しない
+- 部分的な上位結果は返さず、例外を伝播する
+
+**12. 順位台帳にだけ存在する Visit**
+
+- 今回の処理は、今回の collector 記録を起点とする alignment 結果を入力にする
+- 順位台帳にだけ存在し、今回の collector にない Visit を、この処理では探索・確定しない
+- これは既到着 Vehicle の定義を狭める意味ではなく、**今回の後段処理の入力範囲**を示す
+- snapshot 時点で対象 Node に到着して待っている研究対象 Vehicle と、対象 inlink 上にいて fork 中に到着タイムステップ T となる研究対象 Vehicle は、現在の snapshot 固定登録から collector、alignment、今回の抽出へ載る
+- すでに対象 Node を通過済みなのに順位未確定の Visit は、今回の先行確定に混ぜず、既存設計どおり別の重大不整合検出の対象とする
+- 以前登録されたが今回の snapshot 固定集合に含まれない台帳のみの Visit についても、今回の処理へ実 World 探索または台帳全件探索を追加しない
+
+**13. 結果型**
+
+次の 2 層の frozen dataclass を設ける方針とする。
+
+Node 別結果:
+
+- `OrderControlTvtNodeArrivedUndeterminedConfirmationResult`
+  - `node_name`
+  - `confirmed_arrived_visit_keys`
+  - `confirm_result: OrderControlTvtConfirmResult`
+
+全体結果:
+
+- `OrderControlTvtArrivedUndeterminedConfirmationResult`
+  - `alignment_fork_result`
+  - `node_confirmation_results: tuple[OrderControlTvtNodeArrivedUndeterminedConfirmationResult, ...]`
+
+明記すること:
+
+- `node_confirmation_results` は `fork_result.target_node_names` と同じ Node 順
+- `alignment_fork_result` を保持し、次段が未到着 resolved および unresolved を再利用できるようにする
+- 既到着以外の resolved Visit を、今回確定した `VisitKey` 列へ複製しない
+- `rank_states_by_node_name` を返り値へ含めない
+- 順位台帳自体を返さない
+- 参加属性、権利保有車両、意思決定窓判定を含めない
+
+**14. 失敗時**
+
+- Node 名不一致は `RuntimeError`
+- `confirm_visits_in_order` の `ValueError` はそのまま伝播する
+- 想定外例外も伝播する
+- 失敗した Node より後の Node は処理しない
+- 部分的な全体結果は返さない
+- 先行 Node の正常な確定は rollback しない
+- `real_W` を入力として受け取らず、World 状態を変更しない
+- baseline fork や alignment を再実行しない
+
+**15. 今回行わない処理**
+
+- baseline fork の実行
+- Node 別 alignment の実行
+- `unregistered_collector_visit_keys` の再確認
+- 実 World の再探索
+- 順位台帳全件の探索
+- 通過済み未確定 Visit の検出
+- 先頭連続非参加 Visit の処理
+- 権利保有車両の選定
+- 意思決定窓抽出
+- 参加属性の取得・使用
+- TVT 続行・中止判断
+- `rank_states_by_node_name` の生成・所有
+- 上位 TVT 制御クラスの実装
+
+**16. 次の処理との境界**
+
+- 今回確定した既到着 Visit は順位未確定集合から除かれる
+- 次段は、到着タイムステップが **T より大きい**未到着・順位未確定 Visit を扱う
+- 意思決定窓内の条件は **`T < baseline_arrival_timestep <= T + 6`** である
+- 次段で、意思決定窓内 baseline 順位の先頭に連続する非参加 Visit を処理する
+- その後、残る未確定参加 Visit の baseline 順位最上位を権利保有車両とする
+- 今回はこれらを**実装しない**
+- TVT 判断直前の `K_confirmed_before` は、今回の `ConfirmResult` の古い値を流用せず、すべての先行確定後に順位状態から再取得する
+
+**17. 現在地（2026-09-08 時点）**
+
+- コミット **`47173e1`** まで push 済みである
+- baseline fork、順位台帳登録、baseline 仮想計算、Node 別 alignment、未登録列の空確認まで実装・検証済みである
+- **次の実装対象**は、本小節で定める既到着かつ順位未確定 Visit の先行順位確定である
+- 先頭連続非参加 Visit 処理と権利保有車両選定には**まだ進まない**
+
+**18. テストで固定する観点**
+
+最低限、次を記録する。
+
+- 到着タイムステップ `< T`
+- 到着タイムステップ `== T`
+- 到着タイムステップ `> T`
+- 同着時の `arrival_tiebreaker`
+- tiebreaker も同じ場合の `vehicle_id`
+- resolved の既存順維持と再ソート非実行
+- 参加属性不使用
+- 既存確定順位ブロック直後への追加
+- 既到着 0 件でも confirm 1 回
+- 全 Visit が既到着
+- 既到着と未到着の混在
+- unresolved 非空でも既到着確定
+- 単一 Node
+- 複数 Node
+- Node 途中失敗
+- 先行 Node の確定残存
+- 失敗 Node 内の原子性
+- 未登録 Visit、確定済み Visit、入力内重複による既存 API 例外の伝播
+- Node 名不一致
+- baseline fork と alignment の再実行なし
+- `real_W` を受け取らず World 状態を変更しない
+- 先頭連続非参加処理の非実行
+- 権利保有車両選定の非実行
+- 既存結果型を変更しない
+
+##### 25.25.34.39 既到着かつ順位未確定 Visit の先行順位確定の実装完了記録
+
+**2026-09-08 更新：** **§25.25.34.38** で確定した、到着タイムステップが baseline 開始時点 `T` 以下である既到着かつ順位未確定 Visit の先行順位確定を、`uxsim/order_control_tvt_arrived_undetermined_confirmation.py` と専用テストへ実装した。本小節 **§25.25.34.39** を、この後段処理の**実装結果・検証結果・次の再開地点**の最新正本とする。実装前仕様は **§25.25.34.38** を参照する。baseline fork 後の Node 別 alignment 接続の実装完了記録は **§25.25.34.37** を参照する。
+
+**§25.25.34.38** は実装前仕様の記録として本文を削除せず残す。本小節と **§25.25.34.38** の記述に差がある場合は、**本小節を実装済み事実の正本**として参照する。
+
+###### 非技術的な説明
+
+baseline 開始時点 **T** ですでに到着している Vehicle を、正式な到着順のまま確定順位ブロックへ移す処理を実装した。
+
+これにより、既到着 Vehicle を順位交換の起点候補から除外し、その後に未到着の順位未確定 Visit を対象とした処理へ進める状態になった。
+
+権利保有車両の特定へ向けた前進であり、既存実装のやり直しではない。
+
+先頭連続非参加 Visit 処理と権利保有車両選定は、**まだ実装していない**。
+
+###### 新規作成した本番モジュール
+
+**ファイル名：** `uxsim/order_control_tvt_arrived_undetermined_confirmation.py`
+
+**役割**
+
+- baseline fork や alignment を**再実行せず**、既存 `OrderControlTvtBaselineForkAlignmentResult` を入力として既到着 Visit を順位確定する**独立した後段モジュール**である
+- 既存 baseline driver、alignment 部品、順位状態部品（`OrderControlTvtNodeRankState`）は**変更していない**
+
+###### 実装した Node 別結果型
+
+**正式名称：** `OrderControlTvtNodeArrivedUndeterminedConfirmationResult`
+
+- **frozen dataclass** である
+
+| フィールド | 意味 |
+|-----------|------|
+| `node_name` | 対象 Node 名 |
+| `confirmed_arrived_visit_keys` | 今回実際に confirm へ渡した `VisitKey` tuple |
+| `confirm_result` | 既存 `OrderControlTvtConfirmResult` |
+
+###### 実装した全体結果型
+
+**正式名称：** `OrderControlTvtArrivedUndeterminedConfirmationResult`
+
+- **frozen dataclass** である
+
+| フィールド | 意味 |
+|-----------|------|
+| `alignment_fork_result` | 入力と**同じオブジェクト**を保持する |
+| `node_confirmation_results` | `fork_result.target_node_names` と**同じ Node 順**の Node 別結果 |
+
+###### 実装した公開関数
+
+**正式名称：** `confirm_already_arrived_undetermined_visits`
+
+**引数**
+
+| 引数 | 意味 |
+|------|------|
+| `alignment_fork_result` | `OrderControlTvtBaselineForkAlignmentResult` |
+| `rank_states_by_node_name` | keyword-only。呼出側所有の Node 名別順位台帳 `Mapping` |
+
+**入力と所有（実装済み）**
+
+- `real_W` を受け取らない
+- `T` は `alignment_fork_result.fork_result.baseline_timestep_T` から取得する（別引数にしない）
+- `rank_states_by_node_name` は呼出側所有であり、本関数は生成・保持・置換・所有しない
+
+###### 既到着 Vehicle の定義と抽出（実装済み）
+
+- baseline 開始時点を **T** とする
+- **到着タイムステップが T 以下**の Vehicle すべてが既到着 Vehicle である
+- それ以外の別種類の既到着 Vehicle は想定しない
+- 参加・非参加を問わず同じ定義を使う
+- 各 Node の `resolved_undetermined_visits` から、`baseline_arrival_timestep <= T` を満たす `VisitKey` だけを抽出する
+- 境界値 **`baseline_arrival_timestep == T`** を含める
+- `was_arrived_at_snapshot` を後続抽出条件に**使用しない**
+- 参加属性を取得・使用しない
+
+###### 順位確定順（実装済み）
+
+- `resolved_undetermined_visits` の**既存順を維持**する
+- その既存順は、既存 alignment 契約により、`baseline_arrival_timestep` → `arrival_tiebreaker` → `vehicle_id` の昇順である
+- 新しい関数では**再ソートしない**
+- Vehicle 名や `VisitKey` の文字列順を**使用しない**
+- 抽出した `VisitKey` tuple を、そのまま `confirm_visits_in_order` へ渡す
+
+###### `confirm_visits_in_order` の利用（実装済み）
+
+- `fork_result.target_node_names` 順に Node を処理する
+- Node ごとに `confirm_visits_in_order` を**正確に 1 回**呼ぶ
+- 既存確定順位ブロック末尾の次から連続して順位が追加される
+- 入力内重複、確定済み Visit、未登録 Visit の検証は既存 API へ委ねる
+- 呼出側で同じ検証を**重複実装していない**
+- 1 回の Node 別 confirm 内では、既存 API の原子性を利用する
+
+公開関数の本文から、少なくとも次の中心部分が直線的に読める構造になっている。
+
+```
+T 取得
+→ target_node_names 順に Node 処理
+→ Node 名対応確認
+→ baseline_arrival_timestep <= T 抽出
+→ confirm_visits_in_order（各 Node 1 回）
+→ Node 別結果保存
+→ 全体結果返却
+```
+
+###### 既到着 Visit が 0 件の Node（実装済み）
+
+- 空 tuple でも `confirm_visits_in_order` を **1 回**呼ぶ
+- no-op として状態を変更しない
+- `k_confirmed_before` と `k_confirmed_after` は同じ
+- `newly_confirmed_count` は 0
+- 0 件だけを理由に confirm を省略する分岐を**設けていない**
+
+###### `unresolved_undetermined_visits` 非空時（実装済み）
+
+- `unresolved_undetermined_visits` は既到着抽出へ**含めない**
+- unresolved が非空でも、resolved 列の到着タイムステップが **T 以下**の Visit は確定する
+- unresolved 自体は未確定のまま残す
+- TVT 続行・中止判断は**行わない**
+- 既到着確定と TVT 続行判断を**混同しない**
+
+###### Node 対応（実装済み）
+
+- `fork_result.target_node_names` と同じ位置の alignment 結果を使用する
+- Node 名辞書へ**再構成しない**
+- 期待 Node 名と `alignment_result.node_name` の不一致のみを重大不整合として確認する
+- 不一致では当該 Node の confirm **前**に `RuntimeError` を送出する
+- メッセージに期待 Node 名、実際 Node 名、index を含める
+
+###### 複数 Node 途中失敗（実装済み）
+
+- `fork_result.target_node_names` 順に処理する
+- 先行 Node の正常な確定は **rollback しない**
+- 失敗 Node 内では `confirm_visits_in_order` の原子性により部分確定を残さない
+- 失敗 Node より後の Node を処理しない
+- 部分的な全体結果を返さない
+- 複数 Node 横断 rollback API を**追加していない**
+
+###### 再実行しないもの（実装済み）
+
+- baseline fork
+- Node 別 alignment
+- collector export
+- 実 World 探索
+- 順位台帳全件探索
+- `unregistered_collector_visit_keys` の再確認
+
+###### 今回実装していない範囲
+
+- 通過済み未確定 Visit の検出
+- 意思決定窓抽出
+- 参加属性の取得・使用
+- 先頭連続非参加 Visit 処理
+- 権利保有車両選定
+- TVT 続行・中止判断
+- `rank_states_by_node_name` の生成・所有
+- 上位 TVT 制御クラス
+
+###### 新規専用テスト
+
+**ファイル名：** `tests_order_control_tvt_arrived_undetermined_confirmation.py`
+
+**最終件数：** **30 tests passed**
+
+**検証済みの主な契約**
+
+- 到着タイムステップ `< T`、`== T`、`> T` の境界
+- `<= T` だけの抽出
+- alignment の既存順維持
+- `arrival_tiebreaker` と `vehicle_id` の順序
+- Vehicle 名順への再ソートなし
+- 既存確定順位ブロック直後への追加
+- 既到着 0 件の no-op confirm
+- unresolved 非空時の既到着確定
+- 単一 Node と複数 Node
+- Node 名不一致
+- 途中失敗時の先行 Node 確定残存
+- 失敗 Node 内の原子性
+- 既存 API 例外の伝播
+- 部分結果なし
+- baseline fork、alignment、collector 再実行なし
+- 実 alignment 結果型と実 rank state を使う統合確認
+- 既存結果型と順位状態型を変更していないこと
+
+###### 私自身による確認
+
+- 本番モジュール全文を確認した
+- 専用テスト 30 件の本文を確認した
+- **§25.25.34.38** との不一致や実装を止める問題は見つからなかった
+- docstring の「baseline start T」が実ファイルで正しいことを確認した
+- Cursor の完了報告だけでなく、実際のコードとテスト本文を確認した
+
+###### 実行済み検証
+
+| 検証 | 結果 |
+|------|------|
+| `py_compile` | 成功 |
+| `tests_order_control_tvt_arrived_undetermined_confirmation.py` | **30 passed** |
+| `tests_order_control_tvt_node_rank_state.py` | **54 passed** |
+| `tests_order_control_tvt_baseline_alignment.py` | **25 passed** |
+| `tests_order_control_tvt_baseline_fork_alignment.py` | **24 passed** |
+| `git diff --check` | 問題なし |
+
+###### 次の再開地点
+
+1. 今回確定した既到着 Visit は順位未確定集合から除かれている
+2. **次の設計対象**は、到着タイムステップが **T より大きい**未到着・順位未確定 Visit のうち、意思決定窓内の Visit を扱う処理である
+3. 意思決定窓内の条件は **`T < baseline_arrival_timestep <= T + 6`** である
+4. 次に、意思決定窓内 baseline 順位の先頭に連続する非参加 Visit を処理する
+5. その後、残る未確定参加 Visit の baseline 順位最上位を権利保有車両とする
+6. 次の設計では、参加属性をどこから取得するかを明確にする必要がある
+7. TVT 判断直前の `K_confirmed_before` は、すべての先行確定後に順位状態から再取得する
+8. 権利保有車両選定そのものには**まだ進まない**
+
+###### Git状態と再開情報（§25.25.34.39）
+
+- 最新保存済み・push 済みコミット（HEAD）は **`47173e1`**
+- **§25.25.34.38** の設計メモ変更は未コミットで維持されている
+- 新しい本番モジュール `uxsim/order_control_tvt_arrived_undetermined_confirmation.py` と専用テスト `tests_order_control_tvt_arrived_undetermined_confirmation.py` は**未追跡**である
+- `diagnostics/order_control.zip` は既存未追跡、未接触、対象外
+- 本実装完了記録追記時点では、git add、git commit、git push は**未実行**
