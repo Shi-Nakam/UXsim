@@ -16042,3 +16042,554 @@ _prepare_baseline_fork
 4. 第 1 部品を**誰が所有**し、**どの上位関数から呼ぶ**かは**未確定**であり、次の設計対象である
 5. `rank_states_by_node_name` を上位 TVT 制御が生成・保持する時点も**未確定**である
 6. 権利保有車両選定には**まだ進まない**
+
+##### 25.25.34.36 baseline fork後のNode別alignment接続
+
+**2026-09-08 更新：** 全 World baseline 仮想計算の正常完了後に、既存の Node 単位 alignment 第 1 部品を接続し、各 Node の `unregistered_collector_visit_keys` が空であることを確認する上位処理の実装前仕様を確定した。本小節 **§25.25.34.36** を、この上位 alignment 接続の責務・配置・入出力・処理順の最新正本とする。順位台帳登録付き baseline fork 実行の実装完了記録は **§25.25.34.35** を参照する。Node 単位 alignment 第 1 部品の結果契約は **§25.25.34.30**、未確定 Visit 登録タイミングと接続原則は **§25.25.34.31** を参照する。
+
+**§25.25.34.35** の「次の再開地点」は、本小節を書く**前**の記録として本文を削除せず残す。本小節と **§25.25.34.35** の記述に差がある場合は、**本小節を実装前仕様の正本**として参照する。
+
+###### 非技術的な説明
+
+baseline 仮想計算の結果に、順位台帳へ事前登録されていない不明な Visit が混ざっていないことを、対象 Node ごとに確認する処理である。
+
+問題がなければ、その照合結果を次の既到着 Visit 順位確定処理へ渡す。
+
+この処理自体は、順位確定、先頭連続非参加 Visit 処理、権利保有車両選定を**行わない**。
+
+###### 今回確定する目的
+
+**§25.25.34.35** で実装済みの `run_snapshot_fixed_baseline_fork_with_tvt_rank_ledger_registration` により、次まで完了している。
+
+1. 実 World の snapshot を固定する
+2. baseline 仮想計算の対象 Visit を確定する
+3. 対象 Visit を順位台帳の順位未確定集合へ登録する
+4. 同じ `RegistrationPlan` を baseline collector へ apply する
+5. 全 World baseline 仮想計算を実行する
+
+今回の目的は、上記 5 の**正常完了後**に、次を接続する薄い上位処理の実装前仕様を確定する。
+
+6. baseline 仮想計算完了後に alignment 第 1 部品を実行する
+7. baseline 結果と順位未確定 Visit の対応を確認する
+8. `unregistered_collector_visit_keys` が空であることを確認する
+
+今回より後の範囲（順位確定、先頭連続非参加 Visit 処理、権利保有車両選定）は**実装しない**。
+
+###### 現在地
+
+- **§25.25.34.35** で、順位台帳登録付き baseline fork 実行まで**実装・検証・コミット済み**である
+- 最新保存済み・push 済みコミットは **`b67c53d`**
+- 次の実装対象は、本小節で定める上位 alignment 接続である
+- 権利保有車両選定には**まだ進まない**
+
+###### 新しい配置モジュール
+
+**ファイル名：** `uxsim/order_control_tvt_baseline_fork_alignment.py`
+
+**役割**
+
+- `order_control_baseline_driver.py` の TVT 経路公開関数と、`order_control_tvt_baseline_alignment.py` の Node 単位第 1 部品を、決められた順序で接続する**薄い上位モジュール**である
+- baseline driver、alignment 本体、順位状態部品（`OrderControlTvtNodeRankState`）の責務は**変更しない**
+- 順位台帳、alignment 結果、順位確定結果、権利保有車両を**所有しない**
+
+**既存 API の事実（変更しない）**
+
+- baseline driver：`run_snapshot_fixed_baseline_fork_with_tvt_rank_ledger_registration`（**§25.25.34.35** で実装済み）
+- alignment 第 1 部品：`align_snapshot_undetermined_visits_with_node_baseline`（**§25.25.34.30** で実装済み）
+- 順位状態部品：`OrderControlTvtNodeRankState`（**§25.25.30** で実装済み）
+
+###### 新しい公開関数
+
+**正式名称：** `run_snapshot_fixed_baseline_fork_and_align_undetermined_visits`
+
+想定シグネチャ：
+
+```python
+def run_snapshot_fixed_baseline_fork_and_align_undetermined_visits(
+    real_W,
+    *,
+    target_node_names,
+    baseline_horizon_steps,
+    rank_states_by_node_name,
+) -> OrderControlTvtBaselineForkAlignmentResult:
+    ...
+```
+
+**関数名の意味**
+
+- snapshot 固定 baseline fork を実行する
+- 正常完了後、Node 別に順位未確定 Visit の alignment 第 1 部品を実行する
+- 各 Node の `unregistered_collector_visit_keys` が空であることを確認する
+- 順位確定、先頭連続非参加 Visit 処理、権利保有車両選定は**行わない**
+
+###### 引数
+
+入力は次の **4 つ**に限定する。
+
+| 引数 | 意味 |
+|------|------|
+| `real_W` | baseline 開始時点の実 World |
+| `target_node_names` | TVT 対象 Node 名の列 |
+| `baseline_horizon_steps` | 仮想計算の horizon ステップ数 |
+| `rank_states_by_node_name` | 呼出側が所有する Node 名別順位台帳の `Mapping` |
+
+**`rank_states_by_node_name` の所有**
+
+- `rank_states_by_node_name` は**呼出側**（World 外の上位 TVT 制御）が所有する
+- 新しい上位関数は順位台帳を**生成しない**、**保持しない**、**置換しない**
+- baseline driver と同様、受け取った Mapping を既存 helper および alignment 第 1 部品へ**渡すだけ**である
+
+###### 処理順
+
+実装時に**必ず維持**する処理順は次のとおりである。
+
+1. `run_snapshot_fixed_baseline_fork_with_tvt_rank_ledger_registration` を**正確に 1 回**呼ぶ
+2. baseline fork が**正常終了**した場合だけ alignment へ進む
+3. `fork_result.target_node_names` の順に各 Node を処理する
+4. 各 Node について `fork_result.collector.export_node_baseline_visits(node_name)` を取得する
+5. 各 Node について `align_snapshot_undetermined_visits_with_node_baseline` を**正確に 1 回**呼ぶ
+6. 各 Node の `unregistered_collector_visit_keys` が**空**であることを確認する
+7. 全 Node で空なら、`fork_result` と Node 別 alignment 結果を返す
+
+この関数内では次を**行わない**。
+
+- `confirm_visits_in_order` による順位確定
+- 先頭連続非参加 Visit の処理
+- 権利保有車両の選定
+
+公開関数の本文から、少なくとも次の中心部分が直線的に読める構造にする。
+
+```
+baseline fork（1回）
+→ Nodeごとに alignment 第1部品（各Node 1回）
+→ 各Nodeの unregistered_collector_visit_keys 空確認
+→ 結果返却
+```
+
+###### 「正確に1回」の意味
+
+次の 3 層を**混同しない**。
+
+| 層 | 回数の意味 |
+|----|-----------|
+| **上位公開関数** | 1 回の呼出しにつき、baseline fork 全体を **1 回**実行する |
+| **alignment 第 1 部品（公開関数）** | Node 単位 API であるため、対象 Node **ごとに正確に 1 回**実行する |
+| **複数 Node 全体** | alignment 公開関数を「全 Node まとめて 1 回だけ」呼ぶ意味**ではない** |
+
+**§25.25.34.31** の「第 1 部品は仮想計算後に 1 回だけ実行する」は、次を意味する。
+
+- 同じ baseline fork の結果に対して、登録前や仮想計算前の古い alignment 結果を作らない
+- 1 回の baseline fork 完了後に、今回の collector 記録と順位台帳を照合する
+
+複数 Node がある場合、第 1 部品の公開関数は Node 数回呼ばれる。これは既存 API の処理単位であり、設計上の矛盾ではない。
+
+###### 返り値
+
+**方針：** 新しい frozen dataclass を設ける。
+
+```python
+@dataclass(frozen=True)
+class OrderControlTvtBaselineForkAlignmentResult:
+    fork_result: OrderControlBaselineForkResult
+    alignment_results: tuple[
+        OrderControlTvtSnapshotUndeterminedAlignmentResult, ...
+    ]
+```
+
+| フィールド | 意味 |
+|-----------|------|
+| `fork_result` | 既存 `OrderControlBaselineForkResult`（**変更しない**） |
+| `alignment_results` | `fork_result.target_node_names` と**同じ Node 順**の Node 別 alignment 結果 |
+
+**返り値に含めないもの**
+
+- 順位確定結果
+- 権利保有車両
+- `RegistrationPlan`
+- `rank_states_by_node_name`
+- `fork_W`
+
+**既存型の変更禁止**
+
+- `OrderControlBaselineForkResult` は**変更しない**
+- `OrderControlTvtSnapshotUndeterminedAlignmentResult` は**変更しない**
+
+###### 0件時
+
+baseline driver が空の `OrderControlBaselineForkResult` を返した場合（`registered_visit_count == 0`、`fork_steps_executed == 0`）でも、次を維持する。
+
+- 各対象 Node について alignment 第 1 部品を **1 回**実行する
+- 空の collector 記録から、3 列とも空の正常 alignment 結果を得る（既存第 1 部品の契約）
+- **0 件だけを理由に alignment を省略する分岐を設けない**
+- `exec_simulation` は既存 driver 契約どおり**実行されない**（driver 側の既存事実）
+
+###### 複数Node時
+
+- baseline fork は全対象 Node をまとめて **1 回**実行する（既存 driver の既存事実）
+- alignment は `fork_result.target_node_names` の順に、Node **ごとに**実行する
+- `alignment_results` も**同じ Node 順**で返す
+- **1 つの Node でも** `unregistered_collector_visit_keys` が非空なら、上位処理**全体**を失敗させる
+- 一部 Node だけの部分的な成功結果は**返さない**
+
+###### unregistered_collector_visit_keys 非空時
+
+**第 1 部品自身（既存 API の事実）**
+
+- Node 単位 alignment 第 1 部品は、既存どおり結果として分類するだけであり、非空を例外に**しない**
+- `has_unregistered_collector_visits` property で導出可能である
+
+**新しい上位処理（今回確定する設計）**
+
+- 新しい上位処理が、各 Node の `unregistered_collector_visit_keys` が**空**であることを**明示的に確認**する
+- 非空は、事前の順位台帳登録と collector 登録・baseline 結果の接続に不備がある**重大不整合**として扱う
+- **推奨例外型：** `RuntimeError`
+- エラーメッセージには、少なくとも **Node 名**と**未登録 VisitKey 列**を含める
+- 後続の順位確定、先頭非参加処理、権利保有車両選定へ**進まない**
+
+**§25.25.34.30 実装完了記録**には、`unregistered_collector_visit_keys` を正常な一時状態とみなすかブロッキング条件とするかが**未確定**として残っている。**§25.25.34.31** および本小節では、権利保有車両選定前に空を要求する。本小節の上位接続では、非空を `RuntimeError` で停止する。
+
+###### 失敗時
+
+| 失敗経路 | 挙動 |
+|---------|------|
+| baseline fork 失敗 | alignment を**呼ばない**。例外を伝播する。部分的な上位結果は**返さない** |
+| alignment 第 1 部品の入力不整合（A 型到着欠落、到着 2 項目の片方だけ `None`、VisitKey 重複、`node_name` 不一致など） | 第 1 部品が送出する例外（主に `ValueError`）を**そのまま伝播**する |
+| `unregistered_collector_visit_keys` 非空 | 上位処理が `RuntimeError` を送出する |
+| 上記以外の想定外失敗 | 例外を伝播する。部分的な上位結果は**返さない** |
+
+**状態の保持（既存確定事項の継承）**
+
+- baseline fork 前後で正常登録された順位未確定 Visit は**rollback しない**（**§25.25.34.31**、**§25.25.34.35**）
+- 新しい上位処理は `real_W` の `T`、`TIME`、`order_control_baseline_collector` を**変更しない**（baseline driver の既存契約を継承）
+- alignment 第 1 部品は順位台帳を**変更しない**（**§25.25.34.30** の既存事実）
+
+###### 既到着Vehicleの定義
+
+本小節で後続処理へ渡す際に用いる**制度上の定義**を、次のとおり記録する。
+
+- baseline 開始時点を **`T`** とする
+- **到着タイムステップが `T` 以下**の Vehicle すべてが、**既到着 Vehicle** である
+- 既到着 Vehicle に、それ以外の別種類を想定**しない**
+- 参加・非参加を問わず、**同じ定義**を用いる
+
+**区別して記録するもの**
+
+- **制度上の定義**（上記）と、UXsim 内で到着を検出・記録する**処理位置**は区別する（§5、§25.25.34.28 などの既存記述を参照）
+- 既到着の制度定義自体は、本小節では**変更しない**
+- alignment 第 1 部品が直接参照するのは、collector 記録の `baseline_arrival_timestep` と順位台帳の未確定状態である。第 1 部品は「既到着 Vehicle」という制度用語を入力として受け取らない
+
+**後続処理での抽出（今回は実装しない）**
+
+- 次の既到着 Visit 順位確定処理では、alignment 結果の `resolved_undetermined_visits` から、**到着タイムステップが `T` 以下**の Visit を抽出する（**§25.25.34.30** の後続利用）
+- 入力 record の `was_arrived_at_snapshot`（A 型 / B 型区分）は、第 1 部品の**入力分類**に用いる。後続の既到着抽出条件とは**同一ではない**
+
+###### 次の処理との境界
+
+**今回の上位接続が返すところ**
+
+- `OrderControlTvtBaselineForkAlignmentResult`
+- 各 Node の `resolved_undetermined_visits`、`unresolved_undetermined_visits`、空の `unregistered_collector_visit_keys`
+- 順位は**まだ確定していない**
+
+**次の別処理（今回未実装）**
+
+1. **既到着 Visit の順位確定**
+   - 到着タイムステップが `T` 以下で、順位未確定である Visit を抽出する
+   - `confirm_visits_in_order` を呼ぶ
+   - 今回の上位接続では `confirm_visits_in_order` を**呼ばない**
+
+2. **先頭連続非参加 Visit の処理**（§4.5）
+   - 既到着 Visit の順位確定**後**に行う
+   - 意思決定窓内の**未到着**・順位未確定 Visit について、baseline 到着順位の先頭から連続する非参加 Visit を処理する
+   - 今回は**実装しない**
+
+3. **権利保有車両の選定**（§4.5、§8）
+   - 先頭連続非参加 Visit 処理**後**に、残る未確定参加 Visit の baseline 順位最上位を権利保有車両とする
+   - 今回は**実装しない**
+
+**今回未実装の範囲（明示）**
+
+- 既到着 Visit の順位確定
+- 先頭連続非参加 Visit の処理
+- 権利保有車両の選定
+- `unresolved_undetermined_visits` を理由とする TVT 検討中止判断の接続
+- 上位 TVT 制御クラスの名称と配置
+- `rank_states_by_node_name` を上位 TVT 制御が生成・保持する時点の確定
+
+###### 採用しない方式
+
+次は**採用しない**。
+
+- `order_control_baseline_driver.py` へ alignment 呼出しを**直接追加**する
+- `order_control_tvt_baseline_alignment.py` へ baseline fork 呼出しを**追加**する
+- 既存 `OrderControlBaselineForkResult` へ alignment 結果フィールドを**追加**する
+- 複数 Node を一括処理する新しい alignment 公開関数を、第 1 部品の**代替**として作る
+- 0 件時に alignment を**省略**する
+- 一部 Node だけ成功した部分的な上位結果を**返す**
+- callback または hook で空確認を**委ねる**
+- 順位未確定登録の rollback を**追加**する
+
+###### Git状態と再開情報（§25.25.34.36）
+
+- 最新保存済み・push 済みコミットは **`b67c53d`**
+- **§25.25.34.35** の順位台帳登録付き baseline fork 実行はコミット済みである
+- 本小節は設計メモのみを更新する
+- Python コード、テスト、診断は変更しない
+- `diagnostics/order_control.zip` は既存未追跡、未接触、対象外
+- 本小節追記時点では、git add、git commit、git push は未実行
+
+**次の再開地点**
+
+1. 本小節で定めた `uxsim/order_control_tvt_baseline_fork_alignment.py` と専用テストを実装する
+2. 実装後、既存 baseline driver テスト・alignment テスト・driver registration テストの回帰を確認する
+3. その後、既到着 Visit の順位確定処理の設計・実装へ進むか判断する
+4. 権利保有車両選定には**まだ進まない**
+
+##### 25.25.34.37 baseline fork後のNode別alignment接続の実装完了記録
+
+**2026-09-08 更新：** **§25.25.34.36** で確定した baseline fork 正常完了後の Node 別 alignment 接続を、`uxsim/order_control_tvt_baseline_fork_alignment.py` と専用テストへ実装した。本小節 **§25.25.34.37** を、この上位 alignment 接続の**実装結果・検証結果・次の再開地点**の最新正本とする。実装前仕様は **§25.25.34.36** を参照する。順位台帳登録付き baseline fork 実行の実装完了記録は **§25.25.34.35**、Node 単位 alignment 第 1 部品の結果契約は **§25.25.34.30** を参照する。
+
+**§25.25.34.36** は実装前仕様の記録として本文を削除せず残す。本小節と **§25.25.34.36** の記述に差がある場合は、**本小節を実装済み事実の正本**として参照する。
+
+###### 非技術的な説明
+
+baseline 仮想計算の結果と各 Node の順位台帳を照合し、順位台帳へ事前登録されていない不明な Visit が混ざっていないことを確認する**橋渡し処理**を実装した。
+
+全対象 Node で問題がなければ、Node 別 alignment 結果を次の既到着 Visit 順位確定処理へ渡せる状態になった。
+
+この実装では、既到着 Visit の順位確定、先頭連続非参加 Visit の処理、権利保有車両の選定は**まだ行わない**。
+
+権利保有車両の特定へ向けて前進した実装であり、既存実装のやり直しではない。
+
+###### 新規作成した本番モジュール
+
+**ファイル名：** `uxsim/order_control_tvt_baseline_fork_alignment.py`
+
+**役割**
+
+- `order_control_baseline_driver.py` の TVT 経路公開関数と、`order_control_tvt_baseline_alignment.py` の Node 単位 alignment 第 1 部品を、決められた順序で接続する**薄い上位モジュール**である
+- baseline driver、alignment 第 1 部品、順位状態部品（`OrderControlTvtNodeRankState`）の責務は**変更していない**
+
+###### 実装した結果型
+
+**正式名称：** `OrderControlTvtBaselineForkAlignmentResult`
+
+- **frozen dataclass** である
+
+```python
+@dataclass(frozen=True)
+class OrderControlTvtBaselineForkAlignmentResult:
+    fork_result: OrderControlBaselineForkResult
+    alignment_results: tuple[
+        OrderControlTvtSnapshotUndeterminedAlignmentResult,
+        ...
+    ]
+```
+
+| フィールド | 意味 |
+|-----------|------|
+| `fork_result` | 既存 `OrderControlBaselineForkResult`（**変更していない**） |
+| `alignment_results` | `fork_result.target_node_names` と**同じ Node 順**の Node 別 alignment 結果 |
+
+**既存型の変更禁止（実装済み）**
+
+- `OrderControlBaselineForkResult` は**変更していない**
+- `OrderControlTvtSnapshotUndeterminedAlignmentResult` は**変更していない**
+
+###### 実装した公開関数
+
+**正式名称：** `run_snapshot_fixed_baseline_fork_and_align_undetermined_visits`
+
+**引数**
+
+| 引数 | 意味 |
+|------|------|
+| `real_W` | baseline 開始時点の実 World |
+| `target_node_names` | TVT 対象 Node 名の列 |
+| `baseline_horizon_steps` | 仮想計算の horizon ステップ数 |
+| `rank_states_by_node_name` | 呼出側が所有する Node 名別順位台帳の `Mapping` |
+
+**`rank_states_by_node_name` の所有**
+
+- 呼出側所有のままである
+- 新しい上位関数は順位台帳を**生成しない**、**保持しない**、**置換しない**、**所有しない**
+- baseline driver と Node 別 alignment 第 1 部品へ**渡すためだけ**に使用する
+
+###### 実装済みの処理順
+
+1. `run_snapshot_fixed_baseline_fork_with_tvt_rank_ledger_registration` を **1 回**呼ぶ
+2. baseline fork が**正常完了**した場合だけ alignment へ進む
+3. `fork_result.target_node_names` の順に各 Node を処理する
+4. 各 Node について `fork_result.collector.export_node_baseline_visits(node_name)` を **1 回**呼ぶ
+5. 各 Node について `align_snapshot_undetermined_visits_with_node_baseline` を **1 回**呼ぶ
+6. 各 alignment 結果の `unregistered_collector_visit_keys` が**空**であることを**直後に**確認する
+7. 全対象 Node で空の場合だけ `OrderControlTvtBaselineForkAlignmentResult` を返す
+
+公開関数の本文から、少なくとも次の中心部分が直線的に読める構造になっている。
+
+```
+baseline fork（1回）
+→ Nodeごとに collector export（各Node 1回）
+→ Nodeごとに alignment 第1部品（各Node 1回）
+→ 未登録列の空確認
+→ 結果返却
+```
+
+###### 呼出回数
+
+| 処理 | 回数 |
+|------|------|
+| baseline driver | 上位公開関数 **1 回**につき **正確に 1 回** |
+| `collector.export_node_baseline_visits` | 対象 Node **ごとに正確に 1 回** |
+| Node 別 alignment 第 1 部品 | 対象 Node **ごとに正確に 1 回** |
+
+**混同しないこと**
+
+- 同じ baseline 結果と同じ Node について、alignment を**二重に実行しない**
+- 登録前または baseline 仮想計算前には alignment を**呼ばない**
+- 複数 Node 全体について alignment 公開関数を **1 回だけ**呼ぶ意味**ではない**（Node 単位 API のため Node 数回呼ばれる）
+
+###### 0件時
+
+- `registered_visit_count == 0` の空 `ForkResult` でも、Node 別 alignment を**省略しない**
+- 各対象 Node について alignment 第 1 部品を **1 回**実行する
+- 3 列とも空の正常 alignment 結果を `target_node_names` 順で返す
+- `exec_simulation` は既存 driver 契約どおり**実行されない**（driver 側の既存事実）
+
+###### 複数Node時
+
+- baseline fork は全対象 Node について **1 回**実行する
+- Node 別 alignment は `fork_result.target_node_names` の順に実行する
+- `alignment_results` も**同じ Node 順**で格納する
+- **1 つの Node でも** `unregistered_collector_visit_keys` が非空なら、上位処理**全体**を失敗させる
+- それ以前の Node で alignment が成功していても、**部分的な成功結果は返さない**
+- 未登録を検出した Node より**後**の Node は処理**しない**
+
+###### unregistered_collector_visit_keys 非空時
+
+**第 1 部品（既存 API・変更なし）**
+
+- Node 単位 alignment 第 1 部品は、非空を例外にせず、結果として分類するだけである
+
+**新しい上位関数（実装済み）**
+
+- 新しい上位関数が `RuntimeError` を送出する
+- エラーメッセージに、少なくとも **Node 名**と**未登録 VisitKey 列**を含める
+
+実装例：
+
+```text
+unregistered_collector_visit_keys must be empty after baseline fork alignment for node 'junction_b'; got [('veh_b', 1)].
+```
+
+- 順位確定、その他の後続処理へ**進まない**
+
+###### 失敗時
+
+| 失敗経路 | 挙動 |
+|---------|------|
+| baseline driver 失敗 | alignment を**1 回も呼ばない**。例外を伝播する |
+| alignment 第 1 部品の入力不整合 | 第 1 部品が送出する例外（主に `ValueError`）を**そのまま伝播**する |
+| `unregistered_collector_visit_keys` 非空 | 上位関数が `RuntimeError` を送出する |
+| alignment 例外または未登録非空を検出した Node | それより**後**の Node を処理**しない** |
+| いずれの失敗 | 部分的な `OrderControlTvtBaselineForkAlignmentResult` を**返さない** |
+
+**状態の保持**
+
+- baseline fork 前後で正常登録された順位未確定 Visit は**rollback しない**（**§25.25.34.31**、**§25.25.34.35** の継承）
+- 成功時、alignment 失敗時、未登録非空時のいずれでも、`real_W` の `T`、`TIME`、`_order_control_baseline_collector` を**変更しない**
+- alignment 第 1 部品は順位台帳を**変更しない**（**§25.25.34.30** の既存事実）
+- 不要な rollback API は**追加していない**
+
+###### 今回行わない処理
+
+- 既到着 Visit の抽出
+- `confirm_visits_in_order` による順位確定
+- 先頭連続非参加 Visit の処理
+- 権利保有車両の選定
+- `unresolved_undetermined_visits` を理由とする TVT 中止判断
+- `rank_states_by_node_name` の生成・所有
+- 上位 TVT 制御クラスの実装
+
+###### 既到着Vehicleとの境界
+
+**制度上の定義（後続処理で用いる。本実装では抽出しない）**
+
+- baseline 開始時点を **`T`** とする
+- **到着タイムステップが `T` 以下**の Vehicle すべてが、**既到着 Vehicle** である
+- それ以外の別種類の既到着 Vehicle は想定**しない**
+- 参加・非参加を問わず、同じ定義を用いる（**§25.25.34.36**）
+
+**本実装の境界**
+
+- 本実装は、既到着 Vehicle の抽出・順位確定を**行っていない**
+- 次の処理が、Node 別 alignment 結果を使って、到着タイムステップが `T` 以下で順位未確定である Visit を抽出し、順位確定する処理である
+
+###### 新規専用テスト
+
+**ファイル名：** `tests_order_control_tvt_baseline_fork_alignment.py`
+
+**件数：** **24 tests passed**
+
+**検証している主な契約**
+
+| 検証項目 | 代表テスト |
+|----------|------------|
+| 結果型と 2 フィールド | `test_returns_baseline_fork_alignment_result_with_two_fields` |
+| baseline driver 1 回 | `test_calls_baseline_driver_once` |
+| driver 失敗時 alignment 省略 | `test_skips_alignment_when_baseline_driver_fails` |
+| 単一 Node で alignment 1 回 | `test_calls_alignment_once_for_single_node` |
+| 複数 Node を target 順に 1 回ずつ | `test_calls_alignment_once_per_node_in_target_node_order` |
+| collector export 各 Node 1 回 | `test_calls_collector_export_once_per_node`、`test_calls_collector_export_once_per_node_for_multiple_nodes` |
+| 同一 rank state オブジェクトを渡す | `test_passes_same_rank_state_objects_to_alignment` |
+| rank_states を置換しない | `test_does_not_replace_rank_states_mapping` |
+| 未登録列が空なら成功 | `test_succeeds_when_unregistered_collector_visit_keys_empty` |
+| 未登録列非空で RuntimeError | `test_raises_runtime_error_when_unregistered_collector_visit_keys_nonempty` |
+| エラーメッセージに Node 名と VisitKey | `test_runtime_error_includes_node_name_and_unregistered_visit_keys` |
+| 未登録検出後に後続 Node 未処理 | `test_stops_after_unregistered_node_without_processing_later_nodes` |
+| 部分結果なし | `test_does_not_return_partial_result_on_unregistered_nonempty` |
+| alignment 例外の伝播と後続 Node 未処理 | `test_propagates_alignment_exception_without_processing_later_nodes` |
+| 0 件時も alignment 各 Node 1 回 | `test_zero_visits_calls_alignment_once_per_node` |
+| 0 件時の空 alignment 結果 | `test_zero_visits_returns_empty_alignment_results_in_target_node_order` |
+| 成功時 real_W 不変 | `test_leaves_real_world_unchanged_on_success` |
+| alignment 失敗時 real_W 不変 | `test_leaves_real_world_unchanged_on_alignment_failure` |
+| 未登録非空時 real_W 不変 | `test_leaves_real_world_unchanged_on_unregistered_nonempty` |
+| alignment 失敗後も順位未確定残存 | `test_preserves_undetermined_registrations_after_alignment_failure` |
+| 未登録非空後も順位未確定残存 | `test_preserves_undetermined_registrations_after_unregistered_nonempty` |
+| 順位確定しない | `test_does_not_call_confirm_visits_in_order` |
+| 既存結果型を変更しない | `test_does_not_modify_existing_result_types` |
+
+正常系は、実 World、実 baseline driver、実 collector、実順位状態、実 alignment を通す。
+
+###### 実装確認（記録者によるコード・テスト本文確認）
+
+- 本番モジュール `uxsim/order_control_tvt_baseline_fork_alignment.py` の全文を確認した
+- 専用テスト `tests_order_control_tvt_baseline_fork_alignment.py` の 24 件の本文を確認した
+- **§25.25.34.36** との不一致や、実装を止める問題は見つからなかった
+- 完了報告だけでなく、実際のコードとテスト本文を確認した後に検証を進めた
+
+###### 実行済み検証
+
+| 実行 | 結果 |
+|------|------|
+| `uxsim/order_control_tvt_baseline_fork_alignment.py` と専用テストの `python -m py_compile` | 成功 |
+| 専用テストの直接実行 | **24 tests passed** |
+| `pytest` による専用テスト | **24 passed** |
+| `tests_order_control_baseline_driver.py` の直接実行 | **66 tests passed** |
+| `tests_order_control_tvt_baseline_driver_registration.py` の直接実行 | **30 tests passed** |
+| `tests_order_control_tvt_baseline_alignment.py` の直接実行 | **25 tests passed** |
+| `git diff --check` | 問題なし |
+
+###### Git状態と再開情報（§25.25.34.37）
+
+- 最新保存済み・push 済みコミット（HEAD）は **`b67c53d`**
+- **§25.25.34.36** の設計メモ変更は未コミットで維持されている
+- 新しい本番モジュール `uxsim/order_control_tvt_baseline_fork_alignment.py` と専用テスト `tests_order_control_tvt_baseline_fork_alignment.py` は**未追跡**である
+- `diagnostics/order_control.zip` は既存未追跡、未接触、対象外
+- 本実装完了記録追記時点では、git add、git commit、git push は**未実行**
+
+**次の再開地点**
+
+1. 到着タイムステップが **`T` 以下**である、既到着かつ順位未確定の Visit を、Node 別 alignment 結果から抽出し、`confirm_visits_in_order` で順位確定する処理を設計・実装する
+2. その処理は、本小節で実装した `OrderControlTvtBaselineForkAlignmentResult` を入力として受け取る上位処理として配置する
+3. 先頭連続非参加 Visit 処理と権利保有車両選定には**まだ進まない**
