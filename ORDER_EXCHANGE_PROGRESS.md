@@ -4407,7 +4407,7 @@ baseline_horizon_steps + 1 <= fork_W.TSIZE - fork_W.T
 - `K_confirmed_before` は先行確定（到着済み・先頭連続非参加）後に状態から再取得
 - `K_confirmed_after` は最終確定列接続後の確定ブロック末尾
 - 最終確定列には参加・非参加、取引順位、残余 baseline 順位が含まれ得る
-- TVT 成立時の取引順位部分には、意思決定窓外の候補 visit が含まれ得る。状態部品は事前登録済みであれば意思決定窓内外を区別せず確定できる
+- TVT 成立時の取引順位部分には、意思決定窓外の候補 visit が含まれ得る。状態部品は順位未確定集合に事前登録済みであれば意思決定窓内外を区別せず確定できる
 - TVT 不成立の場合：先行確定後に残る意思決定窓内の未確定 visit が **1 件以上**あれば、baseline 順位による最終確定列を `K_confirmed_before` の後へ接続し、順位を確定する。残存 0 件なら接続対象の列は空である。空列の確定 API 呼出しは必須ではない。確定 API を呼ばずに処理を終了してよい。空列を渡した場合も no-op として正常に処理できる
 - TVT 形成に必要な情報を取得できない場合：§14.4 に従い、先行確定後に残る意思決定窓内の未確定 visit が **1 件以上**あれば、baseline 順位による最終確定列を接続し、順位を確定する。残存 0 件なら接続対象の列は空である。空列の確定 API 呼出しは必須ではない。確定 API を呼ばずに処理を終了してよい。空列を渡した場合も no-op として正常に処理できる。意思決定窓外の未確定 visit は、情報未取得だけを理由に確定しない
 - TVT 成立による窓外候補の確定と、情報未取得時の窓外非確定を区別する
@@ -4445,7 +4445,7 @@ baseline_horizon_steps + 1 <= fork_W.TSIZE - fork_W.T
 - **確定する順番どおりに並べた VisitKey の list または tuple**を受け取り、入力順がそのまま確定順位になる。sort しない
 - 原子的更新（下書き帳簿検査後に本物をまとめて置換）。`ValueError` 時・`RuntimeError` 時ともに正式状態不変
 - `export_state()` は 4 キー（`node_name`、`k_confirmed`、`confirmed_visits`、`undetermined_visits`）。未確定は `vehicle_name`・`visit_id` の 2 段階 sort
-- 意思決定窓外 visit も事前登録済みなら確定可能。候補選定や順位計算は未実装
+- 意思決定窓外 visit も順位未確定集合に事前登録済みなら確定可能。候補選定や順位計算は未実装
 - `uxsim.py`、baseline driver、collector、snapshot、`uxsim/__init__.py`、既存テスト、既存診断は変更していない
 
 **専用テスト：**
@@ -4823,6 +4823,61 @@ baseline_horizon_steps + 1 <= fork_W.TSIZE - fork_W.T
 **次の再開地点**
 
 検証済み `RegistrationPlan` の Node 名と VisitKey を使い、実 World 側 Node 別順位台帳へ未登録 Visit を一括登録する薄い helper の責務と配置を検討する。baseline driver への実接続はその後に別途検討する。
+
+##### 2026-09-07追記：snapshot固定Visit計画からNode別順位台帳への未登録Visit登録helperを実装
+
+詳細正本は設計メモ **§25.25.34.33** の「実装完了記録（§25.25.34.33）」。
+
+- 新規本番モジュール `uxsim/order_control_tvt_snapshot_undetermined_registration.py` を追加した
+- 新規専用テスト `tests_order_control_tvt_snapshot_undetermined_registration.py` を追加した
+- 検証済み snapshot 固定 Visit 計画に含まれる Visit を Node ごとに確認し、**未登録 Visit だけ**を順位未確定として台帳へ登録する
+- 順位未確定集合に登録済みの Visit（`is_undetermined` が `True`）と、順位確定済みの Visit（`is_confirmed` が `True`）は、**別々の除外条件**として新規登録対象から除外する
+- Node ごとに `register_undetermined_visits` を 1 回だけ呼び、一括登録する
+- 順位確定は行わない
+- 戻り値は全 Node 合計の新規登録件数 `int`
+- 専用テスト **25 件**成功
+- `tests_order_control_tvt_node_rank_state.py`（54 件）、`tests_order_control_baseline_snapshot.py`、`tests_order_control_tvt_baseline_alignment.py`（25 件）も成功
+- baseline driver への接続は**未実装**
+- 次は prepare、helper、apply、仮想計算の接続方法を検討する
+- 権利保有車両選定には**まだ進まない**
+
+**実装した公開 API**
+
+- `register_undetermined_visits_from_snapshot_plan(plan, rank_states_by_node_name) -> int`
+
+**変更ファイル**
+
+- `uxsim/order_control_tvt_snapshot_undetermined_registration.py`（新規）
+- `tests_order_control_tvt_snapshot_undetermined_registration.py`（新規）
+
+**テスト結果**
+
+| 実行 | 結果 |
+|------|------|
+| 新規本番・専用テストの `python -m py_compile` | 成功 |
+| `python tests_order_control_tvt_snapshot_undetermined_registration.py` | 25 テスト成功 |
+| `pytest tests_order_control_tvt_snapshot_undetermined_registration.py` | 25 passed |
+| `python tests_order_control_tvt_node_rank_state.py` | 54 テスト成功 |
+| `python tests_order_control_baseline_snapshot.py` | 成功 |
+| `python tests_order_control_tvt_baseline_alignment.py` | 25 テスト成功 |
+| `git diff --check` | 問題なし |
+
+**今回実装していないもの**
+
+- baseline driver への実接続
+- prepare、順位台帳登録 helper、apply、仮想計算をつなぐ上位処理
+- 上位 TVT 制御、権利保有車両選定以降のすべて
+
+**Git 状態**
+
+- 作業開始時点の最新保存済み・push 済みコミットは **`434306e`**
+- 新規 Python 2 ファイルは未コミットの作業ツリーに存在する
+- `diagnostics/order_control.zip` は既存未追跡、未接触、対象外
+- git add、git commit、git push は未実行
+
+**次の再開地点**
+
+helper の実装、専用テスト、設計メモの整合を最終確認した後、prepare、順位台帳登録 helper、apply、baseline 仮想計算を接続する最小の処理方法を検討する。baseline driver をどのように拡張または利用するかは、その接続検討で決める。権利保有車両選定にはまだ進まない。
 
 #### 2026-08-29：TVT権利保有車両選定前の先頭非参加Vehicle先行確定の記録補修
 

@@ -8361,7 +8361,7 @@ def export_state(self) -> dict[str, object]:
 13. 整合確認に成功した場合だけ、更新候補を正式な内部状態へ一括反映する
 14. `OrderControlTvtConfirmResult` を返す
 
-**検査順序の理由：** 確定済み visit は未確定集合から除外されるため、未確定集合の有無を先に確認すると、再確定要求と未登録要求を区別できない。確定済みかどうかを**先に**確認し、確定済みでなければ未確定登録済みかを確認する。
+**検査順序の理由：** 確定済み visit は未確定集合から除外されるため、未確定集合の有無を先に確認すると、再確定要求と未登録要求を区別できない。確定済みかどうかを**先に**確認し、確定済みでなければ順位未確定集合に登録済みかを確認する。
 
 **例外の区別（いずれも `ValueError`、メッセージは別）：**
 
@@ -8655,7 +8655,7 @@ k_confirmed_after - k_confirmed_before
 - 同じ VisitKey が確定済みと未確定の**両方に存在しない**
 - 確定ブロック末尾と確定件数が**一致**
 - 一度確定した順位は**上書きしない**
-- 確定操作は**未確定登録済み VisitKey だけ**を対象にする
+- 確定操作は**順位未確定集合に登録済み VisitKey だけ**を対象にする
 - 空確定操作は状態を変えない
 - validation 失敗時は状態を**部分変更しない**
 
@@ -8666,7 +8666,7 @@ k_confirmed_after - k_confirmed_before
 | 生成時 | Node 名 |
 | VisitKey 受付時 | VisitKey の型と内容 |
 | 登録時 | 重複、確定済みとの排他 |
-| 確定時 | 入力列内重複、**確定済みでないこと（先）**、**未確定登録済みであること（後）**、一括更新 |
+| 確定時 | 入力列内重複、**確定済みでないこと（先）**、**順位未確定集合に登録済みであること（後）**、一括更新 |
 | 更新候補反映前 | §25.25.30.17 の必要最小限の内部整合 |
 | 読取時（`is_confirmed` / `is_undetermined` / `assigned_rank`） | 渡された VisitKey の型と内容。内部 list、dict、set 全体の全面再検査はしない |
 | 読取時（その他） | 登録・更新時に保証済みの不変条件を**全面再検査しない** |
@@ -9238,7 +9238,7 @@ VisitKey validation を行う公開経路：単数登録、複数登録、一括
 
 1. VisitKey を validation
 2. 確定済みか確認
-3. 未確定登録済みか確認
+3. 順位未確定集合に登録済みか確認
 4. すべて成功した後で set へ追加
 
 - 確定済み visit の未確定再登録は `ValueError`。既存未確定 visit の重複登録も `ValueError`。
@@ -14511,7 +14511,7 @@ def align_snapshot_undetermined_visits_with_node_baseline(
 
 ###### 今回確定する目的
 
-権利保有車両を正しく選定するには、今回の collector 対象 Visit が、当該 Node の順位台帳で**未確定登録済み**または**確定済み**である必要がある。
+権利保有車両を正しく選定するには、今回の collector 対象 Visit が、当該 Node の順位台帳で**順位未確定集合に登録済み**または**順位確定済み**である必要がある。
 
 第 1 部品（§25.25.34.30）は、collector 記録と順位台帳未確定集合の**交差**だけを分類する。collector に存在する先着 Visit が順位台帳へ未登録の場合、その Visit は `resolved_undetermined_visits` から外れ、`unregistered_collector_visit_keys` へ分類される。`resolved_undetermined_visits` だけから権利保有車両を選ぶと、本来より後ろの Vehicle を権利保有車両として誤選定する可能性がある。
 
@@ -14589,7 +14589,7 @@ baseline driver は途中例外時に rollback しない（§25.25.29.12）。�
 - `is_undetermined(visit_key)` が `True`
 - `is_confirmed(visit_key)` が `True`
 
-つまり、**未確定登録済みでも確定済みでもない** VisitKey だけを新規登録する。すでに未確定登録済みまたは確定済みの VisitKey を無条件に再登録してはならない（§25.25.30.12）。
+つまり、**順位未確定集合に登録済みでも順位確定済みでもない** VisitKey だけを新規登録する。すでに順位未確定集合に登録済みまたは順位確定済みの VisitKey を無条件に再登録してはならない（§25.25.30.12）。
 
 snapshot 固定集合には、次が**含まれ得る**（§24.4）：
 
@@ -14618,7 +14618,7 @@ snapshot 固定集合には、次が**含まれ得る**（§24.4）：
 2. `fork_W` の snapshot 時点の状態から snapshot 固定 Visit 集合を構築する
 3. snapshot 固定 Visit 集合を既存 snapshot 契約に従って検証する
 4. snapshot 固定 Visit 集合の Node 名と VisitKey を、実 World 側の上位 TVT 制御へ渡す
-5. Node ごとに、順位台帳で未確定登録済みでも確定済みでもない VisitKey を抽出する
+5. Node ごとに、順位台帳で順位未確定集合に登録済みでも順位確定済みでもない VisitKey を抽出する
 6. 未登録 VisitKey があれば、Node ごとに `register_undetermined_visits` で一括登録する
 7. 同じ snapshot 固定 Visit 集合を fork 側 collector へ登録する
 8. `fork_W` で全 World baseline 仮想計算を実行する
@@ -15080,3 +15080,427 @@ prepare/apply 関連として **24 件**のテストを追加し、既存 **59 �
 2. その後、検証済み `RegistrationPlan` に含まれる Node 名と VisitKey を使い、実 World 側の Node 別順位台帳へ未登録 Visit を一括登録する**薄い helper** の責務と配置を検討する
 3. baseline driver への実接続は、その helper の設計後に**別途**検討する
 4. 権利保有車両選定へは**まだ進まない**
+
+##### 25.25.34.33 snapshot固定Visit計画からNode別順位台帳への未確定登録helper
+
+**2026-09-07 更新：** 検証済み `OrderControlBaselineSnapshotRegistrationPlan` から、実 World 側の Node 別順位台帳へ未登録 Visit を一括登録する helper の実装前仕様を確定した。本小節 **§25.25.34.33** を、この helper の責務・配置・入出力・検証方針の最新正本とする。未確定 Visit 登録タイミングと接続原則は **§25.25.34.31**、snapshot 登録計画の prepare/apply 分割は **§25.25.34.32** を参照する。本小節では helper の実装前仕様のみを確定し、helper の実装、baseline driver への実接続、権利保有車両選定は行わない。
+
+###### 今回確定する目的
+
+検証済みの `OrderControlBaselineSnapshotRegistrationPlan` に含まれる Visit のうち、実 World 側の Node 別順位台帳へ**まだ登録されていない** Visit だけを、Node ごとにまとめて未確定登録する helper を設ける。
+
+この helper により、snapshot 固定 Visit 計画と順位台帳登録対象を対応させ、正式 baseline 到着順から台帳未登録 Visit が欠落することを防ぐ（§25.25.34.31、§25.25.34.30）。
+
+この helper は、**baseline collector への登録関数ではない**。collector 登録は `apply_snapshot_fixed_visit_registration_plan`（§25.25.34.32）の責務である。
+
+###### 配置
+
+既存モジュールへ責務を混在させず、**新しい小規模接続モジュール**へ配置する。
+
+**推奨ファイル名：** `uxsim/order_control_tvt_snapshot_undetermined_registration.py`
+
+**配置理由：**
+
+- `order_control_baseline_snapshot.py` は、snapshot 固定集合の構築・検証と collector 登録を担当する（§25.25.34.32）
+- `order_control_tvt_node_rank_state.py` は、単一 Node の順位台帳状態と基本操作を担当する（§25.25.30）
+- 今回の helper は、snapshot 計画と**複数**の Node 別 TVT 順位台帳を接続する
+- 将来の上位 TVT 制御クラスはまだ未設計であり、そのクラスへ直接依存させない
+- `order_control_tvt_baseline_alignment.py`（第 1 部品）と同様に、異なる既存部品を接続する**独立部品**として置く
+
+###### 関数名
+
+実装前の正式名称として、次を採用する。
+
+**`register_undetermined_visits_from_snapshot_plan`**
+
+この名称から、次が分かる。
+
+- **snapshot plan** を入力にする
+- **未確定 Visit** を順位台帳へ登録する
+- **状態変更を伴う register 処理**である
+- baseline collector へ登録する **`apply_snapshot_fixed_visit_registration_plan` とは異なる**
+
+###### 最小入力
+
+想定する入力契約は次のとおりである。
+
+- **`plan`：** `OrderControlBaselineSnapshotRegistrationPlan`
+- **`rank_states_by_node_name`：** Node 名をキーとし、`OrderControlTvtNodeRankState` を値とする `Mapping`
+
+```python
+def register_undetermined_visits_from_snapshot_plan(
+    plan: OrderControlBaselineSnapshotRegistrationPlan,
+    rank_states_by_node_name: Mapping[
+        str,
+        OrderControlTvtNodeRankState,
+    ],
+) -> int:
+    ...
+```
+
+具体的な上位 TVT 制御クラスではなく **`Mapping`** を受け取ることにより、今回の helper を将来の上位クラス構造から独立させる。上位制御は Node 名別順位台帳の `dict` または同等の mapping を渡すだけである（§25.25.34.31）。
+
+helper が使用する plan の公開情報は、次に限定される。
+
+- `plan.target_node_names`
+- `plan.entries`
+- `entry.node_name`
+- `entry.visit_key`（`OrderControlBaselineSnapshotVisitEntry` の property）
+
+`RegistrationPlan` へ Node 別 VisitKey 取得 helper を追加しない。helper 内で `plan.entries` を明示的に走査する（§25.25.34.32）。
+
+###### 最小出力
+
+戻り値は、**全 Node を合計した新規未確定登録件数 `int`** とする。
+
+次は、現時点では**追加しない**。
+
+- Node 別件数
+- 新規登録 VisitKey 全件
+- 結果 dataclass
+
+**理由：**
+
+- 後続では第 1 部品を実行し、`unregistered_collector_visit_keys` が空かを確認する（§25.25.34.31）
+- helper の結果へ、今回新たに順位未確定集合へ登録した VisitKey を重複保持する必要がない
+- `int` であれば、登録が何件行われたかをテストと診断で確認できる
+- Node 別の詳細結果には、現在明確な用途がない
+
+###### 読取段階
+
+helper は順位台帳の変更を始める**前**に、次を行う。
+
+1. `plan.entries` を Node 名ごとに分ける
+2. `plan.entries` の既存固定順を Node 内で維持する
+3. `plan.target_node_names` にある全 Node について、対応する `rank_state` が mapping に存在することを確認する
+4. mapping のキーと `rank_state.node_name` が一致することを確認する
+5. `entry.node_name` が `plan.target_node_names` に含まれることを確認する
+6. 各 VisitKey を次のように分類する
+   - `is_undetermined` が `True` なら新規登録しない
+   - `is_confirmed` が `True` なら新規登録しない
+   - 両方 `False` なら新規登録対象にする
+7. Node ごとの新規登録対象 VisitKey 列を準備する
+
+読取段階が正常に完了するまでは、**順位台帳を変更しない**。
+
+###### 登録計画内の順序
+
+`plan.entries` の順序は、**テストと診断の再現性**のために維持する（§25.22.13）。
+
+ただし、この順序は次を**意味しない**。
+
+- 正式 baseline 到着順位
+- 順位確定順
+- 割当権利行使順位
+
+順位台帳への未確定登録は**集合登録**であり、登録順から順位を付けない（§25.25.30.3、§25.25.34.31）。
+
+###### 反映段階
+
+読取段階が正常に完了した後、次の順序で反映する。
+
+1. `plan.target_node_names` の固定順で Node を処理する
+2. 新規登録対象が空の Node では `register_undetermined_visits` を**呼ばない**
+3. 新規登録対象がある Node では、`register_undetermined_visits` を**1 回だけ**呼ぶ
+4. 単数の `register_undetermined_visit` を外側で**繰り返さない**
+5. 各 Node で実際に新規登録した件数を合計する
+6. 全 Node 合計件数を `int` で返す
+
+###### 順位未確定集合に登録済みのVisitと順位確定済みのVisit
+
+- すでに `is_undetermined` が `True` の Visit は**再登録しない**
+- すでに `is_confirmed` が `True` の Visit は**再登録しない**
+- 両方 `False` の Visit だけを新規登録する
+- 既存の `register_undetermined_visits` は再登録を **`ValueError`** とするため、helper が事前に新規登録対象だけを選ぶ（§25.25.30.12）
+- 新しい冪等登録 API は**追加しない**（§25.25.34.31）
+
+これは例外の握りつぶしではなく、**現在の順位台帳を正本**として登録対象を決める処理である。
+
+###### 必要な入力検証
+
+状態変更前に、少なくとも次を確認する。
+
+- `plan` が `OrderControlBaselineSnapshotRegistrationPlan` である
+- `rank_states_by_node_name` が `Mapping` として利用可能である
+- `plan.target_node_names` にある Node の `rank_state` が**すべて**存在する
+- 各 mapping 値が `OrderControlTvtNodeRankState` である
+- mapping の Node 名と `rank_state.node_name` が一致する
+- `entry.node_name` が `plan.target_node_names` に含まれる
+
+mapping に plan 対象外の追加 Node が存在することは**許容**し、**使用しない**。
+
+入力不足や Node 名不一致は、正常な baseline 未解決ではなく、**helper への入力契約違反**として扱う。
+
+###### 重複して行わない検証
+
+次は prepare または rank_state で保証済みなので、helper で**重複実装しない**。
+
+- `RegistrationPlan` の collector 用 10 項目すべての再検証
+- snapshot 契約全体の再検証
+- prepare で保証済みの計画内重複検証
+- `is_undetermined` と `is_confirmed` の内部不変条件の再検証
+- `register_undetermined_visits` が行う VisitKey 形式検証の再実装
+
+この helper が実際に使用する **Node 名、VisitKey、rank_state の対応**だけを、必要最小限に確認する。
+
+###### Node内の原子性
+
+各 Node について、`register_undetermined_visits` を **1 回だけ**呼ぶことで、入力全体を検証してから一括反映する既存の原子性を利用する（§25.25.30.17）。
+
+1 つの Node 内で、登録途中の一部 Visit だけを残さない。
+
+###### 複数Node間の扱い
+
+複数 Node を順番に処理するため、Node1 の登録成功後に Node2 の登録で失敗した場合、**Node1 の登録は残る**（§25.25.34.31）。
+
+- Node 別順位台帳は互いに**独立**している（§25.25.30.7）
+- 複数 Node 横断の **rollback は行わない**
+- **rollback API は追加しない**
+- mapping 不足や Node 名不一致など、あらかじめ確認できる入力不備は、**全 Node の状態変更前**に検出する
+- これは複数 Node 横断の原子性を追加するものではない
+
+###### Node再訪
+
+- VisitKey は `(vehicle_name, visit_id)` である（§25.25.30.9）
+- 同じ Vehicle が同じ Node を再訪した場合は、新しい `visit_id` によって**別 Visit** として登録する（§24.5）
+- 同じ VisitKey が後続 snapshot にも含まれた場合は、`is_undetermined` または `is_confirmed` によって新規登録対象から**除外**する（§25.25.34.31）
+
+###### helperが変更するもの
+
+helper が変更するのは、入力 mapping に含まれる**実 World 側の Node 別順位台帳**だけである。
+
+状態変更があることを、**関数名**と **docstring** で明示する方針とする。
+
+###### helperが行わないこと
+
+次を**行わない**。
+
+- `RegistrationPlan` の構築
+- `RegistrationPlan` の変更
+- snapshot 固定集合の再構築
+- collector への登録
+- baseline 仮想計算
+- `World`、`Vehicle`、`Node`、`Link` の変更
+- 順位確定
+- 権利保有車両選定
+- alignment（第 1 部品）の実行
+- TVT 続行可否の判断
+- rollback
+
+###### 第1部品と後続処理との関係
+
+helper 実行後も、**baseline driver との実接続は未実装**である。
+
+将来は概念的に、次の順序で接続する（§25.25.34.31）。
+
+1. `RegistrationPlan` を **prepare** する
+2. 今回の helper で実 World 側順位台帳へ未確定 Visit を登録する
+3. 同じ `plan` を collector へ **apply** する
+4. 全 World baseline 仮想計算を実行する
+5. 仮想計算後に第 1 部品を **1 回**実行する
+6. 権利保有車両選定前に `unregistered_collector_visit_keys` が**空**であることを確認する
+
+ただし、この**全体接続**を今回実装しない。
+
+###### 今回まだ確定しない事項
+
+今回は次を**確定しない**。
+
+- baseline driver への実接続方法
+- optional `plan` 引数か別エントリポイントか
+- 上位 TVT 制御クラスの名称と配置
+- 権利保有車両選定
+- 既到着 Visit の先行順位確定
+- 先頭連続非参加 Visit の順位確定
+- 権利保有車両の baseline 予想通過 timestep `P` の取得
+- TVT 候補 Vehicle 集合
+- 候補全員の通過情報確認
+- 局所仮想計算
+- 経済条件評価
+
+###### Git状態と再開情報（§25.25.34.33）
+
+- 最新保存済み・push 済みコミットは **`434306e`**
+- 今回は設計メモのみを更新する
+- Python コード、テスト、進捗メモ、診断は変更しない
+- `diagnostics/order_control.zip` は既存未追跡、未接触、対象外
+- git add、git commit、git push はまだ行わない
+
+**次の再開地点**
+
+今回記録した順位台帳登録 helper の実装前仕様について、既存 **§25.25.34.31**、**§25.25.34.32**、順位台帳 API との整合を確認する。
+
+その後、新規小規模モジュールと専用テストだけで helper を実装するか判断する。
+
+baseline driver への実接続と権利保有車両選定へは、**まだ進まない**。
+
+**2026-09-07 更新：** 上記「次の再開地点」は、helper を**実装する前**の記録として本文を削除せず残す。本小節 **§25.25.34.33** の実装完了記録と次の再開地点の最新正本は、下記 **「実装完了記録（§25.25.34.33）」** を参照する。
+
+###### 実装完了記録（§25.25.34.33）
+
+**2026-09-07 更新：** 検証済み `OrderControlBaselineSnapshotRegistrationPlan` から、実 World 側の Node 別順位台帳へ未登録 Visit を一括登録する helper を実装した。本節を、この helper の実装結果と次の再開地点の最新正本とする。baseline driver への実接続、上位 TVT 制御、権利保有車両選定は、引き続き未実装である。
+
+**新規本番モジュール**
+
+- `uxsim/order_control_tvt_snapshot_undetermined_registration.py`
+
+**新規専用テスト**
+
+- `tests_order_control_tvt_snapshot_undetermined_registration.py`
+
+**実装した公開関数**
+
+- `register_undetermined_visits_from_snapshot_plan`
+
+**非技術的な役割**
+
+検証済み snapshot 固定 Visit 計画に含まれる Visit を Node ごとに確認し、順位台帳に未登録の Visit だけを「順位未確定 Visit」として台帳へ登録する。
+
+ここで「順位台帳に未登録」とは、次の**両方**が `False` であることを意味する。
+
+- `is_undetermined(visit_key)`
+- `is_confirmed(visit_key)`
+
+次の表現を混同しない。
+
+- `is_undetermined` が `False` だけでは、順位確定済みか台帳未登録かを区別できない
+- `is_undetermined` と `is_confirmed` が**両方** `False` の場合に、順位台帳へ**未登録**と判断する
+- 新規登録するのは、この順位台帳未登録 Visit だけである
+
+**入力と出力**
+
+入力：
+
+- `plan`：`OrderControlBaselineSnapshotRegistrationPlan`
+- `rank_states_by_node_name`：`Mapping[str, OrderControlTvtNodeRankState]`
+
+出力：
+
+- 全 Node を合計した新規登録件数 `int`
+
+**読取段階**
+
+順位台帳を変更する前に、次を確認・準備する。
+
+- `plan` の型
+- `mapping` の型
+- `plan.target_node_names` に必要な順位台帳がすべて存在すること
+- mapping 値が `OrderControlTvtNodeRankState` であること
+- mapping キーと `rank_state.node_name` が一致すること
+- `entry.node_name` が `plan.target_node_names` に含まれること
+- Node ごとの新規登録対象 VisitKey 列
+
+この読取段階が正常に完了するまで、**どの順位台帳も変更しない**。
+
+**登録対象の分類**
+
+- `is_undetermined` が `True`
+  - 順位未確定集合に登録済み
+  - 再登録しない
+- `is_confirmed` が `True`
+  - 順位確定済み
+  - 再登録しない
+- 両方 `False`
+  - 順位台帳に未登録
+  - 新規に順位未確定 Visit として登録する
+
+**反映段階**
+
+- `plan.target_node_names` の順に Node を処理する
+- 新規登録対象が空なら登録 API を呼ばない
+- 新規登録対象があれば、Node ごとに `register_undetermined_visits` を **1 回だけ**呼ぶ
+- 単数登録 API を外側で繰り返さない
+- 各 Node の新規登録数を合計して返す
+
+**登録順の意味**
+
+`plan.entries` の固定順は維持するが、この順序は次を**意味しない**。
+
+- 正式 baseline 到着順位
+- 順位確定順
+- 割当権利行使順位
+
+今回行うのは、順位未確定集合への登録だけであり、**順位確定ではない**。
+
+**原子性**
+
+- 1 つの Node 内では `register_undetermined_visits` の一括登録による既存原子性を利用する
+- 複数 Node を横断する rollback は行わない
+- 事前に検出可能な入力不備は、**全 Node の状態変更前**に検出する
+- Node1 の登録成功後、Node2 の登録 API 内部で失敗した場合は、Node1 の登録を**取り消さない**
+
+**Node 再訪**
+
+- VisitKey は `vehicle_name` と `visit_id` の組である
+- 同じ Vehicle でも `visit_id` が異なれば別 Visit として登録する
+- 同じ VisitKey が後続 plan に再び現れた場合は、順位未確定集合に登録済みまたは順位確定済みとして除外する
+
+**helper が変更するもの**
+
+入力 mapping に含まれる対象 Node の順位台帳だけを変更する。
+
+**helper が行わないこと**
+
+- `RegistrationPlan` の構築や変更
+- snapshot 固定集合の再構築
+- collector への登録
+- baseline 仮想計算
+- `World`、`Vehicle`、`Node`、`Link` の変更
+- 順位確定
+- 権利保有車両選定
+- baseline alignment（第 1 部品）
+- TVT 続行可否の判断
+- rollback
+- baseline driver への接続
+- 上位 TVT 制御の実装
+
+**実装した内部処理**
+
+次の内部 helper を実装した。これらは**内部 helper**であり、**公開 API として扱わない**。
+
+- `_prepare_registration_keys_by_node_name`
+  - 状態変更前の読取、確認、登録候補作成
+- `_apply_registration_keys_by_node_name`
+  - 検査済み候補を Node ごとに一括登録
+
+**テスト結果**
+
+| 実行 | 結果 |
+|------|------|
+| 新規本番モジュールと専用テストの `python -m py_compile` | 成功 |
+| 専用テストの直接実行 | **25 tests passed** |
+| `pytest` による専用テスト | **25 passed** |
+| `tests_order_control_tvt_node_rank_state.py` | **54 tests passed** |
+| `tests_order_control_baseline_snapshot.py` | 成功 |
+| `tests_order_control_tvt_baseline_alignment.py` | **25 tests passed** |
+| `git diff --check` | 問題なし |
+| 新規 2 ファイルへの `git diff --no-index --check` | 問題なし |
+
+**今回未実装の範囲**
+
+- baseline driver への実接続
+- prepare、順位台帳登録、apply、仮想計算をつなぐ上位処理
+- `rank_states_by_node_name` の所有者となる上位 TVT 制御
+- 仮想計算後の第 1 部品との実接続
+- 権利保有車両選定
+- 既到着 Visit の先行順位確定
+- 先頭連続非参加 Visit の順位確定
+- 権利保有車両の通過予想 timestep `P` の取得
+- TVT 候補 Vehicle 集合
+- 候補全員の通過情報確認
+- 局所仮想計算
+- 経済条件評価
+
+**Git 状態（実装完了記録時点）**
+
+- 作業開始時点の最新保存済み・push 済みコミットは **`434306e`**
+- 新規本番モジュールと専用テストは未コミットの作業ツリーに存在する
+- `diagnostics/order_control.zip` は既存未追跡、未接触、対象外
+- 本実装記録追記時点では、git add、git commit、git push は未実行
+
+**次の再開地点**
+
+1. helper の実装、専用テスト、設計メモの整合を最終確認する
+2. その後、prepare、順位台帳登録 helper、apply、baseline 仮想計算を接続する**最小の処理方法**を検討する
+3. baseline driver をどのように拡張または利用するかは、その接続検討で決める
+4. 権利保有車両選定には**まだ進まない**
