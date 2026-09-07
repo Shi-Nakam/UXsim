@@ -15504,3 +15504,541 @@ baseline driver への実接続と権利保有車両選定へは、**まだ進�
 2. その後、prepare、順位台帳登録 helper、apply、baseline 仮想計算を接続する**最小の処理方法**を検討する
 3. baseline driver をどのように拡張または利用するかは、その接続検討で決める
 4. 権利保有車両選定には**まだ進まない**
+
+##### 25.25.34.34 TVT順位台帳登録を伴うsnapshot固定baseline fork実行経路
+
+**2026-09-07 更新：** 検証済み `OrderControlBaselineSnapshotRegistrationPlan` を、順位台帳登録 helper と collector 登録の間で共有し、全 World baseline 仮想計算の前に実 World 側 TVT 順位台帳へ未登録 Visit を登録する baseline driver 接続方法の実装前仕様を確定した。本小節 **§25.25.34.34** を、この接続経路の責務・配置・入出力・処理順の最新正本とする。未確定 Visit 登録タイミングと接続原則は **§25.25.34.31**、snapshot 登録計画の prepare/apply 分割は **§25.25.34.32**、順位台帳登録 helper は **§25.25.34.33** を参照する。本小節では接続方法の実装前仕様のみを確定し、driver の実装、専用テスト、第 1 部品との実接続、権利保有車両選定は行わない。
+
+###### 今回確定する目的
+
+現在の baseline driver（`order_control_baseline_driver.py`）では、snapshot 固定 Visit 計画の **prepare** と collector への **apply** が、既存 `register_snapshot_fixed_visits` の内部で連続して実行される。
+
+一方、TVT の新しい実行経路では、prepare と apply の**間**に、次の処理を置く必要がある（§25.25.34.31）。
+
+- **順位台帳に未登録**の snapshot 固定 Visit を、実 World 側の各 Node の TVT 順位台帳の**順位未確定集合**へ登録する
+
+今回の目的は、既存 driver の処理を**複製せず**、既存公開関数も**壊さず**に、次の接続順を実現する方法を記録する。
+
+1. `RegistrationPlan` を **prepare** する
+2. 順位台帳に未登録の Visit を、TVT 順位台帳の順位未確定集合へ登録する
+3. **同じ** `RegistrationPlan` を baseline collector へ **apply** する
+4. `fork_W` で全 World baseline 仮想計算を実行する
+
+###### 採用する接続方法
+
+次の方式を**採用**する。
+
+- 既存 `run_snapshot_fixed_baseline_fork` は、**外部シグネチャ**と**従来動作**を維持する
+- TVT 順位台帳への登録を伴う**新しい公開関数**を `order_control_baseline_driver.py` へ追加する
+- 既存関数と新しい関数は、fork 作成、collector 設定、仮想計算、終了時検証、`ForkResult` 構築に関する**内部共通処理**を使用する
+- 既存 driver の前半処理や終了時検証を、新しいモジュールへ**複製しない**
+- `RegistrationPlan` は **1 回だけ** prepare する
+- **同じ** `RegistrationPlan` を、順位台帳登録 helper と collector への apply の**両方**へ渡す
+- callback、hook、rollback は**追加しない**
+- 順位台帳を baseline driver が**所有しない**
+- `OrderControlBaselineForkResult` は**変更しない**
+- `RegistrationPlan` を `ForkResult` へ**追加しない**
+
+###### 新しい公開関数
+
+**正式名称：** `run_snapshot_fixed_baseline_fork_with_tvt_rank_ledger_registration`
+
+想定シグネチャ：
+
+```python
+def run_snapshot_fixed_baseline_fork_with_tvt_rank_ledger_registration(
+    real_W,
+    *,
+    target_node_names,
+    baseline_horizon_steps,
+    rank_states_by_node_name,
+) -> OrderControlBaselineForkResult:
+    ...
+```
+
+**関数名の意味：**
+
+- **snapshot 固定 baseline fork** を実行する
+- 全 World baseline 仮想計算の**前**に、**TVT 順位台帳**への登録を行う
+- 従来の `run_snapshot_fixed_baseline_fork` とは異なる **TVT 用**の実行経路である
+
+**順位台帳への登録内容：**
+
+順位台帳への登録は、既存 helper `register_undetermined_visits_from_snapshot_plan`（§25.25.34.33）とその docstring により明確にする。この関数は、**順位台帳に未登録**の snapshot 固定 Visit を、各 Node の TVT 順位台帳の**順位未確定集合**へ登録する。順位確定、collector 登録、baseline 仮想計算は行わない。
+
+###### 新しい公開関数の入力
+
+入力は次の **4 つ**に限定する。
+
+| 入力 | 意味 |
+|------|------|
+| `real_W` | baseline 開始時点の実 World |
+| `target_node_names` | TVT 対象 Node 名の列 |
+| `baseline_horizon_steps` | 仮想計算の horizon ステップ数 |
+| `rank_states_by_node_name` | World 外の上位 TVT 制御が所有する Node 名別順位台帳の `Mapping` |
+
+`rank_states_by_node_name` は、World 外の上位 TVT 制御が所有する Node 名別順位台帳の **Mapping** である。新しい公開関数は、この Mapping を受け取って既存 helper へ**渡すだけ**であり、順位台帳そのものを**所有しない**。
+
+**新しい公開関数が行わないこと：**
+
+- driver 内部で順位台帳を**新規作成**する
+- 順位台帳を `World` 属性または `Node` 属性へ**保存**する
+- fork 側に順位台帳を**作る**
+- `ForkResult` へ順位台帳を**保存**する
+
+mapping に plan 対象外の追加 Node が存在することは**許容**し、**使用しない**（§25.25.34.33）。
+
+###### 新しい公開関数の実行順
+
+実装時に**必ず維持**する処理順は次のとおりである。
+
+1. 既存 driver 契約に従って入力を検証する
+2. `real_W` の `T`、`TIME`、`collector` を保存する
+3. `real_W` から `fork_W` を作成する
+4. `fork_W` が `real_W` とは異なるオブジェクトであることなど、既存契約を確認する
+5. 空の `OrderControlBaselineCollector` を作成する
+6. collector を `fork_W` 側**だけ**へ設定する
+7. `prepare_snapshot_fixed_visit_registration_plan` を **1 回だけ**呼ぶ
+8. 得られた `RegistrationPlan` を `register_undetermined_visits_from_snapshot_plan` へ渡す
+9. 順位台帳への登録が正常終了した**後**、**同じ** `RegistrationPlan` を `apply_snapshot_fixed_visit_registration_plan` へ渡す
+10. collector への登録件数を既存契約に従って照合する
+11. snapshot 固定 Visit が **0 件**なら、`fork_W.exec_simulation` を**呼ばず**、既存契約に従った空の `ForkResult` を返す
+12. **1 件以上**なら、残り timestep を検証する
+13. `fork_W.exec_simulation` を実行する
+14. 既存の終了時検証を行う
+15. 既存の `OrderControlBaselineForkResult` を返す
+
+公開関数の本文から、少なくとも次の**中心部分**が明確に読める構造にする。
+
+```
+prepare
+→ TVT 順位台帳の順位未確定集合への登録
+→ collector への apply
+→ exec_simulation
+```
+
+###### RegistrationPlanを一度だけ構築する保証
+
+TVT 用の新しい実行経路では、`register_snapshot_fixed_visits` を**呼ばない**。
+
+代わりに、次の **3 処理**を個別に **1 回ずつ**行う。
+
+1. `prepare_snapshot_fixed_visit_registration_plan`
+2. `register_undetermined_visits_from_snapshot_plan`
+3. `apply_snapshot_fixed_visit_registration_plan`
+
+prepare が返した**同じ** `RegistrationPlan` を、2 と 3 の**両方**へ渡す。
+
+- `RegistrationPlan` を上位処理と driver で**二重構築しない**
+- `RegistrationPlan` の内容をコピーして**別計画を作らない**
+- collector への apply 後も、`RegistrationPlan` を `ForkResult` へ**保存しない**
+- 仮想計算後の第 1 部品は、`ForkResult` の `collector` と、上位制御が所有する順位台帳を利用する**想定**である
+
+ただし、第 1 部品との**実接続**は今回**確定しない**。
+
+###### 既存公開関数の維持
+
+既存の次の関数は**維持**する。
+
+- `run_snapshot_fixed_baseline_fork`
+
+次を**変更しない**。
+
+- 外部シグネチャ
+- 返り値
+- 従来の処理結果
+- `register_snapshot_fixed_visits` を **1 回**呼ぶ従来経路
+- 既存利用者から見た動作
+
+既存関数では、引き続き `register_snapshot_fixed_visits` を使用する。
+
+既存 `register_snapshot_fixed_visits` も、prepare と apply を内部で順に呼ぶ**従来利用者向けのラッパー**として維持する（§25.25.34.32）。
+
+###### 内部共通処理
+
+既存 driver 処理の複製を避けるため、**必要最小限**の内部共通化を行う。
+
+概念上、次の **2 段階**までの共通化を基本とする。内部関数の**正式名称**は、実装時に既存命名と可読性を確認して決めるものとし、本小節では**確定しない**。
+
+**1. fork 準備**
+
+含む処理：
+
+- driver 入力検証
+- `real_W` の状態保存
+- `real_W.copy`
+- `fork_W` の検証
+- 空 collector の作成
+- `fork_W` への collector 設定
+
+**2. 仮想計算または空結果の返却**
+
+含む処理：
+
+- collector 登録件数の照合
+- snapshot 固定 Visit が 0 件の場合の空結果
+- 残り timestep の検証
+- `fork_W.exec_simulation`
+- 終了時検証
+- `OrderControlBaselineForkResult` の構築
+
+**採用しない内部構造：**
+
+- 1 つの巨大な内部関数へ `rank_states_by_node_name` を渡し、`None` かどうかで従来経路と TVT 経路を切り替える
+- 処理を必要以上に細かい内部関数へ分割する
+- driver 前半を新しい TVT 接続モジュールへ**コピー**する
+- driver の内部段階を多数の**公開 API**にする
+
+###### snapshot固定Visitが0件の場合
+
+新しい TVT 用実行経路でも、次の順序を**維持**する。
+
+1. 空の `RegistrationPlan` を prepare する
+2. 順位台帳登録 helper を**呼ぶ**
+3. helper は必要な `rank_state` の存在と対応を確認する
+4. helper は順位台帳を**変更せず**、新規登録件数 **0** を返す
+5. **同じ** plan を collector へ apply する
+6. apply は登録件数 **0** を返す
+7. `fork_W.exec_simulation` を**呼ばない**
+8. 既存契約に従った空の `ForkResult` を返す
+
+**0 件時だけ順位台帳登録 helper を飛ばす特別分岐は追加しない**。直線的な処理順を維持し、`plan.target_node_names` に対応する `rank_state` の存在確認を helper の既存契約に委ねる。
+
+空結果では、少なくとも次を**維持**する。
+
+- `registered_visit_count == 0`
+- `fork_steps_executed == 0`
+- collector は**空**
+- `final_fork_timestep` は既存 driver 契約に従う
+- `real_W` は**変更しない**
+
+###### 例外時の扱い
+
+**順位台帳登録 helper が `ValueError` を出した場合：**
+
+- collector への apply を**行わない**
+- `fork_W.exec_simulation` を**行わない**
+- 部分的な `ForkResult` を**返さない**
+- `real_W` を**変更しない**
+- helper 内で別 Node の順位未確定集合へ正常に登録された Visit は**取り消さない**（§25.25.34.33、§25.25.34.31）
+
+**collector への apply が失敗した場合：**
+
+- `fork_W.exec_simulation` を**行わない**
+- 部分的な `ForkResult` を**返さない**
+- `real_W` を**変更しない**
+- 順位台帳の順位未確定集合への登録は**取り消さない**
+
+**`fork_W.exec_simulation` または終了時検証が失敗した場合：**
+
+- 部分的な `ForkResult` を**返さない**
+- `real_W` を**変更しない**
+- 順位台帳の順位未確定集合への登録は**取り消さない**（§25.25.34.31）
+
+**共通方針：**
+
+- rollback API を**追加しない**
+- 登録取消し API を**追加しない**
+- 複数 Node の一部で登録に失敗しても、別 Node だけの仮想計算へ**進まない**
+- 正しく行われた順位未確定集合への登録は、仮想計算結果ではなく実 World 側の順位管理状態なので**保持する**
+
+###### 既存driver契約の維持
+
+新しい TVT 用実行経路でも、次を**維持**する。
+
+- `real_W` の `T` を変更しない
+- `real_W` の `TIME` を変更しない
+- `real_W` の `collector` を変更しない
+- collector は `fork_W` 側**だけ**に設定する
+- snapshot 固定 Visit が 0 件なら仮想計算**しない**
+- `registered_visit_count` は collector へ登録した snapshot 固定 Visit 件数を表す
+- `configured_horizon_steps` を既存契約どおり返す
+- `fork_steps_executed` を既存契約どおり返す
+- `final_fork_timestep` を既存契約どおり返す
+- 途中例外時に部分的な `ForkResult` を**返さない**
+
+###### 結果型
+
+`OrderControlBaselineForkResult` は**変更しない**。
+
+次を新しいフィールドとして**追加しない**。
+
+- `RegistrationPlan`
+- 順位台帳
+- 順位台帳登録件数
+- alignment 結果
+- 権利保有車両
+- TVT 候補 Vehicle 集合
+
+順位台帳登録 helper の戻り値である新規登録件数 `int` は、新しい公開関数内で処理確認に使えるが、`ForkResult` へ**保存する必要はない**。
+
+###### 採用しない方式
+
+次は**採用しない**。
+
+- 既存 `run_snapshot_fixed_baseline_fork` へ `rank_states_by_node_name` を**追加**する
+- 既存関数へ任意の `rank_states` 引数を追加し、関数内部で従来経路と TVT 経路を**切り替える**
+- 外部で prepare 済み `plan` を作り、それを driver へ**渡す**
+- 上位処理が `real_W.copy` や collector 設定など driver 前半を**再実装**する
+- callback または hook へ順位台帳登録を**委ねる**
+- 新しい巨大な orchestration class を**追加**する
+- `OrderControlBaselineForkResult` へ `RegistrationPlan` を**追加**する
+- 複数 Node 横断 rollback を**追加**する
+
+###### 今回まだ確定しない事項
+
+今回は次を**確定しない**。
+
+- 内部共通関数の正式名称
+- TVT 用公開関数の docstring の最終文面
+- 専用テストを既存 driver テストへ追加するか、新規ファイルへ分けるか
+- 上位 TVT 制御クラスの名称と配置
+- `rank_states_by_node_name` を上位制御がどの時点で生成するか
+- 仮想計算後に第 1 部品を**誰が**呼ぶか
+- `unregistered_collector_visit_keys` が空であることを確認する具体的な接続方法
+- 権利保有車両選定
+- 既到着 Visit の先行順位確定
+- 先頭連続非参加 Visit の順位確定
+- 権利保有車両の baseline 予想通過 timestep `P` の取得
+- TVT 候補 Vehicle 集合
+- 候補全員の通過情報確認
+- 局所仮想計算
+- 経済条件評価
+
+###### Git状態と再開情報（§25.25.34.34）
+
+- 最新保存済み・push 済みコミットは **`f7052b1`**
+- 今回は設計メモのみを更新する
+- Python コード、テスト、進捗メモ、診断は変更しない
+- `diagnostics/order_control.zip` は既存未追跡、未接触、対象外
+- git add、git commit、git push はまだ行わない
+
+**次の再開地点**
+
+1. 今回記録した TVT 順位台帳登録付き baseline fork 実行経路について、既存 driver 契約、**§25.25.34.31**、**§25.25.34.32**、**§25.25.34.33** との整合を確認する
+2. その後、`order_control_baseline_driver.py` と TVT 接続専用テスト**だけ**を変更して、今回の実行経路を実装するか判断する
+3. 仮想計算後の第 1 部品との接続と、権利保有車両選定には**まだ進まない**
+
+##### 25.25.34.35 TVT順位台帳登録付きsnapshot固定baseline fork実行経路の実装完了記録
+
+**2026-09-07 更新：** **§25.25.34.34** で確定した TVT 順位台帳登録付き snapshot 固定 baseline fork 実行経路を、`order_control_baseline_driver.py` と専用テストへ実装した。本小節 **§25.25.34.35** を、この接続経路の**実装結果・検証結果・次の再開地点**の最新正本とする。接続方法の実装前仕様は **§25.25.34.34** を参照する。未確定 Visit 登録タイミングと接続原則は **§25.25.34.31**、snapshot 登録計画の prepare/apply 分割は **§25.25.34.32**、順位台帳登録 helper は **§25.25.34.33** を参照する。
+
+**§25.25.34.34** は実装前仕様の記録として本文を削除せず残す。本小節と **§25.25.34.34** の記述に差がある場合は、**本小節を実装済み事実の正本**として参照する。
+
+###### 変更した本番モジュール
+
+- `uxsim/order_control_baseline_driver.py`
+
+###### 新規専用テスト
+
+- `tests_order_control_tvt_baseline_driver_registration.py`
+
+###### 実装した公開関数
+
+**正式名称：** `run_snapshot_fixed_baseline_fork_with_tvt_rank_ledger_registration`
+
+**非技術的な役割**
+
+snapshot 固定 baseline fork を実行する。全 World baseline 仮想計算の**前**に、snapshot 固定 Visit 計画に含まれる**順位台帳に未登録**の Visit を、実 World 側の各 Node の TVT 順位台帳の**順位未確定集合**へ登録する。
+
+**入力**
+
+- `real_W`
+- `target_node_names`
+- `baseline_horizon_steps`
+- `rank_states_by_node_name`
+
+**`rank_states_by_node_name` の所有**
+
+- `rank_states_by_node_name` は**呼出側**（World 外の上位 TVT 制御）が所有する
+- driver は順位台帳を**生成しない**、**保持しない**、**置換しない**
+- driver は受け取った Mapping を helper へ**渡すだけ**である
+
+**この公開関数が行わないこと**
+
+- 順位確定
+- baseline alignment（第 1 部品、`order_control_tvt_baseline_alignment`）
+- 権利保有車両選定
+- 順位台帳の driver 内部生成・保存
+- `ForkResult` への順位台帳または `RegistrationPlan` の保存
+
+###### TVT経路の確定処理順
+
+TVT 新経路の処理順は、次のとおり**実装済み**である。
+
+1. `_prepare_baseline_fork`
+2. `prepare_snapshot_fixed_visit_registration_plan`
+3. `register_undetermined_visits_from_snapshot_plan`
+4. `apply_snapshot_fixed_visit_registration_plan`
+5. `_complete_baseline_fork_after_registration`
+6. 登録件数が **1 件以上**の場合だけ `fork_W.exec_simulation`
+
+公開関数の本文から、少なくとも次の中心部分が直線的に読める構造になっている。
+
+```
+_prepare_baseline_fork
+→ prepare
+→ helper（順位未確定集合への登録）
+→ apply
+→ _complete_baseline_fork_after_registration
+  （件数 0 なら exec 省略、1 件以上なら exec_simulation）
+```
+
+###### RegistrationPlanの扱い
+
+- `prepare_snapshot_fixed_visit_registration_plan` を **1 回だけ**呼ぶ
+- 得られた **同一** `RegistrationPlan` オブジェクトを、helper と apply の**両方**へ渡す
+- TVT 経路では `register_snapshot_fixed_visits` を**呼ばない**
+- plan を**再生成しない**
+
+###### 0件時の契約
+
+登録対象 Visit が **0 件**の場合でも、次を**実装済み・テスト確認済み**である。
+
+- 空 plan でも helper を **1 回**実行する
+- 空 plan でも apply を **1 回**実行する
+- `exec_simulation` は**実行しない**
+- 既存契約に従った空の `OrderControlBaselineForkResult` を返す
+- 0 件だけを理由に helper または apply を省略する分岐は**設けない**
+
+###### 失敗時の確定方針
+
+次の失敗時挙動は**実装済み・テスト確認済み**である。
+
+**処理の中断**
+
+- helper 失敗時は apply と exec を**行わない**
+- apply 失敗時は exec を**行わない**
+
+**例外伝播**
+
+- helper、apply、exec、終了時検証の失敗では、部分的な `OrderControlBaselineForkResult` を**返さず**、例外を**伝播**する
+
+**順位未確定登録の非 rollback**
+
+- driver は順位未確定登録を**rollback しない**
+- 後続処理の失敗前に正常登録された順位未確定 Visit は**残る**
+- 複数 Node を処理する helper 内部で、前方 Node の登録成功後に後方 Node の登録で失敗した場合も、前方 Node へ正常登録済みの順位未確定 Visit は**取り消さない**
+
+**real_W の不変**
+
+- driver は `real_W` へ書き込む処理を**持たない**
+- 例外時も `real_W` の `T`、`TIME`、`order_control_baseline_collector` は**変更しない**
+- この不変は rollback によって実現するのではなく、driver が `real_W` へ変更を加えない構造によって成立する
+
+###### 共通化した内部処理
+
+次の内部処理を共通化した。これらは**内部処理**であり、**公開 API として扱わない**。
+
+| 内部名 | 役割 |
+|--------|------|
+| `_BaselineForkPrepared` | fork 準備完了時点の状態を保持する dataclass |
+| `_prepare_baseline_fork` | 入力検証、`real_W` 状態保存、`fork_W` 作成・検証、空 collector を `fork_W` 側だけへ設定 |
+| `_complete_baseline_fork_after_registration` | 登録件数照合、0 件時の空結果、残り timestep 検証、`exec_simulation`、終了時検証、`ForkResult` 構築 |
+
+**共通化の目的**
+
+既存経路（`run_snapshot_fixed_baseline_fork`）と TVT 経路で、fork 準備および完了処理を**共有**しつつ、登録処理の違いを公開関数側で**直線的に読める**ようにする。
+
+**既存経路との登録処理の差**
+
+| 経路 | 登録処理 |
+|------|----------|
+| 既存 `run_snapshot_fixed_baseline_fork` | `register_snapshot_fixed_visits` を **1 回**（内部で prepare → apply） |
+| TVT 新経路 | prepare → helper → apply を公開関数本文で明示 |
+
+###### 既存APIとの互換性
+
+次は**実装済み・テスト確認済み**である。
+
+- `run_snapshot_fixed_baseline_fork` の外部シグネチャ、返り値、処理結果を**維持**した
+- 既存経路では `register_snapshot_fixed_visits` を引き続き **1 回だけ**呼ぶ
+- `OrderControlBaselineForkResult` は**変更していない**
+- `tests_order_control_baseline_driver.py` の直接実行で **66 tests passed**
+
+###### 専用テスト
+
+**ファイル：** `tests_order_control_tvt_baseline_driver_registration.py`
+
+**最終件数：** **30 tests passed**
+
+**検証している主な契約**
+
+| 検証項目 | 代表テスト |
+|----------|------------|
+| 返り値型 | `test_returns_order_control_baseline_fork_result` |
+| prepare 1 回 | `test_prepare_called_once` |
+| 同一 plan を helper と apply へ渡す | `test_same_plan_passed_to_helper_and_apply` |
+| `register_snapshot_fixed_visits` 非使用 | `test_does_not_call_register_snapshot_fixed_visits` |
+| 呼出順（1 件以上） | `test_call_order_prepare_helper_apply_exec_simulation` |
+| 仮想計算前の順位未確定登録 | `test_registers_unregistered_visit_before_simulation` |
+| 再登録しない（未確定・確定済み） | `test_does_not_reregister_already_undetermined_visit`、`test_does_not_reregister_already_confirmed_visit` |
+| collector 結果の既存経路一致 | `test_collector_matches_legacy_snapshot_registration` |
+| helper 失敗時の apply/exec 省略 | `test_helper_value_error_skips_apply_and_exec` |
+| helper 失敗時の real_W 不変 | `test_helper_failure_leaves_real_world_unchanged` |
+| apply 失敗時の exec 省略・real_W 不変・順位未確定残存 | `test_apply_failure_skips_exec_preserves_real_world_and_undetermined_registrations` |
+| exec 失敗時の部分結果なし・real_W 不変・順位未確定残存 | `test_exec_failure_skips_result_preserves_real_world_and_undetermined_registrations` |
+| 終了時検証失敗時の順位未確定残存 | `test_post_forward_validation_failure_keeps_undetermined_registrations` |
+| 例外時の部分 ForkResult 非返却 | `test_exceptions_do_not_return_partial_fork_result` |
+| 0 件時の helper 1 回 | `test_zero_visits_still_calls_helper` |
+| 0 件時の apply 1 回 | `test_zero_visits_calls_apply_snapshot_fixed_visit_registration_plan_once` |
+| 0 件時の呼出順（exec なし） | `test_zero_visits_call_order_is_prepare_helper_apply_without_exec` |
+| 0 件時の空 ForkResult | `test_zero_visits_fork_result_matches_existing_contract` |
+| rank_state 不足時の ValueError | `test_raises_when_target_node_rank_state_is_missing` |
+| 対象外 Node mapping の無視 | `test_ignores_non_target_mapping_nodes` |
+| 複数 Node helper 内部失敗時の前方登録残存・apply/exec 省略・real_W 不変 | `test_multi_node_helper_internal_failure_preserves_front_registration_without_apply_or_exec` |
+| 成功時の real_W 不変 | `test_leaves_real_world_t_time_collector_unchanged` |
+| collector は fork_W 側のみ | `test_sets_collector_only_on_fork_world` |
+| 既存 API 経路の維持 | `test_legacy_driver_behavior_unchanged`、`test_legacy_driver_calls_register_snapshot_fixed_visits_once` |
+| 順位確定しない | `test_does_not_confirm_ranks` |
+| ForkResult に plan/順位台帳を含めない | `test_fork_result_does_not_include_plan_or_rank_ledger_fields` |
+
+**テスト補強（反証レビュー対応）**
+
+専用テストの初版作成後、反証レビューで指摘された回帰検出上の穴を塞ぐため、次を補強した。
+
+- 0 件時の apply 1 回呼び出し
+- 0 件時の `prepare → helper → apply` 呼出順と exec 非実行の一体確認
+- apply 失敗時の real_W 不変と順位未確定残存の一体確認（旧 2 テストを統合）
+- exec 失敗時の real_W 不変の追加確認
+- 複数 Node で helper 内部の前方登録成功・後方失敗時の挙動（実 helper 経路）
+
+重複するだけのテストは統合し、件数を増やすこと自体ではなく**回帰検出力**を高めた。最終件数は **30** である。
+
+###### 実行済み検証
+
+| 実行 | 結果 |
+|------|------|
+| `tests_order_control_tvt_baseline_driver_registration.py` の `python -m py_compile` | 成功 |
+| 専用テストの直接実行 | **30 tests passed** |
+| `pytest` による専用テスト | **30 passed** |
+| `tests_order_control_baseline_driver.py` の直接実行 | **66 tests passed** |
+| `tests_order_control_baseline_snapshot.py` | 実装完了時に成功 |
+| `tests_order_control_tvt_snapshot_undetermined_registration.py` | 実装完了時に **25 tests passed** |
+| `tests_order_control_tvt_node_rank_state.py` | 実装完了時に **54 tests passed** |
+| `git diff --check` | 問題なし |
+
+###### 今回未実装の範囲
+
+- 仮想計算**後**の `order_control_tvt_baseline_alignment`（第 1 部品）の実行
+- `unregistered_collector_visit_keys` が空であることの確認
+- 順位確定
+- 権利保有車両選定
+- その後の TVT 処理（既到着 Visit の先行順位確定、先頭連続非参加 Visit の順位確定、通過予想 timestep `P` の取得、TVT 候補 Vehicle 集合、候補全員の通過情報確認、局所仮想計算、経済条件評価 など）
+
+###### Git状態と再開情報（§25.25.34.35）
+
+- 作業開始時点の最新保存済み・push 済みコミットは **`f7052b1`**
+- `uxsim/order_control_baseline_driver.py` と `tests_order_control_tvt_baseline_driver_registration.py` は未コミットの作業ツリーに存在する
+- `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES.md` は本実装完了記録追記時に更新する
+- `diagnostics/order_control.zip` は既存未追跡、未接触、対象外
+- 本実装完了記録追記時点では、git add、git commit、git push は未実行
+
+**次の再開地点**
+
+1. 仮想計算**完了後**に、`order_control_tvt_baseline_alignment` を**正確に 1 回**実行する上位処理を接続する
+2. その際、`unregistered_collector_visit_keys` が**空**であることを確認する
+3. この処理は**権利保有車両選定より前**に置く
+4. 第 1 部品を**誰が所有**し、**どの上位関数から呼ぶ**かは**未確定**であり、次の設計対象である
+5. `rank_states_by_node_name` を上位 TVT 制御が生成・保持する時点も**未確定**である
+6. 権利保有車両選定には**まだ進まない**

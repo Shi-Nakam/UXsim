@@ -7,10 +7,19 @@ single fork-side exec_simulation() batch forward. Institutional TVT logic stays 
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 from uxsim.order_control_baseline_collector import OrderControlBaselineCollector
-from uxsim.order_control_baseline_snapshot import register_snapshot_fixed_visits
+from uxsim.order_control_baseline_snapshot import (
+    apply_snapshot_fixed_visit_registration_plan,
+    prepare_snapshot_fixed_visit_registration_plan,
+    register_snapshot_fixed_visits,
+)
+from uxsim.order_control_tvt_node_rank_state import OrderControlTvtNodeRankState
+from uxsim.order_control_tvt_snapshot_undetermined_registration import (
+    register_undetermined_visits_from_snapshot_plan,
+)
 from uxsim.uxsim import World
 
 
@@ -25,6 +34,21 @@ class OrderControlBaselineForkResult:
     fork_steps_executed: int
     final_fork_timestep: int
     registered_visit_count: int
+
+
+@dataclass
+class _BaselineForkPrepared:
+    """Fork-side baseline setup shared by legacy and TVT registration paths."""
+
+    real_W: World
+    fork_W: World
+    collector: OrderControlBaselineCollector
+    fixed_target_node_names: tuple[str, ...]
+    baseline_horizon_steps: int
+    baseline_timestep_T: int
+    real_world_t_before: int
+    real_world_time_before: float
+    real_world_collector_before: object
 
 
 def _validate_and_freeze_target_node_names(target_node_names) -> tuple[str, ...]:
@@ -217,18 +241,12 @@ def _build_completed_baseline_result(
     )
 
 
-def run_snapshot_fixed_baseline_fork(
+def _prepare_baseline_fork(
     real_W: World,
     *,
     target_node_names: list[str] | tuple[str, ...],
     baseline_horizon_steps: int,
-) -> OrderControlBaselineForkResult:
-    """
-    Copy real_W, register snapshot-fixed visits on fork_W, and run one fixed horizon.
-
-    Does not modify real_W. Does not return fork_W. Raises on invalid input or
-    internal inconsistency; does not return partial results on failure.
-    """
+) -> _BaselineForkPrepared:
     fixed_target_node_names = _validate_and_freeze_target_node_names(
         target_node_names
     )
@@ -257,62 +275,148 @@ def run_snapshot_fixed_baseline_fork(
     collector = OrderControlBaselineCollector()
     fork_W._order_control_baseline_collector = collector
 
-    registered_visit_count = register_snapshot_fixed_visits(
-        fork_W,
-        collector,
-        target_node_names=fixed_target_node_names,
-    )
-    _validate_registered_visit_count(
-        registered_visit_count=registered_visit_count,
-        collector=collector,
-        fixed_target_node_names=fixed_target_node_names,
-        reconciliation_phase="after snapshot registration",
-    )
-
-    if registered_visit_count == 0:
-        _validate_real_world_unchanged(
-            real_W=real_W,
-            real_world_t_before=real_world_t_before,
-            real_world_time_before=real_world_time_before,
-            real_world_collector_before=real_world_collector_before,
-        )
-        return _build_empty_baseline_result(
-            collector=collector,
-            fixed_target_node_names=fixed_target_node_names,
-            baseline_timestep_T=baseline_timestep_T,
-            baseline_horizon_steps=baseline_horizon_steps,
-        )
-
-    _validate_remaining_baseline_steps(fork_W, baseline_horizon_steps)
-
-    fork_timestep_before = fork_W.T
-    fork_W.exec_simulation(
-        duration_t2=baseline_horizon_steps * fork_W.DELTAT
-    )
-
-    _validate_completed_fork_forward(
-        fork_W=fork_W,
-        fork_timestep_before=fork_timestep_before,
-        baseline_horizon_steps=baseline_horizon_steps,
-    )
-    _validate_registered_visit_count(
-        registered_visit_count=registered_visit_count,
-        collector=collector,
-        fixed_target_node_names=fixed_target_node_names,
-        reconciliation_phase="after baseline forward",
-    )
-    _validate_real_world_unchanged(
+    return _BaselineForkPrepared(
         real_W=real_W,
+        fork_W=fork_W,
+        collector=collector,
+        fixed_target_node_names=fixed_target_node_names,
+        baseline_horizon_steps=baseline_horizon_steps,
+        baseline_timestep_T=baseline_timestep_T,
         real_world_t_before=real_world_t_before,
         real_world_time_before=real_world_time_before,
         real_world_collector_before=real_world_collector_before,
     )
 
-    return _build_completed_baseline_result(
-        collector=collector,
-        fixed_target_node_names=fixed_target_node_names,
-        baseline_timestep_T=baseline_timestep_T,
-        baseline_horizon_steps=baseline_horizon_steps,
-        fork_W=fork_W,
+
+def _complete_baseline_fork_after_registration(
+    prepared: _BaselineForkPrepared,
+    registered_visit_count: int,
+) -> OrderControlBaselineForkResult:
+    _validate_registered_visit_count(
         registered_visit_count=registered_visit_count,
+        collector=prepared.collector,
+        fixed_target_node_names=prepared.fixed_target_node_names,
+        reconciliation_phase="after snapshot registration",
+    )
+
+    if registered_visit_count == 0:
+        _validate_real_world_unchanged(
+            real_W=prepared.real_W,
+            real_world_t_before=prepared.real_world_t_before,
+            real_world_time_before=prepared.real_world_time_before,
+            real_world_collector_before=prepared.real_world_collector_before,
+        )
+        return _build_empty_baseline_result(
+            collector=prepared.collector,
+            fixed_target_node_names=prepared.fixed_target_node_names,
+            baseline_timestep_T=prepared.baseline_timestep_T,
+            baseline_horizon_steps=prepared.baseline_horizon_steps,
+        )
+
+    _validate_remaining_baseline_steps(
+        prepared.fork_W,
+        prepared.baseline_horizon_steps,
+    )
+
+    fork_timestep_before = prepared.fork_W.T
+    prepared.fork_W.exec_simulation(
+        duration_t2=prepared.baseline_horizon_steps * prepared.fork_W.DELTAT
+    )
+
+    _validate_completed_fork_forward(
+        fork_W=prepared.fork_W,
+        fork_timestep_before=fork_timestep_before,
+        baseline_horizon_steps=prepared.baseline_horizon_steps,
+    )
+    _validate_registered_visit_count(
+        registered_visit_count=registered_visit_count,
+        collector=prepared.collector,
+        fixed_target_node_names=prepared.fixed_target_node_names,
+        reconciliation_phase="after baseline forward",
+    )
+    _validate_real_world_unchanged(
+        real_W=prepared.real_W,
+        real_world_t_before=prepared.real_world_t_before,
+        real_world_time_before=prepared.real_world_time_before,
+        real_world_collector_before=prepared.real_world_collector_before,
+    )
+
+    return _build_completed_baseline_result(
+        collector=prepared.collector,
+        fixed_target_node_names=prepared.fixed_target_node_names,
+        baseline_timestep_T=prepared.baseline_timestep_T,
+        baseline_horizon_steps=prepared.baseline_horizon_steps,
+        fork_W=prepared.fork_W,
+        registered_visit_count=registered_visit_count,
+    )
+
+
+def run_snapshot_fixed_baseline_fork(
+    real_W: World,
+    *,
+    target_node_names: list[str] | tuple[str, ...],
+    baseline_horizon_steps: int,
+) -> OrderControlBaselineForkResult:
+    """
+    Copy real_W, register snapshot-fixed visits on fork_W, and run one fixed horizon.
+
+    Does not modify real_W. Does not return fork_W. Raises on invalid input or
+    internal inconsistency; does not return partial results on failure.
+    """
+    prepared = _prepare_baseline_fork(
+        real_W,
+        target_node_names=target_node_names,
+        baseline_horizon_steps=baseline_horizon_steps,
+    )
+    registered_visit_count = register_snapshot_fixed_visits(
+        prepared.fork_W,
+        prepared.collector,
+        target_node_names=prepared.fixed_target_node_names,
+    )
+    return _complete_baseline_fork_after_registration(
+        prepared,
+        registered_visit_count,
+    )
+
+
+def run_snapshot_fixed_baseline_fork_with_tvt_rank_ledger_registration(
+    real_W: World,
+    *,
+    target_node_names: list[str] | tuple[str, ...],
+    baseline_horizon_steps: int,
+    rank_states_by_node_name: Mapping[str, OrderControlTvtNodeRankState],
+) -> OrderControlBaselineForkResult:
+    """
+    Copy real_W, register snapshot-fixed visits on fork_W, and run one fixed horizon.
+
+    Before baseline virtual simulation, registers rank-ledger-unregistered
+    snapshot-fixed visits from a single prepared plan onto caller-owned TVT rank
+    ledgers (undetermined sets only), then applies the same plan to the fork
+    collector. Does not own rank ledgers, confirm ranks, run baseline alignment,
+    or select right-of-entry vehicles. Does not modify real_W. Does not return
+    fork_W. Raises on invalid input or internal inconsistency; does not return
+    partial results on failure.
+    """
+    prepared = _prepare_baseline_fork(
+        real_W,
+        target_node_names=target_node_names,
+        baseline_horizon_steps=baseline_horizon_steps,
+    )
+
+    plan = prepare_snapshot_fixed_visit_registration_plan(
+        prepared.fork_W,
+        target_node_names=prepared.fixed_target_node_names,
+    )
+    register_undetermined_visits_from_snapshot_plan(
+        plan,
+        rank_states_by_node_name,
+    )
+    registered_visit_count = apply_snapshot_fixed_visit_registration_plan(
+        plan,
+        prepared.collector,
+    )
+
+    return _complete_baseline_fork_after_registration(
+        prepared,
+        registered_visit_count,
     )
