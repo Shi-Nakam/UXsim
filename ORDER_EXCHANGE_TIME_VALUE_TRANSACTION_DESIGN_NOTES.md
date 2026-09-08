@@ -18220,3 +18220,942 @@ baseline 到着情報がすべて解決している Node では、`remaining_dec
 - 新しい本番モジュール `uxsim/order_control_tvt_right_of_entry_selection.py` と専用テスト `tests_order_control_tvt_right_of_entry_selection.py` は**未追跡**である
 - `diagnostics/order_control.zip` は既存未追跡、未接触、対象外
 - 本実装完了記録追記時点では、git add、git commit、git push は**未実行**
+
+##### 25.25.34.44 権利保有 Visit の baseline 予想通過タイムステップ取得、P - 1 による TVT 候補 Visit 母集団の確定、候補全員の baseline 情報充足判定（実装前設計）
+
+**2026-09-08 更新：** 権利保有車両選定結果を入力として、権利保有 Visit の baseline 予想通過タイムステップ P を取得し、P の 1 タイムステップ前までに対象 Node へ到着すると予測された snapshot 固定集合内かつ現在順位未確定の Visit を TVT 候補母集団として確定し、候補 Visit 全員の baseline 情報充足を判定する後段処理の実装前仕様を確定した。本小節 **§25.25.34.44** を、この通過タイムステップ取得・候補母集団確定・候補全員の情報充足判定に関する実装前仕様の最新正本とする。権利保有車両選定の実装完了記録は **§25.25.34.43**、実装前仕様は **§25.25.34.42** を参照する。制度上の権利保有車両・TVT 候補 Vehicle・P - 1 条件は **§4.5**・**§7**・**§8**・**§9**、snapshot 固定集合・A 型 / B 型・collector は **§25.25.28** 以降、部分 TVT 防止は **§25.25.34.30** を参照する。
+
+本小節は、Cursor の調査報告だけで確定したものではない。調査報告後に、実コード、既存設計メモ、ユーザー判断を確認して整理した内容である。
+
+**非技術的な説明**
+
+権利保有 Visit が選定された Node について、すでに固定 horizon まで実行済みの全 World baseline collector から、権利保有 Visit の baseline 予想通過タイムステップ P を取得する。P を取得できた場合、その **1 タイムステップ前**である **P - 1** までに対象 Node へ到着すると予測された、snapshot 固定集合内かつ現在順位未確定の Visit を TVT 候補母集団として確定する。
+
+権利保有 Vehicle は、TVT 成立時に売り手となる取引当事者であり、**TVT 候補 Vehicle の 1 台として候補母集団へ含める**。候補母集団は、後続の TVT-SB、TVT-MH、TVT-SP、TVT-MP が具体的買い手集合を生成する前の**共通母集団**であり、買い手・売り手の最終集合ではない。
+
+候補母集団を確定した後、候補 Visit 全員の baseline 予想通過タイムステップが取得済みか確認する。候補全員の必要情報が揃っている場合だけ、TVT 用 baseline 情報取得完了とする。1 件でも必要な通過情報が欠けていれば、固定 horizon 終端時の正常な未解決とし、情報取得済み Visit だけで部分的 TVT を形成しない。baseline fork を延長または再実行しない。順位台帳、World、collector を変更しない。
+
+**1. UXsim の到着と通過のタイムステップ関係（確認済み事項）**
+
+1 タイムステップ内の主な処理順は次である。
+
+```
+Link.update
+→ Node.update
+→ Node.transfer
+→ Vehicle.carfollow
+→ Vehicle.update
+→ W.T += 1
+```
+
+- 対象 Node への到着は `Vehicle.update` 内で記録される
+- `Node.transfer` は同じタイムステップの `Vehicle.update` より**前**に完了している
+- タイムステップ t の `Vehicle.update` で対象 Node へ到着した Vehicle は、同じ t の `Node.transfer` では通過できない
+- 最短でも次のタイムステップ t + 1 の `Node.transfer` で通過する
+- したがって、研究対象の記録済み Visit について、次が成立する
+
+```
+baseline_passage_timestep
+>= baseline_arrival_timestep + 1
+```
+
+- この確認は、単なる制度上の仮定ではなく、**UXsim の実行順序に基づくコード確認済み事実**である
+
+**2. 権利保有 Visit と候補時間条件（確認済み事項）**
+
+- 権利保有 Vehicle は **TVT 候補 Vehicle の 1 台**である
+- TVT 成立時には、権利保有 Vehicle は時間を譲る**売り手**となる取引当事者である
+- 既存設計でも、候補順位範囲 10 台には権利保有車両 1 台を含み、権利保有車両以外は最大 9 台としている
+- 権利保有 Visit についても、
+
+```
+baseline_passage_timestep
+>= baseline_arrival_timestep + 1
+```
+
+が成立する
+
+- 権利保有 Visit の baseline 予想通過タイムステップを P とすれば、
+
+```
+right_of_entry_baseline_arrival_timestep
+<= P - 1
+```
+
+が成立する
+
+- したがって、権利保有 Visit は例外的な無条件追加ではなく、**通常の候補時間条件を満たす TVT 候補 Visit**として候補母集団へ含める
+- それでも実装上、権利保有 Visit が候補母集団に存在することは**重要な結果契約**として確認する
+- 条件を満たさない場合は単純に追加して隠蔽せず、**重大不整合**として扱う方向とする
+
+**3. 現在の固定 horizon 方式における「観測継続」（確認済み事項）**
+
+- 現在の正式 baseline driver は、指定された固定 horizon を一括で最後まで実行する
+- horizon の通常値として 30 または 50 が想定されている
+- 後段制度処理が、P 取得後に World 仮想計算を継続するかどうかを判断する実装ではない
+- 現在の「観測継続」は、**固定 horizon の仮想計算中も collector が snapshot 固定 Visit の到着・通過情報を記録し続ける**ことを意味する
+- 固定 horizon 実行完了後に、蓄積済み collector 記録を後段制度処理が読み取る
+- 後段で baseline fork を延長、再実行、再 forward しない
+
+**現在の処理順**
+
+1. 固定 horizon まで全 World baseline を一括実行する
+2. collector に snapshot 固定 Visit の到着・通過情報が記録される
+3. 後段処理で権利保有 Visit の P を取得する
+4. P - 1 条件で候補母集団を確定する
+5. 候補 Visit 全員の必要 baseline 情報を確認する
+6. 全員分が揃っていれば TVT 用 baseline 情報取得完了
+7. 1 件でも不足すれば固定 horizon 終端時の正常な未解決
+
+**4. 新しい専用モジュール**
+
+- ファイル: `uxsim/order_control_tvt_candidate_visit_set.py`
+- 権利保有車両選定結果を入力として、権利保有 Visit の P 取得、P - 1 候補母集団確定、候補全員の baseline 情報充足判定を行う**読取専用後段モジュール**とする
+- 権利保有選定モジュールへこの責務を**追加しない**
+- collector へ制度判断を**追加しない**
+- TVT-SB、TVT-MH、TVT-SP、TVT-MP の具体的候補生成を**含めない**
+
+**5. 公開関数**
+
+- 正式名称候補: `build_tvt_candidate_visit_set`
+
+**入力**
+
+| 引数 | 意味 |
+|------|------|
+| `right_of_entry_selection_result` | `OrderControlTvtRightOfEntrySelectionResult` |
+| `rank_states_by_node_name` | keyword-only。呼出側所有の Node 名別順位台帳 `Mapping` |
+
+**入力契約**
+
+- `participates_by_visit_key` は今回の候補母集団確定関数へ**渡さない**
+- 候補母集団には参加 Visit と非参加 Visit の**両方**が含まれ得る
+- 参加・非参加による具体的買い手候補の絞り込みは**後続処理**で行う
+- `real_W` を受け取らない
+- `K_confirmed_before` を別引数で受け取らない
+- 右辺の選定結果に保存済みの `k_confirmed_before` を使用し、`rank_state.k_confirmed()` を**再取得しない**
+- baseline fork、alignment、各先行確定、権利保有選定を**再実行しない**
+
+**6. collector への到達**
+
+次の経路で既存 collector へ到達する。
+
+```
+right_of_entry_selection_result
+→ leading_confirmation_result
+→ arrived_confirmation_result
+→ alignment_fork_result
+→ fork_result
+→ collector
+```
+
+- collector は fork World への逆参照を**持たない**
+- collector は制度判断を行わず、snapshot 固定 Visit の**記録係**である
+- 今回のモジュールは collector を**読み取る**が**変更しない**
+
+**7. collector の公開読取 API**
+
+| API | 意味 |
+|-----|------|
+| `get_baseline_visit_snapshot(vehicle_name, visit_id)` | 1 Visit の記録取得 |
+| `export_node_baseline_visits(node_name)` | Node 別全記録取得 |
+
+- どちらも **plain dict のコピー**を返す
+- 内部 record への参照は**返さない**
+- Visit 主キーは `vehicle_name` と `visit_id` の組である
+- Node 名は主キーに含まれないため、取得した record の `node_name` と現在処理中の Node 名を**必要最小限**に確認する
+- Node 別 export の順序には baseline 順位、通過順位、trade_rank、inlink 内物理順としての**制度上の意味を持たせない**
+
+**8. SELECTED 以外の Node**
+
+- 上流 `selection_status` が `NO_RIGHT_OF_ENTRY` の場合、候補母集団を**構築しない**
+- 上流 `selection_status` が `UNRESOLVED_BASELINE_ARRIVALS` の場合も候補母集団を**構築しない**
+- `SELECTED` 以外の Node では、権利保有 Visit 記録の get と Node 別 export を**行わない**
+- 上流の正常な見送り理由を、新しい Node 別結果へ**区別して伝播**できる構造とする
+- 複数 Node で 1 つの Node が見送りでも、他 Node は通常どおり処理する
+
+**9. 権利保有 Visit の P 取得**
+
+- `SELECTED` の Node **だけ**処理する
+- `right_of_entry_visit_key` は非 `None` である上流契約を使用する
+- `collector.get_baseline_visit_snapshot` を使用して権利保有 Visit の記録を取得する
+- 記録が存在しなければ重大不整合として `RuntimeError`
+- record の `vehicle_name` と `visit_id` が `right_of_entry_visit_key` と一致することを確認する
+- record の `node_name` が現在処理中の Node 名と一致することを確認する
+- 不一致は重大不整合として `RuntimeError`
+- `baseline_passage_timestep` を **P** として取得する
+- P が `None` なら、固定 horizon 内で権利保有 Visit の通過を確認できなかった**正常な未解決**とする
+- P が `None` の場合、Node 別候補母集団を**構築しない**
+- P を得るために fork を延長または再実行しない
+- P が `bool` または Python `int` 以外、負数の場合は重大不整合として `RuntimeError`
+- collector 登録時・記録時に保証されている条件を理由なく**重複検証しない**
+
+**10. 候補時間条件**
+
+候補 Visit の baseline 予想到着タイムステップについて、正確に次を適用する。
+
+```
+candidate_baseline_arrival_timestep
+<= P - 1
+```
+
+同値表現:
+
+```
+candidate_baseline_arrival_timestep + 1
+<= P
+```
+
+- **P - 1 に到着する Visit は含める**
+- **P に到着する Visit は含めない**
+- 意思決定窓終端 T + 6 を候補上限に**しない**
+- T + 6 より後でも P - 1 以前に到着すれば候補になり得る
+- `baseline_arrival_timestep` が `None` なら候補条件を判定できない
+
+**11. 候補母集団**
+
+対象 Node の collector snapshot 固定 Visit のうち、次を**すべて**満たす Visit を候補母集団にする。
+
+- collector に存在する
+- 対象 Node の記録である
+- snapshot 時点では未到着の **B 型**である
+- `was_arrived_at_snapshot` is `False`
+- 現在も `rank_state` で順位未確定である
+- `baseline_arrival_timestep` が取得済みである
+- `baseline_arrival_timestep <= P - 1` を満たす
+
+候補母集団は **Visit 単位**とする。制度上の説明では Vehicle と呼ぶ場合があるが、実装上の主キーは `VisitKey` とする。
+
+**12. 候補から除外するもの**
+
+- snapshot 時点で既到着だった **A 型**
+- 既到着先行確定済み Visit
+- 先頭連続非参加として先行確定済みの Visit
+- その他、現在すでに順位確定済みの Visit
+- collector に存在しない baseline 開始後の新規流入 Vehicle
+- 研究対象外として snapshot 固定集合に登録されなかった Vehicle
+- baseline 到着タイムステップが P 以降の Visit
+- baseline 到着タイムステップが未取得の Visit
+
+既到着・先頭非参加の確定済み Visit は、`rank_state.is_undetermined` によって候補から除外する。確定済み Visit を候補母集団へ**戻さない**。
+
+**13. 権利保有 Visit の包含確認**
+
+- 権利保有 Visit は **TVT 候補 Vehicle の 1 台**である
+- 権利保有 Visit も B 型、現在未確定、到着情報取得済み、`arrival <= P - 1` を満たすため、**通常の抽出条件**で候補母集団へ入る
+- 時間条件から除外した後に特例で無条件追加する設計には**しない**
+- 候補母集団構築後、`right_of_entry_visit_key` が候補母集団に**正確に 1 件**存在することを確認する
+- 存在しない場合は、UXsim 実行順、上流選定契約、collector 記録、順位状態のいずれかに重大不整合があるため `RuntimeError`
+- 重複している場合も `RuntimeError`
+- 権利保有 Visit を買い手とは扱わない
+- 後続で**売り手**となり得る基準 Visit である
+- 候補要素へ重複した role フラグを持たせず、Node 別結果の `right_of_entry_visit_key` で識別する
+
+**14. 参加・非参加**
+
+- 候補母集団には参加 Visit と非参加 Visit の**両方**を含める
+- 非参加 Visit は買い手または売り手にはならないが、baseline 順位、固定順位枠、物理的制約に関係する
+- 今回は `participates_by_visit_key` を**受け取らない**
+- 候補要素へ参加 bool を**複製しない**
+- 後続の具体的買い手集合生成で、snapshot 時点に固定した参加 Mapping を使用する
+- 参加状態を候補母集団の baseline 順位決定に**使用しない**
+
+**15. 候補母集団の順序**
+
+- collector の Node 別 export 順を順位順として**使用しない**
+- 候補母集団は明示的に**正式 baseline 到着順**へ並べる
+- ソートキーは次の昇順:
+  1. `baseline_arrival_timestep`
+  2. `arrival_tiebreaker`
+  3. `vehicle_id`
+- 参加状態をソートキーに**使用しない**
+- Vehicle 名または VisitKey 文字列順を**使用しない**
+- 同着時も既存 alignment と同じ正式順位規則を使用する
+- ソート後の tuple 位置は baseline 順位を表すが、`baseline_rank` を候補要素へ**重複保存しない**
+
+**16. collector 登録順と inlink 内物理順**
+
+- snapshot 登録処理は B 型を各 inlink の `inlink.vehicles` FIFO 順に走査している
+- ただし、既存契約では collector の登録順に到着順位、通過順位、trade_rank その他の制度的意味を**持たせない**
+- collector の Node 別 export 順を、inlink 内物理順の正式契約として**使用しない**
+- inlink 別物理順は、後続の買い手候補生成側で扱う
+- 今回の候補母集団構築では、候補要素へ `inlink_name` を**保持する**
+- TVT-SB、TVT-MH、TVT-SP、TVT-MP の prefix 生成に必要な snapshot 時点の inlink 内物理順を、どの既存結果または新しい固定 Mapping から取得するかは**次段設計**で確定する
+- 今回の結果だけで collector 登録順を物理順として**利用しない**
+
+**17. 候補要素型**
+
+新しい **frozen dataclass** を設ける方向とする。
+
+**正式名称候補:** `OrderControlTvtCandidateVisit`
+
+**最低限のフィールド候補**
+
+| フィールド | 意味 |
+|-----------|------|
+| `visit_key` | `OrderControlTvtVisitKey` |
+| `vehicle_id` | `int` |
+| `inlink_name` | `str` |
+| `baseline_arrival_timestep` | `int` |
+| `arrival_tiebreaker` | `int \| float` |
+| `route_next_link_name` | `str` |
+| `baseline_passage_timestep` | `int \| None` |
+
+**保存しない**
+
+- `baseline_rank`
+- 参加 bool
+- rank state
+- Vehicle オブジェクト
+- fork World 参照
+- real World 参照
+- 権利保有 role フラグ
+
+collector の plain dict をそのまま下流結果へ渡さない。必要な値を検証後、型の明確な frozen dataclass へ変換する。
+
+**18. 候補全員の必要 baseline 情報**
+
+- P 取得と候補母集団確定だけでは、TVT 用 baseline 情報取得完了ではない
+- 候補 Visit 全員について、後続 TVT 形成に必要な baseline 情報が必要である
+- 特に、候補 Visit 全員の `baseline_passage_timestep` が非 `None` である必要がある
+- 候補 Visit の一部でも `baseline_passage_timestep` が `None` なら、情報取得済み Visit だけで部分的 TVT を**形成しない**
+- 候補母集団自体は P - 1 条件で確定済みとして結果へ**保持できる**
+- ただし、Node の status は TVT 用 baseline 情報取得完了に**しない**
+- 固定 horizon 終端時の**正常な未解決**とする
+- 他候補の通過タイムステップを理由に候補時間範囲を再帰的に**拡張しない**
+- P - 1 で候補範囲を**固定する**
+- fork を追加実行しない
+
+**19. status 設計**
+
+単純な `BUILT` だけでは不足する。少なくとも次を区別できる **Enum** を設ける方向とする。
+
+**正式名称候補:** `OrderControlTvtCandidateVisitSetStatus`
+
+| 値 | 意味 |
+|----|------|
+| `NOT_BUILT_NO_RIGHT_OF_ENTRY` | 上流が `NO_RIGHT_OF_ENTRY` |
+| `NOT_BUILT_UNRESOLVED_ARRIVALS` | 上流が `UNRESOLVED_BASELINE_ARRIVALS` |
+| `UNRESOLVED_RIGHT_OF_ENTRY_PASSAGE` | `SELECTED` だが権利保有 Visit の P が `None` |
+| `UNRESOLVED_CANDIDATE_PASSAGES` | P と候補母集団は確定したが、候補 Visit の 1 件以上で `baseline_passage_timestep` が `None` |
+| `BASELINE_INFORMATION_COMPLETE` | P、候補母集団、候補 Visit 全員の必要 baseline 情報が取得済み |
+
+- 候補集合が確定しただけの状態と、TVT 用 baseline 情報取得完了を**混同しない**
+- status 名は実装前に既存命名との整合を確認して最終確定する
+- 正常な情報不足は**例外にしない**
+
+**20. Node 別結果型**
+
+新しい **frozen dataclass** を設ける方向とする。
+
+**正式名称候補:** `OrderControlTvtNodeCandidateVisitSetResult`
+
+**フィールド候補**
+
+| フィールド | 意味 |
+|-----------|------|
+| `node_name` | 対象 Node 名 |
+| `build_status` | `OrderControlTvtCandidateVisitSetStatus` |
+| `right_of_entry_visit_key` | 権利保有 Visit の `VisitKey`。上流が `SELECTED` の場合は非 `None` |
+| `right_of_entry_baseline_passage_timestep` | 権利保有 Visit の P。取得済みなら `int`、未解決なら `None` |
+| `k_confirmed_before` | 上流選定結果に保存済みの snapshot 値 |
+| `candidate_visits` | 正式 baseline 到着順の候補 Visit tuple |
+
+**契約**
+
+- `selection_status` を重複保存する必要性を再検討する
+- 上流 selection 結果を全体結果が保持するため、`selection_status` を Node 別結果へ**複製しない**案を優先する
+- `right_of_entry_visit_key` と `k_confirmed_before` は後続で直接使用するため保持する案と、上流 Node 結果を index で参照する案を比較し、**可読性を優先**して決める
+- `candidate_visits` は正式 baseline 到着順の tuple
+- 候補母集団を構築しない status では `candidate_visits` は**空 tuple**
+- `UNRESOLVED_CANDIDATE_PASSAGES` では、確定済み候補母集団を `candidate_visits` へ**保持する**
+- `BASELINE_INFORMATION_COMPLETE` では、`candidate_visits` 全件の `baseline_passage_timestep` が非 `None` になる
+
+**21. 全体結果型**
+
+新しい **frozen dataclass** を設ける方向とする。
+
+**正式名称候補:** `OrderControlTvtCandidateVisitSetResult`
+
+| フィールド | 意味 |
+|-----------|------|
+| `right_of_entry_selection_result` | 入力と**同じオブジェクト**を保持する |
+| `node_candidate_set_results` | `fork_result.target_node_names` と**同じ Node 順**の Node 別結果 |
+
+**契約**
+
+- `right_of_entry_selection_result` は入力と同じオブジェクトを保持する
+- `node_candidate_set_results` は `fork_result.target_node_names` と同じ Node 順
+- collector、rank state、World を結果へ**含めない**
+
+**22. 候補 0 件**
+
+- 権利保有 Visit は通常条件で**必ず**候補母集団へ含まれる
+- したがって、`SELECTED` かつ P 取得済みの正常系で候補母集団が完全な空 tuple になることは**想定しない**
+- 権利保有 Visit 以外の候補が 0 件で、候補母集団が権利保有 Visit のみとなることは**正常**
+- 権利保有 Visit 以外に買い手候補が存在しないことを理由とする TVT 検討不要判断は、**具体的買い手集合生成段階**へ残す
+- 候補母集団が権利保有 Visit のみでも、候補母集団構築自体は正常に完了し得る
+
+**23. 複数 Node**
+
+- `fork_result.target_node_names` 順に処理する
+- 同じ index の selection 結果と必要な上流結果を使用する
+- 正常見送り status は Node ごとに**独立**する
+- 1 Node で P 未解決または候補通過情報未解決でも、他 Node は `BASELINE_INFORMATION_COMPLETE` になり得る
+- 正常な未解決を全体例外に**しない**
+- Node 名不一致、collector 記録欠落、VisitKey 不一致、型不正、権利保有 Visit の候補母集団欠落は**重大不整合**として例外
+- 重大不整合時は後続 Node を**処理しない**
+- 部分的な全体結果を**返さない**
+- 読取専用なので rollback API は**不要**
+
+**24. 読取専用**
+
+本モジュールは次を**行わない**。
+
+- 順位状態の変更
+- `confirm_visits_in_order`
+- collector の変更
+- World の変更
+- baseline fork の再実行
+- alignment の再実行
+- 既到着先行確定の再実行
+- 先頭非参加先行確定の再実行
+- 権利保有選定の再実行
+- fork の延長
+- 参加 Mapping の構築
+- 具体的買い手集合の生成
+
+**25. 今回実装しない範囲**
+
+- snapshot 時点の inlink 内物理順 Mapping の構築
+- TVT-SB、TVT-MH、TVT-SP、TVT-MP の具体的買い手集合
+- 候補 inlink の決定
+- 候補順位範囲上限 10 の適用
+- P 以外を使った再帰的候補範囲拡張
+- 局所仮想計算
+- VOT、支払い、補償
+- 買い手・売り手の最終選定
+- TVT 成立・不成立判断
+- 最終取引順位
+- §14.4 の順位確定
+- 上位 TVT 制御クラス
+
+**26. 次段との境界**
+
+- 今回は共通 TVT 候補母集団の確定と、候補全員の baseline 情報充足判定まで
+- `BASELINE_INFORMATION_COMPLETE` の Node だけ、具体的買い手集合生成へ進む
+- その他の status では具体的買い手集合を**作らない**
+- 次段は権利保有 Visit と**異なる inlink** を買い手候補 inlink として扱う
+- 次段で snapshot 時点の inlink 内物理順を正確に取得し、物理的先頭から prefix を生成する
+- 次段では候補順位範囲上限 10 を適用する
+- 今回は collector 登録順を inlink 内物理順として**利用しない**
+
+**27. 現在地（2026-09-08 時点）**
+
+- コミット **`fd807ff`** まで push 済み
+- baseline fork、順位台帳登録、baseline 仮想計算、Node 別 alignment、未登録列空確認、既到着 Visit 先行確定、先頭連続非参加 Visit 先行確定、権利保有 Visit 選定まで実装・検証済み
+- **次の実装対象**は、本小節で定める権利保有 Visit の P 取得、P - 1 候補母集団確定、候補全員の baseline 情報充足判定
+- 具体的買い手集合生成は**その次**
+
+**28. テストで固定する観点**
+
+最低限、次を記録する。
+
+- UXsim の通常経路で `passage >= arrival + 1` が成立すること
+- 権利保有 Visit も `arrival <= P - 1` を満たすこと
+- 権利保有 Visit が通常抽出条件で候補母集団に含まれること
+- 権利保有 Visit を特例追加しないこと
+- P - 1 を**含む**
+- P 到着を**除外**する
+- T + 6 より後でも P - 1 以内なら含む
+- `NO_RIGHT_OF_ENTRY` では collector を**照会しない**
+- `UNRESOLVED_BASELINE_ARRIVALS` でも collector を**照会しない**
+- `SELECTED` で権利保有 Visit 記録を取得
+- P が `None` なら `UNRESOLVED_RIGHT_OF_ENTRY_PASSAGE`
+- P 未解決時に Node 別 export を**行わない**
+- P 取得済みなら Node 別 export を行う
+- A 型を候補から除外
+- 現在確定済み Visit を候補から除外
+- 未確定 B 型を候補に含める
+- 非参加 Visit も候補母集団に含め得る
+- 意思決定窓外 Visit も P - 1 以内なら含める
+- baseline 到着順の 3 キーソート
+- Vehicle 名順、VisitKey 文字列順を**使用しない**
+- collector export 順を順位順として**使用しない**
+- candidate 全員の passage 取得済みで `BASELINE_INFORMATION_COMPLETE`
+- candidate の 1 件以上で passage `None` なら `UNRESOLVED_CANDIDATE_PASSAGES`
+- 一部情報だけで候補集合を**縮小しない**
+- `UNRESOLVED_CANDIDATE_PASSAGES` でも確定済み `candidate_visits` を保持
+- 候補母集団が権利保有 Visit のみでも正常
+- 正常な `SELECTED` かつ P 取得済みで候補母集団が空なら重大不整合
+- collector 記録欠落
+- Node 名不一致
+- VisitKey 不一致
+- 複数 Node
+- 1 Node 未解決でも他 Node 完了
+- 重大不整合時の後続 Node 未処理
+- 順位状態不変
+- collector 不変
+- upstream 再実行なし
+- fork 延長なし
+- World 探索なし
+- 具体的買い手集合非生成
+- 既存結果型不変
+
+##### 25.25.34.45 権利保有 Visit の baseline 予想通過タイムステップ取得、P - 1 による TVT 候補 Visit 母集団の確定、候補全員の baseline 情報充足判定の実装完了記録
+
+**2026-09-09 更新：** **§25.25.34.44** で確定した、権利保有 Visit の baseline 予想通過タイムステップ P 取得、P の 1 タイムステップ前までの TVT 候補 Visit 母集団確定、候補 Visit 全員の baseline 情報充足判定を、`uxsim/order_control_tvt_candidate_visit_set.py` と専用テストへ実装した。本小節 **§25.25.34.45** を、この後段処理の**実装結果・検証結果・次の再開地点**の最新正本とする。実装前仕様は **§25.25.34.44** を参照する。権利保有車両選定の実装完了記録は **§25.25.34.43**、実装前仕様は **§25.25.34.42** を参照する。制度上の権利保有車両・TVT 候補 Vehicle・P - 1 条件は **§4.5**・**§7**・**§8**・**§9**、snapshot 固定集合・A 型 / B 型・collector は **§25.25.28** 以降、部分 TVT 防止は **§25.25.34.30** を参照する。
+
+**§25.25.34.44** は実装前仕様の記録として本文を削除せず残す。本小節と **§25.25.34.44** の記述に差がある場合は、**本小節を実装済み事実の正本**として参照する。
+
+###### 非技術的な説明
+
+権利保有 Visit が選定された Node について、固定 horizon まで実行済みの全 World baseline 記録から、その Visit の baseline 予想通過タイムステップ P を取得する処理を実装した。
+
+P を取得できた場合、その **1 タイムステップ前**である **P - 1** までに対象 Node へ到着すると予測された、snapshot 固定集合内かつ現在順位未確定の Visit を TVT 候補母集団として確定する。権利保有 Visit は、TVT 成立時に売り手となる **TVT 候補 Vehicle の 1 台**であり、特例追加ではなく通常の P - 1 条件によって候補母集団へ含まれる。
+
+候補母集団を確定した後、候補 Visit 全員の baseline 予想通過タイムステップが取得済みか確認する。全員分が揃っている場合だけ TVT 用 baseline 情報取得完了とする。1 件でも不足していれば正常な未解決とし、情報取得済み Visit だけで部分的 TVT を形成しない。baseline fork の延長や再実行は行わない。順位台帳、collector、World は変更しない。
+
+これにより、baseline 情報が完全な Node だけを、次の具体的買い手集合生成へ渡せる状態になった。具体的買い手集合、TVT-SB、TVT-MH、TVT-SP、TVT-MP、局所仮想計算、経済評価は、まだ実装していない。既存実装のやり直しではなく、具体的買い手集合生成へ向けた前進である。
+
+###### 新規作成した本番モジュール
+
+**ファイル名：** `uxsim/order_control_tvt_candidate_visit_set.py`
+
+**役割**
+
+- 権利保有車両選定結果を入力として、次を行う**読取専用の後段モジュール**である：
+  - 権利保有 Visit の P 取得
+  - P - 1 候補母集団の確定
+  - 候補 Visit 全員の baseline 情報充足判定
+- collector へ制度判断を**追加していない**
+- 権利保有選定モジュールへ候補母集団構築責務を**追加していない**
+- 具体的買い手集合を**生成していない**
+- baseline fork、alignment、既到着先行確定、先頭非参加先行確定、権利保有選定を**再実行しない**
+
+###### 実装した status Enum
+
+**正式名称：** `OrderControlTvtCandidateVisitSetStatus`
+
+- 標準ライブラリの **`Enum`** である
+- 単純な `BUILT` という status は**設けていない**
+- 候補母集団確定と TVT 用 baseline 情報取得完了を**混同していない**
+
+| メンバー | 意味 |
+|---------|------|
+| `NOT_BUILT_NO_RIGHT_OF_ENTRY` | 上流が `NO_RIGHT_OF_ENTRY`。候補母集団を構築せず collector を照会しない |
+| `NOT_BUILT_UNRESOLVED_ARRIVALS` | 上流が `UNRESOLVED_BASELINE_ARRIVALS`。候補母集団を構築せず collector を照会しない |
+| `UNRESOLVED_RIGHT_OF_ENTRY_PASSAGE` | 権利保有 Visit は選定済みだが、その `baseline_passage_timestep` である P が `None`。候補母集団を構築しない |
+| `UNRESOLVED_CANDIDATE_PASSAGES` | P と候補母集団は確定済みだが、候補 Visit の 1 件以上で `baseline_passage_timestep` が `None` |
+| `BASELINE_INFORMATION_COMPLETE` | P、候補母集団、候補 Visit 全員の baseline 予想通過タイムステップが取得済み |
+
+###### 実装した候補要素型
+
+**正式名称：** `OrderControlTvtCandidateVisit`
+
+- **frozen dataclass** である
+
+| フィールド | 意味 |
+|-----------|------|
+| `visit_key` | `OrderControlTvtVisitKey` |
+| `vehicle_id` | `int` |
+| `inlink_name` | `str` |
+| `baseline_arrival_timestep` | `int` |
+| `arrival_tiebreaker` | `int \| float` |
+| `route_next_link_name` | `str` |
+| `baseline_passage_timestep` | `int \| None` |
+
+**保存していないもの**
+
+- `baseline_rank`
+- 参加 bool
+- rank state
+- Vehicle オブジェクト
+- World 参照
+- 権利保有 role フラグ
+- collector の plain dict
+
+collector の plain dict から必要な値を検証し、型の明確な frozen dataclass へ変換している。collector の record 自体は**変更しない**。
+
+###### 実装した Node 別結果型
+
+**正式名称：** `OrderControlTvtNodeCandidateVisitSetResult`
+
+- **frozen dataclass** である
+
+| フィールド | 意味 |
+|-----------|------|
+| `node_name` | 対象 Node 名 |
+| `build_status` | `OrderControlTvtCandidateVisitSetStatus` |
+| `right_of_entry_visit_key` | 権利保有 Visit の `VisitKey` |
+| `right_of_entry_baseline_passage_timestep` | 権利保有 Visit の P |
+| `k_confirmed_before` | 上流選定結果に保存済みの snapshot 値 |
+| `candidate_visits` | 正式 baseline 到着順の候補 Visit tuple |
+
+**status 別契約（実装済み）**
+
+| status | `right_of_entry_visit_key` | P | `candidate_visits` |
+|--------|------------------------------|---|-------------------|
+| `NOT_BUILT_NO_RIGHT_OF_ENTRY` | `None` | `None` | 空 tuple |
+| `NOT_BUILT_UNRESOLVED_ARRIVALS` | `None` | `None` | 空 tuple |
+| `UNRESOLVED_RIGHT_OF_ENTRY_PASSAGE` | 非 `None` | `None` | 空 tuple |
+| `UNRESOLVED_CANDIDATE_PASSAGES` | 非 `None` | 非 `None` | 確定した候補母集団**全体**を保持 |
+| `BASELINE_INFORMATION_COMPLETE` | 非 `None` | 非 `None` | 全件の `baseline_passage_timestep` が非 `None` |
+
+- `selection_status` を Node 別結果へ**重複保存していない**
+
+###### 実装した全体結果型
+
+**正式名称：** `OrderControlTvtCandidateVisitSetResult`
+
+- **frozen dataclass** である
+
+| フィールド | 意味 |
+|-----------|------|
+| `right_of_entry_selection_result` | 入力と**同じオブジェクト**を保持する |
+| `node_candidate_set_results` | `fork_result.target_node_names` と**同じ Node 順**の Node 別結果 |
+
+- collector、rank state、World を結果へ**含めていない**
+
+###### 実装した公開関数
+
+**正式名称：** `build_tvt_candidate_visit_set`
+
+**引数**
+
+| 引数 | 意味 |
+|------|------|
+| `right_of_entry_selection_result` | `OrderControlTvtRightOfEntrySelectionResult` |
+| `rank_states_by_node_name` | keyword-only。呼出側所有の Node 名別順位台帳 `Mapping` |
+
+**入力と所有（実装済み）**
+
+- `participates_by_visit_key` を**受け取らない**
+- `real_W`、`fork_W`、P、`K_confirmed_before`、collector を別引数で**受け取らない**
+- `rank_states_by_node_name` は呼出側所有であり、本関数は生成・保持・置換・所有しない
+- `k_confirmed_before` は上流選定結果に保存済みの snapshot 値を使用する
+- `rank_state.k_confirmed()` を**再取得しない**
+
+###### 上流結果と collector への到達（実装済み）
+
+次の経路を使用する。
+
+```
+right_of_entry_selection_result
+→ leading_confirmation_result
+→ arrived_confirmation_result
+→ alignment_fork_result
+→ fork_result
+→ collector
+```
+
+- baseline fork、alignment、既到着先行確定、先頭非参加先行確定、権利保有選定を**再実行しない**
+- fork を延長、再 forward、再実行しない
+- World または Vehicle を**探索しない**
+
+###### SELECTED 以外の Node（実装済み）
+
+- `NO_RIGHT_OF_ENTRY` は `NOT_BUILT_NO_RIGHT_OF_ENTRY` へ伝播する
+- `UNRESOLVED_BASELINE_ARRIVALS` は `NOT_BUILT_UNRESOLVED_ARRIVALS` へ伝播する
+- これらの Node では次を**呼ばない**：
+  - `collector.get_baseline_visit_snapshot`
+  - `collector.export_node_baseline_visits`
+- これは、意思決定窓内順位確定に必要な上流情報を取得しないという意味ではない
+- 既到着確定、先頭非参加先行確定、権利保有選定に必要な情報処理は、すでに上流で完了している
+- 今回省略するのは、権利保有車両が存在しない、または到着情報未解決で候補母集団へ進めない Node に対する、**追加の候補母集団用 collector 照会だけ**である
+
+###### 権利保有 Visit の P 取得（実装済み）
+
+- `SELECTED` の Node **だけ**処理する
+- `right_of_entry_visit_key` が `None` なら `RuntimeError`
+- `collector.get_baseline_visit_snapshot` を使用する
+- 権利保有 Visit 記録が存在しなければ `RuntimeError`
+- VisitKey と Node 名の一致を確認する
+- 権利保有 Visit が **B 型**であることを確認する
+- `baseline_arrival_timestep` を確認する
+- `baseline_passage_timestep` を **P** とする
+- P が `None` なら `UNRESOLVED_RIGHT_OF_ENTRY_PASSAGE`
+- P が `None` の場合は Node 別 export を**行わない**
+- P が不正な型または負数なら `RuntimeError`
+- P 取得のために fork を延長または再実行しない
+
+###### passage と arrival の関係（実装済み）
+
+実装は、権利保有 Visit と候補 Visit について次を確認する。
+
+```
+baseline_passage_timestep
+>= baseline_arrival_timestep + 1
+```
+
+- 満たさない場合は `RuntimeError`
+- この関係は UXsim の通常実行順序に基づく
+- 同一タイムステップ内では `Node.transfer` が `Vehicle.update` より**前**に実行される
+- `Vehicle.update` で対象 Node へ到着した Vehicle は、同じタイムステップの `Node.transfer` では通過できない
+- 最短でも次のタイムステップに通過する
+
+###### P - 1 候補条件（実装済み）
+
+候補条件は正確に次である。
+
+```
+baseline_arrival_timestep <= P - 1
+```
+
+- **P - 1 を含む**
+- **P 到着は除外する**
+- T + 6 を候補上限に**しない**
+- T + 6 より後でも P - 1 以前なら候補になり得る
+
+###### 候補母集団の抽出（実装済み）
+
+対象 Node の collector 記録から、次を**すべて**満たす Visit を抽出する。
+
+- **B 型**である（`was_arrived_at_snapshot is False`）
+- 現在 rank state で**順位未確定**である
+- `baseline_arrival_timestep` が取得済みである
+- `baseline_arrival_timestep <= P - 1` である
+
+**除外（実装済み）**
+
+- **A 型**は候補外
+- **確定済み B 型**も候補外
+- **未登録 B 型**は重大不整合として `RuntimeError`
+- **現在未確定の B 型**で arrival が `None` なら重大不整合として `RuntimeError`
+- **確定済み B 型**は arrival が `None` でも候補条件を評価せず除外する
+
+###### 候補要素の検証（実装済み）
+
+候補に含める record について、次を検証する。
+
+- `vehicle_name` は空でない `str`
+- `visit_id` は正の Python `int` で bool ではない
+- `vehicle_id` は非負の Python `int` で bool ではない
+- `inlink_name` は空でない `str`
+- `baseline_arrival_timestep` は非負の Python `int` で bool ではない
+- `arrival_tiebreaker` は bool ではない `int` または `float`
+- `route_next_link_name` は空でない `str`
+- `baseline_passage_timestep` は `None`、または非負の Python `int` で bool ではない
+- passage が非 `None` なら `passage >= arrival + 1`
+
+collector の record 自体を**変更しない**。
+
+###### 正式 baseline 順位（実装済み）
+
+- collector の Node 別 export 順を順位順として**使用しない**
+- `candidate_visits` を次のキーで明示的に昇順ソートする：
+  1. `baseline_arrival_timestep`
+  2. `arrival_tiebreaker`
+  3. `vehicle_id`
+- 参加状態をソートキーに**使用しない**
+- Vehicle 名や VisitKey 文字列順を**使用しない**
+- `baseline_rank` を候補要素へ**重複保存しない**
+
+###### 権利保有 Visit の通常条件による包含（実装済み）
+
+- 権利保有 Visit を**特例追加しない**
+- 権利保有 Visit も B 型、現在順位未確定、`arrival <= P - 1` を満たす**通常候補**として抽出する
+- 構築後に `right_of_entry_visit_key` が `candidate_visits` 内へ**正確に 1 件**存在することを確認する
+- 0 件または複数件なら `RuntimeError`
+- 権利保有 Visit は買い手ではなく、TVT 成立時に**売り手**となる基準 Visit である
+- 候補要素へ role フラグを**追加していない**
+
+###### 参加・非参加（実装済み）
+
+- 候補母集団には参加 Visit、非参加 Visit の**両方**が含まれ得る
+- 参加 Mapping を**受け取らない**
+- 候補要素へ参加 bool を**保存しない**
+- 参加状態を baseline 順位決定に**使用しない**
+- 具体的買い手候補の参加状態確認は**次段へ残す**
+
+###### 候補全員の baseline 情報充足判定（実装済み）
+
+- `candidate_visits` 全員の `baseline_passage_timestep` を確認する
+- 全員分が非 `None` なら `BASELINE_INFORMATION_COMPLETE`
+- 1 件でも `None` なら `UNRESOLVED_CANDIDATE_PASSAGES`
+- 未解決でも `candidate_visits` を情報取得済み Visit だけへ**縮小しない**
+- P - 1 条件で確定した候補母集団**全体**を保持する
+- 一部情報だけを使った部分的 TVT へ**進まない**
+- 他候補の通過時刻を理由に候補範囲を再帰拡張しない
+- 到着時刻、通過時刻を推測・補完しない
+- fork を追加実行しない
+
+###### 権利保有 Visit だけの候補母集団（実装済み）
+
+- `candidate_visits` が権利保有 Visit 1 件だけでも**正常**である
+- 権利保有 Visit の P は取得済みなので、必要情報が揃っていれば `BASELINE_INFORMATION_COMPLETE` になり得る
+- 買い手候補が存在しないという制度判断は**次段へ残す**
+- `NO_RIGHT_OF_ENTRY` へ**変更しない**
+
+###### collector 登録順と inlink 内物理順（実装済み）
+
+- collector の登録順または export 順を inlink 内物理順として**使用していない**
+- collector 登録順に baseline 順位、通過順位、trade_rank その他の制度的意味を**持たせていない**
+- 候補要素には `inlink_name` を**保持する**
+- snapshot 時点の inlink 内物理順 Mapping は**今回実装していない**
+- 次の具体的買い手集合生成設計で、物理的先頭からの prefix 生成に必要な固定順序の取得方法を検討する
+
+###### 複数 Node（実装済み）
+
+- `target_node_names` 順に処理する
+- 正常な非構築・未解決 status は Node ごとに**独立**する
+- ある Node が `UNRESOLVED_RIGHT_OF_ENTRY_PASSAGE` または `UNRESOLVED_CANDIDATE_PASSAGES` でも、他 Node は `BASELINE_INFORMATION_COMPLETE` になり得る
+- 正常な情報不足を全体例外に**しない**
+- 重大不整合では後続 Node を**処理しない**
+- 部分的な全体結果を**返さない**
+- 読取専用なので rollback API を**追加していない**
+
+###### 読取専用性（実装済み）
+
+- rank state を**変更しない**
+- `confirm_visits_in_order` を**呼ばない**
+- collector を**変更しない**
+- World を**変更しない**
+- upstream 処理を**再実行しない**
+- fork を延長または再実行しない
+- 参加 Mapping を構築・変更しない
+- 具体的買い手集合を**生成しない**
+
+公開関数の本文から、少なくとも次の中心部分が直線的に読める構造になっている。
+
+```
+上流結果と collector への到達
+→ target_node_names 順の Node 処理
+→ 上流 selection status の確認
+→ SELECTED 以外の status 伝播
+→ 権利保有 Visit 記録取得
+→ P 確認
+→ Node 別 record export
+→ B 型・現在未確定・P - 1 条件による候補抽出
+→ 候補要素への変換
+→ 正式 baseline 順へのソート
+→ 権利保有 Visit 包含確認
+→ 候補全員の passage 情報確認
+→ Node 別結果作成
+→ 全体結果返却
+```
+
+###### 今回実装していない範囲
+
+- snapshot 時点の inlink 内物理順 Mapping
+- 候補 inlink 決定
+- 同じ inlink の買い手候補除外
+- TVT-SB、TVT-MH、TVT-SP、TVT-MP
+- 候補順位範囲上限 10
+- 参加 Mapping による買い手候補絞り込み
+- 買い手 prefix
+- 局所仮想計算
+- VOT、支払い、補償
+- 買い手・売り手の最終確定
+- TVT 成立・不成立判断
+- 最終取引順位
+- §14.4
+- 上位 TVT 制御クラス
+
+###### 新規専用テスト
+
+**ファイル名：** `tests_order_control_tvt_candidate_visit_set.py`
+
+**最終件数：** **15 tests passed**
+
+**検証済みの主な契約**
+
+- Enum の 5 status
+- frozen 結果型とフィールド
+- 上流結果の同一オブジェクト保持
+- `SELECTED` 以外で collector 非照会
+- P 未解決と Node 別 export 非呼出
+- P - 1 を含み P を除外
+- T + 6 より後の候補
+- A 型と確定済み B 型の除外
+- 未確定 B 型の包含
+- 非参加 Visit を参加 Mapping なしで候補へ含められること
+- 正式 baseline 順位の 3 キーソート
+- export 順へ依存しないこと
+- 権利保有 Visit の通常条件による包含
+- 候補全員の情報充足
+- `UNRESOLVED_CANDIDATE_PASSAGES` でも母集団全体を保持
+- 権利保有 Visit のみの母集団
+- record 型・値の不整合
+- 権利保有 Visit 記録欠落
+- Node 名不一致
+- 未登録 Visit
+- 複数 Node の独立 status
+- 読取専用性
+- 上流 snapshot の `k_confirmed_before` 利用
+- 既存結果型不変
+
+###### UXsim 通常経路による回帰テスト
+
+**テスト名：** `test_uxsim_regression_passage_not_before_arrival`
+
+- 最初の実装では `W.T`、Vehicle 位置、`incoming_vehicles`、到着記録、通過処理を**直接操作**していたため、通常の `exec_simulation` 実行順序の回帰確認になっていなかった
+- その問題を実コード確認で発見し、**専用テストだけ**を修正した
+- 修正後は次を**直接行っていない**：
+  - `W.T` の直接代入
+  - `Vehicle.x`、`Vehicle.link`、`Vehicle.state`、`route_next_link` の直接設定
+  - `incoming_vehicles` への直接追加
+  - `record_order_control_node_arrival` の直接呼出し
+  - `transfer_fcfs_clearance` の直接呼出し
+  - capacity の直接書換え
+- `World.addVehicle` と通常の `exec_simulation` 経路で Vehicle を対象 inlink へ進めた
+- 到着前の B 型状態で `OrderControlBaselineCollector.register_snapshot_visit` を使用した
+  - `register_snapshot_fixed_visits` は FCFS Node 非対応（`time_value` のみ）のため未使用
+- その後も通常の `exec_simulation` を有限回実行し、`Vehicle.update` による到着と `Node.transfer` による通過を発生させた
+- collector の**同じ Visit record** から到着と通過を取得した
+
+**実測結果**
+
+| 項目 | 値 |
+|------|-----|
+| `baseline_arrival_timestep` | **10** |
+| `baseline_passage_timestep` | **11** |
+| 差分 | **1** |
+| `passage >= arrival + 1` | **成立**（`11 >= 10 + 1`） |
+
+- `node_name`、`vehicle_name`、`visit_id` も同一 Visit として確認した
+- 通常経路での回帰テスト修正による**本番コード変更はない**
+
+###### 私自身による確認
+
+- 本番モジュール全文を確認した
+- 専用テスト 15 件の本文を確認した
+- 最初の回帰テストが `W.T` などを直接操作している問題を発見した
+- Cursor へ回帰テストだけの修正を指示した
+- 修正後の回帰テスト本文を再確認した
+- 通常の `exec_simulation` 経路になったことを確認した
+- 最終 assert まで確認した
+- **§25.25.34.44** との不一致や、実装を止める問題は残っていない
+
+###### 実行済み検証
+
+| 検証 | 結果 |
+|------|------|
+| `py_compile` | 成功 |
+| `tests_order_control_tvt_candidate_visit_set.py`（直接実行） | **15 passed** |
+| `tests_order_control_tvt_candidate_visit_set.py`（pytest） | **15 passed** |
+| `tests_order_control_tvt_right_of_entry_selection.py` | **16 passed** |
+| `tests_order_control_tvt_leading_nonparticipating_confirmation.py` | **23 passed** |
+| `tests_order_control_tvt_arrived_undetermined_confirmation.py` | **30 passed** |
+| `tests_order_control_tvt_node_rank_state.py` | **54 passed** |
+| `tests_order_control_tvt_baseline_alignment.py` | **25 passed** |
+| `tests_order_control_tvt_baseline_fork_alignment.py` | **24 passed** |
+| `git diff --check` | 問題なし |
+
+###### 次の再開地点
+
+1. `BASELINE_INFORMATION_COMPLETE` の Node だけ、具体的買い手集合生成へ進める
+2. その他の status では具体的買い手集合を**生成しない**
+3. **次の設計対象**は、snapshot 時点の inlink 内物理順を正確に固定・取得する方法と、権利保有 Visit と異なる inlink の物理的先頭から prefix を作る共通処理である
+4. 次段で TVT-SB、TVT-MH、TVT-SP、TVT-MP の入力となる候補 inlink と prefix を構築する
+5. 次段で候補順位範囲上限 10 をどの時点で適用するか確認する
+6. collector 登録順を inlink 物理順として**使用しない**
+7. 局所仮想計算と経済評価には**まだ進まない**
+
+###### Git状態と再開情報（§25.25.34.45）
+
+- 最新保存済み・push 済みコミット（HEAD）は **`fd807ff`**
+- **§25.25.34.44** の設計メモ変更は未コミットで維持されている
+- 新規本番モジュール `uxsim/order_control_tvt_candidate_visit_set.py` と専用テスト `tests_order_control_tvt_candidate_visit_set.py` は**未追跡**である
+- `diagnostics/order_control.zip` は既存未追跡、未接触、対象外
+- 本実装完了記録追記時点では、git add、git commit、git push は**未実行**
