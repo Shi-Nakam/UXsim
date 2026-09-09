@@ -5578,6 +5578,52 @@ helper の実装、専用テスト、設計メモの整合を最終確認した�
 - `diagnostics/order_control.zip` は既存未追跡、未接触、対象外
 - git add、git commit、git push は未実行
 
+##### 2026-09-09追記：snapshot時点のinlink内物理順の保存・受渡しを実装
+
+**詳細正本：** `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES.md` **§25.25.34.49**
+
+**実装前仕様：** **§25.25.34.48**
+
+**変更した本番（2 ファイル）：**
+
+- `uxsim/order_control_baseline_snapshot.py`
+- `uxsim/order_control_baseline_driver.py`
+
+**実装内容（要約）：**
+
+- 新しい物理順型 `OrderControlBaselineSnapshotInlinkPhysicalOrder` を追加した
+- `OrderControlBaselineSnapshotRegistrationPlan.inlink_physical_orders` と `OrderControlBaselineForkResult.inlink_physical_orders` を必須フィールドとして追加した（default なし）
+- `inlink.vehicles` の index 0 から snapshot 固定 Visit を保存する
+- A 型・B 型を統合し、非参加 Visit も含める
+- 固定 Visit 0 件の inlink は省略する
+- 固定 Visit を含む inlink だけ単車線検証する
+- 一般 driver と TVT driver で同じ tuple を `ForkResult` へ渡す
+- `RegistrationPlan` 全体、collector、candidate 結果型へは保存しない
+- 可読性重視で物理順収集・単車線検証・集合照合・全体構築を helper へ明示分割した
+
+**検証結果：**
+
+- py_compile：本番 2 ファイルとテスト 9 ファイルすべて成功
+- 直接実行：`tests_order_control_baseline_snapshot.py` 直接実行成功（`TESTS` 件数 100）、`tests_order_control_baseline_driver.py` 69 tests passed、`tests_order_control_tvt_snapshot_undetermined_registration.py` 25 tests passed、`tests_order_control_tvt_baseline_driver_registration.py` 32 tests passed、`tests_order_control_tvt_baseline_fork_alignment.py` 25 tests passed、`tests_order_control_tvt_arrived_undetermined_confirmation.py` 30 passed、`tests_order_control_tvt_leading_nonparticipating_confirmation.py` 23 passed、`tests_order_control_tvt_right_of_entry_selection.py` 16 passed、`tests_order_control_tvt_candidate_visit_set.py` 21 passed
+- pytest：上記 9 ファイル 341 passed
+- git diff --check：問題なし
+
+**未実装：**
+
+- `candidate_visits` との照合、inlink 別候補列、prefix
+
+**次の再開地点：**
+
+- 上限適用済み `candidate_visits` と保存済み `inlink_physical_orders` の照合による inlink 別候補列の実装前設計
+
+**Git 状態（§25.25.34.49 記録時点）：**
+
+- 実装完了記録追加前の HEAD は **`1eb3f87`**
+- 実装完了記録追加前の変更：本番 2 ファイル、テスト 9 ファイル
+- 今回の変更：本設計メモ（`ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES.md`）、本進捗メモ（`ORDER_EXCHANGE_PROGRESS.md`）のみ
+- `diagnostics/order_control.zip` は既存未追跡、未接触、対象外
+- git add、git commit、git push は未実行
+
 #### 2026-08-29：TVT権利保有車両選定前の先頭非参加Vehicle先行確定の記録補修
 
 - 過去に確定済みだった、意思決定窓内 baseline 到着順位の先頭に連続する非参加 Vehicle の先行確定が、設計メモに明文化されていなかった

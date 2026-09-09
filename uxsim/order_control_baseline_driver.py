@@ -12,9 +12,9 @@ from dataclasses import dataclass
 
 from uxsim.order_control_baseline_collector import OrderControlBaselineCollector
 from uxsim.order_control_baseline_snapshot import (
+    OrderControlBaselineSnapshotInlinkPhysicalOrder,
     apply_snapshot_fixed_visit_registration_plan,
     prepare_snapshot_fixed_visit_registration_plan,
-    register_snapshot_fixed_visits,
 )
 from uxsim.order_control_tvt_node_rank_state import OrderControlTvtNodeRankState
 from uxsim.order_control_tvt_snapshot_undetermined_registration import (
@@ -34,6 +34,7 @@ class OrderControlBaselineForkResult:
     fork_steps_executed: int
     final_fork_timestep: int
     registered_visit_count: int
+    inlink_physical_orders: tuple[OrderControlBaselineSnapshotInlinkPhysicalOrder, ...]
 
 
 @dataclass
@@ -209,6 +210,7 @@ def _build_empty_baseline_result(
     fixed_target_node_names: tuple[str, ...],
     baseline_timestep_T: int,
     baseline_horizon_steps: int,
+    inlink_physical_orders: tuple[OrderControlBaselineSnapshotInlinkPhysicalOrder, ...],
 ) -> OrderControlBaselineForkResult:
     return OrderControlBaselineForkResult(
         collector=collector,
@@ -218,6 +220,7 @@ def _build_empty_baseline_result(
         fork_steps_executed=0,
         final_fork_timestep=baseline_timestep_T,
         registered_visit_count=0,
+        inlink_physical_orders=inlink_physical_orders,
     )
 
 
@@ -229,6 +232,7 @@ def _build_completed_baseline_result(
     baseline_horizon_steps: int,
     fork_W: World,
     registered_visit_count: int,
+    inlink_physical_orders: tuple[OrderControlBaselineSnapshotInlinkPhysicalOrder, ...],
 ) -> OrderControlBaselineForkResult:
     return OrderControlBaselineForkResult(
         collector=collector,
@@ -238,6 +242,7 @@ def _build_completed_baseline_result(
         fork_steps_executed=baseline_horizon_steps,
         final_fork_timestep=fork_W.T,
         registered_visit_count=registered_visit_count,
+        inlink_physical_orders=inlink_physical_orders,
     )
 
 
@@ -291,6 +296,8 @@ def _prepare_baseline_fork(
 def _complete_baseline_fork_after_registration(
     prepared: _BaselineForkPrepared,
     registered_visit_count: int,
+    *,
+    inlink_physical_orders: tuple[OrderControlBaselineSnapshotInlinkPhysicalOrder, ...],
 ) -> OrderControlBaselineForkResult:
     _validate_registered_visit_count(
         registered_visit_count=registered_visit_count,
@@ -311,6 +318,7 @@ def _complete_baseline_fork_after_registration(
             fixed_target_node_names=prepared.fixed_target_node_names,
             baseline_timestep_T=prepared.baseline_timestep_T,
             baseline_horizon_steps=prepared.baseline_horizon_steps,
+            inlink_physical_orders=inlink_physical_orders,
         )
 
     _validate_remaining_baseline_steps(
@@ -348,6 +356,7 @@ def _complete_baseline_fork_after_registration(
         baseline_horizon_steps=prepared.baseline_horizon_steps,
         fork_W=prepared.fork_W,
         registered_visit_count=registered_visit_count,
+        inlink_physical_orders=inlink_physical_orders,
     )
 
 
@@ -368,14 +377,18 @@ def run_snapshot_fixed_baseline_fork(
         target_node_names=target_node_names,
         baseline_horizon_steps=baseline_horizon_steps,
     )
-    registered_visit_count = register_snapshot_fixed_visits(
+    plan = prepare_snapshot_fixed_visit_registration_plan(
         prepared.fork_W,
-        prepared.collector,
         target_node_names=prepared.fixed_target_node_names,
+    )
+    registered_visit_count = apply_snapshot_fixed_visit_registration_plan(
+        plan,
+        prepared.collector,
     )
     return _complete_baseline_fork_after_registration(
         prepared,
         registered_visit_count,
+        inlink_physical_orders=plan.inlink_physical_orders,
     )
 
 
@@ -419,4 +432,5 @@ def run_snapshot_fixed_baseline_fork_with_tvt_rank_ledger_registration(
     return _complete_baseline_fork_after_registration(
         prepared,
         registered_visit_count,
+        inlink_physical_orders=plan.inlink_physical_orders,
     )

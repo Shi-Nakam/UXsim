@@ -857,6 +857,21 @@ def test_does_not_call_confirm_visits_in_order():
     assert confirm_called is False
 
 
+def test_alignment_result_reaches_inlink_physical_orders_via_fork_result():
+    W, vehicle = _build_arrived_junction_world()
+    result = run_snapshot_fixed_baseline_fork_and_align_undetermined_visits(
+        W,
+        **_single_node_run_kwargs(_rank_states_for_nodes(["junction"])),
+    )
+    physical_orders = result.fork_result.inlink_physical_orders
+    assert len(physical_orders) == 1
+    assert physical_orders[0].node_name == "junction"
+    assert physical_orders[0].inlink_name == "in"
+    assert physical_orders[0].visit_keys_head_to_tail == (
+        (vehicle.name, vehicle.order_control_visit_id),
+    )
+
+
 def test_does_not_modify_existing_result_types():
     W, _vehicle = _build_arrived_junction_world()
     result = run_snapshot_fixed_baseline_fork_and_align_undetermined_visits(
@@ -872,6 +887,7 @@ def test_does_not_modify_existing_result_types():
         "fork_steps_executed",
         "final_fork_timestep",
         "registered_visit_count",
+        "inlink_physical_orders",
     }
     alignment_field_names = {
         field.name for field in dataclasses.fields(result.alignment_results[0])
@@ -910,6 +926,7 @@ TESTS = [
     test_preserves_undetermined_registrations_after_alignment_failure,
     test_preserves_undetermined_registrations_after_unregistered_nonempty,
     test_does_not_call_confirm_visits_in_order,
+    test_alignment_result_reaches_inlink_physical_orders_via_fork_result,
     test_does_not_modify_existing_result_types,
 ]
 

@@ -371,7 +371,7 @@ def test_does_not_call_register_snapshot_fixed_visits():
         raise AssertionError("register_snapshot_fixed_visits must not be called")
 
     with patch(
-        "uxsim.order_control_baseline_driver.register_snapshot_fixed_visits",
+        "uxsim.order_control_baseline_snapshot.register_snapshot_fixed_visits",
         side_effect=fail_if_called,
     ):
         run_snapshot_fixed_baseline_fork_with_tvt_rank_ledger_registration(
@@ -911,26 +911,37 @@ def test_legacy_driver_behavior_unchanged():
     assert snapshot["was_arrived_at_snapshot"] is True
 
 
-def test_legacy_driver_calls_register_snapshot_fixed_visits_once():
+def test_legacy_driver_calls_prepare_and_apply_once():
     W, _vehicle = _build_arrived_junction_world()
-    call_count = 0
-    original_register = register_snapshot_fixed_visits
+    prepare_count = 0
+    apply_count = 0
+    original_prepare = prepare_snapshot_fixed_visit_registration_plan
+    original_apply = apply_snapshot_fixed_visit_registration_plan
 
-    def counting_register(*args, **kwargs):
-        nonlocal call_count
-        call_count += 1
-        return original_register(*args, **kwargs)
+    def counting_prepare(*args, **kwargs):
+        nonlocal prepare_count
+        prepare_count += 1
+        return original_prepare(*args, **kwargs)
+
+    def counting_apply(plan, collector):
+        nonlocal apply_count
+        apply_count += 1
+        return original_apply(plan, collector)
 
     with patch(
-        "uxsim.order_control_baseline_driver.register_snapshot_fixed_visits",
-        side_effect=counting_register,
+        "uxsim.order_control_baseline_driver.prepare_snapshot_fixed_visit_registration_plan",
+        side_effect=counting_prepare,
+    ), patch(
+        "uxsim.order_control_baseline_driver.apply_snapshot_fixed_visit_registration_plan",
+        side_effect=counting_apply,
     ):
         run_snapshot_fixed_baseline_fork(
             W,
             target_node_names=_junction_target_nodes(),
             baseline_horizon_steps=3,
         )
-    assert call_count == 1
+    assert prepare_count == 1
+    assert apply_count == 1
 
 
 def test_does_not_confirm_ranks():
@@ -996,7 +1007,48 @@ def test_fork_result_does_not_include_plan_or_rank_ledger_fields():
         "fork_steps_executed",
         "final_fork_timestep",
         "registered_visit_count",
+        "inlink_physical_orders",
     }
+
+
+def test_tvt_driver_result_includes_inlink_physical_orders():
+    W, vehicle = _build_arrived_junction_world()
+    captured_physical_orders: list = []
+    original_prepare = prepare_snapshot_fixed_visit_registration_plan
+
+    def tracking_prepare(*args, **kwargs):
+        plan = original_prepare(*args, **kwargs)
+        captured_physical_orders.append(plan.inlink_physical_orders)
+        return plan
+
+    with patch(
+        "uxsim.order_control_baseline_driver.prepare_snapshot_fixed_visit_registration_plan",
+        side_effect=tracking_prepare,
+    ):
+        result = run_snapshot_fixed_baseline_fork_with_tvt_rank_ledger_registration(
+            W,
+            target_node_names=_junction_target_nodes(),
+            baseline_horizon_steps=3,
+            rank_states_by_node_name=_rank_states_for_nodes(["junction"]),
+        )
+    assert result.inlink_physical_orders is captured_physical_orders[0]
+    assert result.inlink_physical_orders[0].visit_keys_head_to_tail == (
+        (vehicle.name, vehicle.order_control_visit_id),
+    )
+    assert not hasattr(result, "registration_plan")
+
+
+def test_zero_visit_tvt_driver_result_includes_empty_inlink_physical_orders():
+    W = _build_two_time_value_nodes_world()
+    W.T = 15
+    result = run_snapshot_fixed_baseline_fork_with_tvt_rank_ledger_registration(
+        W,
+        target_node_names=_two_node_target_names(),
+        baseline_horizon_steps=50,
+        rank_states_by_node_name=_rank_states_for_nodes(_two_node_target_names()),
+    )
+    assert result.registered_visit_count == 0
+    assert result.inlink_physical_orders == ()
 
 
 def test_preserves_distinct_visit_keys_for_node_revisit():
@@ -1042,10 +1094,12 @@ TESTS = [
     test_leaves_real_world_t_time_collector_unchanged,
     test_sets_collector_only_on_fork_world,
     test_legacy_driver_behavior_unchanged,
-    test_legacy_driver_calls_register_snapshot_fixed_visits_once,
+    test_legacy_driver_calls_prepare_and_apply_once,
     test_does_not_confirm_ranks,
     test_does_not_call_baseline_alignment,
     test_fork_result_does_not_include_plan_or_rank_ledger_fields,
+    test_tvt_driver_result_includes_inlink_physical_orders,
+    test_zero_visit_tvt_driver_result_includes_empty_inlink_physical_orders,
     test_preserves_distinct_visit_keys_for_node_revisit,
 ]
 

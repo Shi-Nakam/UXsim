@@ -72,6 +72,7 @@ def _plan(
         baseline_timestep_T=baseline_timestep_T,
         target_node_names=target_node_names,
         entries=entries,
+        inlink_physical_orders=(),
     )
 
 

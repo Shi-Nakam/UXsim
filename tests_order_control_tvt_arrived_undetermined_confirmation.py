@@ -90,6 +90,7 @@ def _fork_result(
         fork_steps_executed=3,
         final_fork_timestep=baseline_timestep_T + 3,
         registered_visit_count=1,
+        inlink_physical_orders=(),
     )
 
 

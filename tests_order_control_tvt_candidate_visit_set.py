@@ -146,6 +146,7 @@ def _fork_result(
         fork_steps_executed=configured_horizon_steps,
         final_fork_timestep=baseline_timestep_T + configured_horizon_steps,
         registered_visit_count=1,
+        inlink_physical_orders=(),
     )
 
 

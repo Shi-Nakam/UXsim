@@ -24,6 +24,27 @@ _CURRENT_VISIT_REQUIRED_KEYS = (
 
 
 @dataclass(frozen=True)
+class OrderControlBaselineSnapshotInlinkPhysicalOrder:
+    """
+    Snapshot-time physical order of fixed visits on one single-lane inlink.
+
+    ``visit_keys_head_to_tail`` stores which visits were ahead of or behind one
+    another on the same approach link at baseline timestep T. Index 0 is the
+    visit closest to the target Node (the downstream physical head). Later
+    indices move toward the upstream rear of the inlink queue.
+
+    This is not collector registration order, ``plan.entries`` order, rank-ledger
+    registration order, or baseline predicted arrival order. Integer ranks are not
+    stored; derive them from tuple position when needed. No Vehicle, Link, Node,
+    or World object references are stored.
+    """
+
+    node_name: str
+    inlink_name: str
+    visit_keys_head_to_tail: tuple[OrderControlTvtVisitKey, ...]
+
+
+@dataclass(frozen=True)
 class OrderControlBaselineSnapshotVisitEntry:
     """One snapshot-fixed visit registration entry (scalar fields only)."""
 
@@ -50,6 +71,7 @@ class OrderControlBaselineSnapshotRegistrationPlan:
     baseline_timestep_T: int
     target_node_names: tuple[str, ...]
     entries: tuple[OrderControlBaselineSnapshotVisitEntry, ...]
+    inlink_physical_orders: tuple[OrderControlBaselineSnapshotInlinkPhysicalOrder, ...]
 
 
 def prepare_snapshot_fixed_visit_registration_plan(
@@ -74,10 +96,16 @@ def prepare_snapshot_fixed_visit_registration_plan(
         _visit_entry_from_registration_dict(registration_entry)
         for registration_entry in registration_plan_dicts
     )
+    inlink_physical_orders = _build_inlink_physical_orders(
+        target_nodes=target_nodes,
+        fixed_target_node_names=fixed_target_node_names,
+        entries=entries,
+    )
     plan = OrderControlBaselineSnapshotRegistrationPlan(
         baseline_timestep_T=fork_W.T,
         target_node_names=fixed_target_node_names,
         entries=entries,
+        inlink_physical_orders=inlink_physical_orders,
     )
     validation_collector = OrderControlBaselineCollector()
     for entry in plan.entries:
@@ -332,6 +360,164 @@ def _ordered_inlinks_for_node(target_node):
     Return inlinks in Node.inlinks insertion order (link creation order).
     """
     return list(target_node.inlinks.values())
+
+
+def _visit_keys_by_node_and_inlink_from_entries(
+    entries: tuple[OrderControlBaselineSnapshotVisitEntry, ...],
+) -> dict[tuple[str, str], set[OrderControlTvtVisitKey]]:
+    """
+    Group snapshot-fixed VisitKeys by target Node and inlink from plan entries.
+    """
+    visit_keys_by_node_inlink: dict[tuple[str, str], set[OrderControlTvtVisitKey]] = {}
+    for entry in entries:
+        node_inlink_key = (entry.node_name, entry.inlink_name)
+        if node_inlink_key not in visit_keys_by_node_inlink:
+            visit_keys_by_node_inlink[node_inlink_key] = set()
+        visit_keys_by_node_inlink[node_inlink_key].add(entry.visit_key)
+    return visit_keys_by_node_inlink
+
+
+def _entry_by_vehicle_name_from_entries(
+    entries: tuple[OrderControlBaselineSnapshotVisitEntry, ...],
+) -> dict[str, OrderControlBaselineSnapshotVisitEntry]:
+    """
+    Map each snapshot-fixed vehicle name to its plan entry.
+    """
+    entry_by_vehicle_name: dict[str, OrderControlBaselineSnapshotVisitEntry] = {}
+    for entry in entries:
+        entry_by_vehicle_name[entry.vehicle_name] = entry
+    return entry_by_vehicle_name
+
+
+def _require_single_lane_inlink_for_physical_order(
+    *,
+    node_name: str,
+    inlink,
+) -> None:
+    inlink_name = inlink.name
+    number_of_lanes = inlink.number_of_lanes
+    if number_of_lanes != 1:
+        raise ValueError(
+            f"snapshot inlink physical order at node {node_name!r}, "
+            f"inlink {inlink_name!r}: number_of_lanes={number_of_lanes}; "
+            f"snapshot physical order storage currently supports only "
+            f"single-lane inlinks with snapshot-fixed visits."
+        )
+
+
+def _collect_visit_keys_from_inlink_deque(
+    inlink,
+    *,
+    node_name: str,
+    inlink_name: str,
+    expected_visit_keys: set[OrderControlTvtVisitKey],
+    entry_by_vehicle_name: dict[str, OrderControlBaselineSnapshotVisitEntry],
+) -> tuple[OrderControlTvtVisitKey, ...]:
+    """
+    Walk ``inlink.vehicles`` from the Node-side head and collect fixed VisitKeys.
+    """
+    visit_keys_in_physical_order: list[OrderControlTvtVisitKey] = []
+    seen_visit_keys_on_inlink: set[OrderControlTvtVisitKey] = set()
+
+    for inlink_vehicle in inlink.vehicles:
+        vehicle_name = inlink_vehicle.name
+        if vehicle_name not in entry_by_vehicle_name:
+            continue
+
+        entry = entry_by_vehicle_name[vehicle_name]
+        if entry.node_name != node_name:
+            continue
+        if entry.inlink_name != inlink_name:
+            continue
+
+        visit_key = entry.visit_key
+        if visit_key in seen_visit_keys_on_inlink:
+            raise ValueError(
+                f"snapshot inlink physical order at node {node_name!r}, "
+                f"inlink {inlink_name!r}: duplicate VisitKey {visit_key!r} "
+                f"in the same physical-order tuple."
+            )
+        seen_visit_keys_on_inlink.add(visit_key)
+        visit_keys_in_physical_order.append(visit_key)
+
+    physical_order_visit_keys = set(visit_keys_in_physical_order)
+    if physical_order_visit_keys != expected_visit_keys:
+        missing_visit_keys = expected_visit_keys - physical_order_visit_keys
+        extra_visit_keys = physical_order_visit_keys - expected_visit_keys
+        raise ValueError(
+            f"snapshot inlink physical order at node {node_name!r}, "
+            f"inlink {inlink_name!r}: physical-order VisitKey set does not "
+            f"match plan.entries for this inlink: "
+            f"missing_from_physical_order={sorted(missing_visit_keys)!r}, "
+            f"extra_in_physical_order={sorted(extra_visit_keys)!r}."
+        )
+
+    return tuple(visit_keys_in_physical_order)
+
+
+def _build_inlink_physical_orders(
+    *,
+    target_nodes: Sequence[tuple[str, object]],
+    fixed_target_node_names: tuple[str, ...],
+    entries: tuple[OrderControlBaselineSnapshotVisitEntry, ...],
+) -> tuple[OrderControlBaselineSnapshotInlinkPhysicalOrder, ...]:
+    """
+    Build validated inlink physical-order records for one snapshot plan.
+
+    Empty inlinks with no snapshot-fixed visits are omitted. Inlinks that store
+    at least one fixed visit must be single-lane.
+    """
+    visit_keys_by_node_inlink = _visit_keys_by_node_and_inlink_from_entries(entries)
+    entry_by_vehicle_name = _entry_by_vehicle_name_from_entries(entries)
+    target_node_by_name = {
+        node_name: target_node for node_name, target_node in target_nodes
+    }
+
+    inlink_physical_orders: list[OrderControlBaselineSnapshotInlinkPhysicalOrder] = []
+    visit_keys_seen_in_any_physical_order: set[OrderControlTvtVisitKey] = set()
+
+    for node_name in fixed_target_node_names:
+        target_node = target_node_by_name[node_name]
+        for inlink in _ordered_inlinks_for_node(target_node):
+            inlink_name = inlink.name
+            expected_visit_keys = visit_keys_by_node_inlink.get(
+                (node_name, inlink_name),
+                set(),
+            )
+            if len(expected_visit_keys) == 0:
+                continue
+
+            _require_single_lane_inlink_for_physical_order(
+                node_name=node_name,
+                inlink=inlink,
+            )
+
+            visit_keys_head_to_tail = _collect_visit_keys_from_inlink_deque(
+                inlink,
+                node_name=node_name,
+                inlink_name=inlink_name,
+                expected_visit_keys=expected_visit_keys,
+                entry_by_vehicle_name=entry_by_vehicle_name,
+            )
+
+            for visit_key in visit_keys_head_to_tail:
+                if visit_key in visit_keys_seen_in_any_physical_order:
+                    raise ValueError(
+                        f"snapshot inlink physical order: VisitKey {visit_key!r} "
+                        f"appears in more than one Node/inlink physical-order "
+                        f"tuple (latest node {node_name!r}, inlink {inlink_name!r})."
+                    )
+                visit_keys_seen_in_any_physical_order.add(visit_key)
+
+            inlink_physical_orders.append(
+                OrderControlBaselineSnapshotInlinkPhysicalOrder(
+                    node_name=node_name,
+                    inlink_name=inlink_name,
+                    visit_keys_head_to_tail=visit_keys_head_to_tail,
+                )
+            )
+
+    return tuple(inlink_physical_orders)
 
 
 def _should_skip_non_fixed_set_vehicle(vehicle) -> bool:

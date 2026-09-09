@@ -11,6 +11,7 @@ from unittest.mock import patch
 from uxsim import World
 from uxsim.order_control_baseline_collector import OrderControlBaselineCollector
 from uxsim.order_control_baseline_snapshot import (
+    OrderControlBaselineSnapshotInlinkPhysicalOrder,
     OrderControlBaselineSnapshotRegistrationPlan,
     OrderControlBaselineSnapshotVisitEntry,
     apply_snapshot_fixed_visit_registration_plan,
@@ -2064,6 +2065,396 @@ def test_prepare_failure_before_apply_leaves_formal_collector_empty():
     assert collector.export_node_baseline_visits("junction") == []
 
 
+def _build_same_inlink_ab_world():
+    W = _build_time_value_junction_world(name="same_inlink_ab")
+    snapshot_T = 20
+    W.T = snapshot_T
+
+    arrived_vehicle = W.addVehicle("orig", "dest", 0, name="arrived_head")
+    not_yet_arrived_vehicle = W.addVehicle(
+        "orig", "dest", 0, name="not_yet_arrived_behind"
+    )
+    _advance_until_on_inlink(arrived_vehicle, "in")
+    _advance_until_on_inlink(not_yet_arrived_vehicle, "in")
+
+    _place_arrived_vehicle_at_snapshot(
+        W,
+        arrived_vehicle,
+        inlink_name="in",
+        target_node_name="junction",
+        outlink_name="out",
+        arrival_timestep=10,
+        snapshot_timestep=snapshot_T,
+    )
+    _place_not_yet_arrived_vehicle_at_snapshot(
+        W,
+        not_yet_arrived_vehicle,
+        inlink_name="in",
+        snapshot_timestep=snapshot_T,
+        x_position=120.0,
+    )
+
+    inlink = W.get_link("in")
+    assert list(inlink.vehicles)[0] is arrived_vehicle
+    assert list(inlink.vehicles)[1] is not_yet_arrived_vehicle
+    return W, arrived_vehicle, not_yet_arrived_vehicle
+
+
+def _visit_keys_from_inlink_deque(W, node_name, inlink_name):
+    inlink = W.get_link(inlink_name)
+    visit_keys = []
+    for vehicle in inlink.vehicles:
+        visit_keys.append((vehicle.name, vehicle.order_control_visit_id))
+    return tuple(visit_keys)
+
+
+def test_inlink_physical_order_type_is_frozen_dataclass():
+    physical_order = OrderControlBaselineSnapshotInlinkPhysicalOrder(
+        node_name="junction",
+        inlink_name="in",
+        visit_keys_head_to_tail=(("veh", 1),),
+    )
+    assert physical_order.__dataclass_params__.frozen is True
+    try:
+        physical_order.node_name = "other"
+        raise AssertionError("Expected FrozenInstanceError")
+    except FrozenInstanceError:
+        pass
+
+
+def test_plan_stores_inlink_physical_orders_as_tuple():
+    W, _vehicle = _build_prepare_apply_arrived_world()
+    plan = prepare_snapshot_fixed_visit_registration_plan(
+        W, target_node_names=["junction"]
+    )
+    assert isinstance(plan.inlink_physical_orders, tuple)
+    assert len(plan.inlink_physical_orders) == 1
+    assert isinstance(plan.inlink_physical_orders[0], OrderControlBaselineSnapshotInlinkPhysicalOrder)
+
+
+def test_physical_order_integrates_arrived_and_not_yet_arrived_on_same_inlink():
+    W, arrived_vehicle, not_yet_arrived_vehicle = _build_same_inlink_ab_world()
+    plan = prepare_snapshot_fixed_visit_registration_plan(
+        W, target_node_names=["junction"]
+    )
+    assert len(plan.inlink_physical_orders) == 1
+    physical_order = plan.inlink_physical_orders[0]
+    assert physical_order.node_name == "junction"
+    assert physical_order.inlink_name == "in"
+    assert physical_order.visit_keys_head_to_tail == (
+        (arrived_vehicle.name, arrived_vehicle.order_control_visit_id),
+        (not_yet_arrived_vehicle.name, not_yet_arrived_vehicle.order_control_visit_id),
+    )
+    expected_deque_order = _visit_keys_from_inlink_deque(W, "junction", "in")
+    assert physical_order.visit_keys_head_to_tail == expected_deque_order
+
+
+def test_physical_order_follows_deque_not_entries_construction_order():
+    W, arrived_vehicle, not_yet_arrived_vehicle = _build_same_inlink_ab_world()
+    plan = prepare_snapshot_fixed_visit_registration_plan(
+        W, target_node_names=["junction"]
+    )
+    assert plan.entries[0].vehicle_name == arrived_vehicle.name
+    assert plan.entries[0].was_arrived_at_snapshot is True
+    assert plan.entries[1].vehicle_name == not_yet_arrived_vehicle.name
+    assert plan.entries[1].was_arrived_at_snapshot is False
+    physical_order = plan.inlink_physical_orders[0]
+    assert physical_order.visit_keys_head_to_tail == _visit_keys_from_inlink_deque(
+        W, "junction", "in"
+    )
+
+
+def test_physical_order_index_zero_is_node_side_head():
+    W, arrived_vehicle, _not_yet_arrived_vehicle = _build_same_inlink_ab_world()
+    plan = prepare_snapshot_fixed_visit_registration_plan(
+        W, target_node_names=["junction"]
+    )
+    physical_order = plan.inlink_physical_orders[0]
+    head_visit_key = physical_order.visit_keys_head_to_tail[0]
+    assert head_visit_key == (
+        arrived_vehicle.name,
+        arrived_vehicle.order_control_visit_id,
+    )
+    inlink = W.get_link("in")
+    assert inlink.vehicles[0].name == arrived_vehicle.name
+
+
+def test_physical_order_preserves_multiple_inlinks_in_node_inlink_order():
+    W, arrived_vehicle, not_yet_arrived_vehicle = _build_prepare_apply_mixed_world()
+    plan = prepare_snapshot_fixed_visit_registration_plan(
+        W, target_node_names=["merge"]
+    )
+    assert len(plan.inlink_physical_orders) == 2
+    assert plan.inlink_physical_orders[0].inlink_name == "link1"
+    assert plan.inlink_physical_orders[1].inlink_name == "link2"
+    assert plan.inlink_physical_orders[0].visit_keys_head_to_tail == (
+        (arrived_vehicle.name, arrived_vehicle.order_control_visit_id),
+    )
+    assert plan.inlink_physical_orders[1].visit_keys_head_to_tail == (
+        (not_yet_arrived_vehicle.name, not_yet_arrived_vehicle.order_control_visit_id),
+    )
+
+
+def test_physical_order_preserves_multiple_nodes_in_target_node_names_order():
+    W = _build_two_time_value_nodes_world()
+    snapshot_T = 30
+    W.T = snapshot_T
+    vehicle_a = W.addVehicle("orig_a", "dest", 0, name="node_a_vehicle")
+    vehicle_b = W.addVehicle("mid", "dest", 0, name="node_b_vehicle")
+    _advance_until_on_inlink(vehicle_a, "in_a")
+    _advance_until_on_inlink(vehicle_b, "in_b")
+    _place_arrived_vehicle_at_snapshot(
+        W,
+        vehicle_a,
+        inlink_name="in_a",
+        target_node_name="junction_a",
+        outlink_name="mid_link",
+        arrival_timestep=10,
+        snapshot_timestep=snapshot_T,
+    )
+    _place_not_yet_arrived_vehicle_at_snapshot(
+        W,
+        vehicle_b,
+        inlink_name="in_b",
+        snapshot_timestep=snapshot_T,
+    )
+    plan = prepare_snapshot_fixed_visit_registration_plan(
+        W, target_node_names=["junction_a", "junction_b"]
+    )
+    assert len(plan.inlink_physical_orders) == 2
+    assert plan.inlink_physical_orders[0].node_name == "junction_a"
+    assert plan.inlink_physical_orders[1].node_name == "junction_b"
+
+
+def test_physical_order_includes_nonparticipating_visit():
+    W = _build_time_value_junction_world(name="physical_order_nonparticipating")
+    snapshot_T = 20
+    W.T = snapshot_T
+    vehicle = W.addVehicle(
+        "orig",
+        "dest",
+        0,
+        name="nonparticipating_physical_order",
+        participates_in_order_exchange=False,
+    )
+    _advance_until_on_inlink(vehicle, "in")
+    _place_not_yet_arrived_vehicle_at_snapshot(
+        W, vehicle, inlink_name="in", snapshot_timestep=snapshot_T
+    )
+    plan = prepare_snapshot_fixed_visit_registration_plan(
+        W, target_node_names=["junction"]
+    )
+    assert len(plan.inlink_physical_orders) == 1
+    assert plan.inlink_physical_orders[0].visit_keys_head_to_tail == (
+        (vehicle.name, vehicle.order_control_visit_id),
+    )
+
+
+def test_empty_inlink_with_no_fixed_visits_is_omitted_from_physical_orders():
+    W = _build_two_time_value_nodes_world()
+    plan = prepare_snapshot_fixed_visit_registration_plan(
+        W, target_node_names=["junction_a", "junction_b"]
+    )
+    assert plan.entries == ()
+    assert plan.inlink_physical_orders == ()
+
+
+def test_multilane_inlink_with_fixed_visits_raises_value_error():
+    W = _build_time_value_junction_world(name="multilane_fixed_visit")
+    W.get_link("in").number_of_lanes = 2
+    snapshot_T = 20
+    W.T = snapshot_T
+    vehicle = W.addVehicle("orig", "dest", 0, name="multilane_fixed")
+    _advance_until_on_inlink(vehicle, "in")
+    _place_not_yet_arrived_vehicle_at_snapshot(
+        W, vehicle, inlink_name="in", snapshot_timestep=snapshot_T
+    )
+    _expect_value_error(
+        lambda: prepare_snapshot_fixed_visit_registration_plan(
+            W, target_node_names=["junction"]
+        ),
+        "number_of_lanes=2",
+    )
+
+
+def test_empty_multilane_inlink_does_not_trigger_lane_validation():
+    W = _build_time_value_merge_world(name="empty_multilane_merge")
+    W.get_link("link2").number_of_lanes = 2
+    snapshot_T = 20
+    W.T = snapshot_T
+    arrived_vehicle = W.addVehicle("orig1", "dest", 0, name="only_on_link1")
+    _advance_until_on_inlink(arrived_vehicle, "link1")
+    _place_arrived_vehicle_at_snapshot(
+        W,
+        arrived_vehicle,
+        inlink_name="link1",
+        target_node_name="merge",
+        outlink_name="out",
+        arrival_timestep=10,
+        snapshot_timestep=snapshot_T,
+    )
+    plan = prepare_snapshot_fixed_visit_registration_plan(
+        W, target_node_names=["merge"]
+    )
+    assert len(plan.inlink_physical_orders) == 1
+    assert plan.inlink_physical_orders[0].inlink_name == "link1"
+
+
+def _snapshot_visit_entry(
+    *,
+    vehicle_name: str,
+    node_name: str,
+    inlink_name: str,
+    visit_id: int = 1,
+    was_arrived_at_snapshot: bool = True,
+) -> OrderControlBaselineSnapshotVisitEntry:
+    return OrderControlBaselineSnapshotVisitEntry(
+        vehicle_name=vehicle_name,
+        vehicle_id=0,
+        node_name=node_name,
+        inlink_name=inlink_name,
+        visit_id=visit_id,
+        was_arrived_at_snapshot=was_arrived_at_snapshot,
+        baseline_arrival_timestep=10 if was_arrived_at_snapshot else None,
+        arrival_tiebreaker=0 if was_arrived_at_snapshot else None,
+        route_next_link_name="out",
+        baseline_passage_timestep=None,
+    )
+
+
+def test_physical_order_rejects_entries_set_mismatch():
+    W, _arrived_vehicle, not_yet_arrived_vehicle = _build_same_inlink_ab_world()
+    plan = prepare_snapshot_fixed_visit_registration_plan(
+        W, target_node_names=["junction"]
+    )
+    snapshot_module = __import__(
+        "uxsim.order_control_baseline_snapshot",
+        fromlist=[
+            "_collect_visit_keys_from_inlink_deque",
+            "_entry_by_vehicle_name_from_entries",
+            "_visit_keys_by_node_and_inlink_from_entries",
+        ],
+    )
+    entry_by_vehicle_name = snapshot_module._entry_by_vehicle_name_from_entries(
+        plan.entries
+    )
+    visit_keys_by_node_inlink = (
+        snapshot_module._visit_keys_by_node_and_inlink_from_entries(plan.entries)
+    )
+    expected_visit_keys = visit_keys_by_node_inlink[("junction", "in")]
+
+    inlink = W.get_link("in")
+    inlink.vehicles.remove(not_yet_arrived_vehicle)
+
+    _expect_value_error(
+        lambda: snapshot_module._collect_visit_keys_from_inlink_deque(
+            inlink,
+            node_name="junction",
+            inlink_name="in",
+            expected_visit_keys=expected_visit_keys,
+            entry_by_vehicle_name=entry_by_vehicle_name,
+        ),
+        "missing_from_physical_order",
+    )
+
+
+def test_physical_order_rejects_duplicate_visit_key_in_same_tuple():
+    W, arrived_vehicle, _not_yet_arrived_vehicle = _build_same_inlink_ab_world()
+    inlink = W.get_link("in")
+    inlink.vehicles.append(arrived_vehicle)
+    _expect_value_error(
+        lambda: prepare_snapshot_fixed_visit_registration_plan(
+            W, target_node_names=["junction"]
+        ),
+        "duplicate VisitKey",
+    )
+
+
+def test_physical_order_rejects_same_visit_key_on_multiple_inlinks():
+    W = _build_time_value_merge_world(name="cross_inlink_duplicate")
+    target_node = W.get_node("merge")
+    target_nodes = [("merge", target_node)]
+    shared_visit_key = ("shared_vehicle", 1)
+    entries = (
+        _snapshot_visit_entry(
+            vehicle_name="shared_vehicle",
+            node_name="merge",
+            inlink_name="link1",
+        ),
+        _snapshot_visit_entry(
+            vehicle_name="shared_vehicle",
+            node_name="merge",
+            inlink_name="link2",
+            was_arrived_at_snapshot=False,
+        ),
+    )
+    build_inlink_physical_orders = __import__(
+        "uxsim.order_control_baseline_snapshot",
+        fromlist=["_build_inlink_physical_orders"],
+    )._build_inlink_physical_orders
+
+    def collect_returning_shared_visit_key(inlink, **kwargs):
+        return (shared_visit_key,)
+
+    with patch(
+        "uxsim.order_control_baseline_snapshot._collect_visit_keys_from_inlink_deque",
+        side_effect=collect_returning_shared_visit_key,
+    ):
+        _expect_value_error(
+            lambda: build_inlink_physical_orders(
+                target_nodes=target_nodes,
+                fixed_target_node_names=("merge",),
+                entries=entries,
+            ),
+            "more than one Node/inlink",
+        )
+
+
+def test_excluded_research_vehicle_not_in_physical_order():
+    W = _build_time_value_junction_world(name="physical_order_excluded")
+    snapshot_T = 20
+    W.T = snapshot_T
+    included_vehicle = W.addVehicle("orig", "dest", 0, name="included_physical")
+    excluded_vehicle = W.addVehicle(
+        "orig", "dest", 0, name="taxi_physical", mode="taxi"
+    )
+    _advance_until_on_inlink(included_vehicle, "in")
+    _advance_until_on_inlink(excluded_vehicle, "in")
+    _place_not_yet_arrived_vehicle_at_snapshot(
+        W, included_vehicle, inlink_name="in", snapshot_timestep=snapshot_T
+    )
+    excluded_vehicle.state = "run"
+    excluded_vehicle.link = W.get_link("in")
+    if excluded_vehicle not in W.get_link("in").vehicles:
+        W.get_link("in").vehicles.append(excluded_vehicle)
+    plan = prepare_snapshot_fixed_visit_registration_plan(
+        W, target_node_names=["junction"]
+    )
+    physical_visit_keys = plan.inlink_physical_orders[0].visit_keys_head_to_tail
+    assert (included_vehicle.name, included_vehicle.order_control_visit_id) in physical_visit_keys
+    assert (excluded_vehicle.name, excluded_vehicle.order_control_visit_id) not in physical_visit_keys
+
+
+def test_apply_does_not_write_physical_order_to_collector():
+    W, _vehicle = _build_prepare_apply_arrived_world()
+    plan = prepare_snapshot_fixed_visit_registration_plan(
+        W, target_node_names=["junction"]
+    )
+    collector = _new_collector()
+    apply_snapshot_fixed_visit_registration_plan(plan, collector)
+    exported = collector.export_node_baseline_visits("junction")
+    assert len(exported) == 1
+    assert "inlink_physical_orders" not in exported[0]
+
+
+def test_empty_snapshot_plan_has_empty_inlink_physical_orders():
+    W = _build_two_time_value_nodes_world()
+    plan = prepare_snapshot_fixed_visit_registration_plan(
+        W, target_node_names=["junction_a", "junction_b"]
+    )
+    assert plan.inlink_physical_orders == ()
+
+
 TESTS = [
     test_rejects_empty_target_node_names,
     test_rejects_duplicate_target_node_names,
@@ -2148,6 +2539,23 @@ TESTS = [
     test_empty_snapshot_plan_prepare_and_apply_return_zero,
     test_prepare_failure_leaves_formal_collector_empty,
     test_prepare_failure_before_apply_leaves_formal_collector_empty,
+    test_inlink_physical_order_type_is_frozen_dataclass,
+    test_plan_stores_inlink_physical_orders_as_tuple,
+    test_physical_order_integrates_arrived_and_not_yet_arrived_on_same_inlink,
+    test_physical_order_follows_deque_not_entries_construction_order,
+    test_physical_order_index_zero_is_node_side_head,
+    test_physical_order_preserves_multiple_inlinks_in_node_inlink_order,
+    test_physical_order_preserves_multiple_nodes_in_target_node_names_order,
+    test_physical_order_includes_nonparticipating_visit,
+    test_empty_inlink_with_no_fixed_visits_is_omitted_from_physical_orders,
+    test_multilane_inlink_with_fixed_visits_raises_value_error,
+    test_empty_multilane_inlink_does_not_trigger_lane_validation,
+    test_physical_order_rejects_entries_set_mismatch,
+    test_physical_order_rejects_duplicate_visit_key_in_same_tuple,
+    test_physical_order_rejects_same_visit_key_on_multiple_inlinks,
+    test_excluded_research_vehicle_not_in_physical_order,
+    test_apply_does_not_write_physical_order_to_collector,
+    test_empty_snapshot_plan_has_empty_inlink_physical_orders,
 ]
 
 

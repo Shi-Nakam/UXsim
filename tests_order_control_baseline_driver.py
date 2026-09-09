@@ -16,7 +16,11 @@ from uxsim.order_control_baseline_driver import (
     OrderControlBaselineForkResult,
     run_snapshot_fixed_baseline_fork,
 )
-from uxsim.order_control_baseline_snapshot import register_snapshot_fixed_visits
+from uxsim.order_control_baseline_snapshot import (
+    apply_snapshot_fixed_visit_registration_plan,
+    prepare_snapshot_fixed_visit_registration_plan,
+    register_snapshot_fixed_visits,
+)
 from uxsim.uxsim import World as UxsimWorld
 
 
@@ -589,7 +593,7 @@ def test_previous_collector_results_do_not_leak_to_next_call():
 # --- snapshot registration ---
 
 
-def test_register_snapshot_fixed_visits_called_once_before_exec_simulation():
+def test_prepare_and_apply_called_once_before_exec_simulation():
     W = _build_time_value_junction_world(tmax=300)
     W.T = 100
     vehicle = W.addVehicle("orig", "dest", 0, name="once_call_vehicle")
@@ -604,35 +608,41 @@ def test_register_snapshot_fixed_visits_called_once_before_exec_simulation():
         snapshot_timestep=W.T,
     )
     events: list[str] = []
-    original_register = register_snapshot_fixed_visits
+    original_prepare = prepare_snapshot_fixed_visit_registration_plan
+    original_apply = apply_snapshot_fixed_visit_registration_plan
 
-    def tracking_register(fork_W, collector, *, target_node_names):
-        events.append("register")
-        return original_register(
-            fork_W, collector, target_node_names=target_node_names
-        )
+    def tracking_prepare(*args, **kwargs):
+        events.append("prepare")
+        return original_prepare(*args, **kwargs)
+
+    def tracking_apply(plan, collector):
+        events.append("apply")
+        return original_apply(plan, collector)
 
     def tracking_exec(W, **kwargs):
         events.append("exec")
         return _REAL_EXEC_SIMULATION(W, **kwargs)
 
     with patch(
-        "uxsim.order_control_baseline_driver.register_snapshot_fixed_visits",
-        side_effect=tracking_register,
+        "uxsim.order_control_baseline_driver.prepare_snapshot_fixed_visit_registration_plan",
+        side_effect=tracking_prepare,
+    ), patch(
+        "uxsim.order_control_baseline_driver.apply_snapshot_fixed_visit_registration_plan",
+        side_effect=tracking_apply,
     ), patch.object(UxsimWorld, "exec_simulation", tracking_exec):
         run_snapshot_fixed_baseline_fork(
             W,
             target_node_names=_junction_target_nodes(),
             baseline_horizon_steps=5,
         )
-    assert events == ["register", "exec"]
+    assert events == ["prepare", "apply", "exec"]
 
 
 def test_snapshot_exception_propagates_without_result():
     W = _build_time_value_junction_world()
     W.T = 10
     with patch(
-        "uxsim.order_control_baseline_driver.register_snapshot_fixed_visits",
+        "uxsim.order_control_baseline_driver.prepare_snapshot_fixed_visit_registration_plan",
         side_effect=ValueError("snapshot registration failed"),
     ):
         try:
@@ -652,7 +662,7 @@ def test_registration_failure_returns_no_result():
     W.T = 10
     before = _real_world_snapshot(W)
     with patch(
-        "uxsim.order_control_baseline_driver.register_snapshot_fixed_visits",
+        "uxsim.order_control_baseline_driver.prepare_snapshot_fixed_visit_registration_plan",
         side_effect=ValueError("snapshot registration failed"),
     ):
         try:
@@ -1349,10 +1359,8 @@ def test_runtime_error_when_registration_count_mismatch_after_snapshot_registrat
     before = _real_world_snapshot(W)
     exec_calls = [0]
 
-    def wrong_count_register(fork_W, collector, *, target_node_names):
-        actual_count = register_snapshot_fixed_visits(
-            fork_W, collector, target_node_names=target_node_names
-        )
+    def wrong_count_apply(plan, collector):
+        actual_count = apply_snapshot_fixed_visit_registration_plan(plan, collector)
         return actual_count + 1
 
     def tracking_exec(fork_W, **kwargs):
@@ -1360,8 +1368,8 @@ def test_runtime_error_when_registration_count_mismatch_after_snapshot_registrat
         return _REAL_EXEC_SIMULATION(fork_W, **kwargs)
 
     with patch(
-        "uxsim.order_control_baseline_driver.register_snapshot_fixed_visits",
-        side_effect=wrong_count_register,
+        "uxsim.order_control_baseline_driver.apply_snapshot_fixed_visit_registration_plan",
+        side_effect=wrong_count_apply,
     ), patch.object(UxsimWorld, "exec_simulation", tracking_exec):
         try:
             run_snapshot_fixed_baseline_fork(
@@ -1806,7 +1814,7 @@ def test_real_world_unchanged_on_snapshot_registration_failure():
     W.T = 10
     before = _real_world_snapshot(W)
     with patch(
-        "uxsim.order_control_baseline_driver.register_snapshot_fixed_visits",
+        "uxsim.order_control_baseline_driver.prepare_snapshot_fixed_visit_registration_plan",
         side_effect=ValueError("snapshot registration failed"),
     ):
         try:
@@ -1892,6 +1900,87 @@ def test_completed_result_fields():
     assert not hasattr(result, "fork_W")
 
 
+def test_general_driver_result_includes_inlink_physical_orders():
+    W = _build_time_value_junction_world(tmax=300)
+    snapshot_T = 60
+    W.T = snapshot_T
+    vehicle = W.addVehicle("orig", "dest", 0, name="physical_order_driver_vehicle")
+    _advance_until_on_inlink(vehicle, "in")
+    _place_arrived_vehicle_at_snapshot(
+        W,
+        vehicle,
+        inlink_name="in",
+        target_node_name="junction",
+        outlink_name="out",
+        arrival_timestep=10,
+        snapshot_timestep=snapshot_T,
+    )
+    expected_plan = prepare_snapshot_fixed_visit_registration_plan(
+        W, target_node_names=["junction"]
+    )
+    result = run_snapshot_fixed_baseline_fork(
+        W,
+        target_node_names=["junction"],
+        baseline_horizon_steps=7,
+    )
+    assert result.inlink_physical_orders == expected_plan.inlink_physical_orders
+    assert len(result.inlink_physical_orders) == 1
+
+
+def test_zero_visit_result_includes_empty_inlink_physical_orders():
+    W = _build_two_time_value_nodes_world()
+    W.T = 42
+    plan = prepare_snapshot_fixed_visit_registration_plan(
+        W, target_node_names=_two_node_target_names()
+    )
+    result = run_snapshot_fixed_baseline_fork(
+        W,
+        target_node_names=_two_node_target_names(),
+        baseline_horizon_steps=50,
+    )
+    assert result.registered_visit_count == 0
+    assert result.inlink_physical_orders == plan.inlink_physical_orders
+    assert result.inlink_physical_orders == ()
+
+
+def test_inlink_physical_orders_unchanged_after_baseline_forward():
+    W = _build_time_value_junction_world(tmax=300)
+    snapshot_T = 60
+    W.T = snapshot_T
+    vehicle = W.addVehicle("orig", "dest", 0, name="physical_order_stable_vehicle")
+    _advance_until_on_inlink(vehicle, "in")
+    _place_arrived_vehicle_at_snapshot(
+        W,
+        vehicle,
+        inlink_name="in",
+        target_node_name="junction",
+        outlink_name="out",
+        arrival_timestep=10,
+        snapshot_timestep=snapshot_T,
+    )
+    captured_physical_orders: list = []
+    original_prepare = prepare_snapshot_fixed_visit_registration_plan
+
+    def tracking_prepare(*args, **kwargs):
+        plan = original_prepare(*args, **kwargs)
+        captured_physical_orders.append(plan.inlink_physical_orders)
+        return plan
+
+    with patch(
+        "uxsim.order_control_baseline_driver.prepare_snapshot_fixed_visit_registration_plan",
+        side_effect=tracking_prepare,
+    ):
+        result = run_snapshot_fixed_baseline_fork(
+            W,
+            target_node_names=["junction"],
+            baseline_horizon_steps=7,
+        )
+    assert result.inlink_physical_orders is captured_physical_orders[0]
+    assert result.inlink_physical_orders[0].visit_keys_head_to_tail == (
+        (vehicle.name, vehicle.order_control_visit_id),
+    )
+
+
 TESTS = [
     test_accepts_list_target_node_names,
     test_accepts_tuple_target_node_names,
@@ -1915,7 +2004,7 @@ TESTS = [
     test_collector_set_only_on_fork_world,
     test_multiple_calls_use_distinct_collectors,
     test_previous_collector_results_do_not_leak_to_next_call,
-    test_register_snapshot_fixed_visits_called_once_before_exec_simulation,
+    test_prepare_and_apply_called_once_before_exec_simulation,
     test_snapshot_exception_propagates_without_result,
     test_registration_failure_returns_no_result,
     test_zero_total_registered_visits_returns_zero_step_result,
@@ -1959,6 +2048,9 @@ TESTS = [
     test_real_world_unchanged_on_snapshot_registration_failure,
     test_no_result_on_exec_simulation_exception,
     test_completed_result_fields,
+    test_general_driver_result_includes_inlink_physical_orders,
+    test_zero_visit_result_includes_empty_inlink_physical_orders,
+    test_inlink_physical_orders_unchanged_after_baseline_forward,
 ]
 
 
