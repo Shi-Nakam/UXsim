@@ -132,6 +132,10 @@
 | TVT局所仮想計算 | **未実装**（設計のみ） |
 | 経済評価（G, R） | **未実装**（設計のみ） |
 
+> **更新注記（2026-09-09）：** 上記表は、本メモ作成初期の実装状態を示す歴史的記録である。TVT 制度ロジック全体と上位 TVT 制御は、現在も未完成である。ただし、**§25.25.34.45** までに次の基盤と後段部品は実装・検証済みである：baseline collector、UXsim の到着・通過通知接続、snapshot 固定集合構築、固定 horizon 正式 baseline driver、Node 別 TVT 順位状態、snapshot 固定 Visit 登録計画の prepare/apply 分割、snapshot 固定 Visit の順位未確定登録、順位台帳登録付き baseline fork 実行経路、baseline fork 後の Node 別 alignment、既到着かつ順位未確定 Visit の先行確定、先頭連続非参加 Visit の先行確定、権利保有 Visit 選定、権利保有 Visit の baseline 予想通過タイムステップ P 取得、P − 1 条件による候補 Visit 母集団構築、候補全員の baseline 通過情報充足判定。**§25.25.34.45** 時点では、P − 1 条件を満たす Visit 全件を候補としており、本注記には可変上限 N を含めない。引き続き未実装の主な範囲：snapshot 時点の inlink 内物理順の独立保存、inlink 別候補列、TVT-SB・TVT-MH・TVT-SP・TVT-MP の具体的買い手集合生成、非参加ありを含む具体的取引候補生成、局所仮想計算、経済評価、支払い・補償、最終順位確定の上位接続、上位 TVT 制御。baseline driver の実装結果は **§25.25.29**、Node 別順位状態は **§25.25.31**、baseline fork 以降の現在の実装経路は **§25.25.34.35**、**.37**、**.39**、**.41**、**.43**、**.45** を参照する。
+
+> **最新状態（2026-09-09・可変上限 N 実装後）：** TVT 制度ロジック全体と上位 TVT 制御は、引き続き未完成である。実装済み範囲へ、TVT 固有可変上限 N と上限内 baseline 情報充足判定を追加した（**§25.25.34.47**）。公開識別子は `max_tvt_candidate_visit_count`。P − 1 該当 Visit を正式 baseline 順に並べた後、先頭最大 N 件だけを `candidate_visits` とする。情報充足判定は上限適用後の `candidate_visits` だけを対象とする。snapshot 時点の inlink 内物理順の独立保存、inlink 別候補列、具体的買い手集合生成は引き続き未実装。詳細正本は **§25.25.34.47**。
+
 ### 1.3 研究シナリオ前提（BATCHと共通）
 
 - 比較対象内部交差点 Node を目的地としない端点間 OD を使用する。
@@ -200,6 +204,10 @@
 ## 3. 全World baseline仮想計算
 
 > **更新注記（2026-08-24）：** 本章は TVT **制度ロジック**（baseline 到着・通過記録を含む）の設計記録であり、**未実装**のままである。TVT 向け全World baseline の**性能調査**、BATCH Level 2 short TMAX の検証・正式反映は **§23** で実施済み。
+
+> **更新注記（2026-09-09）：** 2026-08-24 の「未実装」は当時の状態を示す歴史的記録である。現在は、次の全World baseline 基盤が実装・検証済みである：collector、到着・通過通知、snapshot 固定集合、固定 horizon 正式 driver、順位台帳登録付き baseline fork、baseline fork 後の Node 別 alignment。baseline driver は指定された固定 horizon を一括実行する。後段処理は、返された collector 記録を用いて P 取得、P − 1 候補 Visit 母集団構築、候補情報充足判定を行う。P 取得後に baseline fork を延長、再実行、再 forward しない。driver 自身は、権利保有 Visit 選定、候補母集団構築、情報充足判定を行わない。新しい TVT の成立、具体的取引候補生成、局所仮想計算、経済評価、実 World への最終反映は未実装。詳細参照：collector と snapshot は **§25.23** 以降、正式 driver は **§25.25.29**、順位台帳登録付き fork は **§25.25.34.35**、alignment 接続は **§25.25.34.37**、P 取得と P − 1 候補構築は **§25.25.34.45**。
+
+> **最新状態（2026-09-09・可変上限 N 実装後）：** 可変上限 N は固定 horizon 実行後の collector 記録を読む後段処理である（**§25.25.34.47**）。driver を再実行、延長、再 forward しない。driver の責任分界は変更しない。詳細参照：**§25.25.34.47**。
 
 ### 3.1 概要（設計・未実装）
 
@@ -415,6 +423,8 @@ n n p p n p n p p
 - 意思決定窓外 Vehicle の扱いは §7.5、§14.3、§14.4 を参照する。
 - §14.3 と §14.4 の既存本文を本節で再定義しない。
 
+> **実装状況（2026-09-09）：** 本節の制度ルールは変更していない。意思決定窓内の正式 baseline 順位の先頭から連続する非参加 Visit を、正式 baseline 順のまま先行確定する処理は実装済みである。意思決定窓内が全件非参加の場合も、専用アルゴリズムではなく同じ共通処理で全件を先行確定する。参加状態は正式 baseline 順位の決定には使用しない。実装前仕様は **§25.25.34.40**、実装結果は **§25.25.34.41**。先行確定後の権利保有 Visit 選定は **§25.25.34.42** / **§25.25.34.43**。具体的 TVT 形成と最終順位確定の上位接続は未実装である。
+
 ### 4.6 UXsim処理順に関する注意（実装時確認事項）
 
 制度上の「現在 timestep で既到着」と、UXsim コード上で到着が記録される処理位置が一致するとは限らない。実装時に次を確認する：
@@ -461,6 +471,8 @@ n n p p n p n p p
 - 確定順位ブロック内の欠番。
 
 登録時に保証済みの不変条件は、実行時に重複確認しない方針があり得る。実装時の検査位置と頻度は**必要最小限**とする。
+
+> **実装状況（2026-09-09）：** 本節の制度ルールは変更していない。`baseline_arrival_timestep` が baseline 開始時点 **T** 以下であり、現在順位未確定の Visit を正式 baseline 順で先行確定する処理は実装済みである。**T** ちょうどに到着する Visit も含む。参加・非参加を問わない。実装前仕様は **§25.25.34.38**、実装結果は **§25.25.34.39**。通過済み未確定 Visit を救済する処理ではない。先頭非参加 Visit 処理と権利保有 Visit 選定は後続の別部品である。
 
 ---
 
@@ -534,6 +546,10 @@ TVT候補Vehicleのbaseline予想到着timestep + 1
 - 将来その Vehicle 自身が意思決定窓へ初めて入ったとき、別の権利保有車両を起点とする TVT の候補にもなり得る。
 - その時点で意思決定窓内の未確定参加 Vehicle の中で最上位なら、**その Vehicle 自身が権利保有車両**となり TVT 検討の起点になる。
 
+> **実装状況（2026-09-09）：** §7.2 の P − 1 条件による候補 Visit 母集団構築は実装済みである。実装上は Vehicle ではなく VisitKey 単位で扱う。snapshot 固定集合内の B 型、現在順位未確定、`baseline_arrival_timestep <= P - 1` を満たす Visit を対象とする。正式 baseline 順は、到着タイムステップ、固定 tiebreaker、Vehicle ID で構成する。P − 1 到着を含み、P 到着を除外する。**§25.25.34.45** 時点では、条件を満たす Visit 全件を候補としていた。実装前仕様は **§25.25.34.44**、実装結果は **§25.25.34.45**。可変上限 N は本注記へ反映しない。意思決定窓外 Visit の最終順位確定範囲は、引き続き **§14.3**・**§14.4** に従う。
+
+> **最新状態（2026-09-09・可変上限 N 実装後）：** P − 1 条件は維持する。P − 1 該当 Visit を正式 baseline 順に並べた後、先頭最大 N 件だけを `candidate_visits` とする（**§25.25.34.47**）。非参加 Visit も N 件に数える。可変上限 N と意思決定窓を混同しない。N 以内であることだけを理由に、意思決定窓外 Visit を必ず順位確定するとは記載しない。詳細正本は **§25.25.34.47**。
+
 ---
 
 ## 8. 権利保有車両
@@ -554,9 +570,15 @@ TVT候補Vehicleのbaseline予想到着timestep + 1
 
 TVT候補 Vehicle の時間範囲を定めるため、権利保有車両の **baseline予想通過可能 timestep** も全World baseline から取得する。
 
+> **実装状況（2026-09-09）：** 既到着 Visit と先頭連続非参加 Visit の先行確定後、意思決定窓内に残る正式 baseline 順位先頭の参加 Visit を権利保有 Visit として選定する処理は実装済みである。unresolved な baseline 到着情報が存在する Node では選定を見送る。残列が空なら権利保有 Visit なしとする。後方の参加 Visit を探索して繰り上げない。実装前仕様は **§25.25.34.42**、実装結果は **§25.25.34.43**。権利保有 Visit の baseline 予想通過タイムステップ P 取得は **§25.25.34.44** / **§25.25.34.45**。P が未取得の場合は正常な情報未解決として扱う。実際に最初に通過することを保証する意味ではない。具体的買い手・売り手選定は未実装である。
+
 ---
 
 ## 9. TVT候補生成ルール
+
+> **実装状況（2026-09-09）：** TVT 候補 Visit 母集団の構築は **§25.25.34.44** / **§25.25.34.45** で実装済みである。**§25.25.34.45** 時点では、P − 1 条件を満たす Visit 全件を正式 baseline 順で `candidate_visits` へ含める上限なし版であった。TVT-SB、TVT-MH、TVT-SP、TVT-MP の具体的買い手集合生成は未実装である。各 inlink の物理的先頭から prefix を構築する処理も未実装である。snapshot 時点の inlink 内物理順の独立保存も未実装である。上限適用前の過去到達点の詳細は **§25.25.34.45**。§9.4 の初期上限 10 と感度分析候補 15・20 は既存制度記録として維持する。可変上限 N の実装済み事実は本注記ではまだ反映しない。§9.8 の最大 9 候補に関する既存説明も変更しない。
+
+> **最新状態（2026-09-09・可変上限 N 実装後）：** TVT 候補 Visit 母集団への TVT 固有可変上限 N は **§25.25.34.47** で実装・検証済み。§9.4 の初期基本値 10 を維持しつつ、本番処理では `max_tvt_candidate_visit_count` として可変化済み（基本値 10、感度分析値 15・20 などを呼出側から明示渡し）。P − 1 該当 Visit を正式 baseline 順に並べた後、先頭最大 N 件だけを `candidate_visits` とする。§9.8 の最大 9 候補は、N = 10・権利保有 Visit 1 件・非参加 Vehicle なし等の前提による説明である。可変 N 一般では、権利保有 Visit 以外に含まれ得る最大件数は N − 1 である。§9.8 の既存本文は変更しない。具体的買い手集合生成、prefix、snapshot 物理順保存は未実装。詳細正本は **§25.25.34.47**。
 
 ### 9.1 最終ルール名称（確定）
 
@@ -1522,6 +1544,10 @@ K_fixed = max(K_last_buyer, K_decision_window)
 
 TVT 候補 Vehicle の一部についてしか必要情報を取得できない場合、取得済み Vehicle だけで部分的 TVT を形成しない。この場合は baseline 情報を解決できなかった場合として、本節の既存処理に従う。詳細は §24.12 および §25.25 を参照する。
 
+> **実装状況（2026-09-09）：** Node 別順位状態部品は **§25.25.31** で実装済み。既到着 Visit 先行確定は **§25.25.34.38** / **§25.25.34.39**、先頭連続非参加 Visit 先行確定は **§25.25.34.40** / **§25.25.34.41**、権利保有 Visit 選定は **§25.25.34.42** / **§25.25.34.43** で実装済みである。§14.3 と §14.4 の制度ルールは変更していない。TVT 成立、不成立または情報未解決後の最終確定列を構築し、順位状態へ接続する上位処理は未実装である。意思決定窓外 Visit は、不成立または情報未解決だけを理由に確定しない。TVT 成立時に取引範囲へ含まれる意思決定窓外 Visit は、既存 §14.3 の確定範囲により確定され得る。TVT 候補母集団へ含まれることだけを理由に必ず順位確定するわけではない。可変上限 N および N + 1 位以降の説明は本注記では追加しない。
+
+> **最新状態（2026-09-09・可変上限 N 実装後）：** §14.3 と §14.4 の制度ルールは変更していない。N + 1 位以降が意思決定窓内なら、TVT 成立・不成立・未解決時の既定処理に従う。N + 1 位以降が意思決定窓外なら、上限外であることや情報不足だけを理由に今回確定しない。N 以内でも意思決定窓外 Visit は、成立した TVT の確定範囲へ含まれる場合に確定され得る。N 以内という理由だけでは確定しない。最終順位確定の上位接続は引き続き未実装。可変上限 N の詳細は **§25.25.34.47**。
+
 ---
 
 ## 15. 経済評価と候補選択
@@ -2470,6 +2496,10 @@ Copy-on-write に近い考え方。性能改善の可能性は高い。仮想側
 
 状態：設計更新。TVT制度ロジックおよびcollectorは未実装。
 
+> **更新注記（2026-09-09）：** 上記状態は 2026-08-26 時点の歴史的記録である。現在は次まで実装・検証済みである：collector、UXsim 通知接続、snapshot 固定集合構築、固定 horizon 正式 driver、Node 別順位状態、snapshot 固定 Visit の順位未確定登録、順位台帳登録付き baseline fork、Node 別 alignment、既到着 Visit 先行確定、先頭連続非参加 Visit 先行確定、権利保有 Visit 選定、P 取得、P − 1 候補 Visit 母集団構築、候補全員の baseline 通過情報充足判定。**§25.25.34.45** 時点では候補数上限未適用の全件候補である。snapshot 物理順の独立保存、具体的買い手集合、局所仮想計算、経済評価、最終順位確定の上位接続は未実装である。詳細は **§25.23** 以降、**§25.25.29**、**§25.25.31**、**§25.25.34.31**〜**.45** を参照する。
+
+> **最新状態（2026-09-09・可変上限 N 実装後）：** TVT 候補 Visit 母集団への TVT 固有可変上限 N と上限内 baseline 情報充足判定は **§25.25.34.47** で実装・検証済み。snapshot 物理順の独立保存、具体的買い手集合、局所仮想計算、経済評価、最終順位確定の上位接続は引き続き未実装。詳細正本は **§25.25.34.47**。
+
 ### 24.1 この更新の位置づけ
 
 - 今回は、全World baselineの交通予測対象、TVT候補Vehicleの追加条件、snapshot固定集合、二段階の観測方法、早期終了の論理を整理した設計更新である。
@@ -2706,6 +2736,9 @@ baseline予想到着timestep、固定tiebreaker、Vehicle IDで一意のbaseline
 - 同着時に参加状態で優劣をつけない。同着順位は固定 tiebreaker、Vehicle ID で決める（詳細は §6.1、§6.2）。
 - 意思決定窓内 Vehicle がすべて非参加の場合は、全 Vehicle を先行確定し、再構成対象となる未確定 Vehicle が残らず、TVT 検討不要として終了する。意思決定窓外 Vehicle はこの理由だけでは確定しない（§4.5）。
 - TVT用の「順位未確定」「割当権利行使順位」「確定順位ブロック」は現在未実装である。
+
+> **更新注記（2026-09-09）：** 上記は 2026-08-26 時点の歴史的記録である。独立した Node 別順位状態部品は **§25.25.31** で実装済み。snapshot 固定 Visit の順位未確定登録は **§25.25.34.33** と **§25.25.34.35** で実装済み。既到着 Visit 先行確定は **§25.25.34.39**、先頭連続非参加 Visit 先行確定は **§25.25.34.41**、権利保有 Visit 選定は **§25.25.34.43**。TVT 成立、不成立、未解決後の最終順位列を接続する上位処理は未実装である。
+
 - BATCHの `batch_assignment` はBATCH service unitへの所属を表すものであり、TVTの順位確定状態には使用しない。
 - 非参加Vehicleはbaseline順位と候補範囲に関係し得るが、権利保有車両、買い手、売り手にはならない。
 
@@ -2748,6 +2781,10 @@ candidate_expected_arrival_timestep <= P - 1
 - 他候補の通過時刻を理由に再帰拡張しない。
 
 詳細は §25.25 を参照する。
+
+> **更新注記（2026-09-09）：** P 取得、P − 1 該当候補 Visit 母集団構築、候補全員の passage 充足判定は **§25.25.34.45** までに実装済みである。**§25.25.34.45** 時点の「候補全員」は、P − 1 条件を満たす全候補 Visit を意味する。本注記では可変上限 N 適用後の意味へ更新しない。最新作業による可変上限 N の反映は別作業で行う。
+
+> **最新状態（2026-09-09・可変上限 N 実装後）：** 最新状態では「候補全員」は、上限適用後の `candidate_visits` 全員を意味する。N + 1 位以降を情報充足判定へ含めない。上限内の未解決 Visit を除外した部分的 TVT を形成しない。driver を再実行しない。詳細正本は **§25.25.34.47**。
 
 ### 24.12 Node別の概念状態
 
@@ -3344,6 +3381,10 @@ other_vehicle_expected_arrival_timestep <= P - 1
 - World 終端回避用追加 1 timestep 余白は §25.25.11 で確定（2026-08-31 追加確認）。
 
 詳細は §25.20 から §25.25 を参照する。
+
+**2026-09-09更新：** 現在実装済み：collector、通知接続、snapshot 固定集合、固定 horizon 正式 driver、Node 別順位状態、snapshot 固定 Visit の順位未確定登録、順位台帳登録付き baseline fork、Node 別 alignment、既到着 Visit 先行確定、先頭連続非参加 Visit 先行確定、権利保有 Visit 選定、P 取得、P − 1 候補 Visit 母集団構築、候補全員の baseline 通過情報充足判定。引き続き未実装：snapshot 物理順の独立保存、inlink 別候補列、具体的買い手集合生成、非参加ありを含む具体的取引候補生成、局所仮想計算、経済評価、最終順位確定の上位接続、上位 TVT 制御、早期終了方式の正式実装、将来 BATCH と共用する baseline 統括。詳細参照：**§25.25.29**、**§25.25.31**、**§25.25.34.31**〜**.45**。本注記には可変上限 N を含めない。
+
+**2026-09-09更新（可変上限 N 実装後）：** 追加実装済み：TVT 固有可変上限 N、上限内 baseline 情報充足判定。引き続き未実装：snapshot 物理順の独立保存、inlink 別候補列、具体的買い手集合生成、非参加ありを含む具体的取引候補生成、局所仮想計算、経済評価、最終順位確定の上位接続、上位 TVT 制御、早期終了方式の正式実装、将来 BATCH と共用する baseline 統括。詳細参照：**§25.25.34.47**。
 
 ---
 
@@ -5495,6 +5536,10 @@ Terminalで次が成功した：
 - `d3bb306` は origin へ push 済みである。
 - 今回の設計メモ更新は未コミット・未 push である。
 
+> **更新注記（2026-09-09）：** 「正式 driver 未実装」は当時の歴史的記録である。固定 horizon 正式 driver は **§25.25.29** で実装・検証済み。snapshot 固定集合を prepare し、実 World 側順位台帳へ未登録 Visit を登録し、同じ plan を fork 側 collector へ apply してから baseline を実行する TVT 専用経路は **§25.25.34.35** で実装済み。baseline fork 後の Node 別 alignment は **§25.25.34.37** で実装済み。driver は固定 horizon を一括実行し、P 取得後に再実行または延長しない。driver は候補 Visit 母集団や情報充足を判定しない。P 取得、P − 1 候補母集団、候補情報充足判定は後段の **§25.25.34.45** で実装済み。早期終了方式は正式実装していない。本注記には可変上限 N を含めない。
+
+> **最新状態（2026-09-09・可変上限 N 実装後）：** P 取得、P − 1 候補母集団、候補情報充足判定の最新実装は **§25.25.34.47**（可変上限 N 適用版）。driver の責任分界は変更しない。
+
 #### 25.25.2 初期正式driverの目的
 
 正式driverは、本物の交通世界を変えずに、複製した交通世界だけを指定された長さだけ進め、TVTを行わなかった場合の到着・通過の事実を集める入口である。指定した観察時間を正常に進めても、すべての交通情報が得られるとは限らない。情報が得られなかったことは装置の故障ではなく、取得できなかった事実として後続処理へ渡す。正式driverは順位確定やTVT形成を行わない。
@@ -5939,6 +5984,10 @@ Node が情報取得完了になるためには、少なくとも次が必要で
 
 情報不足の場合は、horizon 終端時未解決として後続制度処理が扱う。正式 driver 自身は、この Node 状態を判定しない。
 
+> **更新注記（2026-09-09）：** P 取得と P − 1 候補母集団確定、候補全員の baseline 通過情報充足判定は **§25.25.34.45** で実装済み。**§25.25.34.45** 時点では、P − 1 条件を満たす全候補 Visit を対象としていた。情報未解決 Visit を除外して部分的 TVT を形成しない。実装は固定 horizon 実行後の collector 記録を読む後段処理であり、driver を再実行しない。可変上限 N 適用後の「候補全員」の意味は、本注記ではまだ反映しない。その更新は最新作業の記録時に別途行う。
+
+> **最新状態（2026-09-09・可変上限 N 実装後）：** 最新状態では「候補全員」は上限適用後の `candidate_visits` 全員を意味する。N + 1 位以降を情報充足判定へ含めない。上限内の未解決候補だけを除外した部分的 TVT を形成しない。実装は固定 horizon 実行後の collector 記録を読む後段処理であり、driver を再実行しない。詳細正本は **§25.25.34.47**。
+
 #### 25.25.19 正式driverの処理順
 
 これは正式 driver の処理順であり、早期終了方式の処理順ではない。
@@ -6210,6 +6259,10 @@ from uxsim.order_control_baseline_driver import (
 - `diagnostics/order_control.zip` は未追跡であり、触れない。
 
 **2026-08-31 更新：** 正式 driver 実装前の残存設計を **§25.25.28** で確定した。今後は §25.25.28 を直接参照して実装へ進む。§25.25.27 記録時点の実装前最終確認は完了した。最新保存済みコミットは `142d235` である。
+
+> **更新注記（2026-09-09）：** 上記再開地点は当時の歴史的記録である。正式 driver 実装結果は **§25.25.29**。その後の TVT 登録付き baseline fork は **§25.25.34.35**。alignment 以降の実装到達点は **§25.25.34.37**〜**.45**。現在の再開地点は古い節から判断せず、最新詳細節を参照する。**§25.25.34.46** 以降の最新作業については本注記では記載しない。
+
+> **最新状態（2026-09-09・可変上限 N 実装後）：** alignment 以降の最新実装到達点は **§25.25.34.37**〜**.47**。可変上限 N の実装完了記録は **§25.25.34.47**。現在の再開地点は古い節から判断せず、最新詳細節を参照する。
 
 #### 25.25.28 実装前残存設計事項の確定
 
@@ -19159,3 +19212,542 @@ collector の record 自体を**変更しない**。
 - 新規本番モジュール `uxsim/order_control_tvt_candidate_visit_set.py` と専用テスト `tests_order_control_tvt_candidate_visit_set.py` は**未追跡**である
 - `diagnostics/order_control.zip` は既存未追跡、未接触、対象外
 - 本実装完了記録追記時点では、git add、git commit、git push は**未実行**
+
+##### 25.25.34.46 TVT 候補 Visit 母集団への TVT 固有可変上限 N の適用（実装前仕様）
+
+**2026-09-09 更新：** 権利保有 Visit の baseline 予想通過タイムステップ P 取得、P - 1 による TVT 候補 Visit 母集団の確定、候補全員の baseline 情報充足判定は **§25.25.34.45** まで実装済みである。本小節 **§25.25.34.46** を、TVT 候補 Visit 数の可変上限 N を現在の候補母集団構築処理へ適用し、情報充足判定の対象を正しく限定するための**実装前仕様の最新正本**とする。実装完了記録は、本修正の実装後に別小節へ追記する。
+
+本小節が整理する内容は、既存の意思決定窓、段階的順位確定、TVT 候補範囲、TVT 成立・不成立・未解決時の最終確定ルールを**変更しない**。N + 1 位およびそれより後順位、または意思決定窓外 Visit の順位確定範囲は、既存の **§14.3**、**§14.4**、**§25.25.30.5** に従う。snapshot 時点の inlink 内物理順の独立保存は本小節の対象外とし、別の後続設計で扱う。実装前仕様の先行記録は **§25.25.34.44**、現行実装の完了記録は **§25.25.34.45** を参照する。
+
+###### 非技術的な説明
+
+権利保有 Visit の baseline 予想通過タイムステップ P を取得した後、P の 1 タイムステップ前までに到着すると予測された現在順位未確定 Visit を、正式 baseline 順に並べる。その先頭から最大 N 台だけを、今回の TVT 候補 Visit とする。N の基本値は 10 だが、研究上の感度分析により 15、20 などへ変更できる**可変値**とする。非参加 Visit も N 台へ数える。
+
+候補 Visit 全員の baseline 予想通過タイムステップの充足判定は、上限適用後の最大 N 台だけを対象とする。N + 1 位およびそれより後順位の通過情報が未取得でも、上限内の候補 Visit 全員の情報が揃っていれば、今回の TVT 用 baseline 情報取得完了とする。N + 1 位およびそれより後順位の Visit を、上限内 Visit の情報不足を補うために繰り上げない。今回の候補集合関数は、最終順位の確定を行わない。
+
+###### 位置づけと現行実装の問題
+
+**§25.25.34.45** までの `build_tvt_candidate_visit_set` は、P - 1 条件を満たす現在順位未確定の B 型 Visit を**全件** `candidate_visits` へ含め、その**全件**の `baseline_passage_timestep` を情報充足判定へ使用している。
+
+そのため、基本上限 10 を例にすると、1 位から 10 位の情報が完全でも、N + 1 位（11 位）以降の passage が `None` なら `UNRESOLVED_CANDIDATE_PASSAGES` になる。正しい制度では、N + 1 位およびそれより後順位は今回の TVT 候補 Visit ではないため、上限内 N 台の情報が完全なら `BASELINE_INFORMATION_COMPLETE` とする。一般には固定値 10 ではなく、**可変上限 N** として実装する。
+
+###### 正式な上限名称
+
+公開識別子は **`max_tvt_candidate_visit_count`** とする。
+
+- 今回の TVT 候補 Visit 数の最大値である。
+- BATCH の `batch_size`、`max_batch_size` その他の最大値設定とは**無関係**である。
+- BATCH の設定名、属性名、引数名を**再利用しない**。
+- 裸の `N` を公開 API 名として**使用しない**。
+- TVT 固有かつ Visit 単位の上限であることを名称から明確にする。
+
+###### 公開関数の変更予定
+
+```text
+build_tvt_candidate_visit_set(
+    right_of_entry_selection_result,
+    *,
+    rank_states_by_node_name,
+    max_tvt_candidate_visit_count,
+)
+```
+
+**`max_tvt_candidate_visit_count`：**
+
+- 必須 keyword-only 引数とする。
+- default 値を**設けない**。
+- 呼出側が基本値 10、または感度分析値 15、20 などを**明示的に渡す**。
+- 全 target Node へ原則として**同じ値**を適用する。
+- Node 別 `Mapping` は今回**受け取らない**。
+- BATCH 設定を**再利用しない**。
+- World、Node、rank state へ新しい上限属性を**追加しない**。
+- 将来 Node 別設定が必要になった場合は、別途設計して拡張する。
+
+###### 入力検証
+
+`max_tvt_candidate_visit_count` は、Node 処理を始める**前**に **1 回だけ**検証する。
+
+- `type(value) is int`
+- `value >= 1`
+- `True` と `False` を拒否する。
+- `0`、負数、`float`、文字列、`None` を拒否する。
+- 公開関数へ渡された不正な引数として **`ValueError`** とする。
+
+###### TVT 候補順位
+
+TVT 候補順位は、P - 1 条件を満たす、現在順位未確定の B 型 Visit を正式 baseline 順へ並べた順位とする。ある 1 つの対象 Node へ向かう複数の対象 inlink 上に存在する、現在順位未確定の Visit を統合した正式 baseline 順位である。「Node 全体」という曖昧な表現は**使用しない**。
+
+順位キーは次の昇順とする。
+
+1. `baseline_arrival_timestep`
+2. `arrival_tiebreaker`
+3. `vehicle_id`
+
+参加状態を順位決定に**使わない**。非参加 Visit も順位列へ**含める**。同着時も、固定 tiebreaker と Vehicle ID で一意に決める。
+
+###### 権利保有 Visit の位置
+
+権利保有 Visit は、意思決定窓内で選定された時点の正式 baseline 順位における**先頭参加 Visit**である。既到着 Visit と先頭連続非参加 Visit は、権利保有 Visit の選定前に**先行確定済み**である。
+
+権利保有 Visit は今回の TVT 候補 Visit であり、TVT 候補順位の先頭、つまり **1 位**として扱う。
+
+- 権利保有 Visit を上限列へ**特例追加しない**。
+- 権利保有 Visit を含めるために N 件目を**押し出す**処理を**設けない**。
+- 上限適用後、`candidate_visits` の**先頭**が `right_of_entry_visit_key` と一致することを確認する。
+- `candidate_visits` 内に `right_of_entry_visit_key` が**正確に 1 件**だけ存在することも確認する。
+- 先頭一致または一意性が成立しなければ **`RuntimeError`** とする。
+
+###### 将来の予測更新との関係
+
+権利保有 Visit の先頭順位は、その意思決定時点の全 World baseline 予測に基づく。意思決定窓外だった未確定 Visit について、次回の全 World baseline で到着予測が大幅に前倒しされることはあり得る。その Visit が実 World で、以前に選定された権利保有 Visit より早く到着することもあり得る。
+
+ただし、**一度確定した順位は後の予測更新によって巻き戻さない**。前回の処理で順位未確定のまま残った Visit は、次回の処理で既到着または意思決定窓内になった時点で処理する。新しい順位は、その時点の確定順位ブロック末尾の後ろへ接続する。実際の到着が早まった場合でも、すでに確定した割当権利行使順位を変更しない。
+
+これは既存の段階的順位確定と既到着未確定 Visit 先行確定のルールから自然に導かれる結果であり、**新しい例外制度ではない**。「T + 6 より後に到着すると予測された Visit は、将来も権利保有 Visit より早く到着しない」とは**記録しない**。
+
+###### 正確な処理順
+
+1. `max_tvt_candidate_visit_count` を検証する。
+2. P - 1 条件を満たす現在順位未確定 B 型 Visit を抽出する。
+3. 上限適用前の順位決定に必要な情報を確認する。
+4. 正式 baseline 順へソートする。
+5. 上限適用前の該当件数を取得する。
+6. 正式 baseline 順の先頭から最大 N 件へ制限する。
+7. 上限内 Visit だけについて、完全な `OrderControlTvtCandidateVisit` を構築するための追加情報を検証する。
+8. 上限適用後の列を `candidate_visits` とする。
+9. `candidate_visits` の先頭が `right_of_entry_visit_key` であることを確認する。
+10. `candidate_visits` 内に `right_of_entry_visit_key` が正確に 1 件存在することを確認する。
+11. `candidate_visits` 全員の `baseline_passage_timestep` を確認する。
+12. 全員が非 `None` なら `BASELINE_INFORMATION_COMPLETE`。
+13. 1 件でも `None` なら `UNRESOLVED_CANDIDATE_PASSAGES`。
+14. 未解決でも上限内候補を縮小せず、N + 1 位を繰り上げない。
+
+###### 二段階の情報検証
+
+**上限適用前**の P - 1 該当 Visit について、先頭 N 台を正しく決めるために必要な次の情報を確認する。
+
+- `VisitKey`
+- record の Node 名
+- `was_arrived_at_snapshot`
+- 現在の順位未確定状態
+- `baseline_arrival_timestep`
+- `arrival_tiebreaker`
+- `vehicle_id`
+
+上限適用前の段階では、N + 1 位以降となり得る Visit について、次を完全な TVT 候補要素情報として**検証しない**。
+
+- `inlink_name`
+- `route_next_link_name`
+- `baseline_passage_timestep`
+- `passage >= arrival + 1`
+
+ソート後に先頭 N 件を選んだ後、**上限内 Visit だけ**について次を確認する。
+
+- `inlink_name`
+- `route_next_link_name`
+- `baseline_passage_timestep`
+- passage が非 `None` なら `passage >= arrival + 1`
+- `OrderControlTvtCandidateVisit` の全フィールド
+
+**この二段階検証の目的：**
+
+- N + 1 位以降の passage または `route_next_link_name` の不足・異常を、今回の TVT 候補情報充足判定へ**不要に影響させない**。
+- 一方、先頭 N 台を正しく決めるために必要な arrival、tiebreaker、`vehicle_id` などの不正は、上限適用前でも**重大不整合**として検出する。
+- 上限外 Visit の情報を、今回の TVT 候補情報として完全検証したことには**しない**。
+
+###### N + 1 位およびそれより後順位
+
+- `candidate_visits` へ**含めない**。
+- `baseline_passage_timestep` が `None` でも、今回の TVT 候補全員の情報充足判定へ**影響させない**。
+- passage が取得済みでも候補へ**追加しない**。
+- 上限内 Visit の passage が `None` でも、その Visit を除外して N + 1 位を**繰り上げない**。
+- 非参加 Visit も N 台へ**数える**。
+- 参加 Visit だけを最大 N 台選ぶ処理に**しない**。
+- 参加状態を理由に後方 Visit を**繰り上げない**。
+- 今回の関数は `participates_by_visit_key` を引き続き**受け取らない**。
+
+**N + 1 位以降の `route_next_link_name`：**
+
+- N + 1 位以降の `route_next_link_name` は、今回の TVT 候補要素の完全性判定には**使用しない**。
+- ただし、N + 1 位以降であっても意思決定窓内 Visit なら、既定の最終順位確定処理の対象になる。
+- 意思決定窓内 Visit は T + 6 までに baseline 到着済みであり、`route_next_link` は到着時に決定・記録される。
+- したがって、通常経路では意思決定窓内 Visit の `route_next_link_name` は取得済みである。
+- 今回の上限適用前順位決定では `route_next_link_name` を使用しないため、この関数で N + 1 位以降の完全候補情報として**重複検証しない**。
+- 最終順位確定に `route_next_link_name` が必要となる場合は、その後続処理の責務として既存到着記録を使用する。
+
+###### 意思決定窓内外と順位確定
+
+**N + 1 位以降が意思決定窓内の場合：**
+
+- 今回の TVT 候補 Visit には**含めない**。
+- TVT 成立、不成立、情報未解決の各場合について、既定の最終順位確定処理に従う。
+- TVT 成立時は、**§14.3** および **§25.25.30.5** に従い、取引順位部分と必要な残余意思決定窓内 baseline 順位部分を含む最終確定列を作る。
+- TVT 不成立時は、先行確定後に残る意思決定窓内未確定 Visit を baseline 順で最終確定する。
+- 情報未解決時も **§14.4** に従い、先行確定後に残る意思決定窓内未確定 Visit を baseline 順で最終確定する。
+- したがって、N + 1 位およびそれより後順位の意思決定窓内 Visit も順位確定され、**取り残されない**。
+
+**N + 1 位以降が意思決定窓外の場合：**
+
+- 今回の TVT 候補 Visit には**含めない**。
+- 今回の処理では原則として順位確定**しない**。
+- 情報未取得や上限外であることだけを理由に順位確定**しない**。
+- 後の意思決定窓チェックで、既到着または意思決定窓内になった場合に改めて処理する。
+
+**N 以内に意思決定窓外 Visit が含まれる場合：**
+
+- 今回の TVT 候補 Visit には**含まれる**。
+- 成立した TVT の取引結果に基づく順位確定範囲へ含まれれば、今回の処理で順位確定され得る。
+- TVT が不成立の場合は、意思決定窓外であるため、不成立だけを理由に順位確定**しない**。
+- baseline 情報が未解決の場合も、意思決定窓外であるため、情報未取得だけを理由に順位確定**しない**。
+- N 以内であることだけでは、意思決定窓外 Visit の順位確定理由には**ならない**。
+
+**共通事項：**
+
+- TVT 候補に含まれることと、必ず今回順位確定されることは**同義ではない**。
+- TVT 候補から外れることと、意思決定窓内 Visit の順位が確定されないことも**同義ではない**。
+- 今回の候補集合関数自体は、成立、不成立、未解決時の**最終順位確定を行わない**。
+
+###### 候補数境界
+
+- 該当数が N **未満**なら全件を候補にする。
+- 該当数が N と**同じ**なら全件を候補にする。
+- 該当数が N + 1 件**以上**なら先頭 N 件だけを候補にする。
+- N = 1 なら権利保有 Visit だけが候補になる。
+- 権利保有 Visit だけの候補集合も**正常**である。
+
+###### 情報充足判定
+
+- 上限適用後の `candidate_visits` **だけ**を対象にする。
+- 上限内の 1 件でも passage が `None` なら `UNRESOLVED_CANDIDATE_PASSAGES`。
+- 上限内全員の passage が非 `None` なら `BASELINE_INFORMATION_COMPLETE`。
+- N + 1 位以降の passage 状態は判定に**使用しない**。
+- 上限内の未解決 Visit を除外した部分的 TVT を**形成しない**。
+- 上限内候補全体を結果へ**保持する**。
+- 他候補の通過情報不足を理由に、P - 1 候補時間範囲を再帰的に**変更しない**。
+
+###### status
+
+- 既存の **5 status** を**維持**する。
+- 上限適用専用 status は**追加しない**。
+- 切詰めの有無は status ではなく件数から分かるようにする。
+
+###### 全体結果型への追加予定
+
+`OrderControlTvtCandidateVisitSetResult` へ、次を追加する。
+
+**`max_tvt_candidate_visit_count: int`**
+
+意味：
+
+- 今回の関数呼出しで全対象 Node へ適用した TVT 候補 Visit 数上限。
+- 全 Node 共通なので、Node 別結果へ**重複保存しない**。
+- NOT_BUILT 系または P 未解決の Node があっても、関数呼出し全体の設定として**保存する**。
+- 感度分析と結果再現に利用する。
+- `candidate_visits` の長さから N を**逆算しない**。
+
+###### Node 別結果型への追加予定
+
+`OrderControlTvtNodeCandidateVisitSetResult` へ、次を追加する。
+
+**`p_minus_one_eligible_visit_count_before_limit: int | None`**
+
+意味：
+
+- P - 1 条件を満たし、正式 baseline 順位へ並べる対象になった Visit の**上限適用前件数**。
+- P を取得して候補順位を構築できた Node では非負 `int`。
+- `NO_RIGHT_OF_ENTRY`、`UNRESOLVED_BASELINE_ARRIVALS`、P 未解決など、件数を計算していない Node では **`None`**。
+- `0` を未計算の代用に**しない**。
+- 上限適用後の件数は `len(candidate_visits)` から導出する。
+- 上限外 VisitKey 列そのものは**保存しない**。
+- 切詰めが発生したかは、次の比較から導出できる。
+
+```text
+p_minus_one_eligible_visit_count_before_limit > len(candidate_visits)
+```
+
+###### 変更しないもの
+
+- `OrderControlTvtCandidateVisit` のフィールド。
+- 既存 5 status。
+- P - 1 条件。
+- `candidate_visits` の正式 baseline 順。
+- A 型除外。
+- 確定済み B 型除外。
+- 権利保有 Visit の通常条件による包含。
+- 読取専用性。
+- upstream 非再実行。
+- collector 非変更。
+- rank state 非変更。
+- World 非探索。
+
+###### snapshot 物理順との境界
+
+- 今回は snapshot 時点の inlink 内物理順を**保存・照合しない**。
+- 可変上限 N の適用は正式 baseline 順位上で**完結**する。
+- collector 登録順または export 順へ、物理順としての意味を**追加しない**。
+- 候補要素の `inlink_name` は**維持**する。
+- snapshot 時点の inlink 内物理順は、単車線条件での整合確認と将来の拡張性のため、独立した固定情報として保存する方向である。
+- ただし、その保存先、結果型、接続方法は、**本修正完了後**に別設計として扱う。
+- 現時点では単車線研究を正式対象とし、複車線への完全対応準備は**行わない**。
+
+###### テストで固定する観点
+
+- `max_tvt_candidate_visit_count` は必須 keyword-only 引数。
+- N = 1。
+- N = 10。
+- N = 15。
+- N = 20。
+- 候補総数が N 未満。
+- 候補総数が N と同数。
+- 候補総数が N + 1 以上。
+- 基本値 10 で 11 件以上から先頭 10 件を保持する。
+- N + 1 位の passage が `None` でも、上限内が完全なら `BASELINE_INFORMATION_COMPLETE`。
+- N 位の passage が `None` なら `UNRESOLVED_CANDIDATE_PASSAGES`。
+- N 位が未解決でも N + 1 位を繰り上げない。
+- N + 1 位の passage が取得済みでも候補へ追加しない。
+- 非参加 Visit も N へ数える。
+- 参加状態を理由に後方 Visit を繰り上げない。
+- 権利保有 Visit が `candidate_visits` の**先頭**である。
+- 権利保有 Visit が先頭でなければ `RuntimeError`。
+- 権利保有 Visit を上限列へ特例追加しない。
+- N + 1 位以降の passage または `route_next_link_name` を完全候補検証へ使用しない。
+- N + 1 位以降でも、順位決定材料の arrival、tiebreaker、`vehicle_id` 不正は拒否する。
+- `max_tvt_candidate_visit_count` を全体結果へ保存する。
+- `p_minus_one_eligible_visit_count_before_limit` を Node 別結果へ保存する。
+- 未計算 Node では同件数が `None`。
+- 上限適用後件数は `len(candidate_visits)` から導出する。
+- N 不正：`True`、`False`、`0`、負数、`float`、文字列、`None`。
+- 不正 N は `ValueError`。
+- 全対象 Node へ同じ N を適用する。
+- SELECTED 以外では collector を照会しない既存契約を維持する。
+- rank state、collector、World 不変。
+- upstream 処理を再実行しない。
+- snapshot 物理順処理を今回追加しない。
+- 既存結果型変更の影響を関連テストへ反映する。
+
+###### 現在地と次の作業
+
+- 最新保存済み・push 済みコミット（HEAD）は **`0c7c144`**。
+- P 取得、P - 1 該当 Visit 全件の候補化、全件の passage 充足判定まで**実装済み**（**§25.25.34.45**）。
+- **次の修正対象**は、本小節で定める TVT 固有可変上限 N の適用。
+- 本修正完了後、snapshot 時点の inlink 内物理順の独立保存設計へ進む。
+- 具体的買い手集合生成はさらにその後である。
+
+##### 25.25.34.47 TVT 候補 Visit 母集団への TVT 固有可変上限 N 適用の実装完了記録
+
+**2026-09-09 更新：** **§25.25.34.46** で確定した TVT 固有可変上限 N の適用を、`uxsim/order_control_tvt_candidate_visit_set.py` と専用テストへ実装した。本小節 **§25.25.34.47** を、可変上限 N の**実装結果・検証結果・未実装境界・次の再開地点**の最新正本とする。実装前仕様は **§25.25.34.46** を参照する。**§25.25.34.45** は上限なし版の歴史的実装記録である。可変上限 N に関して **§25.25.34.45** と最新実装に差がある場合は、**本小節を参照する**。
+
+###### 非技術的な説明
+
+P − 1 該当 Visit を正式 baseline 順に並べ、その先頭から最大 N 件だけを今回の TVT 候補 Visit とする。N は固定値 10 ではなく、基本値 10、感度分析値 15・20 などを呼出側から明示的に渡せる。非参加 Visit も N 件に数える。情報充足判定は上限適用後の最大 N 件だけを対象とする。N + 1 位以降の passage 不足では、今回の TVT 候補情報充足判定を未解決にしない。上限内の未解決 Visit を除外して後順位 Visit を繰り上げない。
+
+###### 変更した本番モジュール
+
+**ファイル名：** `uxsim/order_control_tvt_candidate_visit_set.py`
+
+- 既存 **§25.25.34.45** の実装を破棄せず、前向きに拡張した。
+
+###### 実装した公開関数
+
+**正式名称：** `build_tvt_candidate_visit_set`
+
+```python
+def build_tvt_candidate_visit_set(
+    right_of_entry_selection_result,
+    *,
+    rank_states_by_node_name,
+    max_tvt_candidate_visit_count,
+) -> OrderControlTvtCandidateVisitSetResult:
+    ...
+```
+
+- `max_tvt_candidate_visit_count` は**必須 keyword-only 引数**。default 値なし。
+- 全 target Node へ**同じ値**を適用する。Node 別 `Mapping` は受け取らない。
+- World、Node、rank state へ上限属性を**追加していない**。
+- BATCH の `batch_size`、`max_batch_size` その他の設定を**再利用していない**。
+- 裸の `N` は説明用記号であり、公開識別子には**使用しない**。
+
+###### 入力検証
+
+- Node 処理開始**前**に **1 回**検証する。
+- `type(value) is int`、`value >= 1`。
+- `True`、`False`、`0`、負数、`float`、文字列、`None` を拒否する。
+- **`ValueError`**。不正値では collector 照会**前**に停止する。
+
+###### 実装した結果型の追加フィールド
+
+**全体結果型 `OrderControlTvtCandidateVisitSetResult`**
+
+| フィールド | 意味 |
+|-----------|------|
+| `max_tvt_candidate_visit_count` | 今回の関数呼出しで全 target Node へ適用した上限。全 Node 共通なので Node 別結果へ重複保存しない。NOT_BUILT 系や P 未解決 Node があっても、関数呼出し全体の設定として保持する |
+
+**Node 別結果型 `OrderControlTvtNodeCandidateVisitSetResult`**
+
+| フィールド | 意味 |
+|-----------|------|
+| `p_minus_one_eligible_visit_count_before_limit` | P − 1 条件を満たし正式 baseline 順へ並べる対象になった Visit の**上限適用前件数**。P 取得済み Node では非負 `int`。`NOT_BUILT_NO_RIGHT_OF_ENTRY`、`NOT_BUILT_UNRESOLVED_ARRIVALS`、`UNRESOLVED_RIGHT_OF_ENTRY_PASSAGE` では `None`。`UNRESOLVED_CANDIDATE_PASSAGES`、`BASELINE_INFORMATION_COMPLETE` では上限適用前件数を保存する。0 を未計算の代用にしない。上限適用後件数は `len(candidate_visits)` から導出する |
+
+###### 内部順位材料型
+
+**正式名称：** `_PMinusOneRankEntry`（内部 frozen dataclass。公開結果型ではない）
+
+| フィールド | 意味 |
+|-----------|------|
+| `visit_key` | `OrderControlTvtVisitKey` |
+| `vehicle_id` | `int` |
+| `baseline_arrival_timestep` | `int` |
+| `arrival_tiebreaker` | `int \| float` |
+| `record` | collector が返した plain dict コピーへの一時参照。collector 内部 record への参照ではない。公開結果へ保持しない。`record` を変更しない |
+
+###### 二段階検証
+
+**第 1 段階（P − 1 該当 Visit 全件）：** 先頭 N 件を正しく決めるための順位材料を検証する。`VisitKey`、Node 名、B 型、現在順位状態、`baseline_arrival_timestep`、`arrival_tiebreaker`、`vehicle_id`。
+
+**第 2 段階（上限内のみ）：** 正式 baseline 順へソート後、先頭 N 件だけを完全な `OrderControlTvtCandidateVisit` へ変換する。`inlink_name`、`route_next_link_name`、`baseline_passage_timestep`、passage が非 `None` なら `passage >= arrival + 1`、候補要素の全フィールド。
+
+目的：N + 1 位およびそれより後順位の passage や `route_next_link_name` 不足・異常を、今回必要な TVT 候補処理へ不要に影響させない。一方、先頭 N 件を正しく選ぶための順位材料の異常は、上限外 Visit でも検出する。
+
+###### 実装済みの処理順
+
+1. `max_tvt_candidate_visit_count` を検証する
+2. 上流結果と collector へ到達する
+3. `target_node_names` 順に Node を処理する
+4. `SELECTED` 以外の既存 status を伝播する
+5. 権利保有 Visit の P を取得する
+6. P が `None` なら `UNRESOLVED_RIGHT_OF_ENTRY_PASSAGE`
+7. P 取得済みなら Node 別 collector 記録を export する
+8. A 型を除外、確定済み B 型を除外、未登録 B 型は重大不整合
+9. 現在順位未確定 B 型の `baseline_arrival_timestep <= P - 1` を抽出する
+10. 順位材料を検証し、正式 baseline 順へソートする
+11. 上限適用前件数を取得し、先頭最大 `max_tvt_candidate_visit_count` 件へ制限する
+12. 上限内だけを完全候補要素へ変換し `candidate_visits` を作る
+13. 権利保有 Visit が `candidate_visits` の**先頭**であり、正確に 1 件存在することを確認する
+14. 上限内候補全員の passage を確認する。1 件でも `None` なら `UNRESOLVED_CANDIDATE_PASSAGES`、全員非 `None` なら `BASELINE_INFORMATION_COMPLETE`
+15. Node 別結果へ上限適用前件数、全体結果へ使用した N を保存する
+
+###### N + 1 位およびそれより後順位
+
+- `candidate_visits` へ**含めない**
+- passage が `None` でも今回の情報充足判定へ**影響させない**
+- passage が取得済みでも候補へ**追加しない**
+- 上限内候補の passage が `None` でも後順位 Visit を**繰り上げない**
+- 非参加 Visit も N 件に数える。参加状態による繰上げを**行わない**
+- `participates_by_visit_key` を**受け取らない**
+- 上限外 Visit の passage や `route_next_link_name` は完全候補情報として**検証しない**
+- 上限外 Visit でも arrival、tiebreaker、`vehicle_id` などの順位材料は**検証する**
+
+###### 情報充足判定
+
+- 上限適用後の `candidate_visits` **だけ**を対象とする
+- 上限内 1 件でも passage が `None` なら `UNRESOLVED_CANDIDATE_PASSAGES`
+- 上限内全員の passage が非 `None` なら `BASELINE_INFORMATION_COMPLETE`
+- 上限外 Visit の passage 情報は判定に**使用しない**
+- 上限内の未解決 Visit を外して部分的 TVT を**作らない**
+- 上限内候補**全体**を結果へ保持する
+
+###### 権利保有 Visit の確認
+
+- `candidate_visits` が空なら `RuntimeError`
+- `candidate_visits[0].visit_key` が `right_of_entry_visit_key` と一致することを確認する
+- `candidate_visits` 内に `right_of_entry_visit_key` が正確に 1 件存在することを確認する
+- 権利保有 Visit を特例追加しない。N 件目を押し出さない
+
+###### 既存 status
+
+次の 5 status を**変更していない**。上限専用 status は**追加していない**。
+
+- `NOT_BUILT_NO_RIGHT_OF_ENTRY`
+- `NOT_BUILT_UNRESOLVED_ARRIVALS`
+- `UNRESOLVED_RIGHT_OF_ENTRY_PASSAGE`
+- `UNRESOLVED_CANDIDATE_PASSAGES`
+- `BASELINE_INFORMATION_COMPLETE`
+
+###### 意思決定窓と順位確定
+
+- 今回の候補集合関数は**最終順位確定を行わない**
+- N + 1 位以降が意思決定窓内なら、既定の成立・不成立・未解決時の最終処理で順位確定される
+- N + 1 位以降が意思決定窓外なら、今回の処理では原則順位確定しない
+- N 以内でも意思決定窓外 Visit は、成立した TVT の取引結果による確定範囲に入る場合に順位確定され得る
+- 不成立または情報未解決だけを理由に意思決定窓外 Visit を確定しない
+
+###### 型注釈修正
+
+- `_verify_right_of_entry_record` の戻り値型を `tuple[int, int]` から `tuple[int, int | None]` に修正した
+- `passage_timestep` は P 未解決時に `None` となり得る。処理動作の変更ではない
+
+###### 新規・更新専用テスト
+
+**ファイル名：** `tests_order_control_tvt_candidate_visit_set.py`
+
+**最終件数：** **21 tests passed**（15 件から増加）
+
+- 既存 `_build` helper へ `max_tvt_candidate_visit_count` を追加した
+- 既存契約テストへ十分な候補上限を明示し、従来の意味を維持した。default 値で互換性を偽装していない
+
+**テスト修正時に発見した問題**
+
+- 当初の `test_nth_unresolved_candidate_does_not_promote_later_visit` は `visit_count=3`、`unresolved_rank=2`、`N=3` だった。3 位も上限内のため、N + 1 位を繰り上げない契約を検証できていなかった
+- 当該テストだけを `N=2` へ修正した。修正後：上限適用前件数 3、`candidate_visits` は正式 baseline 順位 1 位・2 位だけ、2 位の passage は `None`、3 位の passage は取得済み、3 位を候補へ繰り上げない、`UNRESOLVED_CANDIDATE_PASSAGES`
+- 本番コードはこのテスト修正では**変更していない**
+
+###### 記録者による確認
+
+- **§25.25.34.46** 本文を確認した
+- 本番モジュール全文を確認した
+- 戻り値型注釈の不一致を発見し修正した
+- 追加された上限関連テスト本文を確認した
+- 繰上げ禁止テストが N + 1 位を作れていない問題を発見し、`N=2` 修正後のテスト本文を確認した
+- **§25.25.34.46** との不一致や実装を止める問題は残っていない
+
+###### 実行済み検証
+
+| 検証 | 結果 |
+|------|------|
+| `py_compile` | 成功 |
+| `tests_order_control_tvt_candidate_visit_set.py`（直接実行） | **21 passed** |
+| `tests_order_control_tvt_candidate_visit_set.py`（pytest） | **21 passed** |
+| `tests_order_control_tvt_right_of_entry_selection.py` | **16 passed** |
+| `tests_order_control_tvt_leading_nonparticipating_confirmation.py` | **23 passed** |
+| `tests_order_control_tvt_arrived_undetermined_confirmation.py` | **30 passed** |
+| `tests_order_control_tvt_node_rank_state.py` | **54 passed** |
+| `tests_order_control_tvt_baseline_alignment.py` | **25 passed** |
+| `tests_order_control_tvt_baseline_fork_alignment.py` | **24 passed** |
+| `git diff --check` | 問題なし |
+
+###### snapshot 物理順との境界
+
+- snapshot 時点の inlink 内物理順を**保存・照合していない**
+- collector 登録順や export 順へ物理順の意味を**追加していない**
+- 既存候補要素の `inlink_name` は**維持している**
+- snapshot 時点の inlink 内物理順は、単車線条件での整合確認と将来拡張性のため、独立した固定情報として保存する方向。保存先、結果型、接続方法は**次の別設計**で扱う
+
+###### 今回実装していない範囲
+
+- snapshot 物理順保存、snapshot physical order 結果型
+- inlink 別候補列、買い手 prefix
+- TVT-SB、TVT-MH、TVT-SP、TVT-MP
+- 参加 Mapping による買い手選定、trade scope、売り手選定、trade rank
+- 局所仮想計算、経済評価、最終順位確定、§14.4 の実装、上位 TVT 制御クラス
+
+###### 次の再開地点
+
+1. TVT 候補 Visit 母集団への可変上限 N 適用は実装・検証済みである
+2. **次の設計対象**は、snapshot 時点の inlink 内物理順を独立した固定情報としてどの結果型へ保存し、後続へ渡すか
+3. 物理順保存後、上限適用済み `candidate_visits` と照合して inlink 別候補列を構築する
+4. 具体的買い手集合生成はその後である
+5. 局所仮想計算と経済評価には**まだ進まない**
+
+###### 過去補填との関係
+
+- 本最新作業記録より前に、`ORDER_EXCHANGE_PROGRESS.md` へ **§25.25.34.31**〜**.45** の過去進捗を補填した
+- 詳細設計メモ主要本文へも、**§25.25.34.45** 時点までの上限なし実装に関する状態・参照を補填した
+- それらの過去記録を削除・置換せず、今回の最新状態を後続注記として追加した
+- `ORDER_EXCHANGE_PROGRESS.md` への可変上限 N の最新進捗記録は、本詳細設計メモ確認後に**別作業**で行う
+
+###### Git状態と再開情報（§25.25.34.47）
+
+- HEAD は **`0c7c144`**
+- 未コミット変更：`uxsim/order_control_tvt_candidate_visit_set.py`、`tests_order_control_tvt_candidate_visit_set.py`、本設計メモ（`ORDER_EXCHANGE_PROGRESS.md` にも未コミット変更が存在するが、本実装の正本は本小節とコードである）
+- `diagnostics/order_control.zip` は既存未追跡、未接触、対象外
+- git add、git commit、git push は**未実行**

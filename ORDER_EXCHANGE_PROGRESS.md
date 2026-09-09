@@ -4768,6 +4768,29 @@ baseline_horizon_steps + 1 <= fork_W.TSIZE - fork_W.T
 3. 今回の第 1 部品だけで全 World baseline 必要情報の完全解決を判定しない
 4. この確認の後、到着済み相当・順位未確定 Visit の抽出と先行順位確定へ進めるか判断する
 
+##### 2026-09-07追記：snapshot固定時の未確定Visit登録タイミングと接続原則を確定
+
+詳細正本は設計メモ **§25.25.34.31**。
+
+- これは**実装前**の制度・接続原則の確定記録である
+- 権利保有 Visit を正しく選定するには、今回の snapshot 固定集合に含まれる Visit を、全 World baseline の結果と照合する**前**に、実 World 側の Node 別 TVT 順位台帳へ順位未確定 Visit として登録する必要がある
+- 未確定 Visit 登録は、正式 baseline 順位を付ける処理**ではない**
+- snapshot 固定集合への包含順、collector 登録順、inlink 走査順から割当権利行使順位を**決めない**
+- 同じ snapshot 固定 Visit 集合を、順位台帳登録と collector 登録で**共有**する必要がある
+
+**概念上の接続順**
+
+1. snapshot 固定 Visit 登録計画を構築・検証する
+2. その計画から、実 World 側の Node 別順位台帳へ未登録 Visit を順位未確定として登録する
+3. 同じ計画を fork 側 collector へ登録する
+4. 全 World baseline 仮想計算を実行する
+5. baseline 結果と順位台帳を照合する
+
+- collector に存在する先着 Visit が順位台帳へ未登録のままでは、権利保有 Visit を本来より後方の Visit から誤選定する可能性がある
+- 既存の alignment 第 1 部品自体は変更せず、上位接続によって未登録状態を解消する方針
+- **§25.25.34.31** の記録時点では、prepare/apply 分割、順位台帳登録 helper、baseline driver 接続は**後続作業**だった
+- その後の実装は、既存の進捗記録と **§25.25.34.32** 以降を参照する
+
 ##### 2026-09-07追記：snapshot固定Visit登録計画のprepare/apply分割を実装
 
 詳細正本は設計メモ **§25.25.34.32** の「実装完了記録」。
@@ -4878,6 +4901,631 @@ baseline_horizon_steps + 1 <= fork_W.TSIZE - fork_W.T
 **次の再開地点**
 
 helper の実装、専用テスト、設計メモの整合を最終確認した後、prepare、順位台帳登録 helper、apply、baseline 仮想計算を接続する最小の処理方法を検討する。baseline driver をどのように拡張または利用するかは、その接続検討で決める。権利保有車両選定にはまだ進まない。
+
+##### 2026-09-07追記：TVT順位台帳登録付きsnapshot固定baseline fork実行経路を実装
+
+**位置づけ**
+
+- 実装前仕様の正本は設計メモ **§25.25.34.34**
+- 実装結果、検証結果、当時の再開地点の正本は **§25.25.34.35**
+- **§25.25.34.34** は実装前の歴史的記録として残っている。実装済み事実について差がある場合は **§25.25.34.35** を参照する
+
+**非技術的な目的**
+
+- snapshot 固定集合を**一度だけ**作り、その**同じ計画**を使って、実 World 側順位台帳への未確定登録と fork 側 collector への登録を行う
+- 順位台帳登録を全 World baseline 仮想計算より**前**に済ませ、baseline 結果との照合時に正常な対象 Visit が未登録扱いになることを防ぐ
+
+**実装前仕様（§25.25.34.34）の要点**
+
+- 既存 `run_snapshot_fixed_baseline_fork` の外部シグネチャと従来動作は維持する
+- TVT 順位台帳登録を伴う**新しい公開関数**を `order_control_baseline_driver.py` へ追加する
+- `RegistrationPlan` を **1 回だけ** prepare し、**同じ** plan を順位台帳登録 helper と collector apply の**両方**へ渡す
+- callback、hook、rollback は追加しない
+
+**実装した処理順（§25.25.34.35）**
+
+1. `_prepare_baseline_fork`（入力検証、`real_W` 状態保存、`fork_W` 作成、空 collector を `fork_W` 側だけへ設定）
+2. `prepare_snapshot_fixed_visit_registration_plan`
+3. `register_undetermined_visits_from_snapshot_plan`（既存 helper を利用。重複実装しない）
+4. `apply_snapshot_fixed_visit_registration_plan`
+5. `_complete_baseline_fork_after_registration`（登録件数照合、0 件時の空結果、残り timestep 検証）
+6. 登録件数が **1 件以上**の場合だけ `fork_W.exec_simulation`（固定 horizon 一括実行）
+
+**実装内容**
+
+- 変更本番モジュール：`uxsim/order_control_baseline_driver.py`
+- 新規専用テスト：`tests_order_control_tvt_baseline_driver_registration.py`
+- 新規公開関数：`run_snapshot_fixed_baseline_fork_with_tvt_rank_ledger_registration(real_W, *, target_node_names, baseline_horizon_steps, rank_states_by_node_name) -> OrderControlBaselineForkResult`
+- 既存固定 horizon baseline driver を無理に変更せず、TVT 順位台帳登録を伴う**専用実行経路**を追加した
+- 内部共通化：`_BaselineForkPrepared`、`_prepare_baseline_fork`、`_complete_baseline_fork_after_registration`（内部 API。公開しない）
+- 既存 `run_snapshot_fixed_baseline_fork` は `register_snapshot_fixed_visits` を 1 回呼ぶ従来経路を維持
+- `OrderControlBaselineForkResult` は変更していない
+- 順位確定、権利保有 Visit 選定、TVT 候補生成、alignment 実行は**行わない**
+
+**結果と副作用**
+
+- 順位台帳へ登録するのは、snapshot 固定計画にある**未登録** Visit だけ
+- 登録済み未確定 Visit と確定済み Visit を新規登録しない
+- 順位台帳への登録順から順位を付けない
+- collector は `fork_W` 側**だけ**に設定する
+- `real_W` は forward しない。例外時も `real_W` の `T`、`TIME`、`order_control_baseline_collector` は変更しない
+- helper 失敗時は apply と exec を行わない。apply 失敗時は exec を行わない
+- driver は順位未確定登録を **rollback しない**。正常登録済みの順位未確定 Visit は後続失敗後も残る
+- 0 件時も helper と apply を各 1 回実行し、`exec_simulation` は省略する
+- upstream 処理を再実行しない
+
+**テスト結果（§25.25.34.35）**
+
+| 実行 | 結果 |
+|------|------|
+| `tests_order_control_tvt_baseline_driver_registration.py` の `python -m py_compile` | 成功 |
+| `python tests_order_control_tvt_baseline_driver_registration.py` | **30 tests passed** |
+| `pytest tests_order_control_tvt_baseline_driver_registration.py` | **30 passed** |
+| `python tests_order_control_baseline_driver.py` | **66 tests passed** |
+| `tests_order_control_baseline_snapshot.py` | 実装完了時に成功 |
+| `tests_order_control_tvt_snapshot_undetermined_registration.py` | 実装完了時に **25 tests passed** |
+| `tests_order_control_tvt_node_rank_state.py` | 実装完了時に **54 tests passed** |
+| `git diff --check` | 問題なし |
+
+**Git 状態（§25.25.34.35 記録時点）**
+
+- 作業開始時点の最新保存済み・push 済みコミットは **`f7052b1`**
+- `uxsim/order_control_baseline_driver.py` と `tests_order_control_tvt_baseline_driver_registration.py` は未コミットの作業ツリーに存在する
+- `diagnostics/order_control.zip` は既存未追跡、未接触、対象外
+- git add、git commit、git push は未実行
+
+**当時の次の再開地点**
+
+- 仮想計算**完了後**に、`order_control_tvt_baseline_alignment` を正確に 1 回実行する上位処理を接続し、`unregistered_collector_visit_keys` が空であることを確認する（権利保有 Visit 選定より前）
+- この alignment 接続は後に **§25.25.34.36** と **§25.25.34.37** で設計・実装された。**詳細は後続の補填で記録する**
+
+##### 2026-09-08追記：baseline fork後のNode別alignment接続を実装
+
+**位置づけ**
+
+- 実装前仕様の正本は設計メモ **§25.25.34.36**
+- 実装結果、検証結果、当時の再開地点の正本は **§25.25.34.37**
+- **§25.25.34.36** は実装前の歴史的記録として残っている。実装済み事実について差がある場合は **§25.25.34.37** を参照する
+
+**非技術的な目的**
+
+- 順位台帳登録付きの全 World baseline 仮想計算が正常終了した後、各対象 Node について collector 記録と実 World 側順位台帳を照合する
+- 正常な snapshot 固定 Visit が順位台帳へ未登録のまま残っていないことを、権利保有 Visit 選定より前に確認する
+- 後続処理へ、到着予測を取得できた未確定 Visit と、取得できなかった未確定 Visit を Node 別に渡す
+
+**実装前仕様（§25.25.34.36）の要点**
+
+- 上位公開関数は **§25.25.34.35** の baseline driver を 1 回呼び、正常完了後に Node 別 alignment を接続する（alignment 段階で baseline fork を再実行しない）
+- `target_node_names` 順に各 Node を処理する
+- 既存 Node 単位 alignment 第 1 部品 `align_snapshot_undetermined_visits_with_node_baseline` を再利用する
+- `unregistered_collector_visit_keys` が空であることを上位接続で要求する。非空なら権利保有 Visit 選定へ進まず `RuntimeError` で停止する
+- `unresolved_undetermined_visits` は正常な情報未解決として結果に保持する。この alignment 接続自体の `RuntimeError` にはしない
+- 順位登録、順位確定、意思決定窓抽出、権利保有 Visit 選定は行わない
+
+**実装内容（§25.25.34.37）**
+
+- 新規本番モジュール：`uxsim/order_control_tvt_baseline_fork_alignment.py`
+- 新規専用テスト：`tests_order_control_tvt_baseline_fork_alignment.py`
+- 新規公開結果型：`OrderControlTvtBaselineForkAlignmentResult`（frozen dataclass）
+  - `fork_result: OrderControlBaselineForkResult`（既存型。変更なし）
+  - `alignment_results: tuple[OrderControlTvtSnapshotUndeterminedAlignmentResult, ...]`（`fork_result.target_node_names` と**同じ Node 順**）
+- 新規公開関数：`run_snapshot_fixed_baseline_fork_and_align_undetermined_visits(real_W, *, target_node_names, baseline_horizon_steps, rank_states_by_node_name) -> OrderControlTvtBaselineForkAlignmentResult`
+- 既存 `run_snapshot_fixed_baseline_fork_with_tvt_rank_ledger_registration` を 1 回呼び、正常完了後に Node ごとに collector export と alignment 第 1 部品を各 1 回実行する
+- 既存 Node 単位 alignment 関数を再利用し、同じ分類処理を重複実装していない
+- `target_node_names` と `alignment_results` の Node 名・順序を照合する
+- rank state、collector、real_W、fork_W を変更しない。upstream baseline fork を再実行しない（上位関数 1 回の呼出し内で driver を 1 回呼ぶ）
+- callback、hook、rollback は導入していない
+
+**status と未解決**
+
+- `unresolved_undetermined_visits` が存在しても、この alignment 接続自体は `RuntimeError` にしない。その Node で TVT 検討を進めない判断は後続処理の責務
+- `unregistered_collector_visit_keys` が非空なら `RuntimeError`。正常な情報未解決と重大不整合を混同しない
+- 0 件時（`registered_visit_count == 0`）も Node ごとに alignment を省略しない
+
+**テスト結果（§25.25.34.37）**
+
+| 実行 | 結果 |
+|------|------|
+| `uxsim/order_control_tvt_baseline_fork_alignment.py` と専用テストの `python -m py_compile` | 成功 |
+| `python tests_order_control_tvt_baseline_fork_alignment.py` | **24 tests passed** |
+| `pytest tests_order_control_tvt_baseline_fork_alignment.py` | **24 passed** |
+| `python tests_order_control_baseline_driver.py` | **66 tests passed** |
+| `python tests_order_control_tvt_baseline_driver_registration.py` | **30 tests passed** |
+| `python tests_order_control_tvt_baseline_alignment.py` | **25 tests passed** |
+| `git diff --check` | 問題なし |
+
+**Git 状態（§25.25.34.37 記録時点）**
+
+- 作業開始時点の最新保存済み・push 済みコミットは **`b67c53d`**
+- 新規本番モジュールと専用テストは未追跡の作業ツリーに存在する
+- `diagnostics/order_control.zip` は既存未追跡、未接触、対象外
+- git add、git commit、git push は未実行
+
+**当時の次の再開地点**
+
+- baseline 開始時点 **T** までに到着し、かつ順位未確定の Visit を正式 baseline 順のまま先行順位確定する処理
+- その処理は後に **§25.25.34.38** と **§25.25.34.39** で設計・実装された。**詳細は直後の補填記録を参照する**
+
+##### 2026-09-08追記：既到着かつ順位未確定Visitの先行順位確定を実装
+
+**位置づけ**
+
+- 実装前仕様の正本は設計メモ **§25.25.34.38**
+- 実装結果、検証結果、当時の再開地点の正本は **§25.25.34.39**
+- **§25.25.34.38** は実装前の歴史的記録として残っている。実装済み事実について差がある場合は **§25.25.34.39** を参照する
+- 本体制度ルールは設計メモ **§5** を参照する
+
+**非技術的な目的**
+
+- baseline 開始時点 **T** までに対象 Node へ到着すると予測され、現在も順位未確定である Visit は、新しい TVT の起点にしない
+- それらを正式 baseline 順のまま先に順位確定し、その後に未到着 Visit について意思決定窓と TVT を検討できる状態にする
+
+**正式な既到着定義**
+
+- `baseline_arrival_timestep <= T`（`T` は `alignment_fork_result.fork_result.baseline_timestep_T`）
+- **T ちょうど**に到着する Visit も既到着として扱う
+- 参加・非参加を問わず同じ定義を適用する
+
+**実装前仕様（§25.25.34.38）の要点**
+
+- baseline fork 後の Node 別 alignment 結果 `OrderControlTvtBaselineForkAlignmentResult` を入力する
+- 各 Node の `resolved_undetermined_visits` から `baseline_arrival_timestep <= T` を抽出する
+- `was_arrived_at_snapshot` や参加属性を抽出条件に使用しない
+- `resolved_undetermined_visits` の既存順（正式 baseline 順）を維持し、再ソートしない
+- `confirm_visits_in_order` へ一括渡す。既到着 0 件の Node でも空 tuple で 1 回呼ぶ
+- `unresolved_undetermined_visits` が非空でも、resolved 列の到着タイムステップ **T 以下**の Visit は確定する。TVT 続行・中止判断は行わない
+- 先頭非参加 Visit 処理、権利保有 Visit 選定、TVT 候補生成は行わない
+
+**実装内容（§25.25.34.39）**
+
+- 新規本番モジュール：`uxsim/order_control_tvt_arrived_undetermined_confirmation.py`
+- 新規専用テスト：`tests_order_control_tvt_arrived_undetermined_confirmation.py`
+- 新規 Node 別結果型：`OrderControlTvtNodeArrivedUndeterminedConfirmationResult`（frozen dataclass）
+  - `node_name`
+  - `confirmed_arrived_visit_keys`（今回 `confirm_visits_in_order` へ渡した `VisitKey` tuple）
+  - `confirm_result: OrderControlTvtConfirmResult`
+- 新規全体結果型：`OrderControlTvtArrivedUndeterminedConfirmationResult`（frozen dataclass）
+  - `alignment_fork_result`（入力と同じオブジェクトを保持）
+  - `node_confirmation_results`（`fork_result.target_node_names` と**同じ Node 順**）
+- 新規公開関数：`confirm_already_arrived_undetermined_visits(alignment_fork_result, *, rank_states_by_node_name) -> OrderControlTvtArrivedUndeterminedConfirmationResult`
+- `T` は別引数にせず `alignment_fork_result.fork_result.baseline_timestep_T` から取得する。`real_W` は受け取らない
+- `fork_result.target_node_names` 順に Node を処理し、期待 Node 名と `alignment_result.node_name` の不一致は confirm 前に `RuntimeError`
+- 既存 `OrderControlTvtNodeRankState.confirm_visits_in_order` を Node ごとに 1 回使用する
+- baseline fork、alignment、collector を再実行しない。rollback や独自順位台帳更新は追加していない
+
+**Node 別の処理結果（status フィールドは持たない）**
+
+- 既到着・順位未確定 Visit が 0 件：`confirm_visits_in_order` を no-op で 1 回呼び、`newly_confirmed_count == 0`
+- 1 件以上：抽出順のまま先行確定し、`confirm_result` に `k_confirmed_before` / `k_confirmed_after` を保持
+- `unresolved_undetermined_visits` 非空：resolved 列の **T 以下** Visit は通常どおり確定。unresolved 自体は未確定のまま
+
+**副作用と責任境界**
+
+- 変更するのは、先行確定対象が存在する Node の順位状態だけ
+- collector、baseline fork 結果、alignment 結果、real_W、fork_W を変更しない
+- 先頭連続非参加 Visit の先行確定、権利保有 Visit 選定、TVT 候補生成は**まだ実行しない**
+
+**テスト結果（§25.25.34.39）**
+
+| 実行 | 結果 |
+|------|------|
+| `py_compile` | 成功 |
+| `python tests_order_control_tvt_arrived_undetermined_confirmation.py` | **30 tests passed** |
+| `pytest tests_order_control_tvt_arrived_undetermined_confirmation.py` | **30 passed** |
+| `python tests_order_control_tvt_node_rank_state.py` | **54 tests passed** |
+| `python tests_order_control_tvt_baseline_alignment.py` | **25 tests passed** |
+| `python tests_order_control_tvt_baseline_fork_alignment.py` | **24 tests passed** |
+| `git diff --check` | 問題なし |
+
+主な確認内容：到着 `< T` / `== T` / `> T`、参加・非参加中立、同着順位、既到着 0 件の no-op confirm、unresolved 非空時の既到着確定、複数 Node、読取入力不変、upstream 非再実行、途中失敗時の先行 Node 確定残存
+
+**Git 状態（§25.25.34.39 記録時点）**
+
+- 作業開始時点の最新保存済み・push 済みコミットは **`47173e1`**
+- 新規本番モジュールと専用テストは未追跡の作業ツリーに存在する
+- `diagnostics/order_control.zip` は既存未追跡、未接触、対象外
+- git add、git commit、git push は未実行
+
+**当時の次の再開地点**
+
+- 既到着 Visit 先行確定後の意思決定窓内正式 baseline 順位について、先頭から連続する非参加 Visit を先行確定する処理
+- その処理は後に **§25.25.34.40** と **§25.25.34.41** で設計・実装された。**詳細は後続の補填で記録する**
+
+##### 2026-09-08追記：先頭連続非参加Visitの先行順位確定を実装
+
+**位置づけ**
+
+- 実装前仕様の正本は設計メモ **§25.25.34.40**
+- 実装結果、検証結果、当時の再開地点の正本は **§25.25.34.41**
+- **§25.25.34.40** は実装前の歴史的記録として残っている。実装済み事実について差がある場合は **§25.25.34.41** を参照する
+- 本体の制度ルールは設計メモ **§4.5** を参照する
+- **2026-08-29** の既存進捗記録（直後）は **§4.5** の制度記録補修であり、本項のコード実装記録とは別である（詳細正本：**§25.25.34.40** / **§25.25.34.41**）
+
+**非技術的な目的**
+
+- 既到着 Visit の先行確定後、意思決定窓内の正式 baseline 順位を先頭から確認する
+- 最初の参加 Visit より前に連続する非参加 Visit を、baseline 順位のまま先に順位確定する
+- その後に残る最上位の参加 Visit を、後続の権利保有 Visit 選定候補にできる状態にする
+- 意思決定窓内がすべて非参加なら、その全 Visit を同じ共通処理で先行確定し、TVT 検討不要となる状態を作る
+
+**実装前仕様（§25.25.34.40）の要点**
+
+- **§25.25.34.39** の既到着 Visit 先行確定結果 `OrderControlTvtArrivedUndeterminedConfirmationResult` を入力する
+- 意思決定窓は **`T < baseline_arrival_timestep <= T + 6`**（`T` は `fork_result.baseline_timestep_T`）
+- `configured_horizon_steps >= 6` を処理開始時に確認する
+- 正式 baseline 順は `resolved_undetermined_visits` の既存順を使用する。参加状態による並べ替えを行わない
+- 意思決定窓内列の先頭から連続する非参加 Visit だけを抽出する。最初の参加 Visit より後方の非参加 Visit は確定しない
+- 意思決定窓内がすべて非参加なら全件が先行確定対象となる
+- 権利保有 Visit の最終選定、TVT 候補生成、取引評価は行わない
+
+**実装内容（§25.25.34.41）**
+
+- 新規本番モジュール：`uxsim/order_control_tvt_leading_nonparticipating_confirmation.py`
+- 新規専用テスト：`tests_order_control_tvt_leading_nonparticipating_confirmation.py`
+- 新規 Node 別結果型：`OrderControlTvtNodeLeadingNonparticipatingConfirmationResult`（frozen dataclass）
+  - `node_name`
+  - `decision_window_visit_keys`（意思決定窓内の正式 baseline 順位）
+  - `confirmed_leading_nonparticipating_visit_keys`（今回 confirm へ渡した先頭連続非参加 Visit 列）
+  - `remaining_decision_window_visit_keys`（先頭非参加 prefix を除いた残り）
+  - `confirm_result: OrderControlTvtConfirmResult`
+- 新規全体結果型：`OrderControlTvtLeadingNonparticipatingConfirmationResult`（frozen dataclass）
+  - `arrived_confirmation_result`（入力と同じオブジェクトを保持）
+  - `node_confirmation_results`（`fork_result.target_node_names` と**同じ Node 順**）
+- 新規公開関数：`confirm_leading_nonparticipating_decision_window_visits(arrived_confirmation_result, *, rank_states_by_node_name, participates_by_visit_key) -> OrderControlTvtLeadingNonparticipatingConfirmationResult`
+- `participates_by_visit_key` は呼出側所有。意思決定窓内 Visit **全件**について `type(value) is bool` を検証する
+- status フィールドは**持たない**（実コード確認済み）
+- baseline fork、alignment、既到着先行確定、collector export を再実行しない
+
+**順位確定**
+
+- 先頭連続非参加 Visit だけを `confirm_visits_in_order` へ渡す。空 tuple でも Node ごとに 1 回呼ぶ
+- 入力順を維持し、参加状態による再ソートを行わない
+- 先頭が参加または全参加の場合は no-op confirm（`remaining` は意思決定窓内全件）
+- 全非参加の場合は意思決定窓内全件を confirm し、`remaining` は空
+- 途中失敗時：先行 Node の正常確定は rollback しない。失敗 Node 内は confirm API の原子性を利用する
+
+**責任境界**
+
+- 変更するのは、先行確定対象が存在する Node の順位状態だけ
+- collector、baseline fork 結果、alignment 結果、既到着先行確定結果、real_W、fork_W を変更しない
+- upstream 処理を再実行しない
+- 権利保有 Visit をこの関数内で選定しない。TVT 候補 Visit 集合を作らない
+
+**テスト結果（§25.25.34.41）**
+
+| 実行 | 結果 |
+|------|------|
+| `py_compile` | 成功 |
+| `python tests_order_control_tvt_leading_nonparticipating_confirmation.py` | **23 tests passed** |
+| `pytest tests_order_control_tvt_leading_nonparticipating_confirmation.py` | **23 passed** |
+| `python tests_order_control_tvt_arrived_undetermined_confirmation.py` | **30 tests passed** |
+| `python tests_order_control_tvt_node_rank_state.py` | **54 tests passed** |
+| `python tests_order_control_tvt_baseline_alignment.py` | **25 tests passed** |
+| `python tests_order_control_tvt_baseline_fork_alignment.py` | **24 tests passed** |
+| `git diff --check` | 問題なし |
+
+主な確認内容：先頭非参加 0 件、先頭非参加 1 件以上、`n n p p n p n p p` の制度例、最初の参加 Visit より後方の非参加 Visit を確定しない、意思決定窓内全件が非参加、参加状態中立の baseline 順位、意思決定窓外 Visit を先行確定しない、複数 Node、読取入力不変、upstream 非再実行
+
+**Git 状態（§25.25.34.41 記録時点）**
+
+- 作業開始時点の最新保存済み・push 済みコミットは **`153006c`**
+- 新規本番モジュールと専用テストは未追跡の作業ツリーに存在する
+- `diagnostics/order_control.zip` は既存未追跡、未接触、対象外
+- git add、git commit、git push は未実行
+
+**当時の次の再開地点**
+
+- 先頭連続非参加 Visit 先行確定後の残列から権利保有 Visit を選定する処理
+- その処理は後に **§25.25.34.42** と **§25.25.34.43** で設計・実装された。**詳細は直後の補填記録を参照する**
+
+##### 2026-09-08追記：先頭連続非参加Visit先行確定後の権利保有Visit選定を実装
+
+**位置づけ**
+
+- 実装前仕様の正本は設計メモ **§25.25.34.42**
+- 実装結果、検証結果、当時の再開地点の正本は **§25.25.34.43**
+- **§25.25.34.42** は実装前の歴史的記録として残っている。実装済み事実について差がある場合は **§25.25.34.43** を参照する
+- 制度上の権利保有車両は設計メモ **§4.5** と **§8** を参照する
+
+**非技術的な目的**
+
+- 既到着 Visit と先頭連続非参加 Visit の先行確定が終わった後、意思決定窓内に残る未確定 Visit 列を確認する
+- 正常に TVT 検討を続けられる場合、その残列の先頭にいる参加 Visit を権利保有 Visit として選定する
+- 情報未解決、残列なし、全非参加処理済みなどを区別し、権利保有 Visit が存在しない正常状態と重大不整合を混同しない
+
+**実装前仕様（§25.25.34.42）の要点**
+
+- **§25.25.34.41** の先頭連続非参加 Visit 先行確定結果 `OrderControlTvtLeadingNonparticipatingConfirmationResult` を入力する
+- `target_node_names` 順に Node を処理する
+- `unresolved_undetermined_visits` が非空の Node では TVT 検討を進めない（`UNRESOLVED_BASELINE_ARRIVALS`）
+- 先行確定後の `remaining_decision_window_visit_keys` が空なら権利保有 Visit なし（`NO_RIGHT_OF_ENTRY`）
+- 残列が非空なら先頭 VisitKey を権利保有 Visit とする。後方 Visit へ繰り上げない
+- P 取得、TVT 候補 Visit 生成、買い手・売り手選定は行わない
+
+**実装内容（§25.25.34.43）**
+
+- 新規本番モジュール：`uxsim/order_control_tvt_right_of_entry_selection.py`
+- 新規専用テスト：`tests_order_control_tvt_right_of_entry_selection.py`
+- 新規 status Enum：`OrderControlTvtRightOfEntrySelectionStatus`
+  - `SELECTED` — `unresolved` が空で `remaining` が非空。`right_of_entry_visit_key` は非 `None`
+  - `NO_RIGHT_OF_ENTRY` — `unresolved` が空で `remaining` が空。`right_of_entry_visit_key` は `None`
+  - `UNRESOLVED_BASELINE_ARRIVALS` — `unresolved_undetermined_visits` が非空。`right_of_entry_visit_key` は `None`
+- 新規 Node 別結果型：`OrderControlTvtNodeRightOfEntrySelectionResult`（frozen dataclass）
+  - `node_name`
+  - `selection_status`
+  - `right_of_entry_visit_key: OrderControlTvtVisitKey | None`
+  - `k_confirmed_before`（選定時点の `rank_state.k_confirmed()` の snapshot。全 status で保存）
+- 新規全体結果型：`OrderControlTvtRightOfEntrySelectionResult`（frozen dataclass）
+  - `leading_confirmation_result`（入力と同じオブジェクトを保持）
+  - `node_selection_results`（`fork_result.target_node_names` と**同じ Node 順**）
+- 新規公開関数：`select_right_of_entry_decision_window_visits(leading_confirmation_result, *, rank_states_by_node_name, participates_by_visit_key) -> OrderControlTvtRightOfEntrySelectionResult`
+- 読取専用。`confirm_visits_in_order` を呼ばず、順位台帳を変更しない
+- baseline fork、alignment、既到着先行確定、先頭非参加先行確定、collector を再実行・再照会しない
+
+**選定契約**
+
+- `unresolved` 非空を `remaining` の空・非空より優先して判定する
+- 正常選定時は `remaining_decision_window_visit_keys` の先頭 VisitKey を使用する
+- 先頭が非参加（`participates_by_visit_key` が `False`）なら上流契約違反として `RuntimeError`
+- 選定候補が確定済みまたは未登録なら `RuntimeError`（`NO_RIGHT_OF_ENTRY` へ変換しない）
+- `K_confirmed_before` は既到着・先頭非参加の古い `ConfirmResult` 値を流用せず、選定時点の `k_confirmed()` から取得する
+
+**責任境界**
+
+- 順位台帳、collector、baseline fork 結果、alignment 結果、先行確定結果、real_W、fork_W を変更しない
+- upstream 処理を再実行しない
+- P を取得しない。TVT 候補集合を作らない。局所仮想計算・経済評価は行わない
+
+**テスト結果（§25.25.34.43）**
+
+| 実行 | 結果 |
+|------|------|
+| `py_compile` | 成功 |
+| `python tests_order_control_tvt_right_of_entry_selection.py` | **16 tests passed** |
+| `pytest tests_order_control_tvt_right_of_entry_selection.py` | **16 passed** |
+| `python tests_order_control_tvt_leading_nonparticipating_confirmation.py` | **23 tests passed** |
+| `python tests_order_control_tvt_arrived_undetermined_confirmation.py` | **30 tests passed** |
+| `python tests_order_control_tvt_node_rank_state.py` | **54 tests passed** |
+| `python tests_order_control_tvt_baseline_alignment.py` | **25 tests passed** |
+| `python tests_order_control_tvt_baseline_fork_alignment.py` | **24 tests passed** |
+| `git diff --check` | 問題なし |
+
+主な確認内容：通常選定、先頭非参加確定後の最初の参加 Visit、権利保有 Visit なし、unresolved、全非参加処理後、先頭が非参加で残る重大不整合、順位状態との不一致、複数 Node、`K_confirmed_before`、入力不変、upstream 非再実行
+
+**Git 状態（§25.25.34.43 記録時点）**
+
+- 作業開始時点の最新保存済み・push 済みコミットは **`3012524`**
+- 新規本番モジュールと専用テストは未追跡の作業ツリーに存在する
+- `diagnostics/order_control.zip` は既存未追跡、未接触、対象外
+- git add、git commit、git push は未実行
+
+**当時の次の再開地点**
+
+- 権利保有 Visit の baseline 予想通過タイムステップ **P** を取得し、P − 1 条件から TVT 候補 Visit 母集団を作り、baseline 情報充足を判定する処理
+- その処理は **§25.25.34.44** と **§25.25.34.45** で設計・実装された。**詳細は次の過去補填で記録する**
+
+##### 2026-09-09追記：権利保有VisitのP取得とP - 1候補母集団・baseline情報充足判定を実装
+
+**位置づけ**
+
+- 実装前仕様の正本は設計メモ **§25.25.34.44**
+- 実装結果、検証結果、当時の再開地点の正本は **§25.25.34.45**
+- **§25.25.34.44** は実装前の歴史的記録として残っている。実装済み事実について差がある場合は **§25.25.34.45** を参照する
+- 権利保有 Visit 選定の実装完了は **§25.25.34.43** を参照する
+- 制度上の P − 1 条件は設計メモ **§7**、**§8**、**§9** を参照する
+- 本項は **§25.25.34.45 時点**の実装を記録する。可変上限 N（**§25.25.34.46** 以降）は**含まない**
+
+**非技術的な目的**
+
+- 権利保有 Visit が取引なし baseline で通過すると予測された時点 **P** を取得する
+- P の 1 タイムステップ前までに対象 Node へ到着すると予測された、snapshot 固定集合内かつ現在順位未確定の Visit を、今回の TVT 候補母集団として確定する
+- その候補**全員**について、後続の TVT 形成に必要な baseline 通過情報が揃っているかを判定する
+- 候補の一部だけで部分的な TVT を形成しない
+
+**§25.25.34.45 時点の候補母集団の範囲**
+
+- P − 1 条件を満たす Visit を**全件** `candidate_visits` へ含めていた
+- この時点では**可変上限 N を適用していない**
+
+**実装前仕様（§25.25.34.44）の要点**
+
+- **§25.25.34.43** の権利保有 Visit 選定結果 `OrderControlTvtRightOfEntrySelectionResult` を入力する
+- `target_node_names` 順に Node を処理する
+- `SELECTED` 以外の Node は候補集合を構築しない
+- 権利保有 Visit の collector 記録から `baseline_passage_timestep` を **P** として取得する。P が `None` なら通過情報未解決として扱う
+- B 型かつ現在順位未確定で `baseline_arrival_timestep <= P - 1` を満たす Visit を候補母集団とする
+- A 型・確定済み Visit を候補から除外する。参加状態を候補抽出または baseline 順位決定に使用しない
+- 権利保有 Visit が候補母集団に正確に 1 件含まれることを確認する
+- 候補全員の `baseline_passage_timestep` が非 `None` なら情報取得完了。1 件でも `None` なら情報未解決
+- baseline fork、alignment、先行確定、権利保有選定を再実行しない
+
+**実装内容（§25.25.34.45）**
+
+- 新規本番モジュール：`uxsim/order_control_tvt_candidate_visit_set.py`
+- 新規専用テスト：`tests_order_control_tvt_candidate_visit_set.py`
+- 新規 status Enum：`OrderControlTvtCandidateVisitSetStatus`
+  - `NOT_BUILT_NO_RIGHT_OF_ENTRY` — 上流 `NO_RIGHT_OF_ENTRY`。`right_of_entry_visit_key` / P は `None`、`candidate_visits` は空
+  - `NOT_BUILT_UNRESOLVED_ARRIVALS` — 上流 `UNRESOLVED_BASELINE_ARRIVALS`。同上
+  - `UNRESOLVED_RIGHT_OF_ENTRY_PASSAGE` — 権利保有 Visit 選定済みだが P が `None`。`right_of_entry_visit_key` は非 `None`、`candidate_visits` は空
+  - `UNRESOLVED_CANDIDATE_PASSAGES` — P と候補母集団は確定済みだが、候補の 1 件以上で passage が `None`。母集団**全体**を保持
+  - `BASELINE_INFORMATION_COMPLETE` — P、候補母集団、候補全員の passage が取得済み
+- 新規候補要素型：`OrderControlTvtCandidateVisit`（frozen dataclass）
+  - `visit_key`、`vehicle_id`、`inlink_name`、`baseline_arrival_timestep`、`arrival_tiebreaker`、`route_next_link_name`、`baseline_passage_timestep`
+- 新規 Node 別結果型：`OrderControlTvtNodeCandidateVisitSetResult`（frozen dataclass）
+  - `node_name`、`build_status`、`right_of_entry_visit_key`、`right_of_entry_baseline_passage_timestep`、`k_confirmed_before`、`candidate_visits`
+- 新規全体結果型：`OrderControlTvtCandidateVisitSetResult`（frozen dataclass）
+  - `right_of_entry_selection_result`（入力と同じオブジェクトを保持）
+  - `node_candidate_set_results`（`fork_result.target_node_names` と**同じ Node 順**）
+- 新規公開関数：`build_tvt_candidate_visit_set(right_of_entry_selection_result, *, rank_states_by_node_name) -> OrderControlTvtCandidateVisitSetResult`
+- `participates_by_visit_key` は受け取らない。`k_confirmed_before` は上流選定結果の snapshot 値を使用し、`rank_state.k_confirmed()` を再取得しない
+- 読取専用。順位台帳、collector、World を変更しない
+
+**候補集合の正式条件（§25.25.34.45 時点）**
+
+候補に含む：snapshot 固定集合内の **B 型**、対象 Node で**現在順位未確定**、`baseline_arrival_timestep <= P - 1`（**P − 1 を含み、P 到着は除外**）
+
+候補から除外：A 型、確定済み Visit、`baseline_arrival_timestep > P - 1`、snapshot 固定集合外 Visit
+
+正式 baseline 順：`baseline_arrival_timestep` → `arrival_tiebreaker` → `vehicle_id` の昇順で明示ソート（collector export 順は使用しない）
+
+**情報充足判定（§25.25.34.45 時点）**
+
+- P − 1 該当候補**全件**を対象としていた（候補数上限は**適用しない**）
+- 候補全員の `baseline_passage_timestep` が非 `None` なら `BASELINE_INFORMATION_COMPLETE`
+- 1 件でも `None` なら `UNRESOLVED_CANDIDATE_PASSAGES`。未解決 Visit を `candidate_visits` から除外しない
+- 情報取得済み Visit だけを使う部分的 TVT を作らない
+
+**責任境界**
+
+- collector、baseline fork 結果、alignment 結果、先行確定結果、権利保有選定結果、real_W、fork_W を変更しない
+- upstream 処理を再実行しない。fork を延長・再実行しない
+- TVT-SB、TVT-MH、TVT-SP、TVT-MP の買い手集合を生成しない
+- 売り手選定、trade rank、局所仮想計算、経済評価、最終順位確定を行わない
+
+**テスト結果（§25.25.34.45 時点）**
+
+| 実行 | 結果 |
+|------|------|
+| `py_compile` | 成功 |
+| `python tests_order_control_tvt_candidate_visit_set.py` | **15 tests passed** |
+| `pytest tests_order_control_tvt_candidate_visit_set.py` | **15 passed** |
+| `python tests_order_control_tvt_right_of_entry_selection.py` | **16 tests passed** |
+| `python tests_order_control_tvt_leading_nonparticipating_confirmation.py` | **23 tests passed** |
+| `python tests_order_control_tvt_arrived_undetermined_confirmation.py` | **30 tests passed** |
+| `python tests_order_control_tvt_node_rank_state.py` | **54 tests passed** |
+| `python tests_order_control_tvt_baseline_alignment.py` | **25 tests passed** |
+| `python tests_order_control_tvt_baseline_fork_alignment.py` | **24 tests passed** |
+| `git diff --check` | 問題なし |
+
+主な確認内容：5 status、P − 1 境界（P 到着の除外）、A 型・確定済み除外、非参加 Visit を候補に含める、正式 baseline 順・同着順位、passage 未解決時の母集団全体保持、権利保有 Visit の通常条件による包含、複数 Node、読取入力不変、upstream 非再実行、`passage >= arrival + 1` の時系列整合、重大不整合
+
+**Git 状態（§25.25.34.45 記録時点）**
+
+- 作業開始時点の最新保存済み・push 済みコミットは **`fd807ff`**
+- 新規本番モジュールと専用テストは未追跡の作業ツリーに存在する
+- **§25.25.34.44** の設計メモ変更は未コミットで維持されている
+- `diagnostics/order_control.zip` は既存未追跡、未接触、対象外
+- git add、git commit、git push は未実行
+
+**当時の次の再開地点**
+
+- §25.25.34.45 時点では、具体的買い手集合生成へ直行せず、TVT 候補 Visit 数の上限を制度・実装上どう適用するかを整理することが次の設計対象になった
+- その整理は **§25.25.34.46** で行われた。**詳細と実装結果は今回の最新作業として別途記録する**
+
+##### 2026-09-09追記：TVT候補Visit母集団へTVT固有可変上限Nを実装
+
+**位置づけ**
+
+- 詳細正本は設計メモ **§25.25.34.47**
+- 実装前仕様は **§25.25.34.46**
+- **§25.25.34.45** は可変上限適用前の上限なし版の歴史的実装記録
+- **§25.25.34.47** は、可変上限 N 適用後の実装結果、検証結果、未実装境界、次の再開地点の最新正本
+- 既存の候補集合処理を破棄せず、前向きに拡張した
+
+**非技術的な目的**
+
+- 権利保有 Visit の通過予測時点 P の 1 タイムステップ前までに到着すると予測される Visit を正式 baseline 順へ並べ、その先頭から最大 N 件だけを今回の TVT 候補 Visit とする処理を実装した
+- N は固定値 10 ではなく、基本値 10、感度分析値 15・20 などを呼出側から変更できる
+- 非参加 Visit も N 件に数える
+- 上限内候補に不足情報があっても、情報取得済みの後順位 Visit を繰り上げない
+- 情報充足判定は、上限適用後の候補 Visit だけを対象とする
+
+**変更内容**
+
+- 変更本番モジュール：`uxsim/order_control_tvt_candidate_visit_set.py`
+- 更新専用テスト：`tests_order_control_tvt_candidate_visit_set.py`
+- 公開関数：`build_tvt_candidate_visit_set`
+- 追加必須 keyword-only 引数：`max_tvt_candidate_visit_count`
+
+**重要な契約**
+
+- default 値なし。1 回の呼出しで全 target Node へ同じ上限を適用する
+- Node 別 `Mapping` は受け取らない
+- `type(value) is int` かつ 1 以上を要求する。`bool`、`0`、負数、`float`、文字列、`None` は `ValueError`
+- 不正値では collector 照会前に停止する
+- BATCH の `batch_size`、`max_batch_size` 等を再利用しない
+- World、Node、順位状態へ新しい上限属性を追加していない
+
+**候補選定と情報充足**
+
+- P − 1 条件を満たす現在順位未確定の B 型 Visit を、到着タイムステップ、固定 tiebreaker、Vehicle ID の順に並べる
+- 正式 baseline 順位の先頭から最大 `max_tvt_candidate_visit_count` 件を `candidate_visits` とする
+- 権利保有 Visit と非参加 Visit も上限に数える。参加状態による繰上げを行わない
+- N + 1 位およびそれより後順位は `candidate_visits` へ含めない
+- 上限外 Visit の passage 不足は今回の情報充足判定へ影響させない
+- 上限内 Visit の passage が不足していても、その Visit を除外して後順位 Visit を繰り上げない
+- 上限内候補の 1 件でも passage が `None` なら `UNRESOLVED_CANDIDATE_PASSAGES`
+- 上限内候補全員の passage が非 `None` なら `BASELINE_INFORMATION_COMPLETE`
+- 既存 5 status は変更していない。上限専用 status は追加していない
+
+**二段階検証（要点）**
+
+- 第 1 段階：P − 1 該当 Visit 全件について、先頭 N 件を正しく選ぶための順位材料を検証する
+- 第 2 段階：正式 baseline 順の先頭 N 件だけを完全な候補要素へ変換し、passage や `route_next_link_name` 等を検証する
+- 上限外 Visit の候補情報不足を今回の候補処理へ不要に影響させず、順位選定に必要な情報の異常は上限外でも検出する
+- 詳細は設計メモ **§25.25.34.47** を参照する
+
+**結果型の変更**
+
+- `OrderControlTvtCandidateVisitSetResult`：`max_tvt_candidate_visit_count: int`（今回の関数呼出しで全 target Node へ使用した上限。感度分析と結果再現のため全体結果へ保持）
+- `OrderControlTvtNodeCandidateVisitSetResult`：`p_minus_one_eligible_visit_count_before_limit: int | None`（P − 1 条件を満たした Visit の上限適用前件数。P 取得前 status では `None`、P 取得済み status では非負 `int`。上限適用後件数は `len(candidate_visits)` で確認できる）
+- 内部実装：`_PMinusOneRankEntry` を内部 frozen dataclass として追加（公開結果型ではない。collector が返した record コピーを一時保持し、公開結果へ残さない）
+
+**テスト修正で発見した問題**
+
+- 専用テストは **15 件から 21 件**へ増加した
+- 当初の `test_nth_unresolved_candidate_does_not_promote_later_visit` は `N=3`、候補 3 件のため、3 位が N + 1 位になっておらず繰上げ禁止を検証できていなかった
+- 実際のテスト本文確認により問題を発見し、当該テストだけを `N=2` へ修正した
+- 修正後：1 位と未解決の 2 位だけが候補、passage 取得済みの 3 位を繰り上げない、`UNRESOLVED_CANDIDATE_PASSAGES`
+- このテスト修正では本番コードを変更していない
+
+**型注釈修正**
+
+- `_verify_right_of_entry_record` の戻り値型を `tuple[int, int]` から `tuple[int, int | None]` へ修正した
+- 権利保有 Visit の baseline passage は未解決時に `None` となり得る。処理動作の変更ではない
+
+**確認とテスト結果（§25.25.34.47）**
+
+- §25.25.34.46、本番モジュール全文、追加テスト本文を確認した
+- 戻り値型注釈の不一致を発見して修正した
+- 当初の繰上げ禁止テストが N + 1 位を構成していないことを発見し、`N=2` 修正後の本文を確認した
+- §25.25.34.46 との不一致や実装を止める問題は残っていない
+
+| 実行 | 結果 |
+|------|------|
+| `py_compile` | 成功 |
+| `python tests_order_control_tvt_candidate_visit_set.py` | **21 tests passed** |
+| `pytest tests_order_control_tvt_candidate_visit_set.py` | **21 passed** |
+| `python tests_order_control_tvt_right_of_entry_selection.py` | **16 tests passed** |
+| `python tests_order_control_tvt_leading_nonparticipating_confirmation.py` | **23 tests passed** |
+| `python tests_order_control_tvt_arrived_undetermined_confirmation.py` | **30 tests passed** |
+| `python tests_order_control_tvt_node_rank_state.py` | **54 tests passed** |
+| `python tests_order_control_tvt_baseline_alignment.py` | **25 tests passed** |
+| `python tests_order_control_tvt_baseline_fork_alignment.py` | **24 tests passed** |
+| `git diff --check` | 問題なし |
+
+**未実装境界**
+
+- snapshot 時点の inlink 内物理順の独立保存、snapshot physical order 結果型、inlink 別候補列、買い手 prefix
+- TVT-SB、TVT-MH、TVT-SP、TVT-MP の具体的買い手集合生成
+- 参加 Mapping による買い手選定、trade scope、売り手選定
+- 局所仮想計算、経済評価、最終順位確定の上位接続、上位 TVT 制御
+- collector 登録順や export 順へ snapshot 物理順の意味を追加していない
+- 現時点では単車線研究を正式対象とし、複車線への完全対応を現段階で作り込まない
+
+**次の再開地点**
+
+- TVT 候補 Visit 母集団への可変上限 N 適用は実装・検証済み
+- 次は、snapshot 時点の inlink 内物理順を独立した固定情報としてどの結果型へ保存し、後続へ渡すかを設計する
+- 物理順保存後、上限適用済み `candidate_visits` と照合して inlink 別候補列を構築する
+- 具体的買い手集合生成はその後。局所仮想計算と経済評価にはまだ進まない
+
+**Git 状態（§25.25.34.47 記録時点）**
+
+- HEAD は **`0c7c144`**
+- 未コミット変更：`uxsim/order_control_tvt_candidate_visit_set.py`、`tests_order_control_tvt_candidate_visit_set.py`、`ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES.md`、本進捗メモ（`ORDER_EXCHANGE_PROGRESS.md`）
+- `diagnostics/order_control.zip` は既存未追跡、未接触、対象外
+- git add、git commit、git push は未実行
 
 #### 2026-08-29：TVT権利保有車両選定前の先頭非参加Vehicle先行確定の記録補修
 

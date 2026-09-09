@@ -3,8 +3,9 @@ Build TVT candidate visit sets after right-of-entry selection.
 
 Reads right-of-entry selection results and rank states, obtains baseline passage
 timestep P from the fork collector, determines the P - 1 candidate population,
-and checks baseline information completeness for all candidates. Does not
-modify rank ledgers, collector records, or rerun upstream processing.
+applies the TVT-specific candidate visit count limit, and checks baseline
+information completeness for the limited candidates only. Does not modify rank
+ledgers, collector records, or rerun upstream processing.
 """
 
 from __future__ import annotations
@@ -56,6 +57,7 @@ class OrderControlTvtNodeCandidateVisitSetResult:
     right_of_entry_visit_key: OrderControlTvtVisitKey | None
     right_of_entry_baseline_passage_timestep: int | None
     k_confirmed_before: int
+    p_minus_one_eligible_visit_count_before_limit: int | None
     candidate_visits: tuple[OrderControlTvtCandidateVisit, ...]
 
 
@@ -64,10 +66,22 @@ class OrderControlTvtCandidateVisitSetResult:
     """Overall result of TVT candidate visit set construction."""
 
     right_of_entry_selection_result: OrderControlTvtRightOfEntrySelectionResult
+    max_tvt_candidate_visit_count: int
     node_candidate_set_results: tuple[
         OrderControlTvtNodeCandidateVisitSetResult,
         ...
     ]
+
+
+@dataclass(frozen=True)
+class _PMinusOneRankEntry:
+    """Phase-1 rank material for one P - 1 eligible visit before the count limit."""
+
+    visit_key: OrderControlTvtVisitKey
+    vehicle_id: int
+    baseline_arrival_timestep: int
+    arrival_tiebreaker: int | float
+    record: Mapping[str, object]
 
 
 def _verify_node_name_at_index(
@@ -83,6 +97,15 @@ def _verify_node_name_at_index(
             f"target_node_names entry {expected_node_name!r}, but "
             f"{source_label} has {actual_node_name!r}."
         )
+
+
+def _validate_max_tvt_candidate_visit_count(value: object) -> int:
+    if type(value) is not int or isinstance(value, bool) or value < 1:
+        raise ValueError(
+            "max_tvt_candidate_visit_count must be a positive int (not bool); "
+            f"got {value!r}."
+        )
+    return value
 
 
 def _require_non_empty_str(value: object, field_name: str) -> str:
@@ -173,7 +196,7 @@ def _verify_right_of_entry_record(
     node_name: str,
     right_of_entry_visit_key: OrderControlTvtVisitKey,
     record: Mapping[str, object],
-) -> tuple[int, int]:
+) -> tuple[int, int | None]:
     record_visit_key = _visit_key_from_record(record)
     if record_visit_key != right_of_entry_visit_key:
         raise RuntimeError(
@@ -213,11 +236,38 @@ def _verify_right_of_entry_record(
     return baseline_arrival_timestep, passage_timestep
 
 
+def _p_minus_one_rank_entry_from_record(
+    *,
+    node_name: str,
+    record: Mapping[str, object],
+) -> _PMinusOneRankEntry:
+    """Validate only rank-ordering fields before the candidate count limit."""
+    visit_key = _visit_key_from_record(record)
+    _verify_record_node_name(node_name=node_name, record=record, visit_key=visit_key)
+    vehicle_id = _require_non_negative_int(record["vehicle_id"], "vehicle_id")
+    baseline_arrival_timestep = _require_non_negative_int(
+        record["baseline_arrival_timestep"],
+        "baseline_arrival_timestep",
+    )
+    arrival_tiebreaker = _require_arrival_tiebreaker(
+        record["arrival_tiebreaker"],
+        "arrival_tiebreaker",
+    )
+    return _PMinusOneRankEntry(
+        visit_key=visit_key,
+        vehicle_id=vehicle_id,
+        baseline_arrival_timestep=baseline_arrival_timestep,
+        arrival_tiebreaker=arrival_tiebreaker,
+        record=record,
+    )
+
+
 def _candidate_visit_from_record(
     *,
     node_name: str,
     record: Mapping[str, object],
 ) -> OrderControlTvtCandidateVisit:
+    """Validate full candidate fields for visits inside the count limit."""
     visit_key = _visit_key_from_record(record)
     _verify_record_node_name(node_name=node_name, record=record, visit_key=visit_key)
     vehicle_id = _require_non_negative_int(record["vehicle_id"], "vehicle_id")
@@ -280,6 +330,31 @@ def _verify_right_of_entry_in_candidate_visits(
         )
 
 
+def _verify_right_of_entry_at_head_of_candidate_visits(
+    *,
+    node_name: str,
+    right_of_entry_visit_key: OrderControlTvtVisitKey,
+    candidate_visits: tuple[OrderControlTvtCandidateVisit, ...],
+) -> None:
+    if len(candidate_visits) == 0:
+        raise RuntimeError(
+            f"Node {node_name!r}: candidate_visits is empty after applying "
+            f"max_tvt_candidate_visit_count; expected at least the right-of-entry "
+            f"VisitKey {right_of_entry_visit_key!r}."
+        )
+    _verify_right_of_entry_in_candidate_visits(
+        node_name=node_name,
+        right_of_entry_visit_key=right_of_entry_visit_key,
+        candidate_visits=candidate_visits,
+    )
+    if candidate_visits[0].visit_key != right_of_entry_visit_key:
+        raise RuntimeError(
+            f"Node {node_name!r}: expected right-of-entry VisitKey "
+            f"{right_of_entry_visit_key!r} at candidate_visits[0], but got "
+            f"{candidate_visits[0].visit_key!r}."
+        )
+
+
 def _build_not_built_node_result(
     *,
     node_name: str,
@@ -292,6 +367,7 @@ def _build_not_built_node_result(
         right_of_entry_visit_key=None,
         right_of_entry_baseline_passage_timestep=None,
         k_confirmed_before=k_confirmed_before,
+        p_minus_one_eligible_visit_count_before_limit=None,
         candidate_visits=(),
     )
 
@@ -300,15 +376,24 @@ def build_tvt_candidate_visit_set(
     right_of_entry_selection_result: OrderControlTvtRightOfEntrySelectionResult,
     *,
     rank_states_by_node_name: Mapping[str, OrderControlTvtNodeRankState],
+    max_tvt_candidate_visit_count: int,
 ) -> OrderControlTvtCandidateVisitSetResult:
     """
     Build TVT candidate visit sets from right-of-entry selection results.
 
     Walks ``fork_result.target_node_names`` in order, reads the fork collector
     for selected Nodes, obtains passage timestep P, builds the P - 1 candidate
-    population, and checks baseline information completeness. Does not modify
-    rank ledgers, collector records, World state, or rerun upstream processing.
+    population in official baseline order, keeps at most
+    ``max_tvt_candidate_visit_count`` visits from the head, and checks baseline
+    information completeness for those limited candidates only. Visits beyond
+    the limit are not fully validated because they are outside this cycle's TVT
+    candidate set. Does not modify rank ledgers, collector records, World state,
+    or rerun upstream processing.
     """
+    validated_max_tvt_candidate_visit_count = _validate_max_tvt_candidate_visit_count(
+        max_tvt_candidate_visit_count
+    )
+
     leading_confirmation_result = (
         right_of_entry_selection_result.leading_confirmation_result
     )
@@ -399,6 +484,7 @@ def build_tvt_candidate_visit_set(
                     right_of_entry_visit_key=right_of_entry_visit_key,
                     right_of_entry_baseline_passage_timestep=None,
                     k_confirmed_before=k_confirmed_before,
+                    p_minus_one_eligible_visit_count_before_limit=None,
                     candidate_visits=(),
                 )
             )
@@ -408,7 +494,7 @@ def build_tvt_candidate_visit_set(
         node_rank_state = rank_states_by_node_name[node_name]
         exported_records = collector.export_node_baseline_visits(node_name)
 
-        candidate_visits_list: list[OrderControlTvtCandidateVisit] = []
+        p_minus_one_rank_entries: list[_PMinusOneRankEntry] = []
         for record in exported_records:
             record_visit_key = _visit_key_from_record(record)
             _verify_record_node_name(
@@ -445,23 +531,36 @@ def build_tvt_candidate_visit_set(
             if baseline_arrival_timestep > p - 1:
                 continue
 
-            candidate_visits_list.append(
-                _candidate_visit_from_record(
+            p_minus_one_rank_entries.append(
+                _p_minus_one_rank_entry_from_record(
                     node_name=node_name,
                     record=record,
                 )
             )
 
-        candidate_visits_list.sort(
-            key=lambda candidate: (
-                candidate.baseline_arrival_timestep,
-                candidate.arrival_tiebreaker,
-                candidate.vehicle_id,
+        p_minus_one_rank_entries.sort(
+            key=lambda rank_entry: (
+                rank_entry.baseline_arrival_timestep,
+                rank_entry.arrival_tiebreaker,
+                rank_entry.vehicle_id,
             )
         )
+        p_minus_one_eligible_visit_count_before_limit = len(p_minus_one_rank_entries)
+        limited_rank_entries = p_minus_one_rank_entries[
+            :validated_max_tvt_candidate_visit_count
+        ]
+
+        candidate_visits_list: list[OrderControlTvtCandidateVisit] = []
+        for rank_entry in limited_rank_entries:
+            candidate_visits_list.append(
+                _candidate_visit_from_record(
+                    node_name=node_name,
+                    record=rank_entry.record,
+                )
+            )
         candidate_visits = tuple(candidate_visits_list)
 
-        _verify_right_of_entry_in_candidate_visits(
+        _verify_right_of_entry_at_head_of_candidate_visits(
             node_name=node_name,
             right_of_entry_visit_key=right_of_entry_visit_key,
             candidate_visits=candidate_visits,
@@ -487,11 +586,15 @@ def build_tvt_candidate_visit_set(
                 right_of_entry_visit_key=right_of_entry_visit_key,
                 right_of_entry_baseline_passage_timestep=p,
                 k_confirmed_before=k_confirmed_before,
+                p_minus_one_eligible_visit_count_before_limit=(
+                    p_minus_one_eligible_visit_count_before_limit
+                ),
                 candidate_visits=candidate_visits,
             )
         )
 
     return OrderControlTvtCandidateVisitSetResult(
         right_of_entry_selection_result=right_of_entry_selection_result,
+        max_tvt_candidate_visit_count=validated_max_tvt_candidate_visit_count,
         node_candidate_set_results=tuple(node_candidate_set_results),
     )

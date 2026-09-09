@@ -1,5 +1,5 @@
 # Unit tests for TVT candidate visit set construction after right-of-entry
-# selection (design memo §25.25.34.44).
+# selection (design memo §25.25.34.46).
 #
 # Run from the repository root:
 #   python tests_order_control_tvt_candidate_visit_set.py
@@ -240,10 +240,13 @@ def _not_built_node(
 def _build(
     selection_result: OrderControlTvtRightOfEntrySelectionResult,
     rank_states_by_node_name: dict[str, OrderControlTvtNodeRankState],
+    *,
+    max_tvt_candidate_visit_count: int = 100,
 ) -> OrderControlTvtCandidateVisitSetResult:
     return build_tvt_candidate_visit_set(
         selection_result,
         rank_states_by_node_name=rank_states_by_node_name,
+        max_tvt_candidate_visit_count=max_tvt_candidate_visit_count,
     )
 
 
@@ -264,6 +267,57 @@ def _expect_runtime_error(test_callable, expected_substring: str) -> None:
             ) from exc
         return
     raise AssertionError("Expected RuntimeError")
+
+
+def _expect_value_error(test_callable) -> None:
+    try:
+        test_callable()
+    except ValueError:
+        return
+    raise AssertionError("Expected ValueError")
+
+
+def _register_p_minus_one_chain(
+    collector: OrderControlBaselineCollector,
+    rank_state: OrderControlTvtNodeRankState,
+    *,
+    p: int,
+    visit_count: int,
+    unresolved_rank: int | None = None,
+    beyond_limit_bad_fields: bool = False,
+) -> OrderControlTvtRightOfEntrySelectionResult:
+    visit_keys: list[OrderControlTvtVisitKey] = []
+    for index in range(visit_count):
+        vehicle_name = f"veh_{index}"
+        visit_id = index + 1
+        visit_keys.append((vehicle_name, visit_id))
+        arrival = 10 + index
+        passage: int | None = p + index
+        route_next_link_name = "out"
+        if unresolved_rank is not None and index + 1 == unresolved_rank:
+            passage = None
+        if beyond_limit_bad_fields and index + 1 == visit_count:
+            passage = None
+        _register_b_visit(
+            collector,
+            vehicle_name=vehicle_name,
+            visit_id=visit_id,
+            vehicle_id=index + 1,
+            arrival=arrival,
+            tiebreaker=float(index) * 0.1,
+            route_next_link_name=route_next_link_name,
+            passage=passage,
+        )
+        if beyond_limit_bad_fields and index + 1 == visit_count:
+            record = collector._visit_records_by_primary_key[(vehicle_name, visit_id)]
+            record.baseline_passage_timestep = True  # type: ignore[assignment]
+            record.route_next_link_name = None
+    _register_undetermined(rank_state, *visit_keys)
+    return _selection_result(
+        collector=collector,
+        target_node_names=("merge",),
+        node_selection_results=(_selected_node("merge", visit_keys[0]),),
+    )
 
 
 # --- tests ---
@@ -288,6 +342,26 @@ def test_enum_and_result_types_are_frozen():
         assert dataclasses.is_dataclass(cls)
         for field in dataclasses.fields(cls):
             assert field.repr is not False
+    assert {
+        field.name
+        for field in dataclasses.fields(OrderControlTvtNodeCandidateVisitSetResult)
+    } == {
+        "node_name",
+        "build_status",
+        "right_of_entry_visit_key",
+        "right_of_entry_baseline_passage_timestep",
+        "k_confirmed_before",
+        "p_minus_one_eligible_visit_count_before_limit",
+        "candidate_visits",
+    }
+    assert {
+        field.name
+        for field in dataclasses.fields(OrderControlTvtCandidateVisitSetResult)
+    } == {
+        "right_of_entry_selection_result",
+        "max_tvt_candidate_visit_count",
+        "node_candidate_set_results",
+    }
 
 
 def test_not_built_statuses_do_not_query_collector():
@@ -322,6 +396,8 @@ def test_not_built_statuses_do_not_query_collector():
     assert node_result.right_of_entry_visit_key is None
     assert node_result.right_of_entry_baseline_passage_timestep is None
     assert node_result.candidate_visits == ()
+    assert node_result.p_minus_one_eligible_visit_count_before_limit is None
+    assert result.max_tvt_candidate_visit_count == 100
     assert result.right_of_entry_selection_result is selection_result
 
     collector2 = OrderControlBaselineCollector()
@@ -383,6 +459,7 @@ def test_unresolved_right_of_entry_passage_and_no_export():
     assert node_result.right_of_entry_visit_key == ("veh_roe", 1)
     assert node_result.right_of_entry_baseline_passage_timestep is None
     assert node_result.candidate_visits == ()
+    assert node_result.p_minus_one_eligible_visit_count_before_limit is None
 
 
 def test_baseline_information_complete_with_p_minus_one_boundary():
@@ -777,7 +854,7 @@ def test_candidate_record_validation_and_missing_right_of_entry():
         visit_id=9,
         node_name="merge",
         baseline_arrival_timestep=12,
-        arrival_tiebreaker=0.0,
+        arrival_tiebreaker=1.0,
         route_next_link_name="out",
     )
     record_dup = collector2._visit_records_by_primary_key[("veh_dup", 9)]
@@ -981,7 +1058,7 @@ def test_multi_node_independent_status_and_failure_stops_later_nodes():
             selection_fail,
             {"node_a": rank_state_fail_a, "node_b": rank_state_fail_b},
         ),
-        "missing from the candidate visit set",
+        "candidate_visits is empty",
     )
 
 
@@ -1171,6 +1248,258 @@ def test_existing_result_types_remain_unchanged():
     rank_state = _new_rank_state("merge")
     assert hasattr(rank_state, "is_undetermined")
     assert hasattr(rank_state, "is_confirmed")
+
+
+def test_invalid_max_tvt_candidate_visit_count_rejects_before_collector():
+    collector = OrderControlBaselineCollector()
+    rank_state = _new_rank_state("merge")
+    _register_undetermined(rank_state, ("veh_roe", 1))
+    _register_b_visit(
+        collector,
+        vehicle_name="veh_roe",
+        visit_id=1,
+        vehicle_id=1,
+        arrival=12,
+        passage=14,
+    )
+    selection_result = _selection_result(
+        collector=collector,
+        target_node_names=("merge",),
+        node_selection_results=(_selected_node("merge", ("veh_roe", 1)),),
+    )
+    invalid_values = [True, False, 0, -1, 1.0, "10", None]
+    for invalid_value in invalid_values:
+        with patch.object(
+            collector,
+            "get_baseline_visit_snapshot",
+            wraps=collector.get_baseline_visit_snapshot,
+        ) as get_snapshot, patch.object(
+            collector,
+            "export_node_baseline_visits",
+            wraps=collector.export_node_baseline_visits,
+        ) as export_node:
+            _expect_value_error(
+                lambda invalid_value=invalid_value: build_tvt_candidate_visit_set(
+                    selection_result,
+                    rank_states_by_node_name={"merge": rank_state},
+                    max_tvt_candidate_visit_count=invalid_value,
+                )
+            )
+            get_snapshot.assert_not_called()
+            export_node.assert_not_called()
+
+
+def test_max_tvt_candidate_visit_count_limits_and_result_fields():
+    collector = OrderControlBaselineCollector()
+    rank_state = _new_rank_state("merge")
+    p = 30
+    selection_result = _register_p_minus_one_chain(
+        collector,
+        rank_state,
+        p=p,
+        visit_count=11,
+        unresolved_rank=11,
+    )
+    result_n1 = _build(
+        selection_result,
+        {"merge": rank_state},
+        max_tvt_candidate_visit_count=1,
+    )
+    node_n1 = result_n1.node_candidate_set_results[0]
+    assert result_n1.max_tvt_candidate_visit_count == 1
+    assert node_n1.p_minus_one_eligible_visit_count_before_limit == 11
+    assert len(node_n1.candidate_visits) == 1
+    assert node_n1.candidate_visits[0].visit_key == ("veh_0", 1)
+    assert node_n1.build_status == (
+        OrderControlTvtCandidateVisitSetStatus.BASELINE_INFORMATION_COMPLETE
+    )
+
+    result_n10 = _build(
+        selection_result,
+        {"merge": rank_state},
+        max_tvt_candidate_visit_count=10,
+    )
+    node_n10 = result_n10.node_candidate_set_results[0]
+    assert result_n10.max_tvt_candidate_visit_count == 10
+    assert node_n10.p_minus_one_eligible_visit_count_before_limit == 11
+    assert len(node_n10.candidate_visits) == 10
+    assert [item.visit_key for item in node_n10.candidate_visits] == [
+        (f"veh_{index}", index + 1) for index in range(10)
+    ]
+    assert node_n10.candidate_visits[0].visit_key == ("veh_0", 1)
+    assert node_n10.build_status == (
+        OrderControlTvtCandidateVisitSetStatus.BASELINE_INFORMATION_COMPLETE
+    )
+
+    for limit in (15, 20):
+        result_large = _build(
+            selection_result,
+            {"merge": rank_state},
+            max_tvt_candidate_visit_count=limit,
+        )
+        assert result_large.max_tvt_candidate_visit_count == limit
+        node_large = result_large.node_candidate_set_results[0]
+        assert len(node_large.candidate_visits) == 11
+        assert node_large.p_minus_one_eligible_visit_count_before_limit == 11
+
+    collector_small = OrderControlBaselineCollector()
+    rank_state_small = _new_rank_state("merge")
+    selection_small = _register_p_minus_one_chain(
+        collector_small,
+        rank_state_small,
+        p=p,
+        visit_count=3,
+    )
+    result_below = _build(
+        selection_small,
+        {"merge": rank_state_small},
+        max_tvt_candidate_visit_count=10,
+    )
+    node_below = result_below.node_candidate_set_results[0]
+    assert node_below.p_minus_one_eligible_visit_count_before_limit == 3
+    assert len(node_below.candidate_visits) == 3
+
+    collector_equal = OrderControlBaselineCollector()
+    rank_state_equal = _new_rank_state("merge")
+    selection_equal = _register_p_minus_one_chain(
+        collector_equal,
+        rank_state_equal,
+        p=p,
+        visit_count=5,
+    )
+    result_equal = _build(
+        selection_equal,
+        {"merge": rank_state_equal},
+        max_tvt_candidate_visit_count=5,
+    )
+    node_equal = result_equal.node_candidate_set_results[0]
+    assert node_equal.p_minus_one_eligible_visit_count_before_limit == 5
+    assert len(node_equal.candidate_visits) == 5
+
+
+def test_nth_unresolved_candidate_does_not_promote_later_visit():
+    collector = OrderControlBaselineCollector()
+    rank_state = _new_rank_state("merge")
+    p = 25
+    selection_result = _register_p_minus_one_chain(
+        collector,
+        rank_state,
+        p=p,
+        visit_count=3,
+        unresolved_rank=2,
+    )
+    rank3_visit_key = ("veh_2", 3)
+    result = _build(
+        selection_result,
+        {"merge": rank_state},
+        max_tvt_candidate_visit_count=2,
+    )
+    node_result = result.node_candidate_set_results[0]
+    assert node_result.p_minus_one_eligible_visit_count_before_limit == 3
+    assert node_result.build_status == (
+        OrderControlTvtCandidateVisitSetStatus.UNRESOLVED_CANDIDATE_PASSAGES
+    )
+    assert len(node_result.candidate_visits) == 2
+    assert [item.visit_key for item in node_result.candidate_visits] == [
+        ("veh_0", 1),
+        ("veh_1", 2),
+    ]
+    assert node_result.candidate_visits[0].baseline_passage_timestep is not None
+    assert node_result.candidate_visits[1].baseline_passage_timestep is None
+    assert rank3_visit_key not in {
+        item.visit_key for item in node_result.candidate_visits
+    }
+    rank3_record = collector._visit_records_by_primary_key[rank3_visit_key]
+    assert rank3_record.baseline_passage_timestep is not None
+
+
+def test_beyond_limit_incomplete_fields_do_not_affect_candidate_build():
+    collector = OrderControlBaselineCollector()
+    rank_state = _new_rank_state("merge")
+    p = 30
+    selection_result = _register_p_minus_one_chain(
+        collector,
+        rank_state,
+        p=p,
+        visit_count=11,
+        beyond_limit_bad_fields=True,
+    )
+    result = _build(
+        selection_result,
+        {"merge": rank_state},
+        max_tvt_candidate_visit_count=10,
+    )
+    node_result = result.node_candidate_set_results[0]
+    assert node_result.build_status == (
+        OrderControlTvtCandidateVisitSetStatus.BASELINE_INFORMATION_COMPLETE
+    )
+    assert node_result.p_minus_one_eligible_visit_count_before_limit == 11
+    assert len(node_result.candidate_visits) == 10
+
+
+def test_beyond_limit_invalid_rank_material_still_fails():
+    collector = OrderControlBaselineCollector()
+    rank_state = _new_rank_state("merge")
+    p = 30
+    selection_result = _register_p_minus_one_chain(
+        collector,
+        rank_state,
+        p=p,
+        visit_count=11,
+    )
+    record = collector._visit_records_by_primary_key[("veh_10", 11)]
+    record.arrival_tiebreaker = True  # type: ignore[assignment]
+    _expect_runtime_error(
+        lambda: _build(
+            selection_result,
+            {"merge": rank_state},
+            max_tvt_candidate_visit_count=10,
+        ),
+        "arrival_tiebreaker",
+    )
+
+
+def test_multi_node_uses_same_max_tvt_candidate_visit_count():
+    collector = OrderControlBaselineCollector()
+    rank_state_a = _new_rank_state("node_a")
+    rank_state_b = _new_rank_state("node_b")
+    _register_undetermined(rank_state_a, ("veh_a", 1))
+    _register_undetermined(rank_state_b, ("veh_b", 2))
+    _register_b_visit(
+        collector,
+        vehicle_name="veh_a",
+        visit_id=1,
+        vehicle_id=1,
+        node_name="node_a",
+        arrival=12,
+        passage=14,
+    )
+    _register_b_visit(
+        collector,
+        vehicle_name="veh_b",
+        visit_id=2,
+        vehicle_id=2,
+        node_name="node_b",
+        arrival=12,
+        passage=14,
+    )
+    selection_result = _selection_result(
+        collector=collector,
+        target_node_names=("node_a", "node_b"),
+        node_selection_results=(
+            _selected_node("node_a", ("veh_a", 1)),
+            _selected_node("node_b", ("veh_b", 2)),
+        ),
+    )
+    result = _build(
+        selection_result,
+        {"node_a": rank_state_a, "node_b": rank_state_b},
+        max_tvt_candidate_visit_count=7,
+    )
+    assert result.max_tvt_candidate_visit_count == 7
+    for node_result in result.node_candidate_set_results:
+        assert node_result.p_minus_one_eligible_visit_count_before_limit == 1
+        assert len(node_result.candidate_visits) == 1
 
 
 if __name__ == "__main__":
