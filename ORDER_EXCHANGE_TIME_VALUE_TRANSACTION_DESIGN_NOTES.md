@@ -136,6 +136,8 @@
 
 > **最新状態（2026-09-09・可変上限 N 実装後）：** TVT 制度ロジック全体と上位 TVT 制御は、引き続き未完成である。実装済み範囲へ、TVT 固有可変上限 N と上限内 baseline 情報充足判定を追加した（**§25.25.34.47**）。公開識別子は `max_tvt_candidate_visit_count`。P − 1 該当 Visit を正式 baseline 順に並べた後、先頭最大 N 件だけを `candidate_visits` とする。情報充足判定は上限適用後の `candidate_visits` だけを対象とする。snapshot 時点の inlink 内物理順の独立保存、inlink 別候補列、具体的買い手集合生成は引き続き未実装。詳細正本は **§25.25.34.47**。
 
+> **実装前設計確定（2026-09-09）：** snapshot 時点の inlink 内物理順の独立保存と baseline fork 後への受渡しについて、実装前設計を **§25.25.34.48** で確定した。snapshot 物理順の Python 実装は未着手である。本注記の既存本文は変更しない。
+
 ### 1.3 研究シナリオ前提（BATCHと共通）
 
 - 比較対象内部交差点 Node を目的地としない端点間 OD を使用する。
@@ -550,6 +552,8 @@ TVT候補Vehicleのbaseline予想到着timestep + 1
 
 > **最新状態（2026-09-09・可変上限 N 実装後）：** P − 1 条件は維持する。P − 1 該当 Visit を正式 baseline 順に並べた後、先頭最大 N 件だけを `candidate_visits` とする（**§25.25.34.47**）。非参加 Visit も N 件に数える。可変上限 N と意思決定窓を混同しない。N 以内であることだけを理由に、意思決定窓外 Visit を必ず順位確定するとは記載しない。詳細正本は **§25.25.34.47**。
 
+> **実装前設計確定（2026-09-09）：** 可変上限 N による `candidate_visits` 選定と snapshot 時点の inlink 内物理順は別情報である。N 件選択は正式 baseline 順位で行い、snapshot 物理順を N 件選択の基準に使用しない。将来、上限適用済み `candidate_visits` を保存済み物理順と照合する処理は未実装である。詳細正本は **§25.25.34.48**。
+
 ---
 
 ## 8. 権利保有車両
@@ -579,6 +583,8 @@ TVT候補 Vehicle の時間範囲を定めるため、権利保有車両の **ba
 > **実装状況（2026-09-09）：** TVT 候補 Visit 母集団の構築は **§25.25.34.44** / **§25.25.34.45** で実装済みである。**§25.25.34.45** 時点では、P − 1 条件を満たす Visit 全件を正式 baseline 順で `candidate_visits` へ含める上限なし版であった。TVT-SB、TVT-MH、TVT-SP、TVT-MP の具体的買い手集合生成は未実装である。各 inlink の物理的先頭から prefix を構築する処理も未実装である。snapshot 時点の inlink 内物理順の独立保存も未実装である。上限適用前の過去到達点の詳細は **§25.25.34.45**。§9.4 の初期上限 10 と感度分析候補 15・20 は既存制度記録として維持する。可変上限 N の実装済み事実は本注記ではまだ反映しない。§9.8 の最大 9 候補に関する既存説明も変更しない。
 
 > **最新状態（2026-09-09・可変上限 N 実装後）：** TVT 候補 Visit 母集団への TVT 固有可変上限 N は **§25.25.34.47** で実装・検証済み。§9.4 の初期基本値 10 を維持しつつ、本番処理では `max_tvt_candidate_visit_count` として可変化済み（基本値 10、感度分析値 15・20 などを呼出側から明示渡し）。P − 1 該当 Visit を正式 baseline 順に並べた後、先頭最大 N 件だけを `candidate_visits` とする。§9.8 の最大 9 候補は、N = 10・権利保有 Visit 1 件・非参加 Vehicle なし等の前提による説明である。可変 N 一般では、権利保有 Visit 以外に含まれ得る最大件数は N − 1 である。§9.8 の既存本文は変更しない。具体的買い手集合生成、prefix、snapshot 物理順保存は未実装。詳細正本は **§25.25.34.47**。
+
+> **実装前設計確定（2026-09-09）：** 将来の inlink 別候補列と買い手 prefix は、snapshot 時点に固定保存した inlink 内物理順を使用する。collector 登録順、snapshot `plan.entries` 順、順位台帳登録順、baseline 到着順から物理順を推測しない。物理順は先頭（index 0）から後方へ向かう順序である。baseline fork 後の保存場所は `OrderControlBaselineForkResult` である。具体的な inlink 別候補列と prefix 生成は未実装である。詳細正本は **§25.25.34.48**。
 
 ### 9.1 最終ルール名称（確定）
 
@@ -2499,6 +2505,8 @@ Copy-on-write に近い考え方。性能改善の可能性は高い。仮想側
 > **更新注記（2026-09-09）：** 上記状態は 2026-08-26 時点の歴史的記録である。現在は次まで実装・検証済みである：collector、UXsim 通知接続、snapshot 固定集合構築、固定 horizon 正式 driver、Node 別順位状態、snapshot 固定 Visit の順位未確定登録、順位台帳登録付き baseline fork、Node 別 alignment、既到着 Visit 先行確定、先頭連続非参加 Visit 先行確定、権利保有 Visit 選定、P 取得、P − 1 候補 Visit 母集団構築、候補全員の baseline 通過情報充足判定。**§25.25.34.45** 時点では候補数上限未適用の全件候補である。snapshot 物理順の独立保存、具体的買い手集合、局所仮想計算、経済評価、最終順位確定の上位接続は未実装である。詳細は **§25.23** 以降、**§25.25.29**、**§25.25.31**、**§25.25.34.31**〜**.45** を参照する。
 
 > **最新状態（2026-09-09・可変上限 N 実装後）：** TVT 候補 Visit 母集団への TVT 固有可変上限 N と上限内 baseline 情報充足判定は **§25.25.34.47** で実装・検証済み。snapshot 物理順の独立保存、具体的買い手集合、局所仮想計算、経済評価、最終順位確定の上位接続は引き続き未実装。詳細正本は **§25.25.34.47**。
+
+> **実装前設計確定（2026-09-09）：** snapshot 固定集合と同時に、各 inlink の物理順を関係情報として構築する実装前設計を確定した。`OrderControlBaselineSnapshotRegistrationPlan` で構築し、baseline fork 後は物理順だけを `OrderControlBaselineForkResult` へ残す。`RegistrationPlan` 全体は残さない。collector へ保存しない。snapshot 固定 Visit を 1 件以上含む inlink だけ単車線を要求する。研究対象外 Vehicle 向けに追加処理を作らない。Python 実装は未着手である。詳細正本は **§25.25.34.48**。
 
 ### 24.1 この更新の位置づけ
 
@@ -5539,6 +5547,8 @@ Terminalで次が成功した：
 > **更新注記（2026-09-09）：** 「正式 driver 未実装」は当時の歴史的記録である。固定 horizon 正式 driver は **§25.25.29** で実装・検証済み。snapshot 固定集合を prepare し、実 World 側順位台帳へ未登録 Visit を登録し、同じ plan を fork 側 collector へ apply してから baseline を実行する TVT 専用経路は **§25.25.34.35** で実装済み。baseline fork 後の Node 別 alignment は **§25.25.34.37** で実装済み。driver は固定 horizon を一括実行し、P 取得後に再実行または延長しない。driver は候補 Visit 母集団や情報充足を判定しない。P 取得、P − 1 候補母集団、候補情報充足判定は後段の **§25.25.34.45** で実装済み。早期終了方式は正式実装していない。本注記には可変上限 N を含めない。
 
 > **最新状態（2026-09-09・可変上限 N 実装後）：** P 取得、P − 1 候補母集団、候補情報充足判定の最新実装は **§25.25.34.47**（可変上限 N 適用版）。driver の責任分界は変更しない。
+
+> **実装前設計確定（2026-09-09）：** 固定 horizon driver の結果 `OrderControlBaselineForkResult` へ、snapshot 時点の inlink 内物理順だけを残す設計を確定した。一般 driver と TVT 順位台帳登録付き driver の公開署名は維持する。baseline fork 後に plan を再 prepare したり、`inlink.vehicles` を再読取したりしない。`RegistrationPlan` 全体は返さない。Python 実装は未着手である。詳細正本は **§25.25.34.48**。
 
 #### 25.25.2 初期正式driverの目的
 
@@ -19751,3 +19761,366 @@ def build_tvt_candidate_visit_set(
 - 未コミット変更：`uxsim/order_control_tvt_candidate_visit_set.py`、`tests_order_control_tvt_candidate_visit_set.py`、本設計メモ（`ORDER_EXCHANGE_PROGRESS.md` にも未コミット変更が存在するが、本実装の正本は本小節とコードである）
 - `diagnostics/order_control.zip` は既存未追跡、未接触、対象外
 - git add、git commit、git push は**未実行**
+
+##### 25.25.34.48 snapshot 時点の inlink 内物理順の独立保存と baseline fork 後への受渡し（実装前設計）
+
+**2026-09-09 更新：** **§25.25.34.47** の TVT 固有可変上限 N は実装・検証済みである。次の設計対象として、snapshot 時点の inlink 内物理順の独立保存と baseline fork 後への受渡しを確定した。本小節 **§25.25.34.48** を、この実装前設計の最新正本とする。
+
+**今回の作業範囲：** 本小節は実装前設計の記録だけである。Python コードとテストは未変更である。実装完了記録は、実装・検証後に別小節へ追加する。
+
+**設計の経緯：** Composer 2.5 の一次調査、Grok 4.6 の反証レビュー、実コードと既存設計メモの直接確認を経て確定した。Grok 4.6 の「`RegistrationPlan` で構築する」という骨格は採用する。ただし、`RegistrationPlan` だけでは driver 終了後に情報が失われるため、物理順だけを `OrderControlBaselineForkResult` へ残す。Grok 4.6 が提案した「対象 Node の全 inlink を複車線なら拒否」は採用せず、物理順を実際に保存する inlink だけに単車線条件を要求する。研究対象外 Vehicle への追加対応によって設計を複雑化しない。
+
+###### 非技術的な目的
+
+- snapshot 時点に、同じ inlink 上でどの Visit が前方・後方にいたかを固定保存する。
+- baseline 実行後に `inlink.vehicles` を読み直すと状態が変わっているため、後から物理順を再構築しない。
+- collector 登録順、snapshot `plan.entries` 順、順位台帳登録順、baseline 予想到着順を物理順の代用にしない。
+- 保存した物理順は、将来、上限適用済み `candidate_visits` を inlink 別へ分け、物理先頭から prefix を構築するために使用する。
+- 現在の正式研究対象は単車線であり、複車線への完全対応は今回行わない。
+
+###### データ源
+
+- 単車線 inlink の `inlink.vehicles` deque 順を正本とする。
+- index 0 が対象 Node に最も近い物理先頭である。
+- 先頭から後方へ向かう順序を固定保存する。
+- A 型と B 型を同じ inlink 内物理順へ統合する。
+- A 型が `incoming_vehicles` と `inlink.vehicles` の双方に存在することは正常である。
+- 物理順の正本は `inlink.vehicles` 側であり、`incoming_vehicles` だけから物理順を作らない。
+
+###### 研究対象外条件
+
+- trip-end Vehicle は現在の研究対象外である。
+- `state=="end"`、`state=="abort"`、trip-end 待ち、taxi、`specified_route` は既存 snapshot 処理で固定集合から除外される。
+- 今回は、これら研究対象外ケースに対応するための新しい補完処理、blocker 表現、prefix 連続性処理を追加しない。
+- 既存の除外処理は変更しない。
+- `participates_in_order_exchange=False` は除外せず、物理順へ含める。
+- 正式研究条件で正しく動くことを優先する。
+
+###### 保存型
+
+実装候補として次の公開 frozen dataclass を確定する。
+
+**正式名称：** `OrderControlBaselineSnapshotInlinkPhysicalOrder`
+
+| フィールド | 型 | 意味 |
+|-----------|-----|------|
+| `node_name` | `str` | 対象 Node 名 |
+| `inlink_name` | `str` | 対象 inlink 名 |
+| `visit_keys_head_to_tail` | `tuple[OrderControlTvtVisitKey, ...]` | 先頭（index 0）から後方へ向かう VisitKey 列 |
+
+**意味：**
+
+- `visit_keys_head_to_tail` の index 0 が対象 Node に最も近い物理先頭である。
+- 後方へ向かう順序で VisitKey を保持する。
+- 整数の物理順位は保存しない。必要な場合は tuple 位置から派生する。
+- 0 始まりまたは 1 始まりの整数順位を重複保存しない。
+
+**保存しない値：**
+
+- Vehicle、Link、Node、World のオブジェクト参照
+- `Vehicle.x`
+- `Vehicle.x_next`
+- lane ID
+- baseline 予想到着順位
+- collector の到着・通過結果
+- 整数 physical rank
+- 参加状態
+- 候補内外の区分
+
+###### RegistrationPlan
+
+既存の `OrderControlBaselineSnapshotRegistrationPlan` へ、次を追加する設計とする。
+
+```text
+inlink_physical_orders: tuple[OrderControlBaselineSnapshotInlinkPhysicalOrder, ...]
+```
+
+**既存フィールド：**
+
+- `baseline_timestep_T`
+- `target_node_names`
+- `entries`
+
+**責任分担：**
+
+- `entries` は snapshot 固定 Visit ごとの登録属性である。
+- `inlink_physical_orders` は同じ snapshot 固定 Visit 集合の inlink 内前後関係である。
+- `entries` の並びには物理順の意味を与えない。
+- 属性情報と関係情報で責務が異なるため、不適切な二重順位正本とは扱わない。
+- prepare 完了前に `entries` と物理順の集合整合を確認する。
+- `RegistrationPlan` は、順位台帳登録と collector apply へ同じ snapshot 情報を渡す共有入力である。
+- `RegistrationPlan` 全体は baseline 完了後の結果へ保持しない。
+
+###### 構築方法
+
+**構築責任：**
+
+- `uxsim/order_control_baseline_snapshot.py`
+- `prepare_snapshot_fixed_visit_registration_plan`
+
+**構築条件：**
+
+- 既存 snapshot 固定 Visit 計画と同じ `fork_W.T`。
+- 同じ `target_node_names`。
+- 同じ snapshot 固定集合条件。
+- `inlink.vehicles` を index 0 から走査する。
+- 既存 snapshot 固定集合へ含まれる Visit だけを VisitKey として物理順へ保存する。
+- 非参加 Visit も含める。
+- A 型と B 型を同じ物理順へ統合する。
+- 研究対象外 Vehicle 向けの新しい補完処理は追加しない。
+
+**全体の並び：**
+
+- `inlink_physical_orders` は `target_node_names` 順である。
+- 同一 Node 内では `Node.inlinks` の既存決定的順序である。
+- 同一 inlink 内では `inlink.vehicles` の先頭から末尾である。
+
+**空 inlink：**
+
+- snapshot 固定 Visit を 1 件も含まない inlink は `inlink_physical_orders` へ含めない。
+- 本構造はネットワーク全 inlink の目録ではなく、今回の snapshot 固定 Visit の関係情報である。
+- 空 inlink の省略を、inlink 不存在や対象外 Node の意味には使用しない。
+
+###### 単車線条件
+
+- 物理順を実際に保存する inlink について、`number_of_lanes == 1` を要求する。
+- snapshot 固定 Visit が 0 件で物理順構造へ含めない inlink については、今回の物理順保存を理由に車線数を検証しない。
+- 対象 Node の全 inlink を無条件に単車線検証する案は採用しない。
+- 理由は、今回の物理順情報へ現れない inlink まで停止対象にするのは過剰検証である。
+- 複車線 inlink に snapshot 固定 Visit が 1 件以上ある場合は `ValueError` である。
+- 複車線の lane 別物理順は今回設計しない。
+- lane ID や lane 別 tuple は追加しない。
+- `Vehicle.x` と deque 順の照合は行わない。
+- 将来、複車線を正式研究対象にする場合は別設計とする。
+
+###### baseline fork 後への受渡し
+
+既存の `OrderControlBaselineForkResult` へ次を追加する設計とする。
+
+```text
+inlink_physical_orders: tuple[OrderControlBaselineSnapshotInlinkPhysicalOrder, ...]
+```
+
+**重要：**
+
+- `RegistrationPlan` 全体を `ForkResult` へ保持しない。
+- `plan.entries` を後続へ長期保持しない。
+- plan 内で構築した `inlink_physical_orders` と同じ frozen tuple を `ForkResult` へ渡す。
+- 物理順を再構築しない。
+- baseline 実行後に `fork_W` の `inlink.vehicles` を再読取しない。
+- `real_W` または `fork_W` を `ForkResult` へ保存しない。
+- 物理順は `real_W` の長期状態へ保存しない。
+- `World.copy()` 対象を増やさない。
+- 保持期間は当該 baseline 結果オブジェクトの寿命に限定する。
+
+**`OrderControlBaselineForkResult` へ保存する理由：**
+
+- 物理順は snapshot 固定 baseline fork に付随する snapshot 事実である。
+- 現在の後続結果型は入れ子で `fork_result` まで遡れる。
+- alignment 以降の結果型を逐次変更せず、`ForkResult` の 1 か所だけに保存できる。
+- TVT 専用ラッパー結果型を追加するより単純である。
+- candidate 結果型へ物理順を重複コピーしない。
+
+**現在の参照経路：**
+
+```text
+OrderControlTvtCandidateVisitSetResult
+  → right_of_entry_selection_result
+    → leading_confirmation_result
+      → arrived_confirmation_result
+        → alignment_fork_result
+          → fork_result
+            → fork_result.inlink_physical_orders
+```
+
+###### driver
+
+**実装時の設計：**
+
+- `run_snapshot_fixed_baseline_fork` の公開署名は変更しない。
+- `run_snapshot_fixed_baseline_fork_with_tvt_rank_ledger_registration` の公開署名も変更しない。
+- 両経路とも `OrderControlBaselineForkResult` を返す。
+- 一般 driver 経路も、`RegistrationPlan` を取得できるよう内部で prepare と apply を明示的に使用する。
+- 両経路とも `plan.inlink_physical_orders` を `ForkResult` へ渡す。
+- `_complete_baseline_fork_after_registration` へ物理順を渡せるよう内部契約を調整する。
+- 空結果と通常結果の双方へ物理順を保存する。
+- `register_snapshot_fixed_visits` の公開署名と戻り値 `int` は維持する。
+- apply は物理順を collector へ書かない。
+- baseline fork を再実行しない。
+- plan を後から再 prepare しない。
+
+###### 可変上限 N との分離
+
+- `build_tvt_candidate_visit_set` の候補選択ロジックは変更しない。
+- P − 1 該当 Visit を正式 baseline 順へ並べ、先頭最大 `max_tvt_candidate_visit_count` 件を選ぶ。
+- snapshot 物理順を N 件選択の基準にしない。
+- 上限外 Visit も snapshot 物理順の保存段階では失わない。
+- 将来、別処理が `candidate_visits` の VisitKey 集合を保存済み物理順と照合する。
+- 非参加 Visit も物理順へ含める。
+- 権利保有 Visit と同じ inlink の除外は、将来の inlink 別候補列または prefix 生成側の責務である。
+- 今回の物理順保存は具体的買い手集合を生成しない。
+
+###### 必要最小限の検査
+
+**実装時に prepare 内で確認する候補：**
+
+- 物理順へ保存した VisitKey が、その Node・inlink の `plan.entries` に存在する。
+- その Node・inlink の snapshot 固定 `entries` の VisitKey が、物理順から欠落していない。
+- 一つの物理順 tuple 内に VisitKey 重複がない。
+- 同じ VisitKey が複数の Node または inlink の物理順へ出現しない。
+- 物理順を保存する inlink は `number_of_lanes == 1` である。
+
+**検査を重複実装しない：**
+
+- entry の Node・inlink 対応は集合照合へ含める。
+- collector の全フィールドを再検証しない。
+- 順位台帳状態を検証しない。
+- A 型の incoming と inlink 二重出現自体を再検証しない。
+- `Vehicle.x` と deque 順を照合しない。
+- 既存 prepare で保証済みの一般不変条件を重複検証しない。
+
+**例外方針：**
+
+- 外部入力、snapshot 状態、単車線入力契約の不一致は `ValueError` である。
+- 新しい独自例外型を作らない。
+- 検証失敗時に不完全な `RegistrationPlan` を返さない。
+- collector への apply 前に物理順検証を完了する。
+- 実装時に既存 snapshot モジュールの例外契約と照合し、必要以上の `RuntimeError` を追加しない。
+
+###### 棄却した案
+
+| 案 | 棄却理由 |
+|----|---------|
+| `RegistrationPlan` だけへ保存 | driver 終了後に plan が失われ、後続へ届かない |
+| `RegistrationPlan` 全体を `ForkResult` へ保存 | 後続で不要な `entries` まで保持し、snapshot 時点の未更新属性と fork 後 collector 結果の責任が不明瞭になる |
+| TVT 専用 `ForkResult` ラッパー | 入れ子が増え、既存参照経路が複雑になる |
+| `AlignmentResult` へ初めて追加 | 物理順の由来は alignment ではなく snapshot prepare である |
+| 後続関数へ毎回別引数 | 引渡し漏れを起こしやすい |
+| baseline 後に再 prepare または `inlink.vehicles` を再読取 | snapshot 固定情報でなくなる |
+| collector record へ保存 | snapshot 交通状態と baseline 観測結果の責務を混同する |
+| candidate 結果型へ保存 | 上限外 Visit の物理順を失い、保存時点も遅い |
+| 対象 Node の全 inlink を複車線なら拒否 | snapshot 固定 Visit が 0 件の無関係な inlink まで停止対象にする過剰検証である |
+| 研究対象外 Vehicle の blocker 情報を新規保存 | 現在の正式研究条件に不要であり、設計と実装を複雑化する |
+
+###### 公開 API への影響
+
+**追加予定：**
+
+- `OrderControlBaselineSnapshotInlinkPhysicalOrder`
+- `OrderControlBaselineSnapshotRegistrationPlan.inlink_physical_orders`
+- `OrderControlBaselineForkResult.inlink_physical_orders`
+
+**維持する公開署名：**
+
+- `prepare_snapshot_fixed_visit_registration_plan`
+- `apply_snapshot_fixed_visit_registration_plan`
+- `register_snapshot_fixed_visits`
+- `run_snapshot_fixed_baseline_fork`
+- `run_snapshot_fixed_baseline_fork_with_tvt_rank_ledger_registration`
+- `run_snapshot_fixed_baseline_fork_and_align_undetermined_visits`
+- arrived、leading、right-of-entry、candidate の各公開処理
+
+**その他：**
+
+- getter は初期実装では追加しない。
+- 永続 dict 索引は保存しない。
+- tuple と dict の二重正本を作らない。
+- 必要な後続処理が一時的な dict 索引を作る。
+
+###### 実装時の変更対象候補
+
+**本番：**
+
+- `uxsim/order_control_baseline_snapshot.py`
+- `uxsim/order_control_baseline_driver.py`
+
+**主なテスト：**
+
+- `tests_order_control_baseline_snapshot.py`
+- `tests_order_control_baseline_driver.py`
+- `tests_order_control_tvt_baseline_driver_registration.py`
+- `tests_order_control_tvt_baseline_fork_alignment.py`
+
+**直接コンストラクター利用：**
+
+- `tests_order_control_tvt_snapshot_undetermined_registration.py`
+- `tests_order_control_tvt_arrived_undetermined_confirmation.py`
+- `tests_order_control_tvt_leading_nonparticipating_confirmation.py`
+- `tests_order_control_tvt_right_of_entry_selection.py`
+- `tests_order_control_tvt_candidate_visit_set.py`
+
+実装前に全リポジトリを再検索し、直接構築箇所を確定する。
+
+**原則変更しない：**
+
+- `order_control_baseline_collector.py`
+- `order_control_tvt_candidate_visit_set.py` の候補選択ロジック
+- 順位台帳
+- alignment 分類
+- arrived、leading、right-of-entry の本番ロジック
+
+###### テスト計画
+
+実装時に少なくとも次を検証する。
+
+- 同一 inlink の A 型と B 型を deque 順で同一物理順へ保存する。
+- `plan.entries` 順と物理順が異なるケース。
+- index 0 が Node 側物理先頭である。
+- 複数 inlink。
+- 複数 Node。
+- 非参加 Visit を含む。
+- 可変上限 N の上限外 Visit も物理順には残る。
+- snapshot 固定 Visit が 0 件の inlink は省略される。
+- 固定 Visit を含む複車線 inlink は `ValueError` である。
+- 固定 Visit が 0 件の複車線 inlink だけを理由には停止しない。
+- 物理順と `entries` の集合不一致を拒否する。
+- VisitKey 重複を拒否する。
+- 同一 VisitKey の複数 Node・inlink 出現を拒否する。
+- plan と新しい物理順型が frozen である。
+- fork 進行後も `ForkResult` 内の物理順が変化しない。
+- 一般 baseline driver 結果に物理順が残る。
+- TVT 順位台帳登録付き driver 結果にも物理順が残る。
+- alignment 結果の入れ子から物理順へ到達できる。
+- plan 全体を `ForkResult` へ保持しない。
+- collector へ物理順を書き込まない。
+- prepare 失敗時に不完全な plan を返さない。
+- upstream 処理を再実行しない。
+- 既存 snapshot、driver、TVT 登録、alignment、後続結果テストを維持する。
+
+テスト件数は実装前に固定しない。実装後の実件数を実装完了記録へ記載する。
+
+###### 今回実装しない範囲
+
+- Python による snapshot 物理順保存
+- `candidate_visits` との照合処理
+- inlink 別候補列
+- 買い手 prefix
+- TVT-SB、TVT-MH、TVT-SP、TVT-MP
+- 可変上限 N の選択基準変更
+- lane 別物理順
+- 複車線対応
+- 研究対象外 Vehicle 向けの追加 blocker 処理
+- collector への物理順追加
+- candidate 結果型への物理順追加
+- 具体的買い手・売り手選定
+- 局所仮想計算
+- 経済評価
+- 最終順位確定の上位接続
+
+###### 次の再開地点
+
+1. 次は **§25.25.34.48** の実装前仕様と、実コードの型定義・結果生成・直接コンストラクター利用箇所を最終照合する。
+2. その後、snapshot モジュールと baseline driver へ物理順保存・受渡しを実装する。
+3. 実装とテスト完了後、別の実装完了小節を追加する。
+4. 実装完了時にも、詳細正本、主要本文、`ORDER_EXCHANGE_PROGRESS.md` を同時更新する。
+5. 物理順保存完了後、`candidate_visits` との照合による inlink 別候補列の設計へ進む。
+6. 具体的買い手集合生成はさらにその後である。
+7. 局所仮想計算と経済評価には**まだ進まない**。
+
+###### Git 状態（§25.25.34.48 記録時点）
+
+- HEAD は **`0e4084c`**
+- 今回の変更は本設計メモと `ORDER_EXCHANGE_PROGRESS.md` のみである
+- Python コードとテストは未変更である
+- `diagnostics/order_control.zip` は既存未追跡、未接触、対象外である
+- git add、git commit、git push は**未実行**である

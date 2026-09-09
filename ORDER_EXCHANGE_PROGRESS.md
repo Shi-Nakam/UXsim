@@ -5527,6 +5527,57 @@ helper の実装、専用テスト、設計メモの整合を最終確認した�
 - `diagnostics/order_control.zip` は既存未追跡、未接触、対象外
 - git add、git commit、git push は未実行
 
+##### 2026-09-09追記：snapshot時点のinlink内物理順の保存・受渡し実装前設計を確定
+
+**詳細正本：** `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES.md` **§25.25.34.48**
+
+**設計の経緯**
+
+- Composer 2.5 の一次調査、Grok 4.6 の反証レビュー、実コードと既存設計メモの直接確認を実施した
+- `RegistrationPlan` で物理順を構築し、baseline fork 後は物理順だけを `OrderControlBaselineForkResult` へ残す設計を確定した
+- `RegistrationPlan` 全体は保持しない
+
+**確定した保存・受渡し設計**
+
+- 単車線 inlink の `inlink.vehicles` deque 順を正本とする
+- index 0 が対象 Node に最も近い物理先頭である
+- Node 名、inlink 名、先頭から後方へ並べた VisitKey tuple を保存する
+- 整数順位、Vehicle、Link、Node、World オブジェクト参照、`Vehicle.x` は保存しない
+- A 型と B 型を同一 inlink 内物理順へ統合する
+- 非参加 Visit も物理順へ含める
+- snapshot 固定 Visit が 0 件の inlink は `inlink_physical_orders` から省略する
+- snapshot 固定 Visit を 1 件以上含む inlink だけ `number_of_lanes == 1` を要求する
+- 対象 Node の全 inlink を無条件に複車線拒否しない
+- 研究対象外 Vehicle 向けの追加 blocker 処理は作らない
+- 可変上限 N の選択基準は変更しない
+- `candidate_visits` との照合、inlink 別候補列、prefix 生成は未実装である
+
+**主要本文の更新**
+
+- 詳細設計メモの **§1.2**、**§7**、**§9**、**§24**、**§25.25** に実装前設計確定の更新注記を追加した
+
+**今回の作業範囲**
+
+- 今回は Markdown 2 ファイルだけを変更した
+- Python コードとテストは未変更である
+- snapshot 物理順の Python 実装は未着手である
+
+**次の再開地点**
+
+- **§25.25.34.48** の実装前仕様と、実コードの型定義・結果生成・直接コンストラクター利用箇所を最終照合する
+- その後、snapshot モジュールと baseline driver へ物理順保存・受渡しを実装する
+- 実装完了時にも、詳細正本・主要本文・本進捗メモを同時更新する
+- 物理順保存完了後、`candidate_visits` との照合による inlink 別候補列の設計へ進む
+- 具体的買い手集合生成はさらにその後である
+- 局所仮想計算と経済評価にはまだ進まない
+
+**Git 状態（§25.25.34.48 記録時点）**
+
+- HEAD は **`0e4084c`**
+- 今回の変更：`ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES.md`、本進捗メモ（`ORDER_EXCHANGE_PROGRESS.md`）
+- `diagnostics/order_control.zip` は既存未追跡、未接触、対象外
+- git add、git commit、git push は未実行
+
 #### 2026-08-29：TVT権利保有車両選定前の先頭非参加Vehicle先行確定の記録補修
 
 - 過去に確定済みだった、意思決定窓内 baseline 到着順位の先頭に連続する非参加 Vehicle の先行確定が、設計メモに明文化されていなかった
