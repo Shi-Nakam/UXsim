@@ -142,6 +142,8 @@
 
 > **実装前設計確定（2026-09-10）：** 上限適用済み `candidate_visits` を Node 別・inlink 別の snapshot 物理順へ整理する読取専用部品について、実装前設計を **§25.25.34.50** で確定した。Python 実装は未着手である。本注記の既存本文は変更しない。
 
+> **実装完了（2026-09-11）：** inlink 別 candidate snapshot 物理順整理は実装・検証済みである。買い手、売り手、prefix は未実装である。詳細正本は **§25.25.34.51**。
+
 ### 1.3 研究シナリオ前提（BATCHと共通）
 
 - 比較対象内部交差点 Node を目的地としない端点間 OD を使用する。
@@ -562,6 +564,8 @@ TVT候補Vehicleのbaseline予想到着timestep + 1
 
 > **実装前設計確定（2026-09-10）：** `candidate_visits` は対象 Node における全 inlink 横断の正式 baseline 順である。新しい読取専用部品は、同じ候補 Visit を inlink 別 snapshot 物理順へ整理する。inlink 上の物理的な前後順であり、対象 Node における全 inlink 横断の正式 baseline 順位番号の連続を意味しない。Python 実装は未着手である。詳細正本は **§25.25.34.50**。
 
+> **実装完了（2026-09-11）：** `candidate_visits` を inlink 別 snapshot 物理順へ整理する処理は実装済みである。`candidate_visits` 自体の P − 1 条件、可変上限 N、対象 Node における全 inlink 横断の正式 baseline 順は変更していない。詳細正本は **§25.25.34.51**。
+
 ---
 
 ## 8. 権利保有車両
@@ -597,6 +601,8 @@ TVT候補 Vehicle の時間範囲を定めるため、権利保有車両の **ba
 > **実装完了（2026-09-09）：** snapshot 時点の inlink 内物理順保存は実装済みである。collector 順、entries 順、baseline 到着順から推測しない。物理順は `OrderControlBaselineForkResult` へ保持される。inlink 別候補列と prefix 生成は未実装である。詳細正本は **§25.25.34.49**。
 
 > **実装前設計確定（2026-09-10）：** 上限適用済み candidate Visit 全件を inlink 別 snapshot 物理順へ整理する読取専用部品を設計した。権利保有 inlink も結果へ含める。この段階では買い手・売り手・prefix を決めない。権利保有車両と同じ inlink から買い手を選ばない処理は後続の買い手生成時とする。売り手は所属 inlink によらず trade_scope の共通規則で決める。Python 実装は未着手である。詳細正本は **§25.25.34.50**。
+
+> **実装完了（2026-09-11）：** 権利保有 inlink を含む candidate Visit 全件を inlink 別 snapshot 物理順へ整理済みである。買い手候補 inlink、買い手 prefix、買い手・売り手は未実装である。売り手を所属 inlink によって特別扱いしていない。詳細正本は **§25.25.34.51**。
 
 ### 9.1 最終ルール名称（確定）
 
@@ -2523,6 +2529,8 @@ Copy-on-write に近い考え方。性能改善の可能性は高い。仮想側
 > **実装完了（2026-09-09）：** snapshot 固定集合と同時に物理順を構築する処理は実装済みである。`OrderControlBaselineSnapshotRegistrationPlan` で構築し、`OrderControlBaselineForkResult` へ物理順だけを残す。plan 全体と collector には保存しない。固定 Visit を含む inlink だけ単車線を要求する。詳細正本は **§25.25.34.49**。
 
 > **実装前設計確定（2026-09-10）：** `ForkResult` に保存済みの完全 snapshot 物理順を読み、上限適用済み candidate Visit だけを inlink 別へ整理する読取専用部品を設計した。snapshot 保存処理は変更しない。Python 実装は未着手である。詳細正本は **§25.25.34.50**。
+
+> **実装完了（2026-09-11）：** `ForkResult` に保存済みの物理順を読み、candidate Visit だけを inlink 別に整理する読取専用処理は実装済みである。snapshot 物理順保存処理は変更していない。詳細正本は **§25.25.34.51**。
 
 ### 24.1 この更新の位置づけ
 
@@ -5569,6 +5577,8 @@ Terminalで次が成功した：
 > **実装完了（2026-09-09）：** 一般 driver と TVT 順位台帳登録付き driver の双方で物理順受渡しを実装済みである。公開署名は維持する。空結果と通常結果の双方が物理順を持つ。baseline 後の再 prepare や inlink 再読取は行わない。詳細正本は **§25.25.34.49**。
 
 > **実装前設計確定（2026-09-10）：** baseline fork、candidate 構築を再実行しない読取専用後段部品として、上限適用済み `candidate_visits` の inlink 別 snapshot 物理順整理を設計した。Python 実装は未着手である。詳細正本は **§25.25.34.50**。
+
+> **実装完了（2026-09-11）：** baseline fork や candidate 構築を再実行しない後段部品として実装済みである。入力結果を変更しない。詳細正本は **§25.25.34.51**。
 
 #### 25.25.2 初期正式driverの目的
 
@@ -20757,4 +20767,270 @@ passage 情報の不足と、inlink 別物理順整理を混同しない。
 - 今回の変更は本設計メモと `ORDER_EXCHANGE_PROGRESS.md` のみである
 - Python コードとテストは未変更である
 - `diagnostics/order_control.zip` は既存未追跡、未接触、対象外である
+- git add、git commit、git push は**未実行**である
+
+##### 25.25.34.51 上限適用済み TVT 候補 Visit の Node 別・inlink 別 snapshot 物理順への整理の実装完了記録
+
+**位置づけ：**
+
+- 実装前仕様は **§25.25.34.50**。
+- **§25.25.34.51** を、実装結果、検証結果、未実装境界、次の再開地点の最新正本とする。
+- **§25.25.34.50** は実装前設計の歴史的記録として残す。
+- 今回は `candidate_visits` を inlink 別の snapshot 物理順へ整理する読取専用部品まで実装した。
+- 買い手、売り手、prefix、`trade_scope`、`trade_rank` は未実装である。
+
+**非技術的な説明：**
+
+- 最大 N 件まで選定済みの TVT 候補 Visit を、それぞれが走行する inlink ごとに分けた。
+- 各 inlink 内では、snapshot 時点に対象 Node へ近かった Visit から後方の Visit へ並べた。
+- この結果は同じ inlink 内の物理的な前後順を表す。
+- 対象 Node における全 inlink 横断の正式 baseline 順位番号を表さない。
+- この段階では買い手や売り手を決めていない。
+
+###### 変更ファイル
+
+**新規本番：**
+
+- `uxsim/order_control_tvt_inlink_candidate_physical_order.py`
+
+**新規専用テスト：**
+
+- `tests_order_control_tvt_inlink_candidate_physical_order.py`
+
+既存本番、既存テストは変更していない。Markdown は本実装完了記録の作業まで変更していなかった。
+
+###### 実装した結果型
+
+すべて公開 frozen dataclass である。
+
+1. **`OrderControlTvtInlinkCandidateVisitPhysicalOrder`**
+
+   - フィールド：`node_name`、`inlink_name`、`candidate_visit_keys_head_to_tail`
+   - 当該対象 Node・inlink の上限適用済み candidate Visit だけを保持する。
+   - index 0 が candidate Visit の中で snapshot 時点に最も対象 Node へ近かった Visit である。
+   - 同一 inlink 内の snapshot 物理順である。
+   - 完全な `OrderControlTvtCandidateVisit` は重複保存しない。
+   - 買い手 prefix、買い手列、売り手列ではない。
+
+2. **`OrderControlTvtNodeInlinkCandidatePhysicalOrderResult`**
+
+   - フィールド：`node_name`、`build_status`、`inlink_candidate_physical_orders`
+
+3. **`OrderControlTvtInlinkCandidatePhysicalOrderSetResult`**
+
+   - フィールド：`candidate_visit_set_result`、`node_inlink_candidate_physical_order_results`
+   - 入力 `candidate_visit_set_result` と同じオブジェクトを参照保持する。
+   - 永続 dict 索引は保存しない。
+
+###### 公開関数
+
+`build_tvt_inlink_candidate_physical_orders(candidate_visit_set_result)`
+
+- 入力は `OrderControlTvtCandidateVisitSetResult` である。
+- 既存の入れ子から `fork_result` と `inlink_physical_orders` へ到達する。
+- collector を再 export しない。
+- upstream 処理を再実行しない。
+- candidate 集合を再構築しない。
+- 入力オブジェクトを変更しない。
+
+###### 構築処理
+
+実装した処理順：
+
+1. candidate 結果の入れ子を明示的な途中変数で遡る。
+2. `fork_result.target_node_names` を取得する。
+3. Node 別 candidate 結果件数を確認する。
+4. `target_node_names` 順に Node を処理する。
+5. Node 名の対応を確認する。
+6. `build_status` を明示的に分類する。
+7. candidate VisitKey から `inlink_name` への一時 dict を作る。
+8. candidate VisitKey の重複を確認する。
+9. 当該対象 Node の snapshot 物理順レコードを既存順で取得する。
+10. 各 inlink の物理順を先頭から走査する。
+11. candidate VisitKey だけを同じ順序で収集する。
+12. candidate 側の `inlink_name` と物理順レコードの `inlink_name` を照合する。
+13. 同じ candidate VisitKey が複数回現れないことを確認する。
+14. candidate Visit がある inlink だけ結果を作る。
+15. 全 candidate Visit が正確に 1 件ずつ照合されたことを確認する。
+16. Node 別結果と全体結果を返す。
+
+###### status 別処理
+
+**正当な非構築 status：**
+
+- `NOT_BUILT_NO_RIGHT_OF_ENTRY`
+- `NOT_BUILT_UNRESOLVED_ARRIVALS`
+- `UNRESOLVED_RIGHT_OF_ENTRY_PASSAGE`
+
+これらは空の `inlink_candidate_physical_orders` を返す。
+
+**候補集合確定済み status：**
+
+- `UNRESOLVED_CANDIDATE_PASSAGES`
+- `BASELINE_INFORMATION_COMPLETE`
+
+これらは inlink 別 snapshot 物理順へ整理する。
+
+**重要：**
+
+- `UNRESOLVED_CANDIDATE_PASSAGES` では、権利保有 Visit の P は取得済みである。
+- `candidate_visits` 内に baseline passage 未解決の Visit がある状態である。
+- passage 情報不足と物理順整理を混同しない。
+
+**想定外 status：**
+
+- `RuntimeError` である。
+- 正常な空結果として扱わない。
+- エラーには対象 Node 名と実際の `build_status` を含める。
+- 後続 Node を処理せず、部分的な全体結果を返さない。
+
+###### 順序の区別
+
+**`candidate_visits`：**
+
+- 対象 Node における全 inlink 横断の正式 baseline 順である。
+- P − 1 条件適用後である。
+- 可変上限 N 適用後である。
+
+**今回の結果：**
+
+- 同一 inlink 内の snapshot 物理順である。
+- 対象 Node へ近い側から後方へ向かう順である。
+- 正式 baseline 順位番号を保存しない。
+- 順位番号が連続することを意味しない。
+
+**正常例：**
+
+- 同じ inlink 上で B が C より対象 Node 側にいるため、inlink 別結果は B、C である。
+- 別 inlink の Visit が正式 baseline 順位の間に入ることで、B が 3 位、C が 6 位でも正常である。
+
+同じ inlink 内の snapshot 物理順と正式 baseline 相対順が逆転する状態は、正常ケースとして扱っていない。今回、その逆転だけを検出する新しい複雑な検査は追加していない。
+
+###### 権利保有 inlink、非参加 Visit
+
+- 権利保有 Visit と同じ inlink も結果へ含める。
+- 権利保有 Visit も通常の candidate Visit として整理する。
+- 権利保有 inlink を今回の結果から除外しない。
+- この段階では買い手候補 inlink を決めない。
+- `candidate_visits` に含まれる非参加 Visit も結果へ含める。
+- 参加状態で filter または sort していない。
+- 売り手を所属 inlink によって特別扱いしていない。
+
+###### A 型 Visit と上限外 Visit
+
+- 完全な snapshot 物理順に存在しても、`candidate_visits` に含まれない Visit は今回の結果へ含めない。
+- A 型 Visit は `candidate_visits` に含まれないため、今回の結果へ含めない。
+- 上限外 Visit は完全な snapshot 物理順には残るが、今回の `candidate_visits` には含まれないため結果へ含めない。
+- 上限外 Visit とは、P − 1 条件等を満たす母集団には属するが、正式 baseline 順で可変上限 N を超えた Visit である。
+
+###### 必要最小限の不整合検査
+
+**実装した検査：**
+
+- Node 別 candidate 結果の件数。
+- `target_node_names` と Node 別結果の `node_name` 対応。
+- `candidate_visits` 内の VisitKey 重複。
+- candidate VisitKey が snapshot 物理順に存在すること。
+- candidate VisitKey の `inlink_name` が物理順レコードと一致すること。
+- 同じ candidate VisitKey が複数の物理順レコードへ現れないこと。
+- 全 candidate Visit が正確に 1 回照合されたこと。
+- 想定外 `build_status`。
+
+**再検証していない：**
+
+- snapshot 物理順自体の内部重複。
+- snapshot entries と物理順の集合一致。
+- 単車線条件。
+- candidate の P − 1 条件。
+- 可変上限 N 適用。
+- candidate の正式 baseline sort。
+- 権利保有 Visit が `candidate_visits[0]` である既存保証。
+
+不整合は `RuntimeError` である。新しい独自例外型は追加していない。重大不整合時に部分結果を返さない。
+
+###### 可読性
+
+実装では次を優先した。
+
+- status 分類、candidate 辞書作成、対象 Node の物理順抽出、inlink 別整理を短い helper へ分けた。
+- 公開関数で入れ子結果への参照経路を途中変数へ分けた。
+- 長い内包表記、複雑なジェネレーター式、巧妙な one-liner を使用していない。
+- candidate 整理、物理順走査、照合確認、結果構築を一つの式へ詰め込んでいない。
+- 意味の分かる変数名を使用した。
+- 高度な Python 技法より、初学者が処理を追いやすい構造を優先した。
+
+###### 検証結果
+
+**py_compile：**
+
+- 新規本番モジュールと専用テストが成功。
+
+**専用テスト：**
+
+- `TESTS` 登録：25 件。
+- unique test functions：25 件。
+- 重複登録なし。
+- 直接実行：25 tests passed。
+- pytest：25 passed in 0.89s。
+
+**既存回帰：**
+
+- 指定した既存 8 テストファイル。
+- pytest：316 passed in 26.64s。
+
+今回確認した pytest：新規 25 件 + 既存 316 件 = **341 件成功**。
+
+**git diff --check：**
+
+- 問題なし。
+
+###### 今回実装していない範囲
+
+- 買い手候補 inlink の抽出
+- 権利保有車両と同じ inlink から買い手を選ばない処理
+- 買い手 prefix
+- 参加状態による買い手絞り込み
+- TVT-SB、TVT-MH、TVT-SP、TVT-MP
+- 買い手集合生成
+- `trade_scope`
+- 売り手選定
+- `trade_rank`
+- 局所仮想計算
+- 経済評価
+- 最終順位確定
+- 複車線対応
+- 研究対象外 Vehicle 向け追加処理
+
+###### 実コード確認
+
+Copilot が Cursor 報告だけで完了判断せず、次を実コードで確認したことを記録する。
+
+- 新規ファイル以外に変更がないこと。
+- 3 つの結果型。
+- 公開関数と既存結果への参照経路。
+- candidate VisitKey と `inlink_name` の一時 dict。
+- inlink 物理順の走査。
+- 全件照合。
+- status 別処理。
+- 想定外 status の `RuntimeError`。
+- 想定外 status の専用テスト。
+- 専用テスト件数と重複なし。
+- 回帰テスト結果。
+
+###### 次の再開地点
+
+- inlink 別 candidate snapshot 物理順整理は実装・検証済みである。
+- 次は、買い手候補 inlink の抽出と、各候補 inlink の物理的先頭からの買い手 prefix 生成に関する実装前設計である。
+- 権利保有車両と同じ inlink から買い手を選ばない。
+- 参加状態をどの段階で適用するかを確定する。
+- TVT-SB、TVT-MH、TVT-SP、TVT-MP の共通入力を確定する。
+- 売り手はその後、具体的候補の `trade_scope` 共通規則で決める。
+- 局所仮想計算と経済評価にはまだ進まない。
+
+###### Git 状態（§25.25.34.51 記録時点）
+
+- 実装完了記録追加前の HEAD は **`9996b0b`**
+- 実装完了記録追加前の変更：新規本番モジュール、新規専用テスト
+- 既存未追跡：`diagnostics/order_control.zip`（未接触、対象外）
+- 本小節追加時は Markdown 2 ファイルのみを変更する
 - git add、git commit、git push は**未実行**である

@@ -5667,6 +5667,46 @@ helper の実装、専用テスト、設計メモの整合を最終確認した�
 - `diagnostics/order_control.zip` は既存未追跡、未接触、対象外
 - git add、git commit、git push は未実行
 
+##### 2026-09-11追記：TVT候補VisitのNode別・inlink別snapshot物理順整理を実装
+
+**詳細正本：** `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES.md` **§25.25.34.51**
+
+**実装前仕様：** **§25.25.34.50**
+
+**実装内容：**
+
+- 新規本番モジュール `uxsim/order_control_tvt_inlink_candidate_physical_order.py` と専用テスト `tests_order_control_tvt_inlink_candidate_physical_order.py`
+- 3 つの frozen 結果型（`OrderControlTvtInlinkCandidateVisitPhysicalOrder`、`OrderControlTvtNodeInlinkCandidatePhysicalOrderResult`、`OrderControlTvtInlinkCandidatePhysicalOrderSetResult`）
+- 公開関数 `build_tvt_inlink_candidate_physical_orders`
+- 上限適用済み `candidate_visits` を inlink 別 snapshot 物理順へ整理（対象 Node における全 inlink 横断の正式 baseline 順位番号とは別）
+- 権利保有 inlink、権利保有 Visit、非参加 Visit を含める
+- A 型 Visit と上限外 Visit は含めない
+- status 別処理（正当な非構築 status は空結果、候補集合確定済み status は整理）
+- 想定外 `build_status` は `RuntimeError`（正常な空結果として隠さない）
+- 読取専用（upstream 再実行・入力変更なし）
+- 買い手、売り手、prefix は未実装
+- 可読性重視の helper 分割と明示的な途中変数
+
+**検証：**
+
+- py_compile 成功
+- 専用テスト 25 件成功（`TESTS` 重複なし）
+- 既存回帰 316 件成功
+- 合計 341 件成功
+- git diff --check 問題なし
+
+**次の再開地点：**
+
+- 買い手候補 inlink 抽出と買い手 prefix の実装前設計
+
+**Git 状態（§25.25.34.51 記録時点）：**
+
+- HEAD は **`9996b0b`**
+- 実装完了記録追加前の変更：新規本番・専用テスト（未コミット）
+- 今回の変更：本設計メモ、本進捗メモのみ
+- `diagnostics/order_control.zip` は未接触、対象外
+- git add、git commit、git push は未実行
+
 #### 2026-08-29：TVT権利保有車両選定前の先頭非参加Vehicle先行確定の記録補修
 
 - 過去に確定済みだった、意思決定窓内 baseline 到着順位の先頭に連続する非参加 Vehicle の先行確定が、設計メモに明文化されていなかった
