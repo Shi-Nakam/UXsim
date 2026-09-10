@@ -5624,6 +5624,49 @@ helper の実装、専用テスト、設計メモの整合を最終確認した�
 - `diagnostics/order_control.zip` は既存未追跡、未接触、対象外
 - git add、git commit、git push は未実行
 
+##### 2026-09-10追記：TVT候補VisitのNode別・inlink別snapshot物理順整理の実装前設計を確定
+
+**詳細正本：** `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES.md` **§25.25.34.50**
+
+**設計の要点：**
+
+- 上限適用済み `candidate_visits` を Node 別・inlink 別へ整理する読取専用部品を設計した
+- 各 inlink 内は snapshot 物理順（Node へ近い側から後方へ）である
+- inlink 上の物理的な前後順であり、対象 Node における全 inlink 横断の正式 baseline 順位番号の連続を意味しない
+- 権利保有 inlink も結果へ含める
+- この段階では買い手・売り手・prefix を決めない
+- 権利保有車両と同じ inlink から買い手を選ばない処理は後続の買い手生成時とする
+- 売り手は所属 inlink ではなく trade_scope の共通規則で決まる
+
+**新規モジュール候補：**
+
+- `uxsim/order_control_tvt_inlink_candidate_physical_order.py`
+- `tests_order_control_tvt_inlink_candidate_physical_order.py`
+
+**既存処理は変更しない：**
+
+- `build_tvt_candidate_visit_set` の候補選定
+- 可変上限 N
+- snapshot 物理順保存（`order_control_baseline_snapshot.py` / `order_control_baseline_driver.py`）
+
+**今回の作業範囲：**
+
+- 今回は Markdown 2 ファイルだけを変更した
+- Python コードとテストは未変更である
+
+**次の再開地点：**
+
+- **§25.25.34.50** の実装前仕様と実コードの最終照合
+- 新規読取専用モジュールと専用テストの実装
+- 実装完了時にも詳細正本・主要本文・本進捗メモを同時更新する
+
+**Git 状態（§25.25.34.50 記録時点）：**
+
+- HEAD は **`751a146`**
+- 今回の変更：本設計メモ（`ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES.md`）、本進捗メモ（`ORDER_EXCHANGE_PROGRESS.md`）のみ
+- `diagnostics/order_control.zip` は既存未追跡、未接触、対象外
+- git add、git commit、git push は未実行
+
 #### 2026-08-29：TVT権利保有車両選定前の先頭非参加Vehicle先行確定の記録補修
 
 - 過去に確定済みだった、意思決定窓内 baseline 到着順位の先頭に連続する非参加 Vehicle の先行確定が、設計メモに明文化されていなかった
