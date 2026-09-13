@@ -5707,6 +5707,50 @@ helper の実装、専用テスト、設計メモの整合を最終確認した�
 - `diagnostics/order_control.zip` は未接触、対象外
 - git add、git commit、git push は未実行
 
+##### 2026-09-14追記：TVT設計メモ継続版とTVT-MP一般形最新正本を作成
+
+**位置づけ**
+
+- `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_2.md`を、既存の`ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES.md`の継続版として新規作成した。
+- 新メモはTVT-MPだけの専用メモではなく、今後のTVT設計・実装記録の主要な追加先である。
+- 非参加Visitの有無を統一して扱うTVT-MP一般形アルゴリズムについては、新メモを最新正本とする。
+- 旧メモは歴史的記録および実装済み事実の記録として維持する。
+- 旧メモ§25.25.34.51までの実装済み事実は引き続き有効である。
+
+**今回確定した一般形の中核**
+
+- 各買い手候補inlinkについて、空prefixから最大prefixまでの全prefixを生成する。
+- 最前方の非参加Visitが存在する場合、そのVisitが最大prefix長を制限する。
+- 各inlinkのprefix直積から、全空組合せだけを除外して具体的買い手候補集合を作る。
+- `trade_scope`の日本語表記を「取引候補別順位再構成範囲」とする。
+- 非参加Visitのbaseline局所順位を固定し、残る空き順位の先頭側へ買い手、その後へ売り手をbaseline相対順で配置する。
+- この空き順位枠方式は、非参加Visitが0件の場合にも同じ一般形として使用する。
+- TVT-MP一般形を直接実装し、TVT-SB、TVT-MH、TVT-SPは当面実装しない。
+- `surplus`が同値の場合は取引当事者総数ではなく買い手数が多い候補を優先し、買い手数も同じ場合はランダムに選ぶ。
+- ランダム選択に使用する具体的RNGは未確定である。
+- `UNRESOLVED_CANDIDATE_PASSAGES`ではinlink別snapshot物理順を保持するが、prefixおよび具体的買い手候補集合を生成しない。
+
+**実装状態**
+
+- `candidate_visits`の構築、TVT固有可変上限N、inlink別snapshot物理順整理は実装済みである。
+- 非参加Visitなしの一具体的候補に対する順位計算部品と`preserves_inlink_fifo()`は実装済みである。
+- 買い手候補inlink、買い手prefix、具体的買い手候補集合、非参加Visitあり・なしを統一する一般形順位再構成、および後続の上位接続は未実装である。
+- 今回はMarkdownメモだけを変更し、Pythonとテストは変更していない。
+
+**次の作業開始点**
+
+- 新メモの「次の作業開始点」を最新の再開情報とする。
+- 次の直接作業は、具体的買い手候補集合生成部品の実装前仕様を、既存の公開型と接続できる形で確定することである。
+- 一般形順位再構成の実装は、その次とする。
+
+**Git状態**
+
+- 記録作成前の最新保存済み・push済みコミットは`b5af3da`である。
+- 新規メモと今回の相互参照は、まだ`git add`、`git commit`、`git push`していない。
+- `diagnostics/order_control.zip`は既存未追跡、未接触、対象外である。
+- Git操作は利用者がTerminalで実行し、コミットとpushを分ける。
+- メモを含むコミット名には`document`を含める。
+
 #### 2026-08-29：TVT権利保有車両選定前の先頭非参加Vehicle先行確定の記録補修
 
 - 過去に確定済みだった、意思決定窓内 baseline 到着順位の先頭に連続する非参加 Vehicle の先行確定が、設計メモに明文化されていなかった
