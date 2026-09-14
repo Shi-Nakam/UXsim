@@ -5805,6 +5805,56 @@ helper の実装、専用テスト、設計メモの整合を最終確認した�
 - `diagnostics/order_control.zip`は未接触、対象外である。
 - git add、git commit、git pushは未実行である。
 
+##### 2026-09-15追記：TVT-MP具体的買い手候補集合生成部品を実装・検証
+
+**位置づけ**
+
+- 実装前仕様はコミット`8d57cd9`に保存・push済みであった（documentメモ）。
+- その保存済み仕様に従い、新規本番`uxsim/order_control_tvt_mp_concrete_buyer_candidate_set.py`と専用テスト`tests_order_control_tvt_mp_concrete_buyer_candidate_set.py`を実装した。
+- 既存Python、既存テスト、旧メモ`ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES.md`は変更していない。
+- 実装完了記録の正本は`ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_2.md`の「具体的買い手候補集合生成部品の実装完了記録」である。実装前仕様節は維持する。
+
+**公開API**
+
+- 公開関数`build_tvt_mp_concrete_buyer_candidate_sets`。
+- 入力`OrderControlTvtInlinkCandidatePhysicalOrderSetResult`と`participates_by_visit_key`。
+- 公開frozen dataclass 4つ（`OrderControlTvtMpInlinkBuyerPrefixResult`、`OrderControlTvtMpConcreteBuyerCandidateSet`、`OrderControlTvtNodeMpConcreteBuyerCandidateSetResult`、`OrderControlTvtMpConcreteBuyerCandidateSetResult`）。
+- 全体結果は入力`inlink_candidate_physical_order_result`を同一オブジェクト参照で保持する。
+
+**実装内容の要点**
+
+- `BASELINE_INFORMATION_COMPLETE`だけでprefixと具体的買い手候補集合を生成する。
+- 正式非生成4 statusでは参加Mappingを検証せず、両結果tupleを空とする。
+- `UNRESOLVED_CANDIDATE_PASSAGES`では部分的TVTを防ぎ、生成しない。
+- 権利保有inlinkをprefixと直積から除外する。
+- 最大prefix、全prefix、`itertools.product`、全空組合せのみ除外、対象Nodeへ向かう全inlink横断の正式baseline相対順への並べ替えを実装した。
+- 必要最小限の`ValueError`と`RuntimeError`のみ。重複除去とseen setは行わない。
+- 読取専用。上流再実行なし。
+
+**確認済みテスト（Copilotと利用者がTerminalで確認）**
+
+- 新規2ファイル`py_compile`成功。
+- 新規専用テスト：直接実行およびpytestで各63 passed、収集63、定義`test_`63、`TESTS`63（重複・漏れ・未知参照なし）。
+- 既存回帰5ファイル：200 passed。
+- 合計263件成功。
+
+**現在地（未実装境界）**
+
+- 買い手候補inlink抽出、買い手prefix、具体的買い手候補集合は実装済み。
+- 引き続き未実装：非参加Visitあり・なしを統一した一般形順位再構成、一般形順位再構成の結果型、`trade_scope`の一般形実装、3分類、非参加Visitのbaseline局所順位枠固定、空き順位枠方式のPython実装、一般形`trade_rank`/`trade_order`、候補別FIFO接続、局所仮想計算、経済性評価、成立候補選択、支払いと補償、各場合の最終確定列、確定順位ブロックへの上位接続、上位TVT制御、TVT-SB/MH/SP、性能最適化。
+
+**次の作業開始点**
+
+- 一般形順位再構成を直ちにコーディングしない。
+- 既存非参加Visitなし順位計算部品と`preserves_inlink_fifo()`の契約を再確認し、確定済み空き順位枠方式を基礎に一般形順位再構成部品の**実装前仕様**を確定する。
+
+**Git状態（記録時点）**
+
+- 実装前仕様メモの保存済みコミットは`8d57cd9`（push済み）。
+- 新規本番・新規専用テスト・本進捗追記・継続版メモ追記は、まだ`git add`、`git commit`、`git push`していない。
+- 未追跡：`uxsim/order_control_tvt_mp_concrete_buyer_candidate_set.py`、`tests_order_control_tvt_mp_concrete_buyer_candidate_set.py`、`diagnostics/order_control.zip`（対象外）。
+- `diagnostics/order_control.zip`は未接触、対象外である。
+
 #### 2026-08-29：TVT権利保有車両選定前の先頭非参加Vehicle先行確定の記録補修
 
 - 過去に確定済みだった、意思決定窓内 baseline 到着順位の先頭に連続する非参加 Vehicle の先行確定が、設計メモに明文化されていなかった

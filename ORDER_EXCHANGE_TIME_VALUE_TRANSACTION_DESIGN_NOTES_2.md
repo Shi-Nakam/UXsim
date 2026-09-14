@@ -1619,6 +1619,8 @@ surplus最大候補を選ぶ
 
 **2026-09-14更新：** 買い手候補inlink、買い手prefix、具体的買い手候補集合は、実装前仕様まで確定した。Python実装と専用テストは未着手である。一般形順位再構成、一般形順位再構成の結果型、およびそれ以降の項目は引き続き未実装である。最新詳細は、本ファイルの「具体的買い手候補集合生成部品の実装前仕様」を参照する。
 
+**2026-09-15更新：** 買い手候補inlinkの抽出、買い手prefix、具体的買い手候補集合は、新規本番モジュールと専用テストとして実装・検証済みである。上記3項目は、本メモ作成時点の未実装一覧に歴史的に残す。最新の実装完了事実は、本ファイルの「具体的買い手候補集合生成部品の実装完了記録」を参照する。一般形順位再構成以降は引き続き未実装である。
+
 # 具体的買い手候補集合生成部品の実装前仕様
 
 本節は、具体的買い手候補集合生成部品の実装前仕様の最新正本である。
@@ -2238,6 +2240,155 @@ status:
 
 局所仮想計算と経済性評価には、まだ進まない。
 
+# 具体的買い手候補集合生成部品の実装完了記録
+
+**実装完了日：2026-09-15**
+
+本節は、上記「具体的買い手候補集合生成部品の実装前仕様」に対応する実装完了記録である。制度ロジックの正本は、引き続き本ファイル§7から§13、§28、§29.1、§29.2および当該実装前仕様である。実装前仕様は、実装時に用いた正本として削除・置換せず維持する。
+
+実装前仕様の保存済みコミットは`8d57cd9`（メモへの記録のみ。実装前仕様のdocumentコミットとして利用者が保存・push済み）である。その保存済み仕様に従い、新規本番と専用テストを実装した。本実装完了記録時点では、新規コード・新規テスト・本節の追記は、まだ`git add`、`git commit`、`git push`していない。
+
+Copilotと利用者が、実コード、専用テスト、回帰テスト、テスト件数、Git状態をTerminalで確認済みである。Cursor報告だけでは実装完了を確定しない。
+
+## 新規ファイルと公開API
+
+新規本番:
+
+- `uxsim/order_control_tvt_mp_concrete_buyer_candidate_set.py`
+
+新規専用テスト:
+
+- `tests_order_control_tvt_mp_concrete_buyer_candidate_set.py`
+
+公開関数:
+
+- `build_tvt_mp_concrete_buyer_candidate_sets`
+
+公開frozen dataclass（4つ）:
+
+1. `OrderControlTvtMpInlinkBuyerPrefixResult`
+2. `OrderControlTvtMpConcreteBuyerCandidateSet`
+3. `OrderControlTvtNodeMpConcreteBuyerCandidateSetResult`
+4. `OrderControlTvtMpConcreteBuyerCandidateSetResult`
+
+## 既存入力型との接続
+
+第一入力は`OrderControlTvtInlinkCandidatePhysicalOrderSetResult`である。keyword-only必須入力は`participates_by_visit_key: Mapping[OrderControlTvtVisitKey, bool]`である。
+
+`OrderControlTvtMpConcreteBuyerCandidateSetResult`は、渡された`inlink_candidate_physical_order_result`と**同一オブジェクト参照**を保持する。候補Visit完全情報の複写、`candidate_visit_set_result`の重複フィールドは追加していない。
+
+## status別動作
+
+`BASELINE_INFORMATION_COMPLETE`の対象Nodeだけで、prefixと具体的買い手候補集合を生成する。
+
+次の正式4 statusでは、参加Mappingを検証せず、prefixも具体的候補も生成しない。
+
+- `NOT_BUILT_NO_RIGHT_OF_ENTRY`
+- `NOT_BUILT_UNRESOLVED_ARRIVALS`
+- `UNRESOLVED_RIGHT_OF_ENTRY_PASSAGE`
+- `UNRESOLVED_CANDIDATE_PASSAGES`
+
+非生成4 statusでは、`buyer_candidate_inlink_prefix_results=()`、`concrete_buyer_candidate_sets=()`とする。
+
+特に`UNRESOLVED_CANDIDATE_PASSAGES`では、`candidate_visits`とinlink別snapshot物理順が保持されていても、部分的TVTを防ぐため、参加Mapping検証、prefix生成、具体的候補生成へ進まない。
+
+想定外`build_status`は`RuntimeError`とし、正常な空結果として隠さない。重大不整合時は後続の対象Nodeを処理せず、部分的な全体結果を返さない。
+
+## 実装済み処理の要約
+
+実装済みの主な処理は次である。
+
+- candidate Node結果とinlink別物理順Node結果の件数・`node_name`・`build_status`の対応確認。
+- `BASELINE_INFORMATION_COMPLETE`の対象Nodeについて、`candidate_visits`全件の参加Mapping検証（欠落・非strict `bool`は`ValueError`。`1`、`0`、文字列、`numpy.bool_`は受け入れない。余分キーは許容し使用しない）。
+- candidate VisitKeyから`inlink_name`および`candidate_visits`内正式baseline位置への一時dict構築。
+- `candidate_visits`のVisitKey集合とinlink別candidate物理順のVisitKey集合の、対象Node単位の一致確認（不一致は`RuntimeError`）。
+- 権利保有Visitの特定、非参加・欠落・`right_of_entry_visit_key is None`の重大不整合検出（`RuntimeError`）。
+- 権利保有inlinkをprefix結果とprefix直積から除外（上流の権利保有inlink上Visitは削除しない）。
+- 上流`inlink_candidate_physical_orders`の出現順で、snapshot物理先頭からの参加連続範囲を最大prefixとし、最初の非参加Visit自身と後方を含めない。
+- 最大prefixが空のinlinkを公開prefix結果と直積軸から除外。
+- `buyer_prefixes_empty_to_max`を空tupleから最大prefixまで生成・保存。
+- `itertools.product`によるprefix直積、全空組合せのみ除外、一部inlinkだけ空の組合せは維持。
+- 選択prefixのVisitKey統合後、`candidate_visits`内の位置に従い、対象Nodeへ向かう全inlink横断の正式baseline相対順へ並べ替え（到着timestep、tiebreaker、Vehicle IDによる再計算は行わない）。
+- 買い手候補inlinkが0本のとき、具体的買い手候補集合は正常な空tuple。
+- 具体的買い手候補集合の重複除去および重複検出用seen setは行わない。
+- 入力結果、`candidate_visits`、inlink別物理順、参加Mappingを変更しない。上流処理を再実行しない。World、Vehicle、collector、順位台帳へ戻らない。
+
+## 結果型の実装結果
+
+`OrderControlTvtMpInlinkBuyerPrefixResult`: `node_name`, `inlink_name`, `buyer_prefixes_empty_to_max`
+
+`OrderControlTvtMpConcreteBuyerCandidateSet`: `buyers_sorted`
+
+`OrderControlTvtNodeMpConcreteBuyerCandidateSetResult`: `node_name`, `build_status`, `buyer_candidate_inlink_prefix_results`, `concrete_buyer_candidate_sets`
+
+`OrderControlTvtMpConcreteBuyerCandidateSetResult`: `inlink_candidate_physical_order_result`, `node_concrete_buyer_candidate_set_results`
+
+次は結果型に保存していない。候補ID、選択元prefix組合せ、`max_prefix`の重複フィールド、`excluded_right_of_entry_inlink_name`、売り手、非参加Visit分類、`trade_scope`、`last_buyer_rank`、`trade_rank`、`trade_order`、FIFO結果、局所仮想計算結果、経済性評価結果、`surplus`、支払額、補償額、永続baseline順位dict、`candidate_visit_set_result`の重複参照。
+
+## 可読性
+
+本番実装は、時間価値取引の根幹部分を初学者が後から追いやすくするため、短さや高度なPython技法より可読性を優先している。参加Mapping検証、一時dict構築、VisitKey集合対応確認、権利保有inlink特定、最大prefix生成、全prefix生成、prefix直積、VisitKey統合（明示的ループ）、正式baseline相対順への並べ替え、結果構築を分離している。複雑な多重ジェネレーター式や巧妙なone-linerへ処理を詰め込んでいない。意味の分かる中間変数を使用している。実測前の性能最適化は行っていない。可読性のために、保存済みの制度仕様、公開API、status契約、例外契約、未実装境界は変更していない。
+
+## 本番の必要最小限の検査
+
+`ValueError`:
+
+- `BASELINE_INFORMATION_COMPLETE`の対象Nodeで、必要なcandidate VisitKeyが`participates_by_visit_key`にない。
+- 参加状態が厳密なPythonの`bool`でない。
+
+`RuntimeError`:
+
+- candidate Node結果とinlink別物理順Node結果の件数不一致。
+- 対応するNode別結果の`node_name`不一致。
+- 対応するNode別結果の`build_status`不一致。
+- 想定外`build_status`。
+- `BASELINE_INFORMATION_COMPLETE`なのに`right_of_entry_visit_key`が`None`。
+- 権利保有Visitが`candidate_visits`に存在しない。
+- 権利保有Visitが非参加。
+- `candidate_visits`のVisitKey集合とinlink別candidate物理順のVisitKey集合が一致しない。
+
+新しい独自例外型は追加していない。
+
+## 本番で繰り返していない上流保証済み検査
+
+P−1条件、可変上限N、`candidate_visits`の正式baseline sort規則、baseline passage値、candidate Visitの一般的なフィールド型、VisitKeyの一般的な型検証、`candidate_visits`内VisitKey重複、snapshot物理順内部の重複、snapshot entriesと物理順の集合一致、単車線条件、candidate Visitの詳細なNode・inlink所属、具体的買い手候補集合の重複、具体候補内VisitKey重複、FIFOは、本番で再検証していない。異なる上流結果の誤結合により誤った具体的候補を生成する重大不整合だけを、対象Node単位で軽量に確認している。
+
+## 確認済みテスト結果
+
+新規2ファイルの`py_compile`は成功した。
+
+| 区分 | 結果 |
+|------|------|
+| 新規専用テスト直接実行 | 63 tests passed |
+| 新規専用テスト pytest | 63 passed |
+| pytest収集 | 63 collected |
+| 定義済み`test_`関数 | 63件 |
+| `TESTS`登録 | 63件（重複なし、登録漏れなし、未知参照なし） |
+| 直接実行件数とpytest収集 | 一致 |
+
+関係する既存回帰テスト5ファイルは200 passedである。
+
+- `tests_order_control_tvt_candidate_visit_set.py`
+- `tests_order_control_tvt_inlink_candidate_physical_order.py`
+- `tests_order_control_tvt_leading_nonparticipating_confirmation.py`
+- `tests_order_control_tvt_right_of_entry_selection.py`
+- `tests_order_control_tvt_trade_rank.py`
+
+新規専用テスト63件と既存回帰200件を合わせ、263件成功を確認した。
+
+## 今回実装しなかった境界
+
+`trade_scope`、最後尾買い手候補の順位計算、買い手・売り手・非参加Visitの3分類、非参加Visitのbaseline局所順位枠固定、空き順位枠方式のPython実装、一般形`trade_rank`、`trade_order`、FIFO検査の実行、局所仮想計算、経済性評価、`surplus`比較、RNG、支払い、補償、TVT成立・不成立・情報未解決時の最終確定、確定順位ブロックへの接続、上位TVT制御、TVT-SB、TVT-MH、TVT-SP、性能最適化は、今回も実装していない。
+
+## 次の作業開始点（本部品完了後）
+
+次の直接作業は、一般形順位再構成部品を直ちにコーディングすることではない。
+
+1. 非参加Visitあり・なしを統一する一般形順位再構成部品について、既存の非参加Visitなし順位計算部品と`preserves_inlink_fifo()`の契約を再確認する。
+2. 継続版メモで確定済みの空き順位枠方式を基礎に、一般形順位再構成部品の公開API、結果型、入力、責任分離、必要最小限の検査、専用テスト契約を**実装前仕様**として確定する。
+
+一般形順位再構成の制度ロジックを新しく考え直す必要はない。空き順位枠方式は確定済みである。次に必要なのは、その確定済み制度ロジックを既存公開型へ接続する実装前仕様である。局所仮想計算と経済性評価には、まだ進まない。
+
 # 次の作業開始点
 
 次の直接作業は、具体的買い手候補集合生成部品の実装前仕様を、既存の公開型と接続できる形で確定することである。
@@ -2258,6 +2409,8 @@ status:
 この部品の実装・検証後に、非参加Visitあり・なしを統一する一般形順位再構成へ進む。
 
 **2026-09-14更新：** 具体的買い手候補集合生成部品のAPI、結果型、例外、専用テスト契約を確定した。次の直接作業は、新規本番モジュール`uxsim/order_control_tvt_mp_concrete_buyer_candidate_set.py`と専用テスト`tests_order_control_tvt_mp_concrete_buyer_candidate_set.py`の実装である。実装後に一般形順位再構成の実装前仕様へ進む。局所仮想計算と経済性評価にはまだ進まない。最新詳細は、本ファイルの「具体的買い手候補集合生成部品の実装前仕様」を参照する。
+
+**2026-09-15更新（最新の再開情報）：** 具体的買い手候補集合生成部品は実装・検証済みである。最新の実装完了事実は、本ファイルの「具体的買い手候補集合生成部品の実装完了記録」を参照する。次の直接作業は、非参加Visitあり・なしを統一する一般形順位再構成部品について、既存の非参加Visitなし順位計算部品と`preserves_inlink_fifo()`の契約を再確認し、確定済み空き順位枠方式を基礎に**実装前仕様**を確定することである。一般形順位再構成のコーディングを直ちに開始する、とは読み取らない。局所仮想計算と経済性評価にはまだ進まない。
 
 # 新しいチャットでの再開方法
 
