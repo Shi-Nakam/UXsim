@@ -5751,6 +5751,60 @@ helper の実装、専用テスト、設計メモの整合を最終確認した�
 - Git操作は利用者がTerminalで実行し、コミットとpushを分ける。
 - メモを含むコミット名には`document`を含める。
 
+##### 2026-09-14追記：TVT-MP具体的買い手候補集合生成部品の実装前仕様を確定
+
+**最新正本**
+
+- 最新正本は`ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_2.md`の「具体的買い手候補集合生成部品の実装前仕様」である。
+- TVT-MP一般形を直接実装する。
+- TVT-SB、TVT-MH、TVT-SPは当面実装しない。
+- 旧メモは歴史的記録として維持し、今回は変更していない。
+
+**公開APIとファイル候補**
+
+- 入力は`OrderControlTvtInlinkCandidatePhysicalOrderSetResult`である。
+- 参加Mappingは`participates_by_visit_key`である。
+- 公開関数候補は`build_tvt_mp_concrete_buyer_candidate_sets`である。
+- 新規本番候補は`uxsim/order_control_tvt_mp_concrete_buyer_candidate_set.py`である。
+- 新規専用テスト候補は`tests_order_control_tvt_mp_concrete_buyer_candidate_set.py`である。
+- 公開結果型は次の4つのfrozen dataclassである。
+  - `OrderControlTvtMpInlinkBuyerPrefixResult`
+  - `OrderControlTvtMpConcreteBuyerCandidateSet`
+  - `OrderControlTvtNodeMpConcreteBuyerCandidateSetResult`
+  - `OrderControlTvtMpConcreteBuyerCandidateSetResult`
+
+**生成規則**
+
+- 権利保有inlinkを買い手候補から除外する。
+- 最前方非参加Visitで最大prefixを打ち切る。
+- 各買い手候補inlinkに空prefixから最大prefixまでの全prefixを作る。
+- prefix直積の全空組合せだけを除外する。
+- 具体的買い手候補集合を、`candidate_visits`内の対象Nodeへ向かう全inlink横断の正式baseline相対順へ並べる。
+- `max_prefix`を別フィールドへ重複保存しない。
+- 権利保有inlink名を結果へ重複保存しない。
+- 本番処理で重複除去や重複検出用seen setを追加しない。
+
+**status**
+
+- `BASELINE_INFORMATION_COMPLETE`だけで生成する。
+- 他の正式statusでは空結果とする。
+- 想定外statusは`RuntimeError`とする。
+- `UNRESOLVED_CANDIDATE_PASSAGES`ではprefixも具体的買い手候補集合も生成しない。
+
+**実装状態**
+
+- Python実装とテストは未着手である。
+- 今回はMarkdownだけを変更し、Pythonとテストは変更していない。
+- 次は新規本番モジュールと専用テストの実装である。
+- その後、一般形順位再構成の実装前仕様へ進む。
+- 局所仮想計算と経済性評価にはまだ進まない。
+
+**Git状態**
+
+- HEADは`9477c73`である。
+- `diagnostics/order_control.zip`は未接触、対象外である。
+- git add、git commit、git pushは未実行である。
+
 #### 2026-08-29：TVT権利保有車両選定前の先頭非参加Vehicle先行確定の記録補修
 
 - 過去に確定済みだった、意思決定窓内 baseline 到着順位の先頭に連続する非参加 Vehicle の先行確定が、設計メモに明文化されていなかった

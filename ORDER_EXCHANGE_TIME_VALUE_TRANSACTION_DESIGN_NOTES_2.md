@@ -1504,6 +1504,14 @@ TVT成立時の確定範囲は、採用候補の`trade_scope`だけと無条件�
 
 これらは一般形アルゴリズムの中核を変更する事項ではなく、主としてAPI、結果型、互換性、責任分離に関する実装上の判断である。
 
+**2026-09-14更新：** 具体的買い手候補集合生成部品について、次の実装前仕様を確定した。Python実装と専用テストは未着手である。最新詳細は、本ファイルの「具体的買い手候補集合生成部品の実装前仕様」を正本とする。
+
+- 公開関数名は`build_tvt_mp_concrete_buyer_candidate_sets`とする。
+- 具体的買い手候補集合の結果型名は`OrderControlTvtMpConcreteBuyerCandidateSet`とする。
+- inlink別の空prefixから最大prefixまでの全prefixを、公開結果へ保持する。
+- 全体結果は、上流の`OrderControlTvtInlinkCandidatePhysicalOrderSetResult`を同一オブジェクト参照で保持する。
+- 一般形順位結果型、既存非参加Visitなし結果型との移行、RNG、局所仮想計算・経済性評価・最終確定とのAPI接続は、本部品の範囲外として残す。
+
 ---
 
 ## 31. 現時点の結論
@@ -1609,6 +1617,627 @@ surplus最大候補を選ぶ
 - 上位TVT制御
 - TVT-MP一般形の性能測定
 
+**2026-09-14更新：** 買い手候補inlink、買い手prefix、具体的買い手候補集合は、実装前仕様まで確定した。Python実装と専用テストは未着手である。一般形順位再構成、一般形順位再構成の結果型、およびそれ以降の項目は引き続き未実装である。最新詳細は、本ファイルの「具体的買い手候補集合生成部品の実装前仕様」を参照する。
+
+# 具体的買い手候補集合生成部品の実装前仕様
+
+本節は、具体的買い手候補集合生成部品の実装前仕様の最新正本である。
+
+- 制度ロジックは、本ファイル§7から§13、§28、§29.1、§29.2に従う。
+- 今回確定するのは、既存公開型との接続、公開API、結果型、status、参加Mapping、例外契約、専用テスト契約である。
+- Python実装とテストは未着手である。
+- 実装・検証後は、別の実装完了記録を追加する。
+- 旧メモは変更しない。
+
+## 非技術的な説明
+
+すでに、P−1条件と可変上限Nの適用後に最大N件まで選ばれたTVT候補Visitと、各inlink内でのsnapshot時点の前後順は取得できている。
+
+次の部品では、権利保有車両と同じinlinkを買い手候補から外す。その他のinlinkでは、対象Nodeに近い先頭側から参加Visitが続く範囲を最大prefixとする。最初の非参加Visitに到達したら、そのVisitと後方のVisitを買い手候補prefixへ含めない。
+
+各inlinkについて、空prefixから最大prefixまでのすべてのprefixを作る。各inlinkからprefixを一つずつ選ぶ全組合せを作り、すべて空の組合せだけを除外する。選ばれたVisitを、対象Nodeへ向かう全inlink横断の正式baseline相対順へ並べたものが、一つの具体的買い手候補集合である。
+
+これは経済性評価前の候補であり、確定した買い手集合ではない。この段階では売り手、`trade_scope`、取引後順位を決めない。
+
+## 責任分離
+
+新しい独立した読取専用部品とする。既存部品へ統合しない。
+
+新規本番ファイルの正式候補:
+
+```text
+uxsim/order_control_tvt_mp_concrete_buyer_candidate_set.py
+```
+
+新規専用テスト:
+
+```text
+tests_order_control_tvt_mp_concrete_buyer_candidate_set.py
+```
+
+変更しない既存部品:
+
+- `order_control_tvt_candidate_visit_set.py`
+- `order_control_tvt_inlink_candidate_physical_order.py`
+- `order_control_tvt_trade_rank.py`
+- その他の上流処理
+
+理由:
+
+- `candidate_visits`の選定は上流の責務である。
+- inlink別snapshot物理順整理も実装済み上流部品の責務である。
+- 今回の責務はprefixと具体的買い手候補集合の生成である。
+- 一般形順位再構成は次の別部品とする。
+- 上流処理を再実行しない。
+- World、Vehicle、collector、順位台帳へ戻らない。
+- 入力結果を変更しない。
+
+## 公開関数
+
+正式名称:
+
+```text
+build_tvt_mp_concrete_buyer_candidate_sets
+```
+
+署名候補:
+
+```python
+def build_tvt_mp_concrete_buyer_candidate_sets(
+    inlink_candidate_physical_order_result:
+        OrderControlTvtInlinkCandidatePhysicalOrderSetResult,
+    *,
+    participates_by_visit_key:
+        Mapping[OrderControlTvtVisitKey, bool],
+) -> OrderControlTvtMpConcreteBuyerCandidateSetResult:
+```
+
+契約:
+
+- 第一引数は位置引数として受け取る。
+- `participates_by_visit_key`はkeyword-only必須引数である。
+- 追加のWorld、Vehicle、collector、rank stateを受け取らない。
+- 上流処理を再実行しない。
+- 入力オブジェクトを変更しない。
+
+## 既存入力への参照経路
+
+第一入力は`OrderControlTvtInlinkCandidatePhysicalOrderSetResult`である。
+
+この入力から次へ到達する。
+
+- `candidate_visit_set_result`
+- `node_inlink_candidate_physical_order_results`
+
+`candidate_visit_set_result`から次を読む。
+
+- `node_candidate_set_results`
+- 各対象Nodeの`build_status`
+- `right_of_entry_visit_key`
+- `candidate_visits`
+
+各candidate Visitから次を読む。
+
+- `visit_key`
+- `inlink_name`
+- baseline情報
+
+各対象Nodeのinlink別結果から次を読む。
+
+- `node_name`
+- `build_status`
+- `inlink_candidate_physical_orders`
+
+各inlink結果から次を読む。
+
+- `node_name`
+- `inlink_name`
+- `candidate_visit_keys_head_to_tail`
+
+全体結果は、入力`OrderControlTvtInlinkCandidatePhysicalOrderSetResult`と同じオブジェクトを参照保持する。
+
+`candidate_visit_set_result`だけを重複して保存しない。候補Visitの完全情報を複写しない。永続的なbaseline順位dictを結果型へ保存しない。
+
+## 結果型
+
+すべて公開frozen dataclassとする。
+
+### inlink別prefix結果
+
+正式名称:
+
+```text
+OrderControlTvtMpInlinkBuyerPrefixResult
+```
+
+フィールド:
+
+- `node_name: str`
+- `inlink_name: str`
+- `buyer_prefixes_empty_to_max: tuple[tuple[OrderControlTvtVisitKey, ...], ...]`
+
+意味:
+
+- 買い手候補となる一つのinlinkについて、空prefixから最大prefixまでの全prefixを保持する。
+- 最初の要素は必ず空tupleである。
+- その後は、物理先頭1件、先頭2件、先頭3件という順に長くなる。
+- 最後の要素が最大prefixである。
+- prefix内のVisitKey順は、同一inlink内のsnapshot物理順である。
+- prefix列挙順は、候補の優先順位を意味しない。
+- 権利保有inlinkは、この結果へ含めない。
+- 物理先頭のcandidate Visitが非参加で、非空prefixを作れないinlinkも含めない。
+
+`max_prefix`を別フィールドとして保存しない。
+
+理由:
+
+- `buyer_prefixes_empty_to_max`の最後の要素から最大prefixを取得できる。
+- `max_prefix`と全prefixの二重管理を避ける。
+- 両者の不一致を生じさせない。
+
+### 一つの具体的買い手候補集合
+
+正式名称:
+
+```text
+OrderControlTvtMpConcreteBuyerCandidateSet
+```
+
+フィールド:
+
+- `buyers_sorted: tuple[OrderControlTvtVisitKey, ...]`
+
+意味:
+
+- 一つのprefix組合せから作られた、経済性評価前の具体的買い手候補集合である。
+- 空でない。
+- 全VisitKeyが参加Visitである。
+- `candidate_visits`内の位置に従って、対象Nodeへ向かう全inlink横断の正式baseline相対順に並ぶ。
+- 権利保有Visitを含まない。
+- 権利保有inlink上のVisitを含まない。
+- 確定した買い手集合ではない。
+
+保存しないもの:
+
+- 候補ID
+- 選択元prefix組合せ
+- 売り手
+- 非参加Visit
+- `trade_scope`
+- `last_buyer_rank`
+- `trade_rank`
+- `trade_order`
+- FIFO結果
+- 局所仮想計算結果
+- 経済性評価結果
+- `surplus`
+- 支払額
+- 補償額
+
+### Node別結果
+
+正式名称:
+
+```text
+OrderControlTvtNodeMpConcreteBuyerCandidateSetResult
+```
+
+フィールド:
+
+- `node_name: str`
+- `build_status: OrderControlTvtCandidateVisitSetStatus`
+- `buyer_candidate_inlink_prefix_results: tuple[OrderControlTvtMpInlinkBuyerPrefixResult, ...]`
+- `concrete_buyer_candidate_sets: tuple[OrderControlTvtMpConcreteBuyerCandidateSet, ...]`
+
+`excluded_right_of_entry_inlink_name`は追加しない。
+
+理由:
+
+- 権利保有Visitおよび`inlink_name`は上流結果から取得可能である。
+- 同じ情報の重複保存を避ける。
+- 権利保有inlinkは生成処理で買い手候補から除外するだけで十分である。
+
+### 全体結果
+
+正式名称:
+
+```text
+OrderControlTvtMpConcreteBuyerCandidateSetResult
+```
+
+フィールド:
+
+- `inlink_candidate_physical_order_result: OrderControlTvtInlinkCandidatePhysicalOrderSetResult`
+- `node_concrete_buyer_candidate_set_results: tuple[OrderControlTvtNodeMpConcreteBuyerCandidateSetResult, ...]`
+
+入力`inlink_candidate_physical_order_result`と同じオブジェクトを参照保持する。
+
+対象Node別結果は、上流の`node_inlink_candidate_physical_order_results`と同じ順序で保持する。
+
+## status設計
+
+新しいstatus Enumは追加しない。
+
+既存の`OrderControlTvtCandidateVisitSetStatus`を対象Node別結果へ保持する。
+
+`BASELINE_INFORMATION_COMPLETE`:
+
+- 参加Mappingを検証する。
+- 権利保有Visitの参加状態を確認する。
+- prefixを生成する。
+- 具体的買い手候補集合を生成する。
+
+`BASELINE_INFORMATION_COMPLETE`以外の正式4 status:
+
+- `NOT_BUILT_NO_RIGHT_OF_ENTRY`
+- `NOT_BUILT_UNRESOLVED_ARRIVALS`
+- `UNRESOLVED_RIGHT_OF_ENTRY_PASSAGE`
+- `UNRESOLVED_CANDIDATE_PASSAGES`
+
+これらでは:
+
+- 参加Mappingを検証しない。
+- prefixを生成しない。
+- 具体的買い手候補集合を生成しない。
+- `buyer_candidate_inlink_prefix_results=()`
+- `concrete_buyer_candidate_sets=()`
+
+特に`UNRESOLVED_CANDIDATE_PASSAGES`では:
+
+- `candidate_visits`は確定済みである。
+- inlink別snapshot物理順も整理済みである。
+- ただし、部分的TVTを防ぐためprefix生成へ進まない。
+
+想定外status:
+
+- `RuntimeError`とする。
+- 正常な空結果として扱わない。
+- 対象Node名と実際のstatusをエラーメッセージへ含める。
+- 後続の対象Nodeを処理せず、部分的な全体結果を返さない。
+
+次の三状態は、既存statusとtupleの内容で区別する。
+
+1. 上流情報により生成対象外
+   - `build_status`が`BASELINE_INFORMATION_COMPLETE`以外
+   - 両結果tupleが空
+2. 情報は完全だが買い手候補inlinkが0本
+   - `build_status`が`BASELINE_INFORMATION_COMPLETE`
+   - 両結果tupleが空
+3. 具体的買い手候補集合を生成
+   - `build_status`が`BASELINE_INFORMATION_COMPLETE`
+   - prefix結果および具体候補結果が非空
+
+## 参加Mapping
+
+必須入力:
+
+```text
+participates_by_visit_key:
+Mapping[OrderControlTvtVisitKey, bool]
+```
+
+契約:
+
+- `BASELINE_INFORMATION_COMPLETE`の対象Nodeだけ検証する。
+- その対象Nodeの`candidate_visits`全件について参加情報を確認する。
+- 必要なVisitKeyが欠けていれば`ValueError`とする。
+- 値が厳密なPythonの`bool`でなければ`ValueError`とする。
+- `bool`の代わりに`1`、`0`、文字列、`numpy.bool_`を受け入れない。
+- Mapping内の余分なVisitKeyは許容する。
+- 余分なVisitKeyは使用しない。
+- Mapping全体の完全一致は要求しない。
+- Mappingを変更しない。
+- 参加状態を、対象Nodeへ向かう全inlink横断の正式baseline順の決定へ使用しない。
+
+権利保有Visit:
+
+- `BASELINE_INFORMATION_COMPLETE`の対象Nodeでは参加Visitでなければならない。
+- `participates_by_visit_key[right_of_entry_visit_key]`が`False`なら`RuntimeError`とする。
+- これはTVT形成直前の重大不整合確認として行う。
+- 権利保有Visitを買い手候補へ含めない。
+
+## 権利保有inlink
+
+`BASELINE_INFORMATION_COMPLETE`の対象Nodeについて:
+
+1. 対象Node別candidate結果から`right_of_entry_visit_key`を取得する。
+2. `None`なら`RuntimeError`とする。
+3. `candidate_visits`からVisitKeyと`inlink_name`の一時dictを作る。
+4. 権利保有Visitを一時dictから検索する。
+5. 見つからなければ`RuntimeError`とする。
+6. その`inlink_name`を権利保有inlinkとする。
+7. 権利保有inlinkはprefix生成および直積の対象から除外する。
+8. 上流の`candidate_visits`とinlink別物理順結果は変更しない。
+9. 権利保有inlink上のVisitを上流結果から削除しない。
+10. 後続の`trade_scope`と順位再構成では、権利保有inlink上のVisitも必要に応じて扱う。
+
+## prefix生成
+
+`BASELINE_INFORMATION_COMPLETE`の各対象Nodeについて:
+
+1. `candidate_visits`全件の参加Mappingを検証する。
+2. candidate VisitKeyから`inlink_name`への一時dictを作る。
+3. candidate VisitKeyから正式baseline位置への一時dictを作る。
+4. 権利保有Visitの参加状態を確認する。
+5. 権利保有inlinkを特定する。
+6. `inlink_candidate_physical_orders`を既存tuple順に走査する。
+7. 権利保有inlinkはprefix生成対象から除外する。
+8. その他のinlinkでは`candidate_visit_keys_head_to_tail`を先頭から走査する。
+9. 参加Visitなら最大prefix用listへ追加する。
+10. 最初の非参加Visitに到達したら停止する。
+11. 最初の非参加Visit自身を最大prefixへ含めない。
+12. 最初の非参加Visitより後方のVisitも含めない。
+13. 最大prefixが空なら、そのinlinkを直積対象から除外する。
+14. 最大prefixが非空なら、空prefixから最大prefixまでの全prefixを作る。
+15. inlink別prefix結果を作る。
+
+各inlinkの`buyer_prefixes_empty_to_max`は次の順序とする。
+
+- 空tuple
+- 物理先頭1件
+- 物理先頭2件
+- 物理先頭3件
+- 以下同様
+- 最大prefix
+
+例えば最大prefixがA、B、Cなら:
+
+- `()`
+- `(A,)`
+- `(A, B)`
+- `(A, B, C)`
+
+この順序は候補の優先順位を意味しない。
+
+## 具体的買い手候補集合生成
+
+1. 買い手候補inlinkが0本なら、具体的買い手候補集合は空tupleとする。
+2. 各inlinkの`buyer_prefixes_empty_to_max`を直積の軸とする。
+3. 標準ライブラリ`itertools.product`を使用してよい。
+4. 全inlinkで空prefixを選んだ組合せだけを除外する。
+5. 一部のinlinkが空で、別のinlinkが非空の組合せは残す。
+6. 各prefix組合せのVisitKeyを一時listへ統合する。
+7. `candidate_visits`内の位置から作った一時dictで、対象Nodeへ向かう全inlink横断の正式baseline相対順へ並べる。
+8. 空でないVisitKey tupleを`buyers_sorted`として保存する。
+9. `OrderControlTvtMpConcreteBuyerCandidateSet`を作る。
+10. すべての具体的買い手候補集合をtupleで保持する。
+
+直積軸となるinlinkの順序:
+
+- 上流の`inlink_candidate_physical_orders`における出現順。
+- 権利保有inlinkと最大prefixが空のinlinkを除いた順。
+
+prefix組合せと具体候補の列挙順:
+
+- 決定論的な列挙順として維持する。
+- 候補の優先順位に使用しない。
+- 経済性評価の同値判定に使用しない。
+- 将来のランダム選択の代用にしない。
+
+## 重複候補
+
+本ファイル§12.5に従う。
+
+- 一つのVisitKeyは一つのsnapshot inlinkにだけ属する。
+- 一つのinlinkのprefixは選択した長さにより一意に決まる。
+- 異なるprefix組合せから同じ具体的買い手候補集合は生成されない。
+- 本番処理で重複除去しない。
+- 本番処理で候補ごとの重複検出用seen setも作らない。
+- 専用テストで、生成された具体的買い手候補集合に重複がないことを確認する。
+- 具体候補内のVisitKey重複も、正常な生成経路では構造上発生しない。
+- 候補ごとの重複検査を本番へ追加しない。
+- 上流のVisitKey所属とinlink別物理順の既存保証を利用する。
+
+## 必要最小限の検査
+
+本番に残す外部入力検査:
+
+`ValueError`:
+
+- `BASELINE_INFORMATION_COMPLETE`の対象Nodeで、必要なcandidate VisitKeyが`participates_by_visit_key`にない。
+- 参加状態の値が厳密なPythonの`bool`でない。
+
+本番に残す既存結果間の重大不整合検査:
+
+`RuntimeError`:
+
+- 対象Node別candidate結果とinlink別物理順結果の件数不一致。
+- 対応する対象Node別結果の`node_name`不一致。
+- 対応する対象Node別結果の`build_status`不一致。
+- 想定外`build_status`。
+- `BASELINE_INFORMATION_COMPLETE`なのに`right_of_entry_visit_key`が`None`。
+- 権利保有Visitが`candidate_visits`に存在しない。
+- 権利保有Visitが非参加。
+- `candidate_visits`のVisitKey集合と、inlink別candidate物理順のVisitKey集合が一致しない場合。
+
+上記の集合一致については、上流部品がすでに保証した内容の全面的な再検証にはしない。ただし、異なる上流結果オブジェクトを誤って組み合わせた場合に、誤った買い手候補を生成する重大不整合を防ぐため、対象Node単位の軽量な対応確認は行う第一候補とする。
+
+本番で再検証しない:
+
+- P−1条件。
+- 可変上限N。
+- `candidate_visits`の正式baseline sort規則。
+- baseline passage値そのもの。
+- snapshot物理順の内部重複。
+- snapshot entriesと物理順の集合一致。
+- 単車線条件。
+- candidate Visitの対象Node・inlink所属について、既存上流部品が保証済みの詳細。
+- 具体的買い手候補集合の重複。
+- 具体候補内のVisitKey重複。
+
+重大不整合時:
+
+- 後続の対象Nodeを処理しない。
+- 部分的な全体結果を返さない。
+- 新しい独自例外型を作らない。
+
+## 可読性
+
+実装では、正しさを最優先とし、次に初学者が後から追いやすい可読性を優先する。
+
+複数の実装方法がある場合は、短さ、巧妙さ、高度なPython技法より、明示的な処理を選ぶ。
+
+責務を少なくとも次へ分ける方針とする。
+
+- statusの分類
+- 対象Node別結果の対応確認
+- 参加Mappingの検証
+- candidate VisitKeyから`inlink_name`への一時dict作成
+- candidate VisitKeyから正式baseline位置への一時dict作成
+- 権利保有inlinkの特定
+- 一つのinlinkの最大prefix作成
+- 空prefixから最大prefixまでの全prefix作成
+- 対象Nodeの買い手候補inlink別prefix結果作成
+- prefix直積
+- prefix組合せの統合
+- 対象Nodeへ向かう全inlink横断の正式baseline相対順への並べ替え
+- 対象Node別結果作成
+- 全体結果作成
+
+避ける:
+
+- 長い内包表記。
+- 複雑な多重ジェネレーター式。
+- 多段階処理を一つの式へ詰め込むこと。
+- 高度なPython技法による短縮。
+- 不要な抽象化。
+- 実測前の性能最適化。
+
+`itertools.product`は使用してよい。ただし、prefix組合せ、統合済みVisitKey、並べ替え後VisitKeyを、意味の分かる中間変数へ分ける。
+
+## 専用テスト契約
+
+新規専用テスト:
+
+```text
+tests_order_control_tvt_mp_concrete_buyer_candidate_set.py
+```
+
+期待値は、実装と同じ処理で自動生成せず、テスト本文へ明示する。
+
+正常系:
+
+- 単一対象Node・単一買い手候補inlink。
+- 単一対象Node・複数買い手候補inlink。
+- 複数対象Node。
+- 権利保有inlinkをprefix対象から除外する。
+- 権利保有Visitを具体的買い手候補集合へ含めない。
+- 全参加ならinlink別candidate Visit列の末尾まで最大prefixとなる。
+- 途中の最前方非参加Visitで最大prefixを打ち切る。
+- 最前方非参加Visit自身を含めない。
+- 最前方非参加Visitより後方を含めない。
+- 物理先頭が非参加なら、そのinlinkを直積対象から除外する。
+- 各買い手候補inlinkのprefix列の先頭が空tuple。
+- 空prefixから最大prefixまで全prefixがある。
+- 全空組合せだけを除外する。
+- 一部inlinkだけ空の組合せを残す。
+- 統合後は`candidate_visits`内の位置に従って、対象Nodeへ向かう全inlink横断の正式baseline相対順へ並ぶ。
+- inlink内snapshot物理順と、対象Nodeへ向かう全inlink横断の正式baseline順の用途を混同しない。
+- 非参加Visitが0件でも同じ一般形処理で生成する。
+- 買い手候補inlinkが0本なら具体的候補0件。
+- 権利保有Visitだけのcandidate集合なら具体的候補0件。
+- 具体的買い手候補集合に重複がない。
+- 候補数が`∏(M_i + 1) - 1`と一致する小規模例。
+
+status:
+
+- `BASELINE_INFORMATION_COMPLETE`で生成する。
+- `UNRESOLVED_CANDIDATE_PASSAGES`では生成しない。
+- `UNRESOLVED_RIGHT_OF_ENTRY_PASSAGE`では生成しない。
+- `NOT_BUILT_NO_RIGHT_OF_ENTRY`では生成しない。
+- `NOT_BUILT_UNRESOLVED_ARRIVALS`では生成しない。
+- 想定外statusは`RuntimeError`。
+- 生成対象外の対象Nodeでは参加Mappingを検証しない。
+
+参加Mapping:
+
+- 必要なVisitKey欠落を`ValueError`。
+- 値`1`を拒否。
+- 値`0`を拒否。
+- 文字列`"True"`を拒否。
+- `numpy.bool_`を拒否。
+- 余分なVisitKeyを許容する。
+- 余分なVisitKeyが結果へ影響しない。
+- 権利保有Visitが`False`なら`RuntimeError`。
+- 非参加Visitが具体的買い手候補集合へ入らない。
+
+結果型:
+
+- 4つの公開結果型がfrozen dataclassである。
+- すべての列がtupleである。
+- `buyer_prefixes_empty_to_max`の先頭要素が空tupleである。
+- 最後の要素が最大prefixである。
+- `max_prefix`の重複フィールドがない。
+- 全体結果が入力上流結果と同じオブジェクトを参照保持する。
+- `buyers_sorted`は空でない。
+- 結果型に候補IDがない。
+- 結果型に売り手、非参加分類、`trade_scope`、`trade_rank`、`trade_order`、FIFO、経済評価フィールドがない。
+- `excluded_right_of_entry_inlink_name`の重複フィールドがない。
+- 永続baseline順位dictがない。
+- 更新API、rollback API、export APIを追加していない。
+
+重大不整合:
+
+- 対象Node別結果件数不一致。
+- `node_name`不一致。
+- `build_status`不一致。
+- `BASELINE_INFORMATION_COMPLETE`なのに`right_of_entry_visit_key`が`None`。
+- 権利保有Visitが`candidate_visits`に存在しない。
+- candidate Visit集合とinlink別candidate物理順集合の不一致。
+- 後続の対象Nodeで重大不整合が起きた場合に部分結果を返さない。
+- 重大不整合後に後続の対象Nodeを処理しない。
+
+読取専用:
+
+- 入力上流結果を変更しない。
+- `candidate_visits`を変更しない。
+- inlink別candidate物理順を変更しない。
+- `participates_by_visit_key`を変更しない。
+- World、Vehicle、collector、順位台帳へ戻らない。
+- 上流公開処理を呼び直さない。
+
+## 今回実装しない範囲
+
+- `trade_scope`。
+- 最後尾買い手候補の順位計算。
+- 買い手、売り手、非参加Visitの3分類。
+- 非参加Visitのbaseline局所順位枠固定。
+- 空き順位枠方式。
+- 一般形`trade_rank`。
+- `trade_order`。
+- FIFO検査の実行。
+- 局所仮想計算。
+- 経済性評価。
+- `surplus`比較。
+- 同値候補のRNG選択。
+- 支払い。
+- 補償。
+- TVT成立時の最終確定。
+- TVT不成立時の最終確定。
+- 情報未解決時の最終確定。
+- 確定順位ブロックへの接続。
+- 上位TVT制御。
+- TVT-SB。
+- TVT-MH。
+- TVT-SP。
+- 性能最適化。
+- 研究対象外Vehicle対応の拡張。
+
+## 実装後の次の作業
+
+具体的買い手候補集合生成部品を実装・検証した後は、次へ進む。
+
+- 非参加Visitあり・なしを統一する一般形順位再構成部品の実装前仕様。
+- `candidate_visits`と具体的買い手候補集合から`trade_scope`を構築する。
+- `trade_scope`内を買い手、売り手、非参加Visitへ分類する。
+- 非参加Visitのbaseline局所順位枠を固定する。
+- 空き順位の先頭側へ買い手を配置する。
+- 残る空き順位へ売り手を配置する。
+- `trade_rank`と`trade_order`を構築する。
+- 非参加Visit0件で既存の非参加Visitなし関数と結果が一致することを確認する。
+
+局所仮想計算と経済性評価には、まだ進まない。
+
 # 次の作業開始点
 
 次の直接作業は、具体的買い手候補集合生成部品の実装前仕様を、既存の公開型と接続できる形で確定することである。
@@ -1627,6 +2256,8 @@ surplus最大候補を選ぶ
 - 専用テスト契約を確定する
 
 この部品の実装・検証後に、非参加Visitあり・なしを統一する一般形順位再構成へ進む。
+
+**2026-09-14更新：** 具体的買い手候補集合生成部品のAPI、結果型、例外、専用テスト契約を確定した。次の直接作業は、新規本番モジュール`uxsim/order_control_tvt_mp_concrete_buyer_candidate_set.py`と専用テスト`tests_order_control_tvt_mp_concrete_buyer_candidate_set.py`の実装である。実装後に一般形順位再構成の実装前仕様へ進む。局所仮想計算と経済性評価にはまだ進まない。最新詳細は、本ファイルの「具体的買い手候補集合生成部品の実装前仕様」を参照する。
 
 # 新しいチャットでの再開方法
 
