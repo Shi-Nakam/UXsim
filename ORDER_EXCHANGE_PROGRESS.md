@@ -5934,6 +5934,45 @@ helper の実装、専用テスト、設計メモの整合を最終確認した�
 - 新規本番・新規専用テスト・本進捗追記・継続版メモの実装完了記録追記は、まだ`git add`、`git commit`、`git push`していない。
 - `diagnostics/order_control.zip`は対象外の未追跡ファイルである。
 
+##### 2026-09-15追記：TVT-MP FIFO検査接続部品の実装前仕様を確定
+
+**最新正本**
+
+- 詳細正本は`ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_2.md`の「TVT-MP FIFO検査接続部品の実装前仕様」である。
+- FIFO検査の制度ロジックは継続版メモ§20、§21で既に確定済みである。今回確定したのは、実装済み一般形順位再構成結果と既存`preserves_inlink_fifo()`へ接続する完全な実装前仕様である。
+- 一般形順位再構成部品の保存済み・push済み実装コミットは`1e23174`である。このhashをFIFO検査接続部品の実装コミットとして扱わない。
+- 旧メモは変更していない。
+
+**公開APIとファイル候補**
+
+- 新規本番候補は`uxsim/order_control_tvt_mp_fifo_inspection.py`である。
+- 新規専用テスト候補は`tests_order_control_tvt_mp_fifo_inspection.py`である。
+- 入力は`OrderControlTvtMpGeneralTradeRankSetResult`である。
+- `participates_by_visit_key`は不要である。
+- 公開関数候補は`build_tvt_mp_fifo_inspection_results`である。
+- 一候補、対象Node別、全体の3結果型は公開frozen dataclassである。
+
+**接続規則の要点**
+
+- 取引前は`trade_scope`、取引後は`trade_order[:last_buyer_rank]`を既存`preserves_inlink_fifo()`へ渡す。
+- FIFO違反は`False`として結果へ残す正常な候補棄却である。例外ではない。
+- FIFO違反候補を結果から削除せず、上流候補順と一対一対応を維持する。
+- `preserves_inlink_fifo()`が`ValueError`を出した場合は重大不整合として`RuntimeError`へ変換する。
+- `False`は例外変換しない。Python `bool`以外の戻り値は`RuntimeError`とする。
+
+**実装状態**
+
+- Python実装と専用テストはまだ未着手である。
+- 次の直接作業は、この保存済み実装前仕様に従う新規2ファイルの実装である。
+- 局所仮想計算、経済性評価、成立候補選択にはまだ進まない。
+- git add、git commit、git pushはまだ行っていない。
+
+**Git状態（記録時点）**
+
+- 一般形順位再構成部品の保存済み・push済みコミットは`1e23174`である。
+- 本実装前仕様のMarkdown追記は、まだ`git add`、`git commit`、`git push`していない。
+- `diagnostics/order_control.zip`は対象外の未追跡ファイルのままである。
+
 #### 2026-08-29：TVT権利保有車両選定前の先頭非参加Vehicle先行確定の記録補修
 
 - 過去に確定済みだった、意思決定窓内 baseline 到着順位の先頭に連続する非参加 Vehicle の先行確定が、設計メモに明文化されていなかった

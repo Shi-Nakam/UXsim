@@ -1644,6 +1644,15 @@ surplus最大候補を選ぶ
 
 候補別FIFO接続、局所仮想計算、経済性評価、成立候補選択、支払いと補償、各場合の最終確定列、確定順位ブロックへの上位接続、上位TVT制御は引き続き未実装である。空き順位枠方式の制度ロジック自体は本ファイル§3.3、§4、§17で確定済みである。今回確定したのは、その制度ロジックを既存公開型へ接続する実装前仕様である。
 
+**2026-09-15追記（FIFO検査接続）：** 次は実装前仕様まで確定したが、Python実装と専用テストは未着手である。最新詳細は、本ファイルの「TVT-MP FIFO検査接続部品の実装前仕様」を参照する。
+
+- 候補別FIFO接続
+- `preserves_inlink_fifo()`の呼出し
+- FIFO違反候補のTrue/False結果保持
+- FIFO違反候補の正常な後続除外契約
+
+局所仮想計算、経済性評価、成立候補選択、支払いと補償、各場合の最終確定列、確定順位ブロックへの上位接続、上位TVT制御は引き続き未実装である。FIFO検査の制度ロジック自体は本ファイル§20、§21で確定済みである。今回確定したのは、実装済みの一般形順位再構成結果と既存`preserves_inlink_fifo()`へ接続する実装前仕様である。
+
 # 具体的買い手候補集合生成部品の実装前仕様
 
 本節は、具体的買い手候補集合生成部品の実装前仕様の最新正本である。
@@ -3668,6 +3677,848 @@ FIFO検査の実行、FIFO違反候補の除外、候補別局所仮想計算、
 - FIFO検査接続部品では、正常なFIFO違反候補を`False`として除外し、別候補の検討を継続できる契約を設計する。
 - 局所仮想計算、経済性評価、成立候補選択にはまだ進まない。
 
+# TVT-MP FIFO検査接続部品の実装前仕様
+
+本節は、TVT-MP FIFO検査接続部品のPython実装に使用する**唯一の最新実装前仕様**である。
+
+- 制度ロジックは、本ファイル§20、§21、および「TVT-MP一般形順位再構成部品の実装前仕様」「TVT-MP一般形順位再構成部品の実装完了記録」に従う。FIFO検査の規則と一般形順位再構成を本節で新しく考え直さない。
+- 今回確定するのは、実装・検証済みの一般形順位再構成結果と既存`preserves_inlink_fifo()`へ接続する公開API、結果型、入力経路、status、処理順、正常なFIFO違反、重大不整合、読取専用契約、専用テスト契約、未実装境界である。
+- Python実装と専用テストは未着手である。実装済み、テスト済み、コミット済み、push済みとは記載しない。
+- 実装・検証後は、別の実装完了記録を追加する。
+- 旧メモは変更しない。
+- 一般形順位再構成部品の保存済み実装コミットは`1e23174`である。このhashを、本部品の実装コミットとして扱わない。
+
+## 非技術的な説明
+
+一般形順位再構成部品が作った各順位案をFIFO検査へ一つずつ通し、同じ道路から交差点へ向かうVisitの前後関係が守られているかを確認する。
+
+各候補について、FIFOを維持するか、FIFO違反かという検査票を作る。
+
+FIFO違反候補は異常停止ではなく、その候補だけを後続対象から外す。別の候補の検討は継続する。
+
+検査に不合格だった候補を結果から消して対応関係を失うのではなく、各候補の検査結果をTrueまたはFalseとして残す。
+
+この部品では、局所仮想計算、経済性評価、成立候補選択はまだ行わない。
+
+## 責任分離と新規ファイル
+
+新しい独立した読取専用部品とする。既存の`preserves_inlink_fifo()`へ一般形接続処理を追加しない。一般形順位再構成部品へFIFO検査を追加しない。
+
+新規本番モジュールの正式名称:
+
+```text
+uxsim/order_control_tvt_mp_fifo_inspection.py
+```
+
+新規専用テストの正式名称:
+
+```text
+tests_order_control_tvt_mp_fifo_inspection.py
+```
+
+変更しない既存部品:
+
+- `uxsim/order_control_tvt_trade_rank.py`
+- `tests_order_control_tvt_trade_rank.py`
+- `uxsim/order_control_tvt_mp_general_trade_rank.py`
+- `tests_order_control_tvt_mp_general_trade_rank.py`
+- その他の上流処理
+
+理由:
+
+- `preserves_inlink_fifo()`自体は既に完成している。
+- 一般形順位再構成部品はFIFO検査前の順位結果を作る責務である。
+- 新しい部品は、一般形順位結果からFIFO検査材料を取り出し、既存FIFO関数を候補ごとに呼ぶ責務である。
+- 順位再構成と候補検査を混在させない。
+- FIFO違反の正常な候補棄却と、順位構造の重大不整合を区別する。
+
+## 公開関数
+
+正式名称:
+
+```text
+build_tvt_mp_fifo_inspection_results
+```
+
+署名:
+
+```python
+def build_tvt_mp_fifo_inspection_results(
+    general_trade_rank_set_result:
+        OrderControlTvtMpGeneralTradeRankSetResult,
+) -> OrderControlTvtMpFifoInspectionSetResult:
+    ...
+```
+
+契約:
+
+- 第一入力は位置引数として受け取る。
+- keyword-onlyの追加入力は設けない。
+- `participates_by_visit_key`は受け取らない。
+- World、Vehicle、Node、Link、collector、順位台帳を受け取らない。
+- `candidate_visit_set_result`を重複入力として受け取らない。
+- concrete buyer candidate set resultを重複入力として受け取らない。
+- inlink別物理順結果を重複入力として受け取らない。
+- 第一入力から必要な`candidate_visits`へ参照で到達する。
+- 入力結果を変更しない。
+- 上流処理を再実行しない。
+
+`participates_by_visit_key`を受け取らない理由:
+
+- `preserves_inlink_fifo()`は参加・非参加を区別しない。
+- FIFO検査に必要なのは、取引前後のVisit列とVisitKeyごとのinlink名である。
+- 買い手、売り手、非参加Visitはすべて同じFIFO検査対象である。
+
+## 上流入力との接続
+
+第一入力は`OrderControlTvtMpGeneralTradeRankSetResult`である。
+
+第一入力から次を参照する。
+
+- `concrete_buyer_candidate_set_result`
+- `node_trade_rank_results`
+
+`concrete_buyer_candidate_set_result`から次へ到達する。
+
+- `inlink_candidate_physical_order_result`
+- `node_concrete_buyer_candidate_set_results`
+
+`inlink_candidate_physical_order_result`から次へ到達する。
+
+- `candidate_visit_set_result`
+
+`candidate_visit_set_result`から次を参照する。
+
+- `node_candidate_set_results`
+
+各candidate Node結果から次を参照する。
+
+- `node_name`
+- `build_status`
+- `candidate_visits`
+
+各candidate Visitから次を参照する。
+
+- `visit_key`
+- `inlink_name`
+
+各一般形順位Node結果から次を参照する。
+
+- `node_name`
+- `build_status`
+- `candidate_trade_rank_results`
+
+各一候補順位結果から次を参照する。
+
+- `concrete_buyer_candidate_set`
+- `last_buyer_rank`
+- `trade_scope`
+- `trade_order`
+
+## 処理単位と順序
+
+処理は次の二段構造とする。
+
+1. 対象Node別に処理する。
+2. 各対象Nodeの一般形順位候補を一つずつFIFO検査する。
+
+対象Nodeの結果順は、上流の`node_trade_rank_results`の順序を維持する。
+
+候補検査結果は、上流の`candidate_trade_rank_results`の順序を維持する。
+
+候補IDを追加しない。
+
+列挙順を次に使用しない。
+
+- 候補の優先順位
+- 経済性評価順
+- `surplus`同値時の選択規則
+- 将来のRNGの代用
+
+## 公開結果型
+
+次の3つを公開frozen dataclassとする。
+
+1. `OrderControlTvtMpCandidateFifoInspectionResult`
+2. `OrderControlTvtNodeMpFifoInspectionResult`
+3. `OrderControlTvtMpFifoInspectionSetResult`
+
+### 一候補のFIFO検査結果
+
+正式名称:
+
+```text
+OrderControlTvtMpCandidateFifoInspectionResult
+```
+
+公開frozen dataclassとする。
+
+フィールド:
+
+- `general_trade_rank_result: OrderControlTvtMpGeneralTradeRankResult`
+- `preserves_inlink_fifo: bool`
+
+`general_trade_rank_result`:
+
+- 対応する上流の一般形順位結果オブジェクトを同一参照で保持する。
+- 複製しない。
+- どの順位候補に対するFIFO検査結果かを示す。
+
+`preserves_inlink_fifo`:
+
+- 厳密なPythonの`bool`。
+- `True`は、対象Nodeへ向かう各inlink内の相対順をすべて維持したことを表す。
+- `False`は、1本以上のinlinkで相対順が変化したことを表す。
+- `False`は例外ではない。
+- `False`は当該候補を後続の局所仮想計算対象から除外するための正常な検査結果である。
+
+フィールド名`preserves_inlink_fifo`と、公開関数`preserves_inlink_fifo()`を混同しない。結果型のフィールドは、既存関数が返した検査票の値である。既存関数そのものではない。docstringでその意味を明示する。
+
+候補を結果から削除せず、上流の候補順と一対一対応する検査結果を残す。
+
+初期結果型へ、FIFO違反理由、違反inlink名、診断ログを保存しない。
+
+### 対象Node別結果
+
+正式名称:
+
+```text
+OrderControlTvtNodeMpFifoInspectionResult
+```
+
+公開frozen dataclassとする。
+
+フィールド:
+
+- `node_name: str`
+- `build_status: OrderControlTvtCandidateVisitSetStatus`
+- `candidate_fifo_inspection_results: tuple[OrderControlTvtMpCandidateFifoInspectionResult, ...]`
+
+意味:
+
+- 一つの対象Nodeに対応するFIFO検査結果。
+- `candidate_fifo_inspection_results`は、上流の`candidate_trade_rank_results`と同じ順序。
+- FIFO合格候補だけを保存しない。
+- FIFO違反候補も`preserves_inlink_fifo=False`として同じ順序に残す。
+- `BASELINE_INFORMATION_COMPLETE`でも順位候補が0件なら空tuple。
+- 正式な非生成statusでも空tuple。
+
+### 全体結果
+
+正式名称:
+
+```text
+OrderControlTvtMpFifoInspectionSetResult
+```
+
+公開frozen dataclassとする。
+
+フィールド:
+
+- `general_trade_rank_set_result: OrderControlTvtMpGeneralTradeRankSetResult`
+- `node_fifo_inspection_results: tuple[OrderControlTvtNodeMpFifoInspectionResult, ...]`
+
+意味:
+
+- 公開関数へ渡された第一入力を同一オブジェクト参照で保持する。
+- 複製しない。
+- `node_fifo_inspection_results`は上流の`node_trade_rank_results`と同じ順序。
+- concrete buyer candidate set resultやcandidate visit set resultを重複フィールドとして保存しない。
+
+## 結果型へ保存しないもの
+
+次を結果型へ保存しない。
+
+- FIFO違反理由
+- FIFO違反inlink名
+- FIFO診断ログ
+- FIFO合格候補だけを集めた重複tuple
+- FIFO違反候補だけを集めた重複tuple
+- 参加Mapping
+- `inlink_name_by_visit_key`
+- `trade_scope`の複写
+- `trade_order`の複写
+- concrete buyer candidate setの重複参照
+- 局所仮想計算結果
+- 経済性評価結果
+- 買い手価値`G`
+- 売り手必要補償`R`
+- `G >= R`判定
+- `surplus`
+- 成立候補フラグ
+- 採用候補フラグ
+- RNG結果
+- 支払い
+- 補償
+- 最終確定列
+- 確定順位ブロック
+- World
+- Vehicle
+- Node
+- Link
+- collector
+- 順位台帳
+
+## Node別status契約
+
+既存の`OrderControlTvtCandidateVisitSetStatus`を使用する。新しいstatus Enumを作らない。
+
+次の場合だけFIFO検査を実行する。
+
+- `BASELINE_INFORMATION_COMPLETE`
+- `candidate_trade_rank_results`が1件以上
+
+`BASELINE_INFORMATION_COMPLETE`でも`candidate_trade_rank_results`が0件なら、正常な空結果とする。
+
+- inlink対応辞書を作らない。
+- `preserves_inlink_fifo()`を呼ばない。
+- `candidate_fifo_inspection_results`は空tuple。
+
+次の正式4 statusではFIFO検査を実行しない。
+
+- `NOT_BUILT_NO_RIGHT_OF_ENTRY`
+- `NOT_BUILT_UNRESOLVED_ARRIVALS`
+- `UNRESOLVED_RIGHT_OF_ENTRY_PASSAGE`
+- `UNRESOLVED_CANDIDATE_PASSAGES`
+
+これらの場合:
+
+- inlink対応辞書を作らない。
+- `preserves_inlink_fifo()`を呼ばない。
+- `candidate_fifo_inspection_results`を空tupleとする。
+
+想定外status:
+
+- `RuntimeError`
+- 正常な空結果として隠さない。
+- 対象Node名と実際のstatusをメッセージへ含める。
+- 後続の対象Nodeを処理しない。
+- 部分的な全体結果を返さない。
+
+## 対象Node別上流結果の対応確認
+
+次の対象Node別結果について、件数を確認する。
+
+- `general_trade_rank_set_result.node_trade_rank_results`
+- 上流`candidate_visit_set_result.node_candidate_set_results`
+- 上流`node_concrete_buyer_candidate_set_results`
+
+3つの件数が一致しなければ`RuntimeError`。
+
+各indexについて次を確認する。
+
+- `node_name`が一致する。
+- `build_status`が一致する。
+
+比較対象:
+
+- candidate Node結果
+- concrete buyer candidate Node結果
+- general trade rank Node結果
+
+不一致は`RuntimeError`。
+
+エラーメッセージには少なくとも次を含める。
+
+- index
+- expected
+- actual
+- 対象Nodeを識別できる情報
+
+重大不整合後は後続の対象Nodeを処理せず、部分的な全体結果を返さない。
+
+## 候補結果の対応確認
+
+`BASELINE_INFORMATION_COMPLETE`で順位候補が1件以上ある対象Nodeについて、次の件数が一致することを確認する。
+
+- general trade rank Node結果の`candidate_trade_rank_results`
+- concrete buyer candidate Node結果の`concrete_buyer_candidate_sets`
+
+件数不一致は`RuntimeError`。
+
+同じcandidate indexについて、次を確認する。
+
+```text
+general_trade_rank_result.concrete_buyer_candidate_set
+is
+concrete_buyer_candidate_sets[candidate_index]
+```
+
+同一オブジェクト参照でなければ`RuntimeError`。
+
+内容が同じだけでは不十分である。異なる候補オブジェクトを誤接続してFIFO検査しないため、同一参照を確認する。
+
+エラーメッセージには少なくとも次を含める。
+
+- 対象Node名
+- candidate index
+- expected
+- actualを識別できる情報
+
+途中候補で不一致が発生した場合:
+
+- 後続候補を処理しない。
+- 後続の対象Nodeを処理しない。
+- 部分的なNode結果または全体結果を返さない。
+
+## inlink対応辞書
+
+`BASELINE_INFORMATION_COMPLETE`で順位候補が1件以上ある対象Nodeについて、`candidate_visits`から次の一時dictを対象Node単位で一度だけ作る。
+
+```text
+inlink_name_by_visit_key:
+    dict[OrderControlTvtVisitKey, str]
+```
+
+既存`preserves_inlink_fifo()`は第三引数としてPythonの`dict`を要求する。`Mapping`一般ではなく、この一時dictを`dict`として渡す。
+
+候補ごとに同じdictを作り直さない。
+
+`candidate_visits`の既存順を変更しない。
+
+この一時dictを結果型へ保存しない。
+
+candidate Visitの`inlink_name`を再計算しない。World、Vehicle、Node、Linkへ戻らない。
+
+上流でVisitKey重複と所属が保証済みであるため、一般的な重複検査や所属再検査を繰り返さない。
+
+ただし、FIFO検査対象の`trade_scope`内VisitKeyについてinlink名を取得できない場合は重大不整合とする。
+
+`trade_scope`外Visitのinlink情報が同じ一時dictに存在してもよい。既存関数は検査対象VisitKeyだけを参照するため、余分キーは結果へ影響しない。余分キーを結果型へ保存しない。
+
+## 候補ごとのFIFO材料
+
+一つの`general_trade_rank_result`について、次を作る。
+
+取引前:
+
+```text
+before_trade = general_trade_rank_result.trade_scope
+```
+
+取引後:
+
+```text
+after_trade = general_trade_rank_result.trade_order[
+    :general_trade_rank_result.last_buyer_rank
+]
+```
+
+`before_trade`と`after_trade`は、どちらも`trade_scope`に対応するVisit列でなければならない。未確定候補列全体を渡さない。`trade_scope`外VisitをFIFO材料へ追加しない。
+
+既存`preserves_inlink_fifo()`の第一引数名は`baseline_order`、第二引数名は`trade_order`である。意味は、取引前の`trade_scope`列と取引後の同範囲列である。接続部品では位置引数として`before_trade`、`after_trade`を渡す。既存関数の引数名や実装を変更しない。
+
+次を候補ごとに確認する。
+
+- `before_trade`が空でない。
+- `last_buyer_rank`が厳密なPythonの`int`である。
+- `bool`ではない。
+- `last_buyer_rank`が1以上。
+- `last_buyer_rank`が`trade_order`の件数以下。
+- `len(before_trade) == last_buyer_rank`。
+- `len(after_trade) == last_buyer_rank`。
+- `before_trade`と`after_trade`のVisitKey集合が一致する。
+- `before_trade`と`after_trade`の各VisitKeyについて、`inlink_name_by_visit_key`にinlink名が存在する。
+
+これらの不一致はFIFO違反ではなく`RuntimeError`。
+
+順位再構成部品で保証済みの順位構造を全面的に再検証しない。次を繰り返さない。
+
+- `trade_rank`の1からNまでの連続性。
+- 買い手・売り手・非参加Visitの3分類。
+- 非参加Visitの固定順位。
+- 買い手と売り手の配置。
+- 売り手後退。
+- `trade_scope`外順位不変。
+- `trade_order`全体と`trade_rank`の完全対応。
+
+FIFO接続部品では、既存FIFO関数へ安全に渡すための材料整合だけを確認する。
+
+## 既存`preserves_inlink_fifo()`の呼出し
+
+各候補について、既存関数を次の材料で一度だけ呼ぶ。
+
+```python
+preserves_fifo = preserves_inlink_fifo(
+    before_trade,
+    after_trade,
+    inlink_name_by_visit_key,
+)
+```
+
+`preserves_inlink_fifo()`自体を変更しない。
+
+同じ候補について複数回呼ばない。
+
+`False`だった候補について別の順位を作り直し、再検査しない。
+
+`preserves_inlink_fifo()`へ未確定候補列全体を渡さない。
+
+`trade_scope`外VisitをFIFO材料へ追加しない。
+
+参加MappingをFIFO関数へ渡さない。
+
+既存関数は、対象Nodeへ向かう各inlink内の相対順だけを比較する。複数inlink間の順序変更だけでは`False`を返さない。1本でも相対順が変われば`False`を返す。参加Visitと非参加Visitを区別しない。
+
+## TrueとFalseの扱い
+
+既存`preserves_inlink_fifo()`の戻り値は`bool`である。戻り値が厳密なPythonの`bool`であることを確認する。判定は概念上次とする。
+
+```text
+type(preserves_fifo) is bool
+```
+
+`True`:
+
+- FIFOを維持した候補。
+- 後続の局所仮想計算へ進められる候補。
+- この部品ではまだ局所仮想計算を実行しない。
+
+`False`:
+
+- FIFO違反。
+- 正常な候補棄却。
+- `RuntimeError`または`ValueError`に変換しない。
+- 当該候補だけを後続対象から外す。
+- 別候補の検査を継続する。
+- 同じ候補の順位を作り直さない。
+- 結果型には`preserves_inlink_fifo=False`として残す。
+- 結果から削除しない。
+
+厳密なPythonの`bool`以外（`1`、`0`、`numpy.bool_`、文字列、`None`など）が返された場合:
+
+- 既存FIFO関数の契約違反または内部不整合。
+- `RuntimeError`。
+- 対象Node名とcandidate index、実際の型と値を含める。
+- 後続候補と後続の対象Nodeを処理しない。
+- 部分結果を返さない。
+
+## 既存FIFO関数が送出する`ValueError`
+
+FIFO接続部品が内部で組み立てた材料を既存`preserves_inlink_fifo()`へ渡した際に、`ValueError`が送出された場合は、その`ValueError`を正常な候補棄却として扱わない。
+
+接続部品側では、生成済み上流結果間の重大不整合として`RuntimeError`へ変換する。
+
+`RuntimeError`のメッセージには少なくとも次を含める。
+
+- 対象Node名
+- candidate index
+- FIFO検査材料の重大不整合であること
+- 元の`ValueError`のメッセージ
+
+例外チェーンを維持するため、概念上次の形式を使用する。
+
+```python
+try:
+    preserves_fifo = preserves_inlink_fifo(
+        before_trade,
+        after_trade,
+        inlink_name_by_visit_key,
+    )
+except ValueError as error:
+    raise RuntimeError(
+        ...
+    ) from error
+```
+
+ただし、`preserves_inlink_fifo()`が`False`を返した場合は例外変換しない。`False`は正常なFIFO違反である。
+
+## 候補検査結果の保持
+
+各`general_trade_rank_result`について、必ず一つの`OrderControlTvtMpCandidateFifoInspectionResult`を作る。
+
+FIFO違反候補を`candidate_fifo_inspection_results`から削除しない。
+
+上流候補順と一対一対応を維持する。
+
+後続処理は、`preserves_inlink_fifo`が`True`の候補だけを選択できる。この部品では、`True`候補だけの別tupleを結果型へ重複保存しない。後続処理が必要に応じて明示的に抽出する。
+
+## 正常な候補棄却と重大不整合
+
+正常な候補棄却:
+
+- `preserves_inlink_fifo()`が`False`を返す。
+- 当該候補だけFIFO違反。
+- 検査結果へ`False`を保存する。
+- 別候補の検査を継続する。
+- 例外を送出しない。
+
+重大不整合:
+
+- Node結果件数不一致。
+- `node_name`不一致。
+- `build_status`不一致。
+- 想定外status。
+- 順位候補数と具体的買い手候補数の不一致。
+- 一般形順位結果が対応する具体的候補を同一参照保持していない。
+- `before_trade`が空。
+- `last_buyer_rank`の型または範囲が不正。
+- `before_trade`または`after_trade`の件数が`last_buyer_rank`と不一致。
+- `before_trade`と`after_trade`のVisitKey集合が不一致。
+- FIFO対象Visitのinlink名がない。
+- `preserves_inlink_fifo()`が`ValueError`を送出する。
+- `preserves_inlink_fifo()`がPython `bool`以外を返す。
+
+重大不整合は`RuntimeError`。
+
+正常なFIFO違反として隠さない。
+
+重大不整合発生後は、後続候補および後続の対象Nodeを処理せず、部分結果を返さない。
+
+外部入力または結果クラス直接構築時の型・形式違反が将来の直接構築テストで必要になっても、既存FIFO関数の`False`を`ValueError`へ変換しない。新しい独自例外型を作らない。
+
+## 読取専用契約
+
+次を変更しない。
+
+- `general_trade_rank_set_result`
+- `node_trade_rank_results`
+- `candidate_trade_rank_results`
+- `general_trade_rank_result`
+- `concrete_buyer_candidate_set_result`
+- `candidate_visits`
+- `trade_scope`
+- `trade_order`
+- `last_buyer_rank`
+- concrete buyer candidate set
+- その他の上流結果
+
+`preserves_inlink_fifo()`は読取専用検査として呼ぶ。
+
+上流関数を再実行しない。次を呼び直さない。
+
+- `build_tvt_candidate_visit_set`
+- `build_tvt_inlink_candidate_physical_orders`
+- `build_tvt_mp_concrete_buyer_candidate_sets`
+- `build_tvt_mp_general_trade_ranks`
+- `build_tvt_trade_rank_without_nonparticipants`
+- `select_right_of_entry_decision_window_visits`
+- `confirm_leading_nonparticipating_decision_window_visits`
+- baseline alignment
+- baseline fork
+- collector export
+
+World、Vehicle、Node、Link、collector、順位台帳へ戻らない。
+
+## 本番で再検証しない事項
+
+次をFIFO接続部品で再検証しない。
+
+- P−1条件。
+- TVT固有可変上限N。
+- `candidate_visits`の正式baseline sort。
+- baseline passage timestep。
+- inlink別snapshot物理順。
+- prefixの物理的連続性。
+- 具体的買い手候補集合の生成方法。
+- 一般形順位の構築方法。
+- 3分類。
+- 非参加Visitの固定順位。
+- 空き順位枠への買い手と売り手の配置。
+- 売り手後退。
+- `trade_scope`外順位不変。
+- `trade_rank`全体の順位連続性。
+- 候補間の重複。
+- participantかnonparticipantかの再判定。
+- 権利保有Visitの参加状態。
+
+FIFO接続に必要な材料の対応と、既存FIFO関数へ渡す範囲だけを必要最小限に確認する。
+
+## 専用テスト契約
+
+新規専用テスト:
+
+```text
+tests_order_control_tvt_mp_fifo_inspection.py
+```
+
+既存テストのhelperを直接importしない。新規テスト内に必要なfixtureを明示的に作る。期待値を本番と同じ処理で自動生成しない。
+
+少なくとも次を確認する。
+
+### 公開APIと結果型
+
+- 3つの公開frozen dataclassをimportできる。
+- 公開関数をimportできる。
+- 各結果型がfrozen dataclassである。
+- 正確なフィールド集合。
+- フィールド変更で`FrozenInstanceError`。
+- 全体結果が第一入力を同一参照保持する。
+- 一候補結果が一般形順位結果を同一参照保持する。
+- 結果フィールド`preserves_inlink_fifo`が厳密なPython `bool`である。
+- 禁止フィールドを持たない。
+- `update`、`rollback`、`export`、`to_dict`等を持たない。
+
+### status
+
+- `BASELINE_INFORMATION_COMPLETE`かつ順位候補ありでFIFO検査。
+- `BASELINE_INFORMATION_COMPLETE`かつ候補0件で正常な空tuple。
+- 候補0件ではinlink辞書を作らずFIFO関数を呼ばない。
+- 正式4非生成statusで空tuple。
+- 正式4非生成statusではFIFO関数を呼ばない。
+- 想定外statusで`RuntimeError`。
+- 途中の対象Nodeの異常で部分結果を返さない。
+
+### Nodeと候補の対応
+
+- 3種類のNode結果の件数不一致。
+- `node_name`不一致。
+- `build_status`不一致。
+- 順位候補数と具体的候補数の不一致。
+- 同じcandidate indexで具体的候補オブジェクトの同一参照不一致。
+- 内容が同じ別オブジェクトでも`RuntimeError`。
+- 対応が正常なら上流候補順を維持する。
+- 複数の対象Nodeで上流Node順を維持する。
+
+### FIFO材料
+
+- `before_trade`が`trade_scope`と同じオブジェクトまたは同じtuple内容である。
+- `after_trade`が`trade_order[:last_buyer_rank]`である。
+- 未確定候補列全体を渡さない。
+- `trade_scope`外Visitを渡さない。
+- 買い手、売り手、非参加Visitをすべて含む。
+- `before_trade`と`after_trade`の件数が一致する。
+- VisitKey集合が一致する。
+- `candidate_visits`からinlink対応を対象Node単位で作る。
+- 対象Visit全件のinlink名をFIFO関数へ提供する。
+- 余分な`trade_scope`外Visitのinlink情報がdictに存在しても結果へ影響しない。
+
+### FIFO合格
+
+- 同一inlink内相対順を維持する候補が`True`。
+- 複数inlink間のVisit順が変わっても、対象Nodeへ向かう各inlink内の相対順が同じなら`True`。
+- 買い手、売り手、非参加Visitを含む正常な`True`ケース。
+- `True`候補の検査結果を上流候補順で保持する。
+
+### FIFO違反
+
+- 買い手と売り手の同一inlink内逆転で`False`。
+- 買い手と非参加Visitの逆転で`False`。
+- 売り手と非参加Visitの逆転で`False`。
+- 複数inlinkのうち1本だけ違反しても`False`。
+- `False`で例外を出さない。
+- `False`候補を結果から削除しない。
+- `False`の後に続く別候補も検査する。
+- 同じ`False`候補の順位を作り直さない。
+- `preserves_inlink_fifo()`を一候補につき一度だけ呼ぶ。
+- 全候補が`False`でも正常な結果を返す。
+- `True`と`False`が混在しても上流候補順を維持する。
+
+### 重大不整合
+
+- `before_trade`が空。
+- `last_buyer_rank`が`bool`。
+- `last_buyer_rank`が非int。
+- `last_buyer_rank`が0。
+- `last_buyer_rank`が`trade_order`件数を超える。
+- `len(before_trade)`と`last_buyer_rank`の不一致。
+- `len(after_trade)`と`last_buyer_rank`の不一致。
+- `before_trade`と`after_trade`のVisitKey集合不一致。
+- FIFO対象VisitKeyのinlink名欠落。
+- `preserves_inlink_fifo()`が`ValueError`を送出した場合に`RuntimeError`へ変換する。
+- `RuntimeError`のメッセージに対象Node名、candidate index、元の`ValueError`内容を含む。
+- 例外チェーンが維持される。
+- FIFO関数が`1`、`0`、`numpy.bool_`、文字列、`None`等のPython `bool`以外を返した場合に`RuntimeError`。
+- 途中候補の重大不整合で後続候補を処理しない。
+- 途中の対象Nodeの重大不整合で後続の対象Nodeを処理しない。
+- 部分的な全体結果を返さない。
+
+内部不整合テストでは、複数の異常を混在させず、狙った検査へ到達する手書きfixtureを使用する。
+
+### 読取専用
+
+- 第一入力を変更しない。
+- Node結果を変更しない。
+- 一般形順位結果を変更しない。
+- `trade_scope`を変更しない。
+- `trade_order`を変更しない。
+- `candidate_visits`を変更しない。
+- 上流処理を再実行しない。
+- World、Vehicle、Node、Link、collector、順位台帳へ戻らない。
+- `preserves_inlink_fifo()`自体を変更しない。
+
+### 呼出し回数
+
+patch等を用いて確認する。
+
+- 順位候補1件につき`preserves_inlink_fifo()`を1回だけ呼ぶ。
+- 候補0件では0回。
+- 正式非生成statusでは0回。
+- `False`候補を再検査しない。
+- 途中候補で重大不整合が発生した後、後続候補のFIFO関数を呼ばない。
+
+### テスト登録
+
+`TESTS`リストを設ける場合:
+
+- 定義済み`test_`関数の登録漏れなし。
+- 重複登録なし。
+- 未知関数参照なし。
+- AST確認。
+- 直接実行件数を表示する。
+- pytest収集件数と一致する。
+
+既存の堅牢なテスト登録方式を参考にしてよいが、必要以上に複雑化しない。
+
+## 今回実装しない範囲
+
+今回の実装前仕様には、一般形順位結果のFIFO検査接続と、候補ごとのTrue/False結果保持までを含める。次は実装対象外とする。
+
+- FIFO違反理由の詳細診断。
+- 違反inlink名の保存。
+- FIFO棄却数や棄却率の集計。
+- True候補だけを集めた永続結果型。
+- 局所仮想計算。
+- 局所仮想計算未解決候補の除外。
+- 経済性評価。
+- 買い手価値`G`。
+- 売り手必要補償`R`。
+- `G >= R`判定。
+- `surplus`。
+- 成立候補選択。
+- `surplus`同値時の買い手数比較。
+- RNG。
+- 支払い。
+- 補償。
+- 成立時の最終確定列。
+- 不成立時の最終確定列。
+- 情報未解決時の最終確定列。
+- 確定順位ブロックへの接続。
+- 上位TVT制御。
+- TVT-SB。
+- TVT-MH。
+- TVT-SP。
+- 性能最適化。
+- `preserves_inlink_fifo()`の変更。
+- 一般形順位再構成部品の変更。
+
+## 可読性方針
+
+研究用コードとして正しく動くことを最優先とする。複数の実装方法を選べる場合は、短さ、巧妙さ、高度なPythonテクニックより、Python初学者が後から処理を追いやすい、明示的で可読性の高い方法を優先する。
+
+実装では次を分ける。
+
+- 上流Node結果の対応確認。
+- 候補結果の対応確認。
+- inlink対応辞書の作成。
+- `before_trade`の取得。
+- `after_trade`の取得。
+- FIFO材料の整合確認。
+- `preserves_inlink_fifo()`の呼出し。
+- `ValueError`の`RuntimeError`変換。
+- `bool`戻り値の確認。
+- 一候補結果の構築。
+- Node結果の構築。
+- 全体結果の構築。
+
+長い内包表記、複雑な多重ジェネレーター式、巧妙なone-linerを避ける。意味の分かる中間変数と明示的なforループを使用する。helperは責務が明確な場合だけ作る。不要な一般化、抽象化、実測前の性能最適化を行わない。コメントとdocstringではPython処理だけでなく交通上の意味も説明する。「Node全体」という曖昧な表現を避ける。必要な場合は「対象Nodeへ向かう各inlink内の相対順」と書く。
+
+この可読性方針を理由に、確定済み制度仕様、公開API、結果型、status契約、例外契約、未実装境界を変更しない。
+
+## 実装後の次の作業
+
+FIFO検査接続部品を実装・検証した後は、局所仮想計算、経済性評価、成立候補選択へ進む前に、実装完了記録を本ファイルと進捗メモへ残す。その後の直接作業は、`preserves_inlink_fifo=True`の候補だけを対象とする局所仮想計算接続の実装前仕様である。
+
 # 次の作業開始点
 
 次の直接作業は、具体的買い手候補集合生成部品の実装前仕様を、既存の公開型と接続できる形で確定することである。
@@ -3694,6 +4545,8 @@ FIFO検査の実行、FIFO違反候補の除外、候補別局所仮想計算、
 **2026-09-15追記（最新の再開情報）：** 一般形順位再構成部品の実装前仕様を確定した。Python実装と専用テストは未着手である。最新詳細は、本ファイルの「TVT-MP一般形順位再構成部品の実装前仕様」を参照する。次の直接作業は、保存済み実装前仕様に従い`uxsim/order_control_tvt_mp_general_trade_rank.py`と`tests_order_control_tvt_mp_general_trade_rank.py`を実装することである。制度ロジックを再考しない。既存の非参加Visitなし順位計算部品と`preserves_inlink_fifo()`は変更しない。FIFO検査の実行、局所仮想計算、経済性評価には進まない。
 
 **2026-09-15更新（最新の再開情報）：** 一般形順位再構成部品は実装・検証済みである。最新の実装完了事実は、本ファイルの「TVT-MP一般形順位再構成部品の実装完了記録」を参照する。実装前仕様の保存済み・push済みコミットは`3932f21`である。次の直接作業は、本部品が構築した`trade_scope`と`trade_order[:last_buyer_rank]`を材料とするFIFO検査接続部品の**実装前仕様**を確定することである。一般形順位再構成のPython実装を再考しない。`preserves_inlink_fifo()`自体は変更しない。局所仮想計算、経済性評価、成立候補選択には進まない。
+
+**2026-09-15追記（最新の再開情報）：** FIFO検査接続部品の実装前仕様を確定した。Python実装と専用テストは未着手である。最新詳細は、本ファイルの「TVT-MP FIFO検査接続部品の実装前仕様」を参照する。一般形順位再構成部品の保存済み実装コミットは`1e23174`である。次の直接作業は、保存済み実装前仕様に従い`uxsim/order_control_tvt_mp_fifo_inspection.py`と`tests_order_control_tvt_mp_fifo_inspection.py`を実装することである。一般形順位再構成を再考しない。`preserves_inlink_fifo()`自体を変更しない。局所仮想計算、経済性評価、成立候補選択には進まない。
 
 # 新しいチャットでの再開方法
 
