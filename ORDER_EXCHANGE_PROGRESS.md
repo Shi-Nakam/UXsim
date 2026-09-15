@@ -5973,6 +5973,20 @@ helper の実装、専用テスト、設計メモの整合を最終確認した�
 - 本実装前仕様のMarkdown追記は、まだ`git add`、`git commit`、`git push`していない。
 - `diagnostics/order_control.zip`は対象外の未追跡ファイルのままである。
 
+##### 2026-09-15追記：TVT-MP FIFO検査接続部品を実装・検証
+
+- 実装前仕様はコミット`25764b8`へ保存・push済みであった。保存済み仕様に従い、新規本番`uxsim/order_control_tvt_mp_fifo_inspection.py`と新規専用テスト`tests_order_control_tvt_mp_fifo_inspection.py`を実装した。
+- 公開関数は`build_tvt_mp_fifo_inspection_results`。公開frozen dataclassは`OrderControlTvtMpCandidateFifoInspectionResult`、`OrderControlTvtNodeMpFifoInspectionResult`、`OrderControlTvtMpFifoInspectionSetResult`の3つである。
+- FIFO材料は取引前`trade_scope`、取引後`trade_order[:last_buyer_rank]`である。`inlink_name_by_visit_key`は対象Node単位で`candidate_visits`から一度だけ構築する。
+- 各候補について既存`preserves_inlink_fifo()`を1回だけ呼び、結果フィールド`preserves_inlink_fifo`に厳密なPython `bool`を保存する。False候補を結果から削除せず、上流候補順と一対一対応を維持する。Falseは正常なFIFO違反であり、例外ではない。
+- 接続部品が組み立てた材料に対する`preserves_inlink_fifo()`の`ValueError`は`RuntimeError`へ変換する（例外チェーン維持）。非bool戻り値は`RuntimeError`とする。
+- 新規専用テスト66件成功（直接実行・pytest収集・`TESTS`登録66件、重複・漏れ・未知参照なし）。既存回帰395件と合わせ461件成功。新規2ファイルに空白エラーなし。
+- Copilotと利用者が本番コード、主要テスト、Terminal結果を確認済みである。
+- **未実装境界（概略）：** 局所仮想計算、経済性評価、成立候補選択、支払い・補償、最終確定列、確定順位ブロック接続、上位TVT制御、TVT-SB/MH/SP、性能最適化。詳細は継続版メモの実装完了記録と未実装境界更新注記を参照。
+- **次の作業開始点：** `preserves_inlink_fifo=True`候補向けの候補別局所仮想計算接続部品の実装前仕様。FIFO検査接続・`preserves_inlink_fifo()`・一般形順位再構成は再考しない。直ちに局所仮想計算は実装しない。まず既存の局所仮想計算関係の設計・部品・入力要件を確認する。
+- 新規2ファイルと本進捗追記・継続版メモの実装完了記録追記は、まだ`git add`、`git commit`、`git push`していない。実装前仕様の保存済み・push済みコミットとして記載するのは`25764b8`のみである。
+- `diagnostics/order_control.zip`は対象外である（触れていない）。
+
 #### 2026-08-29：TVT権利保有車両選定前の先頭非参加Vehicle先行確定の記録補修
 
 - 過去に確定済みだった、意思決定窓内 baseline 到着順位の先頭に連続する非参加 Vehicle の先行確定が、設計メモに明文化されていなかった

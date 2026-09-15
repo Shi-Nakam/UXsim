@@ -1646,12 +1646,14 @@ surplus最大候補を選ぶ
 
 **2026-09-15追記（FIFO検査接続）：** 次は実装前仕様まで確定したが、Python実装と専用テストは未着手である。最新詳細は、本ファイルの「TVT-MP FIFO検査接続部品の実装前仕様」を参照する。
 
+**2026-09-15更新（FIFO検査接続・実装完了）：** 候補別FIFO接続、`preserves_inlink_fifo()`の候補ごとの呼出し、FIFO違反候補のTrue/False結果保持、FIFO違反候補を結果から削除しない一対一対応、FIFO違反候補の正常な後続除外契約は、新規本番モジュールと専用テストとして実装・検証済みである。上記5項目は、本メモ作成時点の未実装一覧に歴史的に残す。最新の実装完了事実は、本ファイルの「TVT-MP FIFO検査接続部品の実装完了記録」を参照する。局所仮想計算以降は引き続き未実装である。
+
 - 候補別FIFO接続
 - `preserves_inlink_fifo()`の呼出し
 - FIFO違反候補のTrue/False結果保持
 - FIFO違反候補の正常な後続除外契約
 
-局所仮想計算、経済性評価、成立候補選択、支払いと補償、各場合の最終確定列、確定順位ブロックへの上位接続、上位TVT制御は引き続き未実装である。FIFO検査の制度ロジック自体は本ファイル§20、§21で確定済みである。今回確定したのは、実装済みの一般形順位再構成結果と既存`preserves_inlink_fifo()`へ接続する実装前仕様である。
+局所仮想計算、経済性評価、成立候補選択、支払いと補償、各場合の最終確定列、確定順位ブロックへの上位接続、上位TVT制御は引き続き未実装である。FIFO検査の制度ロジック自体は本ファイル§20、§21で確定済みである。実装前仕様は、本ファイルの「TVT-MP FIFO検査接続部品の実装前仕様」に保存済みである。実装完了事実は、同ファイルの「TVT-MP FIFO検査接続部品の実装完了記録」を参照する。
 
 # 具体的買い手候補集合生成部品の実装前仕様
 
@@ -4519,6 +4521,252 @@ patch等を用いて確認する。
 
 FIFO検査接続部品を実装・検証した後は、局所仮想計算、経済性評価、成立候補選択へ進む前に、実装完了記録を本ファイルと進捗メモへ残す。その後の直接作業は、`preserves_inlink_fifo=True`の候補だけを対象とする局所仮想計算接続の実装前仕様である。
 
+# TVT-MP FIFO検査接続部品の実装完了記録
+
+**実装完了日：2026-09-15**
+
+本節は、上記「TVT-MP FIFO検査接続部品の実装前仕様」に対応する実装完了記録である。制度ロジックの正本は、引き続き本ファイル§20、§21、および「TVT-MP一般形順位再構成部品の実装前仕様」「TVT-MP一般形順位再構成部品の実装完了記録」、当該FIFO検査接続の実装前仕様である。実装前仕様は、実装時に用いた正本として削除・短縮・置換せず維持する。
+
+FIFO検査接続部品の実装前仕様の保存済み・push済みコミットは`25764b8`（`Document the TVT-MP FIFO inspection connection implementation specification`）である。その保存済み仕様に従い、新規本番と専用テストを実装した。本実装完了記録時点では、新規コード・新規専用テスト・本節の追記・進捗メモ追記は、まだ`git add`、`git commit`、`git push`していない。
+
+Copilotと利用者が、本番コード、主要テスト、Terminalでのテスト結果、テスト登録件数、空白エラー、Git状態を確認済みである。Cursor報告だけでは実装完了を確定しない。
+
+## 新規ファイルと公開API
+
+新規本番:
+
+- `uxsim/order_control_tvt_mp_fifo_inspection.py`
+
+新規専用テスト:
+
+- `tests_order_control_tvt_mp_fifo_inspection.py`
+
+公開関数:
+
+- `build_tvt_mp_fifo_inspection_results`
+
+公開frozen dataclass（3つ）:
+
+1. `OrderControlTvtMpCandidateFifoInspectionResult`
+2. `OrderControlTvtNodeMpFifoInspectionResult`
+3. `OrderControlTvtMpFifoInspectionSetResult`
+
+## 公開APIと結果型
+
+公開関数:
+
+```text
+build_tvt_mp_fifo_inspection_results(
+    general_trade_rank_set_result
+)
+```
+
+- 第一入力は位置引数である。追加入力はない。
+- `participates_by_visit_key`は受け取らない。
+- World、Vehicle、Node、Link、collector、順位台帳は受け取らない。
+- 第一入力から`candidate_visits`へ参照で到達する。
+- 上流結果を変更しない。上流処理を再実行しない。
+
+3つの結果型は、すべて公開frozen dataclassとして実装した。
+
+`OrderControlTvtMpCandidateFifoInspectionResult`:
+
+- `general_trade_rank_result`
+- `preserves_inlink_fifo`（厳密なPython `bool`。既存公開関数`preserves_inlink_fifo()`と同名の検査票フィールドであり、関数そのものではない）
+
+`OrderControlTvtNodeMpFifoInspectionResult`:
+
+- `node_name`
+- `build_status`
+- `candidate_fifo_inspection_results`
+
+`OrderControlTvtMpFifoInspectionSetResult`:
+
+- `general_trade_rank_set_result`
+- `node_fifo_inspection_results`
+
+全体結果は、公開関数へ渡された第一入力を同一オブジェクト参照で保持する。一候補結果は、対応する一般形順位結果を同一オブジェクト参照で保持する。
+
+FIFO違反理由、違反inlink名、診断ログ、True候補だけの重複tuple、False候補だけの重複tupleは保存していない。
+
+## status別動作
+
+FIFO検査を実行するのは、次の場合だけである。
+
+- `BASELINE_INFORMATION_COMPLETE`
+- `candidate_trade_rank_results`が1件以上
+
+`BASELINE_INFORMATION_COMPLETE`でも順位候補0件なら正常な空結果である。この場合、inlink対応辞書を作らず、`preserves_inlink_fifo()`を呼ばず、`candidate_fifo_inspection_results`は空tupleとする。
+
+次の正式4非生成statusではFIFO検査を行わず、空tupleを返す。
+
+- `NOT_BUILT_NO_RIGHT_OF_ENTRY`
+- `NOT_BUILT_UNRESOLVED_ARRIVALS`
+- `UNRESOLVED_RIGHT_OF_ENTRY_PASSAGE`
+- `UNRESOLVED_CANDIDATE_PASSAGES`
+
+想定外statusは`RuntimeError`とする。対象Node名と実際のstatusをメッセージへ含める。重大不整合後は後続Nodeを処理せず、部分的な全体結果を返さない。
+
+## 上流結果の対応確認
+
+次の3種類の対象Node別結果について、件数を確認する。
+
+- candidate Node結果
+- concrete buyer candidate Node結果
+- general trade rank Node結果
+
+同じindexについて、`node_name`と`build_status`を確認する。不一致は`RuntimeError`とする。
+
+`BASELINE_INFORMATION_COMPLETE`で順位候補が存在する対象Nodeでは、`candidate_trade_rank_results`と`concrete_buyer_candidate_sets`の件数を確認する。同じcandidate indexについて、一般形順位結果が対応する具体的買い手候補を同一オブジェクト参照で保持していることを確認する。内容が同じ別オブジェクトでは不十分であり、同一参照でなければ`RuntimeError`とする。
+
+## inlink辞書とFIFO材料
+
+順位候補が存在する対象Nodeについて、`candidate_visits`から次を対象Node単位で一度だけ作る。
+
+```text
+inlink_name_by_visit_key:
+    dict[OrderControlTvtVisitKey, str]
+```
+
+候補ごとに作り直さない。結果型へ保存しない。
+
+候補ごとのFIFO材料は次のとおりである。
+
+取引前:
+
+- `general_trade_rank_result.trade_scope`
+
+取引後:
+
+- `general_trade_rank_result.trade_order[:general_trade_rank_result.last_buyer_rank]`
+
+未確定候補列全体や`trade_scope`外VisitをFIFO材料へ追加しない。買い手、売り手、非参加Visitを区別せず、`trade_scope`内の全VisitをFIFO検査対象とする。
+
+次の材料整合を必要最小限に確認する。
+
+- `before_trade`が空でない
+- `last_buyer_rank`がboolではないPython `int`
+- `last_buyer_rank`が1以上
+- `last_buyer_rank`が`trade_order`件数以下
+- `before_trade`と`after_trade`の件数が`last_buyer_rank`と一致
+- `before_trade`と`after_trade`のVisitKey集合が一致
+- 検査対象VisitKeyのinlink名が存在する
+
+一般形順位再構成で確認済みの順位構造を全面的に再検証していない。
+
+## 既存FIFO関数の呼出し
+
+各候補について、既存の`preserves_inlink_fifo()`を一度だけ呼ぶ。
+
+```python
+preserves_fifo = preserves_inlink_fifo(
+    before_trade,
+    after_trade,
+    inlink_name_by_visit_key,
+)
+```
+
+`preserves_inlink_fifo()`自体は変更していない。同じ候補を複数回検査しない。`False`候補について順位を作り直さず、再検査もしない。
+
+## True、False、非bool
+
+既存FIFO関数の戻り値について、厳密なPythonの`bool`であることを確認する（`type(preserves_fifo) is bool`）。
+
+`True`は、対象Nodeへ向かう各inlink内の相対順を維持した候補である。結果へ`True`として保存する。後続の局所仮想計算へ進められる候補である。この部品では局所仮想計算を実行しない。
+
+`False`は、1本以上のinlinkで相対順が変化したFIFO違反候補である。正常な候補棄却であり、例外へ変換しない。結果から削除せず、`False`として保存する。後続候補の検査を続ける。全候補が`False`でも正常な全体結果を返す。
+
+Python `bool`以外（`1`、`0`、`numpy.bool_`、文字列、`None`等）は`RuntimeError`とする。後続候補と後続Nodeを処理せず、部分結果を返さない。
+
+候補検査結果は上流候補順に一対一対応している。True候補だけの別tupleは重複保存していない。
+
+## ValueErrorの変換
+
+接続部品が組み立てた材料を`preserves_inlink_fifo()`へ渡した結果、既存関数が`ValueError`を送出した場合は、正常なFIFO違反として扱わない。`RuntimeError`へ変換する。対象Node名、candidate index、元の`ValueError`の内容をメッセージへ含める。`raise ... from error`により例外チェーンを維持する。
+
+`preserves_inlink_fifo()`が`False`を返した場合は例外変換しない。
+
+## 読取専用と未実装範囲
+
+次を変更していない。
+
+- 第一入力
+- Node結果
+- 一般形順位結果
+- `trade_scope`
+- `trade_order`
+- `candidate_visits`
+- concrete buyer candidate set
+- その他の上流結果
+
+上流処理を再実行していない。World、Vehicle、Node、Link、collector、順位台帳へ戻っていない。
+
+次は未実装のままである。
+
+- FIFO違反理由の詳細診断
+- 違反inlink名の保存
+- FIFO棄却数と棄却率の集計
+- True候補だけの永続結果型
+- 局所仮想計算
+- 局所仮想計算未解決候補の除外
+- 経済性評価
+- 買い手価値`G`
+- 売り手必要補償`R`
+- `G >= R`判定
+- `surplus`
+- 成立候補選択
+- RNG
+- 支払い
+- 補償
+- 成立時・不成立時・情報未解決時の最終確定列
+- 確定順位ブロックへの接続
+- 上位TVT制御
+- TVT-SB
+- TVT-MH
+- TVT-SP
+- 性能最適化
+- 一般形順位再構成部品の変更
+- `preserves_inlink_fifo()`の変更
+
+## 確認済みテスト
+
+Copilotと利用者がTerminalで確認済みである。
+
+新規2ファイルの`py_compile`は成功した。
+
+| 区分 | 結果 |
+|------|------|
+| 新規専用テスト直接実行 | 66 tests passed |
+| 新規専用テスト pytest | 66 passed |
+| pytest収集 | 66 collected |
+| 定義済み`test_`関数 | 66件 |
+| `TESTS`登録 | 66件（重複なし、登録漏れなし、未知参照なし） |
+| 直接実行件数とpytest収集 | 一致 |
+
+新規専用テストと既存回帰を合わせたpytestは461 passedである。
+
+既存回帰の内訳:
+
+- `tests_order_control_tvt_mp_general_trade_rank.py`: 132
+- `tests_order_control_tvt_mp_concrete_buyer_candidate_set.py`: 63
+- `tests_order_control_tvt_trade_rank.py`: 115
+- `tests_order_control_tvt_candidate_visit_set.py`: 21
+- `tests_order_control_tvt_inlink_candidate_physical_order.py`: 25
+- `tests_order_control_tvt_right_of_entry_selection.py`: 16
+- `tests_order_control_tvt_leading_nonparticipating_confirmation.py`: 23
+
+新規66件と既存395件を合わせて461件成功である。未追跡ファイル用diff checkにより、新規2ファイルに空白エラーがないことも確認した。
+
+## 次の作業開始点（本部品完了後）
+
+次の直接作業は、`preserves_inlink_fifo=True`の候補だけを対象とする候補別局所仮想計算接続部品の**実装前仕様**を確定することである。
+
+- FIFO検査接続部品を再考しない。
+- `preserves_inlink_fifo()`を変更しない。
+- 一般形順位再構成を変更しない。
+- 直ちに局所仮想計算を実装しない。まず既存の局所仮想計算関係の設計・部品・入力要件を確認する。
+- 経済性評価、成立候補選択にはまだ進まない。
+
 # 次の作業開始点
 
 次の直接作業は、具体的買い手候補集合生成部品の実装前仕様を、既存の公開型と接続できる形で確定することである。
@@ -4547,6 +4795,8 @@ FIFO検査接続部品を実装・検証した後は、局所仮想計算、経�
 **2026-09-15更新（最新の再開情報）：** 一般形順位再構成部品は実装・検証済みである。最新の実装完了事実は、本ファイルの「TVT-MP一般形順位再構成部品の実装完了記録」を参照する。実装前仕様の保存済み・push済みコミットは`3932f21`である。次の直接作業は、本部品が構築した`trade_scope`と`trade_order[:last_buyer_rank]`を材料とするFIFO検査接続部品の**実装前仕様**を確定することである。一般形順位再構成のPython実装を再考しない。`preserves_inlink_fifo()`自体は変更しない。局所仮想計算、経済性評価、成立候補選択には進まない。
 
 **2026-09-15追記（最新の再開情報）：** FIFO検査接続部品の実装前仕様を確定した。Python実装と専用テストは未着手である。最新詳細は、本ファイルの「TVT-MP FIFO検査接続部品の実装前仕様」を参照する。一般形順位再構成部品の保存済み実装コミットは`1e23174`である。次の直接作業は、保存済み実装前仕様に従い`uxsim/order_control_tvt_mp_fifo_inspection.py`と`tests_order_control_tvt_mp_fifo_inspection.py`を実装することである。一般形順位再構成を再考しない。`preserves_inlink_fifo()`自体を変更しない。局所仮想計算、経済性評価、成立候補選択には進まない。
+
+**2026-09-15更新（最新の再開情報）：** FIFO検査接続部品は実装・検証済みである。最新の実装完了事実は、本ファイルの「TVT-MP FIFO検査接続部品の実装完了記録」を参照する。実装前仕様の保存済み・push済みコミットは`25764b8`である。次の直接作業は、`preserves_inlink_fifo=True`の候補だけを対象とする候補別局所仮想計算接続部品の**実装前仕様**を確定することである。FIFO検査接続部品を再考しない。`preserves_inlink_fifo()`自体を変更しない。一般形順位再構成を変更しない。直ちに局所仮想計算を実装しない。まず既存の局所仮想計算関係の設計・部品・入力要件を確認する。経済性評価、成立候補選択には進まない。
 
 # 新しいチャットでの再開方法
 
