@@ -5894,6 +5894,46 @@ helper の実装、専用テスト、設計メモの整合を最終確認した�
 - 本実装前仕様のMarkdown追記は、まだ`git add`、`git commit`、`git push`していない。
 - `diagnostics/order_control.zip`は対象外の未追跡ファイルのままである。
 
+##### 2026-09-15追記：TVT-MP一般形順位再構成部品を実装・検証
+
+**正本と前提**
+
+- 一般形順位再構成部品の実装前仕様は、コミット`3932f21`へ保存・push済みであった。
+- 詳細正本は`ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_2.md`の「TVT-MP一般形順位再構成部品の実装前仕様」および同ファイルの「TVT-MP一般形順位再構成部品の実装完了記録」である。
+- 保存済み仕様に従い、新規本番`uxsim/order_control_tvt_mp_general_trade_rank.py`と新規専用テスト`tests_order_control_tvt_mp_general_trade_rank.py`を実装した。
+
+**実装の要点**
+
+- 公開関数`build_tvt_mp_general_trade_ranks`と3結果型（一候補読取専用クラス、対象Node別frozen dataclass、全体frozen dataclass）。
+- 確定済み空き順位枠方式、`trade_scope`、買い手・売り手・非参加Visitの3分類、非参加Visitのbaseline局所順位固定、`trade_rank`正本と`trade_order`派生。
+- 非参加Visit0件では、既存`build_tvt_trade_rank_without_nonparticipants`と専用テストで同値性を確認した（本番からは既存関数を呼ばない）。
+- FIFO検査の実行は未実装であり、後続のFIFO検査接続部品の責務である。
+
+**独立反証レビューとテスト補強**
+
+- Cursor Grok 4.6による独立反証レビューで、重大0・要修正0であった（軽微6件は仕様違反ではなく任意改善またはテスト弱点）。
+- 反証後は本番の制度ロジックは変更せず、専用テストを補強した（keyword-only、`trade_scope`外非参加Visit、結果クラスコンストラクター契約など）。
+- 正常な上流制度契約を破る売り手0件の公開関数経由テスト2件（`test_zero_sellers`、`test_zero_nonparticipants_zero_sellers_matches_existing`）を削除した。結果クラス単体の空`sellers_sorted`形式契約は別テストとコメントで区別している。
+
+**確認済みテスト**
+
+- 新規専用132件、既存回帰6ファイル263件、合計395件成功。
+- Copilotと利用者が本番コード、中核テスト、Terminal結果を確認済みである。
+
+**未実装境界（概略）**
+
+- 候補別FIFO接続（`preserves_inlink_fifo()`への接続と違反候補棄却）、局所仮想計算、経済性評価、成立候補選択、支払い・補償、各場合の最終確定列、確定順位ブロックへの上位接続、上位TVT制御、TVT-SB/MH/SP、性能最適化。
+
+**次の作業開始点**
+
+- `trade_scope`と`trade_order[:last_buyer_rank]`を既存`preserves_inlink_fifo()`へ接続するFIFO検査接続部品の実装前仕様。一般形実装の再考や`preserves_inlink_fifo()`の変更は行わない。
+
+**Git状態（記録時点）**
+
+- 実装前仕様の保存済み・push済みコミットは`3932f21`のみをそのように記載する（新しい実装コミットhashは推測しない）。
+- 新規本番・新規専用テスト・本進捗追記・継続版メモの実装完了記録追記は、まだ`git add`、`git commit`、`git push`していない。
+- `diagnostics/order_control.zip`は対象外の未追跡ファイルである。
+
 #### 2026-08-29：TVT権利保有車両選定前の先頭非参加Vehicle先行確定の記録補修
 
 - 過去に確定済みだった、意思決定窓内 baseline 到着順位の先頭に連続する非参加 Vehicle の先行確定が、設計メモに明文化されていなかった

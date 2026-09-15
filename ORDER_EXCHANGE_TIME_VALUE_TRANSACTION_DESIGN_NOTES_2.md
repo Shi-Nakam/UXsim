@@ -1631,6 +1631,8 @@ surplus最大候補を選ぶ
 
 **2026-09-15追記：** 次は実装前仕様まで確定したが、Python実装と専用テストは未着手である。最新詳細は、本ファイルの「TVT-MP一般形順位再構成部品の実装前仕様」を参照する。
 
+**2026-09-15更新（実装完了）：** 非参加Visitあり・なしを統一した一般形順位再構成、一般形順位再構成の結果型、`trade_scope`の一般形実装、買い手・売り手・非参加Visitの3分類、非参加Visitのbaseline局所順位枠固定、空き順位枠方式のPython実装、一般形`trade_rank`、`trade_order`は、新規本番モジュールと専用テストとして実装・検証済みである。上記8項目は、本メモ作成時点の未実装一覧に歴史的に残す。最新の実装完了事実は、本ファイルの「TVT-MP一般形順位再構成部品の実装完了記録」を参照する。候補別FIFO接続以降は引き続き未実装である。
+
 - 非参加Visitあり・なしを統一した一般形順位再構成
 - 一般形順位再構成の結果型
 - `trade_scope`の一般形実装
@@ -3515,6 +3517,157 @@ tests_order_control_tvt_mp_general_trade_rank.py
 
 一般形順位再構成部品を実装・検証した後は、FIFO検査の実行、局所仮想計算、経済性評価へ進む前に、実装完了記録を本ファイルと進捗メモへ残す。その後の直接作業は、本部品が構築した`trade_scope`と`trade_order[:last_buyer_rank]`を材料とするFIFO検査接続の実装前仕様である。
 
+# TVT-MP一般形順位再構成部品の実装完了記録
+
+**実装完了日：2026-09-15**
+
+本節は、上記「TVT-MP一般形順位再構成部品の実装前仕様」に対応する実装完了記録である。制度ロジックの正本は、引き続き本ファイル§3.3、§4、§7、§10.1、§14から§21、§28（該当段階）、§29.3から§29.5および当該実装前仕様である。実装前仕様は、実装時に用いた正本として削除・置換せず維持する。
+
+一般形順位再構成部品の実装前仕様の保存済み・push済みコミットは`3932f21`（`Document the TVT-MP general trade rank reconstruction implementation specification`）である。その保存済み仕様に従い、新規本番と専用テストを実装した。本実装完了記録時点では、新規コード・新規専用テスト・本節の追記・進捗メモ追記は、まだ`git add`、`git commit`、`git push`していない。
+
+Copilotと利用者が、本番コード、専用テスト、独立反証レビュー、Terminalでのテスト結果、テスト登録件数、Git状態を確認済みである。Cursor報告だけでは実装完了を確定しない。
+
+## 新規ファイルと公開API
+
+新規本番:
+
+- `uxsim/order_control_tvt_mp_general_trade_rank.py`
+
+新規専用テスト:
+
+- `tests_order_control_tvt_mp_general_trade_rank.py`
+
+公開関数:
+
+- `build_tvt_mp_general_trade_ranks`
+
+公開結果型（3つ）:
+
+1. `OrderControlTvtMpGeneralTradeRankResult`
+2. `OrderControlTvtNodeMpGeneralTradeRankResult`
+3. `OrderControlTvtMpGeneralTradeRankSetResult`
+
+## 公開関数と結果型
+
+第一入力は`OrderControlTvtMpConcreteBuyerCandidateSetResult`を位置引数として受け取る。keyword-only必須入力は`participates_by_visit_key: Mapping[OrderControlTvtVisitKey, bool]`である。`participates_by_visit_key`は位置引数では渡せず、キーワード名が必要である。
+
+World、Vehicle、collector、Node、Link、順位台帳は受け取らない。`candidate_visit_set_result`やinlink別物理順結果を重複入力として受け取らない。
+
+`OrderControlTvtMpGeneralTradeRankResult`は、一般形の一候補順位結果を保持する読取専用の通常クラスである。キーワード専用コンストラクターを持つ。公開propertyは`concrete_buyer_candidate_set`、`buyers_sorted`、`sellers_sorted`、`nonparticipating_visits_sorted`、`last_buyer_rank`、`trade_scope`、`trade_order`である。公開読取メソッドは`assigned_rank()`と`trade_rank_items()`である。順位辞書はprivateな`_trade_rank_by_visit_key`として保持し、コンストラクターへ渡された順位辞書を防御コピーする。内部dictは直接返さない。property setter、`update`、`rollback`、`export`、`export_state`、`to_dict`、順位変更用公開APIは追加していない。
+
+`OrderControlTvtNodeMpGeneralTradeRankResult`と`OrderControlTvtMpGeneralTradeRankSetResult`は公開frozen dataclassとして実装した。
+
+全体結果は、公開関数へ渡された`OrderControlTvtMpConcreteBuyerCandidateSetResult`を同一オブジェクト参照で保持する。一候補結果は、対応する上流の`OrderControlTvtMpConcreteBuyerCandidateSet`を同一参照で保持する。
+
+## status別動作
+
+`BASELINE_INFORMATION_COMPLETE`かつ具体的買い手候補集合が1件以上ある対象Nodeだけで一般形順位再構成を実行する。
+
+`BASELINE_INFORMATION_COMPLETE`でも具体的買い手候補集合が0件なら正常な空結果とする。参加Mappingを検証せず、`candidate_trade_rank_results`は空tupleとする。
+
+次の正式4 statusでは順位再構成を行わない。参加Mappingを検証せず、`trade_scope`、3分類、`trade_rank`、`trade_order`を作らず、`candidate_trade_rank_results`は空tupleとする。
+
+- `NOT_BUILT_NO_RIGHT_OF_ENTRY`
+- `NOT_BUILT_UNRESOLVED_ARRIVALS`
+- `UNRESOLVED_RIGHT_OF_ENTRY_PASSAGE`
+- `UNRESOLVED_CANDIDATE_PASSAGES`
+
+想定外statusは`RuntimeError`とする。対象Node名と実際のstatusをエラーメッセージへ含める。後続の対象Nodeを処理せず、部分的な全体結果を返さない。
+
+## 参加Mappingと上流Node結果の対応
+
+`BASELINE_INFORMATION_COMPLETE`かつ具体的候補が1件以上ある対象Nodeについて、`candidate_visits`全件の参加Mappingを対象Node単位で一度だけ検証する。候補ごとに同じ検証を繰り返さない。
+
+必要なcandidate VisitKeyの欠落、厳密なPythonの`bool`以外（`1`、`0`、文字列、`numpy.bool_`、その他のbool類似値）は`ValueError`とする。余分なVisitKeyは許容し、処理には使用しない。参加Mappingは変更しない。
+
+上流candidate Node結果と具体的買い手候補集合のNode結果について、件数・各indexの`node_name`・`build_status`を確認する。不一致は`RuntimeError`とする。重大不整合後は後続候補、後続の対象Nodeを処理せず、部分的結果を返さない。
+
+## baseline順位、`trade_scope`、3分類、空き順位枠方式
+
+`candidate_visits`の既存tuple順を、対象Nodeへ向かう全inlink横断の正式baseline順として使用する。`baseline_order`と1始まりの`baseline_rank_by_visit_key`を一時dictとして構築する。`baseline_arrival_timestep`、`arrival_tiebreaker`、`vehicle_id`による再ソートは行わない。参加状態を正式baseline順位の決定へ使用しない。上流の`buyers_sorted`を一般形部品内で再ソートしない。`buyers_sorted`の正式baseline相対順が壊れている場合は`RuntimeError`とする。
+
+一つの具体的買い手候補について、`buyers_sorted[-1]`を最後尾買い手とし、その1始まり正式baseline順位を`last_buyer_rank`とする。`trade_scope`は`candidate_visits`の先頭から最後尾買い手までである。`candidate_visits`全件を無条件に`trade_scope`としない。`trade_scope`外Visitはbaseline順位を維持する。`trade_scope`外の非参加Visitは、買い手・売り手・`nonparticipating_visits_sorted`の3分類には含めない。参加状態が`False`であることを理由に、`trade_scope`外Visitのbaseline順位を変更しない。
+
+`trade_scope`内のVisitを正式baseline順に一度走査し、買い手候補集合所属→非買い手かつ非参加→非買い手かつ参加の順で3分類する。3集合は相互に重複せず、和集合は`trade_scope`と一致する。権利保有Visitは買い手にならず、参加Visitであり、`trade_scope`に含まれる場合は売り手となる。権利保有inlink上の別の参加Visitも、`trade_scope`に含まれ、買い手でなければ売り手となる。権利保有inlink上の非参加Visitは、`trade_scope`に含まれる場合、固定順位Visitとなる。買い手候補生成時の権利保有inlink除外と、一般形順位再構成時の3分類を混同していない。
+
+一般形順位構築は、確定済みの空き順位枠方式で実装した。非参加Visitへbaseline局所順位を設定し、固定順位を除いた空き順位へ買い手を先頭側、売り手を残りへ配置し、`trade_scope`外へbaseline順位を設定し、`trade_rank`を完成させ、`trade_rank`から`trade_order`を派生させる。既存の非参加Visitなし専用の売り手後退式は、一般形の順位構築には使用していない。`build_tvt_trade_rank_without_nonparticipants`は本番処理から呼んでいない。非参加Visitが0件の場合も同じ空き順位枠方式を使用する。
+
+売り手は3分類時点で決定する。順位構築後に、後退した参加Visitだけを改めて売り手として抽出していない。すべての売り手について、取引後順位がbaseline順位より後ろであることを一般形内部整合確認で確認する。
+
+正常なTVT-MPの公開関数経路では、権利保有Visitが`trade_scope`内の売り手となる。したがって、正常な公開関数経路で売り手0件となる候補は生じない。ただし、`OrderControlTvtMpGeneralTradeRankResult`のコンストラクターは、結果クラス単体の最低限の形式契約として`sellers_sorted=()`を受け入れる。このコンストラクター契約は、正常な公開関数経路で売り手0件が発生することを意味しない。
+
+制度上の誤解を招くため、権利保有Visitを買い手にして正常な売り手0件候補として扱っていた次の2専用テストを削除した。
+
+- `test_zero_sellers`
+- `test_zero_nonparticipants_zero_sellers_matches_existing`
+
+同内容の別名テストへ置き換えていない。結果クラス単体の空`sellers_sorted`契約は、`test_constructor_accepts_empty_sellers_and_nonparticipants`とコメントで明示している。
+
+## `trade_rank`、`trade_order`、一般形専用内部整合確認
+
+`trade_rank`を取引後順位の正本とする。`candidate_visits`全件について順位を保持する。`trade_order`は`baseline_order`を`trade_rank`の値が小さい順へ並べたtupleであり、`trade_rank`から一方向に派生させる。`trade_order`を独立した順位正本として別計算していない。`trade_order`内の位置と`trade_rank`の一致を確認する。
+
+新規モジュール内に一般形専用helper `_verify_general_trade_rank_state`を実装した。既存の非参加Visitなし専用`_verify_local_trade_rank_state`は使用していない。実装前仕様が列挙する一般形固有の不変条件（3分類、`trade_scope`、非参加固定、空き順位の先頭/残り配置、売り手後退、`trade_scope`外不変、順位の完全性、`trade_order`対応など）を確認する。失敗は`RuntimeError`とし、成功する前に結果オブジェクトを返さない。
+
+## 例外区分、FIFO責任分離、読取専用
+
+参加Mappingの形式違反、結果クラス直接構築時の最低限の型・形式違反、`assigned_rank()`への不正VisitKeyまたは結果外VisitKeyは`ValueError`とする。上流Node結果不一致、想定外status、権利保有不整合、空の`buyers_sorted`、baseline相対順破壊、一般形内部整合確認の失敗は`RuntimeError`とする。FIFO違反は、この部品の`ValueError`または`RuntimeError`ではない。
+
+`preserves_inlink_fifo()`は呼んでいない。FIFO検査前の順位結果を構築する。後続FIFO検査の材料は、取引前`result.trade_scope`、取引後`result.trade_order[:result.last_buyer_rank]`、`candidate_visits`から作るVisitKeyと`inlink_name`の対応である。FIFO判定結果は一般形順位結果へ保存していない。FIFO違反候補の棄却は未実装である。
+
+第一入力、`candidate_visits`、具体的買い手候補集合、`buyers_sorted`、参加Mapping、その他の上流結果を変更していない。上流処理を再実行していない。World、Vehicle、Node、Link、collector、順位台帳へ戻っていない。
+
+## 非参加Visit0件での既存部品との同値性
+
+専用テストで、非参加Visitが0件の一般形結果を、既存の`build_tvt_trade_rank_without_nonparticipants`と比較した。`buyers_sorted`、`sellers_sorted`、`last_buyer_rank`、各Visitの取引後順位、`trade_order`、`trade_scope`外順位、`trade_scope`を確認した。既存関数は本番処理から呼んでいない。専用テストの比較対象としてのみ使用した。既存関数、既存結果型、`preserves_inlink_fifo`は変更していない。
+
+## 独立反証レビューとテスト補強
+
+実装後、Cursor Grok 4.6による独立反証レビューを実施した。反証レビューでは、ファイル変更とGit操作を行っていない。結果は重大問題0、要修正問題0、軽微問題・改善候補6であった。軽微6件は仕様違反ではなく、任意改善またはテストの弱点であった。
+
+反証レビュー後、制度ロジックと本番コードは変更しなかった。専用テストについて、公開関数のkeyword-only契約の直接確認、`trade_scope`外の非参加Visitのbaseline順位維持、結果クラスコンストラクターのlist拒否・重複拒否・非dict順位辞書拒否、不適切な売り手0件の公開関数経由テスト2件の削除、結果クラス単体の空`sellers_sorted`契約の意味をコメントで明示する補強を行った。private順位dictを`MappingProxyType`へ変更していない。指定した2件以外の既存テストを、重複を理由に削除していない。
+
+## 可読性
+
+本番実装は、baseline順位構築、`trade_scope`、3分類、非参加固定順位、空き順位、買い手配置、売り手配置、`trade_scope`外順位、`trade_order`、一般形内部確認、結果構築を分離した。長い内包表記、複雑な多重ジェネレーター式、巧妙なone-linerへ処理を詰め込んでいない。意味の分かる中間変数と明示的なforループを使用した。実測前の性能最適化は行っていない。
+
+## 確認済みテスト結果
+
+新規2ファイルの`py_compile`は成功した。
+
+| 区分 | 結果 |
+|------|------|
+| 新規専用テスト直接実行 | 132 tests passed |
+| 新規専用テスト pytest | 132 passed |
+| pytest収集 | 132 collected |
+| 定義済み`test_`関数 | 132件 |
+| `TESTS`登録 | 132件（重複なし、登録漏れなし、未知参照なし） |
+| 直接実行件数とpytest収集 | 一致 |
+
+関係する既存回帰テスト6ファイルは263 passedである。
+
+- `tests_order_control_tvt_mp_concrete_buyer_candidate_set.py`
+- `tests_order_control_tvt_trade_rank.py`
+- `tests_order_control_tvt_candidate_visit_set.py`
+- `tests_order_control_tvt_inlink_candidate_physical_order.py`
+- `tests_order_control_tvt_right_of_entry_selection.py`
+- `tests_order_control_tvt_leading_nonparticipating_confirmation.py`
+
+新規専用132件と既存回帰263件を合わせ、395件成功を確認した。新規2ファイルについて、未追跡ファイル用のdiff checkを実施し、空白エラーがないことを確認した。
+
+## 今回実装しなかった境界
+
+FIFO検査の実行、FIFO違反候補の除外、候補別局所仮想計算、経済性評価、買い手価値`G`、売り手必要補償`R`、`G >= R`判定、`surplus`、成立候補選択、`surplus`同値時の買い手数比較、RNG、支払い、補償、成立時・不成立時・情報未解決時の最終確定列、確定順位ブロックへの接続、上位TVT制御、TVT-SB、TVT-MH、TVT-SP、性能最適化、既存非参加Visitなし順位計算部品の変更、`preserves_inlink_fifo`の変更は、今回も実装していない。
+
+## 次の作業開始点（本部品完了後）
+
+次の直接作業は、本部品が構築した`trade_scope`と`trade_order[:last_buyer_rank]`を、既存`preserves_inlink_fifo()`へ接続するFIFO検査接続部品の**実装前仕様**を確定することである。
+
+- 一般形順位再構成のPython実装を再考しない。
+- `preserves_inlink_fifo()`自体を変更しない。
+- FIFO検査接続部品では、正常なFIFO違反候補を`False`として除外し、別候補の検討を継続できる契約を設計する。
+- 局所仮想計算、経済性評価、成立候補選択にはまだ進まない。
+
 # 次の作業開始点
 
 次の直接作業は、具体的買い手候補集合生成部品の実装前仕様を、既存の公開型と接続できる形で確定することである。
@@ -3539,6 +3692,8 @@ tests_order_control_tvt_mp_general_trade_rank.py
 **2026-09-15更新（最新の再開情報）：** 具体的買い手候補集合生成部品は実装・検証済みである。最新の実装完了事実は、本ファイルの「具体的買い手候補集合生成部品の実装完了記録」を参照する。次の直接作業は、非参加Visitあり・なしを統一する一般形順位再構成部品について、既存の非参加Visitなし順位計算部品と`preserves_inlink_fifo()`の契約を再確認し、確定済み空き順位枠方式を基礎に**実装前仕様**を確定することである。一般形順位再構成のコーディングを直ちに開始する、とは読み取らない。局所仮想計算と経済性評価にはまだ進まない。
 
 **2026-09-15追記（最新の再開情報）：** 一般形順位再構成部品の実装前仕様を確定した。Python実装と専用テストは未着手である。最新詳細は、本ファイルの「TVT-MP一般形順位再構成部品の実装前仕様」を参照する。次の直接作業は、保存済み実装前仕様に従い`uxsim/order_control_tvt_mp_general_trade_rank.py`と`tests_order_control_tvt_mp_general_trade_rank.py`を実装することである。制度ロジックを再考しない。既存の非参加Visitなし順位計算部品と`preserves_inlink_fifo()`は変更しない。FIFO検査の実行、局所仮想計算、経済性評価には進まない。
+
+**2026-09-15更新（最新の再開情報）：** 一般形順位再構成部品は実装・検証済みである。最新の実装完了事実は、本ファイルの「TVT-MP一般形順位再構成部品の実装完了記録」を参照する。実装前仕様の保存済み・push済みコミットは`3932f21`である。次の直接作業は、本部品が構築した`trade_scope`と`trade_order[:last_buyer_rank]`を材料とするFIFO検査接続部品の**実装前仕様**を確定することである。一般形順位再構成のPython実装を再考しない。`preserves_inlink_fifo()`自体は変更しない。局所仮想計算、経済性評価、成立候補選択には進まない。
 
 # 新しいチャットでの再開方法
 
