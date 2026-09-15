@@ -5855,6 +5855,45 @@ helper の実装、専用テスト、設計メモの整合を最終確認した�
 - 未追跡：`uxsim/order_control_tvt_mp_concrete_buyer_candidate_set.py`、`tests_order_control_tvt_mp_concrete_buyer_candidate_set.py`、`diagnostics/order_control.zip`（対象外）。
 - `diagnostics/order_control.zip`は未接触、対象外である。
 
+##### 2026-09-15追記：TVT-MP一般形順位再構成部品の実装前仕様を確定
+
+**最新正本**
+
+- 詳細正本は`ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_2.md`の「TVT-MP一般形順位再構成部品の実装前仕様」である。
+- 空き順位枠方式の制度ロジックは継続版メモで既に確定済みである。今回確定したのは、その制度ロジックを実装・検証済みの具体的買い手候補集合生成部品および既存の非参加Visitなし順位計算部品へ接続する完全な実装前仕様である。
+- 具体的買い手候補集合生成部品の保存済み実装コミットは`2764f0c`である。このhashを一般形順位再構成の実装コミットとして扱わない。
+- 旧メモは変更していない。
+
+**公開APIとファイル候補**
+
+- 新規本番候補は`uxsim/order_control_tvt_mp_general_trade_rank.py`である。
+- 新規専用テスト候補は`tests_order_control_tvt_mp_general_trade_rank.py`である。
+- 入力は`OrderControlTvtMpConcreteBuyerCandidateSetResult`と`participates_by_visit_key`である。
+- 公開関数候補は`build_tvt_mp_general_trade_ranks`である。
+- 一般形専用結果型を新設する。一候補結果は読取専用クラス、対象Node別結果と全体結果はfrozen dataclassである。
+
+**生成規則の要点**
+
+- 非参加Visitあり・なしを空き順位枠方式で統一する。
+- `trade_scope`と`nonparticipating_visits_sorted`を一候補結果に保存する。
+- `trade_rank`をprivateな防御コピーとして保持し、`assigned_rank`と`trade_rank_items`で読み取る。
+- FIFO検査は後続責務であり、この部品では`preserves_inlink_fifo`を呼ばない。
+- 非参加Visit0件では既存部品との同値性を専用テストで確認する。
+- 既存順位計算部品と`preserves_inlink_fifo`は変更しない。
+
+**実装状態**
+
+- Python実装と専用テストはまだ未着手である。
+- 次の直接作業は、この保存済み実装前仕様に従う新規本番と専用テストの実装である。
+- 局所仮想計算、経済性評価、FIFO実行にはまだ進まない。
+- git add、git commit、git pushはまだ行っていない。
+
+**Git状態（記録時点）**
+
+- 具体的買い手候補集合生成部品の保存済み・push済みコミットは`2764f0c`である。
+- 本実装前仕様のMarkdown追記は、まだ`git add`、`git commit`、`git push`していない。
+- `diagnostics/order_control.zip`は対象外の未追跡ファイルのままである。
+
 #### 2026-08-29：TVT権利保有車両選定前の先頭非参加Vehicle先行確定の記録補修
 
 - 過去に確定済みだった、意思決定窓内 baseline 到着順位の先頭に連続する非参加 Vehicle の先行確定が、設計メモに明文化されていなかった
