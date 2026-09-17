@@ -5987,6 +5987,22 @@ helper の実装、専用テスト、設計メモの整合を最終確認した�
 - 新規2ファイルと本進捗追記・継続版メモの実装完了記録追記は、まだ`git add`、`git commit`、`git push`していない。実装前仕様の保存済み・push済みコミットとして記載するのは`25764b8`のみである。
 - `diagnostics/order_control.zip`は対象外である（触れていない）。
 
+##### 2026-09-18追記：TVT-MP候補別局所仮想計算の設計検討を開始
+
+- FIFO検査接続の実装コミット`33e6101`は保存・push済みである。次の対象は`preserves_inlink_fifo=True`候補の局所仮想計算である。
+- BATCH Level 2とFCFSの既存規則を調査した。BATCHはtrigger 1台の通過時刻と早期終了が主目的、TVTは経済評価に必要な複数Visitの通過時刻取得が目的であり、終了条件が異なる。
+- 全Worldではなく局所計算とする制度上の理由は、同じ時点Tに他NodeのTVT結果が未確定であり、候補別全World計算が実際の将来Worldを表さないためである。計算負荷削減だけが理由ではない。
+- `trade_order`を通過試行順とする基本方針を採用した。未到着・物理・容量制約は一時スキップ、クリアランス未充足は走査終了。一時スキップは正式順位の変更ではない。
+- baseline保存済み`route_next_link_name`を使用し、局所計算中に`route_next_link_choice()`を呼び直さない。
+- 局所mimic Worldへ対象Nodeの全inlink・全outlinkとsnapshot時点の全Vehicleを含める案が有力。候補Visitだけを含める案は第一候補ではない。
+- horizonは可変である。30や50に限定せず、計算負荷が許せば100以上も試す。一つの実験条件ではbaselineと局所計算で同じhorizonを使う。
+- inlink始端の新規流入は未確定。BATCH式単純sinkはTVTでは保留。
+- outlink終端の条件付き平均境界サービス案、流出許可残高の無期限繰越し、outlink流出容量と終端Node容量によるtimestep別物理制限が有力。active timestep 0では下流Link流入容量を使わない制約付きsink案。
+- baseline境界観測機能はまだ存在せず、保存場所と観測位置は未確定。
+- Python実装とテストは未着手。完全な実装前仕様は未作成。
+- 次の直接作業は、baseline実行中の終端境界観測位置の調査。この調査が終わるまで実装前仕様を作らない。
+- 今回のMarkdown追記は未コミット。`diagnostics/order_control.zip`は対象外である。
+
 #### 2026-08-29：TVT権利保有車両選定前の先頭非参加Vehicle先行確定の記録補修
 
 - 過去に確定済みだった、意思決定窓内 baseline 到着順位の先頭に連続する非参加 Vehicle の先行確定が、設計メモに明文化されていなかった

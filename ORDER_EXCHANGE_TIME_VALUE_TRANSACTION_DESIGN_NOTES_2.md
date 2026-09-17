@@ -1655,6 +1655,8 @@ surplus最大候補を選ぶ
 
 局所仮想計算、経済性評価、成立候補選択、支払いと補償、各場合の最終確定列、確定順位ブロックへの上位接続、上位TVT制御は引き続き未実装である。FIFO検査の制度ロジック自体は本ファイル§20、§21で確定済みである。実装前仕様は、本ファイルの「TVT-MP FIFO検査接続部品の実装前仕様」に保存済みである。実装完了事実は、同ファイルの「TVT-MP FIFO検査接続部品の実装完了記録」を参照する。
 
+**2026-09-18更新（候補別局所仮想計算・設計検討）：** FIFO検査接続までは実装・検証・push済みである（保存済み実装コミット`33e6101`）。候補別局所仮想計算は未実装である。今回は完全な実装前仕様を作らず、設計検討記録を追加した。通過試行順の基本方針は採用した。outlink終端の条件付き平均境界サービス方式は有力案である。ただし、baseline境界観測、inlink始端、新規流入、公開API、結果型等は未確定である。最新詳細は、本ファイルの「TVT-MP候補別局所仮想計算の設計検討記録」を参照する。
+
 # 具体的買い手候補集合生成部品の実装前仕様
 
 本節は、具体的買い手候補集合生成部品の実装前仕様の最新正本である。
@@ -4767,6 +4769,781 @@ Copilotと利用者がTerminalで確認済みである。
 - 直ちに局所仮想計算を実装しない。まず既存の局所仮想計算関係の設計・部品・入力要件を確認する。
 - 経済性評価、成立候補選択にはまだ進まない。
 
+# TVT-MP候補別局所仮想計算の設計検討記録
+
+**記録日：2026-09-18**
+
+本節は、候補別局所仮想計算の**設計検討記録**である。**完全な実装前仕様ではない。** 公開API、結果型、新規モジュール名、専用テスト契約を確定していない。Python実装と専用テストは未着手である。実装済み、テスト済み、コミット済みとは記載しない。
+
+FIFO検査接続部品の保存済み・push済み実装コミットは`33e6101`（`Implement and document the TVT-MP FIFO inspection connection`）である。本節はその後段である候補別局所仮想計算の調査・議論を失わないための記録である。新しい実装コミットhashを推測しない。本節および進捗メモ追記は、記録時点ではまだ`git add`、`git commit`、`git push`していない。
+
+本節では、次を混同しない。
+
+1. 確定済みの制度
+2. 既存コードとメモから確認した事実
+3. 今回採用した基本方針
+4. 現在の有力案
+5. 未確定事項
+6. 今後の調査事項
+
+有力案を実装前仕様または実装済みと記載しない。未確定事項を独自判断で確定しない。制度ロジックの正本は、引き続き旧メモ§8、§16、§25.25.34、本ファイル§22、FIFO検査接続の実装前仕様および実装完了記録である。既存の実装前仕様、実装完了記録、制度記録は削除・短縮・置換しない。
+
+## 非技術的な目的
+
+候補別局所仮想計算では、一つの対象Nodeについて、一つの具体的TVT候補を仮に採用した場合に、買い手や売り手がいつ交差点を通過できるかを予測する。
+
+取引後順位は、必ずその順番どおりに実際に通過できることを保証するものではなく、その順位で先に通過を試す権利を表す。
+
+実際の通過可否は、到着状態、同一inlink内の物理先頭、outlinkの空間、各容量、方向切替クリアランス等に左右される。
+
+全World baselineでの予想通過timestepと、候補別局所仮想計算での予想通過timestepを比較し、後続の経済性評価に必要な時間短縮と待ち時間増加を求める。
+
+局所仮想計算は、将来の実Worldを完全に予言または再現する計算ではなく、同じ対象Nodeの複数候補を比較するための局所的な予測である。
+
+## 確定済みの制度
+
+旧メモと継続版メモから、候補別局所仮想計算の前提として既に確定している制度は次である。本節で新しく考え直さない。
+
+### 権利保有車両の権利内容
+
+旧メモ§8.2：権利保有車両が持つのは、**最初に通過を試す権利**である。実際に最初に通過できることを保証しない。通過できない場合は、既存FCFSと同様に、通過不能理由に応じて後順位Vehicleへ通過機会を回すことがある。
+
+この権利内容は、候補の`trade_order`を「必ずその順で通過する確定列」ではなく、「通過を試す優先順位」として扱うことと整合する。
+
+### 三つの計算世界と局所候補未解決時の扱い
+
+旧メモ§25.25.34および本ファイル§22：
+
+- 全World baseline仮想計算、Node別・具体的候補別の局所仮想計算、実Worldを区別する。
+- 時点`T`の全World baselineは、時点`T-1`までのTVT結果を引き継ぎ、時点`T`では新しいTVTを追加しない比較基準である。
+- 候補別局所仮想計算は、一つの対象Nodeにおいて一つの具体的TVT候補を仮に実行した場合の到着・通過等を予測する。
+- 実Worldは、全対象Nodeがそれぞれ最終的に選択したTVTを反映して進む。
+- 同一timestepでは各対象Nodeが共通の全World baselineを参照し、それぞれ独立に候補を局所評価する。各対象Nodeで最大1件のTVTを選び、全対象Nodeの評価完了後に一括して実Worldへ登録する構想である（旧メモ§16.3）。
+- 局所計算である以上、他Nodeで同時に成立するTVTの将来影響を完全には予測できない。この差は予測値と実現値の差として事後評価する（旧メモ§16.4）。
+- 入力候補はFIFOを満たした具体的候補である。FIFO検査接続実装後は、`preserves_inlink_fifo=True`の候補である。
+- 一部候補だけlocal horizon内に必要情報を取得できなければ、その候補だけを評価対象から除外する。他の解決済み候補は維持する。
+- 全候補が未解決なら、経済条件による不成立とは別に、局所仮想計算未解決によるTVT不成立とする。
+- 不足情報を任意推定値、利益0、surplus 0等で補わない。未解決のまま採用しない。未解決を自動的に経済的不成立と分類しない。
+
+### 全Worldではなく局所仮想計算にする制度上の理由
+
+同じ実時点`T`に、複数の対象NodeでTVTが検討され得る。
+
+一つの対象Nodeの一つの候補だけを全Worldへ適用して仮想計算しても、他の対象Nodeで最終的にどのTVT候補が採用されるかはまだ決まっていない。
+
+そのため、一つの候補だけを反映した候補別全World計算は、実際に進む将来Worldを正確に表すものではない。
+
+候補別局所仮想計算は、実World全体の将来を完全再現するためではなく、対象Nodeにおける候補間比較のために行う。
+
+各対象Nodeで候補評価と候補選択が終わった後に、全対象Nodeの採用結果を実Worldへまとめて反映する。
+
+局所仮想計算を採用する理由を、単なる計算負荷削減だけにしない。計算負荷が大きいことも事実であるが、制度上の第一の理由は、他Nodeの未確定TVTを含む全World将来を候補単位で正確に表せないことである。
+
+## 既存コードとメモから確認した事実
+
+### BATCH Level 2局所仮想計算の目的
+
+既存コード`uxsim/order_control_batch_level_2_reference.py`およびBATCH設計メモから確認した。
+
+BATCH Level 2の主目的:
+
+- trigger Vehicleの仮想通過時刻`t_virtual_trigger`を求める
+- その時刻を使ってBATCH形成の`t_trigger`を補正する
+- 既存BATCH service queue、trigger Vehicle、容量、clearance、outlink入口空間等を模倣する
+- trigger Vehicleが通過した時点で早期終了する
+- virtual horizon内にtriggerが通過しなければ`resolved=False`
+- 本体ではunresolved時にLevel 1値へfallbackする
+- trigger以外の関係Vehicle全員の最終通過時刻を取得することが目的ではない
+
+BATCH mimic World:
+
+- 対象Node
+- 対象Nodeのinlink
+- 対象Nodeのoutlink
+- dummy upstream Node
+- sink Node
+- BATCH service queue
+- trigger用pseudo service unit
+- snapshot時点の車両・容量状態
+
+BATCHでは、dummy upstream Nodeから新しいVehicleを生成しない。Vehicle生成なし、新規流入なし、signalなし、order-controlなしである。
+
+BATCHでは、outlink終端をsink Nodeとし、標準end-tripでVehicleを除去する。
+
+BATCHではtrigger通過時に即座に終了し、同じoffset内のその後のVehicle前進やsink処理も行わない。
+
+この目的と早期終了のため、BATCHのsink境界がTVTより影響しにくい可能性がある。ただし、「影響が必ず小さい」と断定しない。
+
+BATCHでは、一つのservice unitとして登録されたVehicleのまとまりを、正式service queueの順序に従って処理する。処理対象service unitの先頭Vehicleが対象Nodeへ未到着の場合、そのVehicleを飛ばして同じservice unit内の後続Vehicleを処理したり、別inlinkの後続service unitへ移ったりせず、そのtimestepのservice処理を停止する。これにより、現在のservice unitに含まれるVehicleのまとまりを、後続service unitより先に処理する順序を維持する。
+
+BATCH Level 2の未到着Vehicle用kind Bでは、Vehicle IDによる仮想outlink選択がある。snapshot時点で`route_next_link`が対象Nodeから始まる到着済みVehicleはkind Aとして固定outlinkを使う。
+
+### TVT局所仮想計算の目的（BATCHとの違い）
+
+TVTでは:
+
+- 一つの対象Node、一つの具体的候補ごとに別の局所仮想計算を行う
+- 入力候補は`preserves_inlink_fifo=True`の候補だけである
+- 候補の取引後順位`trade_order`を前提とする
+- baseline保存済み`route_next_link_name`を使う
+- 買い手、売り手等、経済性評価に必要な関係Visitの予想通過timestepを取得する
+- 関係Visit全員について必要情報が揃うまで計算する
+- 一部候補だけlocal horizon内に解決できなければ、その候補だけを除外する
+- 他の解決済み候補は維持する
+- 全候補未解決なら、経済条件による不成立とは別に、局所仮想計算未解決によるTVT不成立とする
+- 不足情報を任意推定値、0、利益0、surplus 0等で補わない
+
+BATCHは主としてtrigger Vehicle 1台の通過時刻取得が目的である。
+
+TVTは、候補の経済評価に必要な複数Visitの通過時刻取得が目的である。
+
+このため、BATCHの局所World構築と交通進行は参考にできるが、BATCH service queue、trigger用pseudo unit、Level 1 fallback、trigger通過時早期終了をそのままTVTへ適用しない。
+
+TVTは、複数Vehicleを一つのBATCHとしてまとめて通過させる制度ではない。そのため、BATCHの未到着待機規則をそのままTVTへ適用しない。
+
+### FCFSから確認した通過規則
+
+既存`Node.transfer_fcfs_clearance()`およびFCFSメモから確認した。
+
+FCFSでは、各timestepに到着済みVehicleを現在Visitの固定順位キーで並べる。
+
+固定順位キー:
+
+- `arrival_time`
+- `arrival_tiebreaker`
+- Vehicle ID
+
+クリアランス未充足:
+
+- `break`
+- 後順位Vehicleを検討しない
+- そのtimestepの走査を終了する
+
+クリアランス不要または充足済みであるが、物理・容量条件を満たさない:
+
+- `continue`
+- 同じtimestepで後順位Vehicleを検討する
+
+物理・容量条件には少なくとも次が含まれる。
+
+- inlinkの物理先頭である
+- outlinkに入口空間がある
+- `outlink.capacity_in_remain`
+- `inlink.capacity_out_remain`
+- `Node.flow_capacity_remain`
+
+次のtimestepでは、未通過Vehicleを同じ固定FCFS順位で再び先頭から評価する。
+
+クリアランス待ちVehicleに新しい予約順位を与えない。
+
+クリアランス未充足で`break`する理由:
+
+- 後順位の別方向Vehicleを通すと、`last_order_control_inlink`と`last_order_control_entry_timestep`が更新される
+- その結果、先順位Vehicleの方向切替クリアランスが繰り返し必要となる
+- 先順位Vehicleが長時間または際限なく通過できなくなる可能性がある
+- FCFSでは交通効率だけでなく先順位優先を守るため、クリアランス未充足時には後順位へ進まない
+
+具体例:
+
+正式順位:
+
+```text
+A → B
+```
+
+timestep T:
+
+- Aは容量不足で`continue`
+- Bは方向切替クリアランス未充足で`break`
+- 後順位は検討しない
+
+timestep T+1:
+
+- 再び正式順位先頭のAから評価する
+- BがTにクリアランス待ちになったことを理由に、BをAより上位へ予約しない
+- Aが容量回復済みならAが先に通過する
+- Bのクリアランス待ちはB固有の予約権ではなく、Tに後順位を通さないための停止条件である
+
+一台が通過した後も、残る候補の走査を続ける。同じinlinkの連続通過では方向切替クリアランスは不要であり、容量等を満たせば同じtimestep内に続けて通過できる。異なるinlinkでは、直前の通過により`last_order_control_inlink`と`last_order_control_entry_timestep`が現在時刻へ更新されるため、同じtimestep内では方向切替クリアランスを満たさない。
+
+### `route_next_link_name`
+
+`OrderControlTvtCandidateVisit`は`route_next_link_name: str`を保持する。空でない文字列を要求する。
+
+snapshot時点で到着済みのVisit:
+
+- `route_next_link`が対象Nodeから始まるLinkであることをsnapshot登録時に確認する
+- `route_next_link.name`を保存する
+
+snapshot時点で未到着のVisit:
+
+- snapshot登録時は`route_next_link_name=None`
+- 全World baselineで対象Nodeへ到着する前に`route_next_link_choice()`が実行される
+- その後、選択済み`route_next_link.name`がcollectorへ記録される
+- candidate Visitになる段階では、空でない`route_next_link_name`を要求する
+
+### baseline driverと`OrderControlBaselineForkResult`
+
+既存`OrderControlBaselineForkResult`は次を保持する。
+
+- `collector`
+- `target_node_names`
+- `baseline_timestep_T`
+- `configured_horizon_steps`
+- `fork_steps_executed`
+- `final_fork_timestep`
+- `registered_visit_count`
+- `inlink_physical_orders`
+
+`OrderControlBaselineForkResult`は`fork_W`を保持しない。
+
+snapshot固定Visitが1件以上ある通常経路では、`configured_horizon_steps`全体を実行する。必要情報が途中で揃っても早期終了しない。実行後、設定horizonだけ進んだことを検証する。
+
+登録Visitが0件の空経路だけはforwardせず、`fork_steps_executed=0`である。TVT候補が形成される正常経路では、通常この空経路から局所計算へ進まない。
+
+horizonは可変値である。旧メモは初期検討として50 timestepを中心に述べ、30、50、100などの比較と未解決率の測定が必要としている。30または50は過去の例示または検討例にすぎない。30または50を正式値として確定していない。30または50を上限としていない。正式な研究条件は未確定である。
+
+既存baseline collectorは、主としてsnapshot固定Visitの到着・通過情報を記録する。既存コードには少なくとも次の接続がある。
+
+- `prepare_baseline_passage_recording()`
+- `apply_baseline_passage_timestep()`
+- `record_baseline_arrival()`
+
+outlink終端境界のactive timestep数と総流出台数は、現時点では正式結果として保存されていない。baseline forward終了後に`fork_W`を参照して後から取得することもできない。
+
+## 今回採用した基本方針
+
+次は、今回の議論で採用した通過試行順の基本方針である。局所仮想計算全体の完全仕様が確定したとは記載しない。公開API、結果型、mimic World範囲、境界処理は未確定のままである。
+
+### TVT通過試行順
+
+各timestepで、未通過Visitを固定された`trade_order`順に確認する。
+
+未到着Visit:
+
+- そのtimestepの走査では一時的にスキップする
+- 後順位Visitを検討する
+- 未到着を理由に`trade_order`を書き換えない
+- 次のtimestepでは再び元の`trade_order`順で評価する
+
+inlinkの物理先頭でないVisit:
+
+- そのtimestepの走査では一時的にスキップする
+- 後順位Visitを検討する
+
+outlink閉塞または容量不足:
+
+- そのtimestepの走査では一時的にスキップする
+- 後順位Visitを検討する
+
+対象となる制約:
+
+- outlink入口空間
+- outlink流入容量
+- inlink流出容量
+- 対象Node容量
+- inlink物理先頭
+- その他、既存UXsimで交差点通過に必要な物理条件
+
+クリアランス未充足:
+
+- 後順位Visitへ進まない
+- そのtimestepの走査を終了する
+- 次のtimestepでは、残る未通過Visitを元の`trade_order`順に先頭から再評価する
+- クリアランス待ちVisitへ別の予約順位を与えない
+
+通過可能:
+
+- 保存済み`route_next_link_name`に対応するoutlinkへ通過させる
+- 通過timestepを記録する
+- 最終通過inlinkと最終通過timestepを更新する
+- 残る`trade_order`の走査を続ける
+
+一時的なスキップは、正式な取引後順位の変更ではない。
+
+`trade_order`は、通過を試す優先順位である。
+
+局所仮想計算上の実通過順は、到着、物理条件、容量、clearance等により`trade_order`と異なり得る。
+
+### 同じtimestep内の複数通過
+
+一台が通過した後も、残る`trade_order`の走査を続ける。
+
+次のVisitが同じinlinkである場合:
+
+- 方向切替クリアランスは不要
+- 到着済み、物理先頭、容量等の条件を満たせば同じtimestep内に続けて通過できる
+- 一台ごとに強制的に1 timestep待たせない
+
+次のVisitが異なるinlinkである場合:
+
+- 直前の通過により`last_order_control_inlink`と`last_order_control_entry_timestep`が現在時刻へ更新される
+- 同じtimestep内では方向切替クリアランスを満たさない
+- クリアランス未充足として走査を終了する
+
+同じinlinkの次順位Visitが容量等で通れず、その後順位が別inlinkである場合:
+
+- 同じinlinkの容量不能Visitは一時スキップできる
+- ただし、別inlinkのVisitには方向切替クリアランスを別途適用する
+- クリアランス未充足なら、そのtimestepの走査を終了する
+
+### 未到着Visit（BATCHとの違い）
+
+TVTでは、順位が付いているが対象Nodeへ未到着のVisitを、そのtimestepに物理的に通過できないVisitとして一時スキップする。
+
+別inlinkの後順位Visitが到着済みで通過可能なら、そのVisitを検討できる。
+
+同じinlinkの後順位Visitは、通常は未到着先順位Visitより物理的に後方にいるため、物理先頭条件によって通過できない。
+
+この処理によって同一inlink FIFOを破らない。
+
+### `route_next_link`の使用方針
+
+TVT局所仮想計算では:
+
+- baseline保存済み`route_next_link_name`を使用する
+- 局所計算中に`route_next_link_choice()`を呼び直さない
+- baseline保存済みの進路に従って直進、右折、左折させる
+- BATCHの未到着Vehicle用kind BやVehicle IDによる仮想outlink選択をそのまま使用しない
+
+### horizonの扱い
+
+horizonは可変値である。30または50に限定しない。30または50を正式値または上限としない。計算負荷が許せば100以上も試す。将来さらに大きな値を試す可能性も排除しない。正式な研究条件は未確定である。horizon感度分析を可能にする。
+
+一つの実験条件では、全World baselineと候補別局所仮想計算に同じhorizon値を使用する。
+
+局所仮想計算のhorizonは、baseline側の`configured_horizon_steps`を参照する方向が有力である。局所計算へ別のhorizon値を重複して自由入力する設計は、有力案とはしない。ただし、公開APIと具体的な値の受渡し方法は未確定である。
+
+## 現在の有力案
+
+次は現在の有力案である。正式確定済み、実装前仕様完成、実装済みとは記載しない。
+
+### 局所mimic Worldの対象範囲
+
+実時点`T`を開始点として、一つの対象Node、一つの具体的候補ごとに局所mimic Worldを作る。
+
+局所mimic Worldへ含める有力な範囲:
+
+- 対象Node
+- 対象Nodeへ接続する全inlink
+- 対象Nodeから出る全outlink
+- 時点`T`に全inlink上に存在する全Vehicle
+- 時点`T`に全outlink上に存在する全Vehicle
+- Node、inlink、outlinkの容量と残容量
+- Vehicleの位置
+- 速度
+- 車線
+- leaderとfollower
+- `move_remain`
+- `link_arrival_time`
+- その他、既存BATCH mimic Worldが交通状態再現に使用する必要情報
+- 最終通過inlink
+- 最終通過timestep
+
+候補Visitだけをmimic Worldへ含める方式は、交通状態再現漏れの可能性があるため、現時点の有力案ではない。
+
+ただし、mimic Worldへ含めた全VehicleへTVT順位を与えるわけではない。
+
+次を区別する。
+
+TVTの仮想サービス順位を持つVisit:
+
+- 候補の`trade_order`に含まれるVisit
+
+交通状態再現のためだけに含めるVehicle:
+
+- car-following
+- inlink物理順
+- outlink混雑
+- outlink入口空間
+- 容量消費
+- その他の物理交通状態へ影響するVehicle
+
+旧メモ§16.2は、局所仮想計算の対象範囲を対象Nodeの全inlinkと全outlinkを基本とすると既に述べている。本有力案はその記録と整合する。
+
+### outlink終端の条件付き平均境界サービス
+
+BATCHの単純sinkをTVTへそのまま適用する案は保留する。
+
+理由:
+
+- BATCHはtrigger Vehicleが対象Nodeを通過した時点で早期終了する
+- TVTでは、経済評価に必要な複数の関係Visitの通過timestepが揃うまで計算する
+- 早く対象Nodeを通過したVehicleがoutlinkを長く走り、局所計算終了前に終端へ到達する可能性が高まる
+- 終端で無条件にend-tripさせると、outlink空間が実Worldより早く回復する可能性がある
+- 後続Visitの予想通過timestepを楽観化する可能性がある
+- 時間短縮、待ち時間増加、経済評価、候補選択へ影響し得る
+
+このため、TVTではoutlink終端境界の処理を別途設計する必要がある。
+
+全World baselineの設定horizon全体について、対象Nodeの各outlinkごとに次を観測する有力案である。
+
+1. 当該outlinkの終端Nodeで、transfer処理直前に、当該outlink由来の`incoming_vehicles`が1台以上存在したtimestep数
+2. 当該outlinkから終端Nodeを実際に通過した総Vehicle数
+
+観測時点は、終端Nodeのtransfer処理直前に固定する方針である。
+
+同一Vehicleが複数timestep待機した場合は、複数のactive timestepとして数える。
+
+これはVehicle数ではなく、流出需要が存在した時間を分母にするためである。
+
+用語候補:
+
+- `downstream_active_timestep_count`
+- `downstream_transferred_vehicle_count`
+- `downstream_mean_service_rate`
+
+正式な名称は未確定である。
+
+条件付き平均流出率:
+
+```text
+downstream_mean_service_rate
+=
+downstream_transferred_vehicle_count
+/
+downstream_active_timestep_count
+```
+
+baselineのtimestep別流出台数時系列を、そのまま局所候補へ再生しない。
+
+理由:
+
+- baselineと局所候補では対象Nodeから各outlinkへVehicleが入る時刻と順序が変わる
+- baseline固有の時間配置を局所候補へ強制する理由がない
+- horizon全体またはactive timestep全体の平均により、瞬間的な有利・不利を平準化する
+- 局所候補固有の終端到着時刻に応じて境界サービスを使えるようにする
+
+保存済み`route_next_link_name`はbaselineと局所候補で共通である。
+
+そのため、outlink別の総需要構成には一定期間で概算的な同等性が期待できる可能性がある。
+
+ただし、horizon内のoutlink別進入台数が必ず同じとは断定しない。
+
+### 流出許可残高
+
+局所仮想計算では、各outlinkについて流出許可残高を持つ有力案である。
+
+初期残高:
+
+```text
+0
+```
+
+各timestep:
+
+```text
+流出許可残高
+=
+前timestepからの残高
++
+downstream_mean_service_rate
+```
+
+例:
+
+平均流出率1.46の場合
+
+最初のtimestep:
+
+- 残高1.46
+- 最大1台分を使用可能
+- 1台流出したら残高0.46
+
+次のtimestep:
+
+- 0.46 + 1.46 = 1.92
+- 最大1台分を使用可能
+- 1台流出したら残高0.92
+
+次のtimestep:
+
+- 0.92 + 1.46 = 2.38
+- 最大2台分を使用可能
+
+最初のtimestepに終端待機Vehicleがおらず、1台も流出しなかった場合:
+
+- 残高1.46を維持
+- 次のtimestepに1.46を加え、残高2.92
+- 最大2台分を使用可能
+
+小数部分の繰越しは必須である。
+
+未使用の整数部分も含め、残高は次のtimestepへ繰り越す有力案である。
+
+無期限繰越しを認める方向で検討している。無期限残高繰越しを、無制約の一括流出と混同しない。
+
+ただし、流出許可残高だけで一つのtimestepの実流出台数を決めない。
+
+### 一つのtimestepの流出台数制限
+
+一つのtimestepに実際に流出させる台数は、次のすべてが許す範囲とする有力案である。
+
+- 流出許可残高の整数台数分
+- outlink終端で待機しているVehicle数
+- outlinkの流出容量
+- 終端Nodeの容量
+- `DELTAN`
+- その他、既存UXsimにおいて終端Node通過に必要な物理条件
+
+独立した人工的なburst上限を新設する案を基本としない。
+
+既存のoutlink流出容量と終端Node容量を、timestep別の物理上限として使用する方向である。
+
+このため、流出許可残高が20台分あっても、outlink流出容量と終端Node容量が2台分しか許さなければ、そのtimestepでは最大2台だけ流出させる。
+
+使用しなかった18台分は残高に残る。
+
+大きな残高は、局所計算内でそれまで下流境界サービスを十分使用していなかったことを表す。
+
+その後に流出需要が生じた場合、既存物理容量の範囲内で速やかに流出させられることには、境界近似として意味がある。
+
+ただし、残高を実Worldで物理的な容量が保存されたものとは説明しない。
+
+baselineから推定した平均的な境界サービス機会を、局所候補固有の需要時刻に合わせて再配分する近似とする。
+
+### 条件付き平均流出率の場合分け
+
+active timestep数が1以上で、総流出台数が1台以上:
+
+- 条件付き平均流出率を計算する
+- 局所計算の流出許可残高へ毎timestep加算する
+
+active timestep数が1以上で、総流出台数が0:
+
+- baselineの共通horizon中に終端待機Vehicleが存在したが、一台も流出しなかった
+- 観測した共通horizon内では下流境界サービス率0とする
+- 局所仮想計算でも同じhorizon内は境界閉塞として扱う
+- horizon後も永続閉塞すると断定するものではない
+
+active timestep数が0:
+
+- baseline horizon中、終端Nodeのtransfer直前に当該outlink由来の`incoming_vehicles`が一度も存在しなかった
+- 下流境界待ちは観測されていない
+- 境界サービス能力そのものを直接観測できたわけではない
+- ただし、horizon全体で終端待ちが生じなかったことは、outlink負荷が小さい、またはhorizon中に下流混雑が軽減した可能性を示唆する
+- 初期案として制約付きsinkへfallbackする
+
+「下流混雑がないことを確認した」とは記載しない。「下流境界待ちが観測されなかったため、制約付きsinkを使用する近似」と記載する。
+
+### active timestepが0の場合の制約付きsink
+
+active timestep数が0の場合、無制約sinkではなく制約付きsinkを使う有力案である。
+
+一つのtimestepのsink台数は次で制限する。
+
+- outlink終端で待機しているVehicle数
+- outlinkの流出容量
+- 終端Nodeの容量
+- `DELTAN`
+- その他、既存UXsimの物理条件
+
+下流Linkの流入容量は使用しない。
+
+理由:
+
+- active timestepが0の場合にsink fallbackを使うのは、baseline horizon中に終端待ちが観測されず、下流側が比較的空いているとみなす近似だからである
+- 局所Worldに実在する下流Linkを追加しない限り、下流Linkの流入容量を形式的に持ち込まない
+- sink扱いと下流Link流入容量制約を混在させない
+
+### 条件付き平均流出率の意味
+
+baselineで条件付き平均1.46台が実現した場合:
+
+- baseline条件下で、active timestep当たり平均1.46台の流出が実際に実現したことは事実である
+- これを、局所仮想計算の近似的な下流境界サービス率として使う
+- 瞬間ごとに最低1.46台の通過を物理的に保証する意味ではない
+- 潜在容量そのものと断定しない
+- baselineで観測された期間実績から、局所境界の平均サービス条件を近似する
+
+このような仮想計算では誤差を完全に避けられない。
+
+より同程度に実装可能で、局所性を保ち、明らかに優れた代替方式がない場合には、平均化による誤差は近似として引き受ける。
+
+誤差が存在することだけを理由に、この方式を否定しない。
+
+ただし、研究分析で境界近似の限界やhorizon感度を検討できる余地を残す。
+
+### 終端流出要求の詳細化
+
+分母を単純な全horizon timestep数にするより、終端Nodeのtransfer直前に`incoming_vehicles`が存在したactive timestep数にする方が、流出需要がなかった時間を除外できる。
+
+さらに厳密に、
+
+- 物理先頭である
+- 到着直後ではない
+- 実際に流出要求可能である
+- 下流進路が有効である
+
+等を確認する案も考えられる。
+
+しかし、初期方式では実装負担に対する精度向上が限定的である可能性がある。
+
+理由:
+
+- 物理先頭でないVehicleがいる場合、通常は前方Vehicleが存在する
+- 到着直後に処理されなくても次のtimestepには通過検討対象となる
+- trip-end Vehicleは現在の研究対象外である
+- 長めのhorizon平均では1 timestep単位の差が平均上小さくなる可能性がある
+
+したがって、初期案では、
+
+- transfer処理直前に当該outlink由来の`incoming_vehicles`が1台以上存在したか
+
+をactiveの定義とする方向である。
+
+ただし、コード上の観測位置と既存`Node.transfer()`実行順をさらに確認してから正式確定する。
+
+## inlink始端境界（未確定）
+
+BATCHでは:
+
+- dummy upstream Node
+- Vehicle生成なし
+- 新規流入なし
+- signalなし
+- order-controlなし
+
+TVTでも同じ方式を使う案はあるが、まだ正式確定していない。inlink始端からの新規流入なしを確定事項と記載しない。
+
+新規流入なしは楽観的となる可能性がある。
+
+例:
+
+- inlink Xとinlink Yがある
+- Y上のTVT順位保有Visitが早くまとめて通過する
+- 実Worldでは時点`T`以後にY始端から新しいVehicleが進入する
+- そのVehicleが対象Nodeへ到着し、X上の残るTVT順位保有Visitの通過、方向切替、clearance等へ影響する可能性がある
+- 局所計算で新規流入を無視すると、この影響を捨象する
+
+ただし、新規Vehicleには当該候補の`trade_order`がないため、局所計算へ入れる場合には次の制度設計が必要になる。
+
+- TVT順位保有Visitと新規流入Vehicleの優先関係
+- 新規流入Vehicleをどの順位へ置くか
+- baseline到着順位を使うか
+- clearanceへどう影響させるか
+- `route_next_link`をどう与えるか
+- 必要なVehicle流入情報をbaselineからどう取得するか
+
+影響が限定的かもしれないという印象はあるが、根拠なく確定しない。
+
+inlink始端からの新規流入を再現するか、捨象するかは未確定事項として残す。
+
+## 未確定事項
+
+少なくとも次は未確定である。独自判断で確定しない。
+
+- TVT局所仮想計算の具体的な公開API
+- 結果型
+- 新規本番モジュール名
+- 専用テスト名
+- local horizonの正式な実験値
+- horizon設定の受渡し方法
+- 局所計算へ必要な全当事者Visitの厳密な範囲
+- 買い手と売り手以外の非参加Visitについて通過timestep取得が必要か
+- 局所mimic Worldへ含めるVehicleの最終範囲
+- inlink始端から`T`以後の新規流入を再現するか
+- 新規流入Vehicleと`trade_order`保有Visitのサービス優先関係
+- outlink終端の条件付き平均境界方式の正式採用
+- active timestepの厳密な観測位置
+- baseline実流出台数の計測方法
+- 条件付き平均率と流出許可残高のデータ型
+- `DELTAN`が1以外の場合の台数表現
+- 複数車線への将来拡張
+- 無期限残高の初期化、候補間独立性、結果保存
+- 制約付きsinkの具体的実装
+- baseline境界観測の保存場所
+- 局所計算のresolved条件
+- unresolved理由の形式
+- diagnostic情報
+- 軽量カウンター
+- 性能測定
+- 精度検証方式
+- horizon感度分析
+- 境界近似の感度分析
+- 局所予測と実World実績の比較方法
+
+baseline境界観測について、次もまだ未確定である。
+
+- 既存`OrderControlBaselineCollector`へ統合するか
+- 別の下流境界観測collectorを作るか
+- `OrderControlBaselineForkResult`へ直接保存するか
+- 対象Node、outlink、終端Nodeのキー設計
+- 観測対象を全target Nodeの全outlinkとするか
+- 観測開始・終了の厳密な位置
+- 終端Nodeのtransfer前後で流出台数をどう計測するか
+- 複数inlinkが同じ終端Nodeへ入る場合のoutlink別集計
+- 同一timestepに複数台流出した場合の集計
+
+将来の実装には、baseline実行中に終端境界を観測して結果へ受け渡す仕組みが必要である。観測機能自体はまだ存在しない。
+
+## 採用していない案
+
+現時点で第一候補としない案と理由。永久に排除したとは記載しない。
+
+- 候補ごとに全Worldを計算する方式
+  - 他NodeのTVT結果が未確定なので、実際の将来Worldを正確に表さない
+  - 計算負荷も大きい
+- BATCHの単純sinkを無条件にTVTへ流用する方式
+  - TVTでは複数当事者の通過確認まで計算するため、sinkの楽観影響が大きくなる可能性
+- baselineのtimestep別下流流出台数を同じ時系列で再生する方式
+  - baselineと局所候補でoutlink終端到着時刻と構成が変わる
+  - baseline固有の時間配置を局所候補へ固定する理由がない
+  - 平均により瞬間変動を平準化する方が今回の目的に合う
+- 独立した人工的なburst上限を別パラメータとして追加する方式
+  - まず既存outlink流出容量と終端Node容量を物理上限として利用する方が明確
+
+## 今回実装しない範囲
+
+今回は次を実装しない。Python実装済みまたはテスト済みとは記載しない。
+
+- baseline終端境界観測
+- collector変更
+- baseline driver変更
+- `Node.transfer()`変更
+- 局所mimic World
+- TVT仮想サービス処理
+- 流出許可残高
+- 条件付き平均流出率
+- 制約付きsink
+- inlink始端の新規流入
+- 局所仮想計算結果型
+- unresolved判定
+- 経済性評価
+- `G`
+- `R`
+- `surplus`
+- 成立候補選択
+- 実Worldへの反映
+- カウンター
+- 診断ログ
+- 性能最適化
+
+## 次の調査開始点
+
+次の直接作業は、完全な実装前仕様の作成ではない。
+
+次の直接作業は、全World baseline実行中に、各対象Nodeの各outlinkについて、
+
+- 終端Nodeのtransfer処理直前のactive状態
+- 当該outlinkから終端Nodeを実際に通過した台数
+
+をどこで、どの処理順で、どの単位で観測できるかを調査することである。
+
+具体的には次を確認する。
+
+- `Node.transfer()`の実行順
+- 標準Nodeで`incoming_vehicles`がいつ作られ、いつclearされるか
+- 終端Nodeのtransfer直前へ観測hookを置けるか
+- transfer前後の差からoutlink別流出台数を数えられるか
+- 同一Nodeへ複数inlinkが接続する場合にoutlink別の由来を識別できるか
+- existing baseline collectorへ統合する責任範囲
+- 別collectorまたは観測結果型の必要性
+- 実Worldへ影響しないこと
+- baselineの設定horizon全体を観測できること
+
+この調査が終わるまでは、完全な実装前仕様を作らない。FIFO検査接続部品を再考しない。`preserves_inlink_fifo()`を変更しない。一般形順位再構成を変更しない。直ちに局所仮想計算を実装しない。経済性評価、成立候補選択には進まない。
+
 # 次の作業開始点
 
 次の直接作業は、具体的買い手候補集合生成部品の実装前仕様を、既存の公開型と接続できる形で確定することである。
@@ -4797,6 +5574,8 @@ Copilotと利用者がTerminalで確認済みである。
 **2026-09-15追記（最新の再開情報）：** FIFO検査接続部品の実装前仕様を確定した。Python実装と専用テストは未着手である。最新詳細は、本ファイルの「TVT-MP FIFO検査接続部品の実装前仕様」を参照する。一般形順位再構成部品の保存済み実装コミットは`1e23174`である。次の直接作業は、保存済み実装前仕様に従い`uxsim/order_control_tvt_mp_fifo_inspection.py`と`tests_order_control_tvt_mp_fifo_inspection.py`を実装することである。一般形順位再構成を再考しない。`preserves_inlink_fifo()`自体を変更しない。局所仮想計算、経済性評価、成立候補選択には進まない。
 
 **2026-09-15更新（最新の再開情報）：** FIFO検査接続部品は実装・検証済みである。最新の実装完了事実は、本ファイルの「TVT-MP FIFO検査接続部品の実装完了記録」を参照する。実装前仕様の保存済み・push済みコミットは`25764b8`である。次の直接作業は、`preserves_inlink_fifo=True`の候補だけを対象とする候補別局所仮想計算接続部品の**実装前仕様**を確定することである。FIFO検査接続部品を再考しない。`preserves_inlink_fifo()`自体を変更しない。一般形順位再構成を変更しない。直ちに局所仮想計算を実装しない。まず既存の局所仮想計算関係の設計・部品・入力要件を確認する。経済性評価、成立候補選択には進まない。
+
+**2026-09-18更新（最新の再開情報）：** FIFO検査接続部品は実装・検証・push済みである（保存済み実装コミット`33e6101`）。候補別局所仮想計算は未実装である。今回は完全な実装前仕様を確定せず、設計検討記録を追加した。通過試行順の基本方針は採用した。outlink終端の条件付き平均境界サービス方式は有力案である。inlink始端の新規流入、baseline境界観測の保存場所と観測位置、公開API、結果型等は未確定である。次の直接作業は、全World baseline実行中に各対象Nodeの各outlinkについて、終端Nodeのtransfer処理直前のactive状態と当該outlinkから終端Nodeを実際に通過した台数を、どこで・どの処理順で・どの単位で観測できるかを調査することである。この調査が終わるまでは完全な実装前仕様を作らない。直ちに局所仮想計算を実装しない。経済性評価、成立候補選択には進まない。最新詳細は、本ファイルの「TVT-MP候補別局所仮想計算の設計検討記録」を参照する。
 
 # 新しいチャットでの再開方法
 
