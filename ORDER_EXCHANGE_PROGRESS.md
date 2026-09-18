@@ -6022,6 +6022,23 @@ helper の実装、専用テスト、設計メモの整合を最終確認した�
 - 今回のMarkdown追記は未コミット。
 - `diagnostics/order_control.zip`は対象外である。
 
+##### 2026-09-19追記：TVT下流境界観測部品の完全実装前仕様を確定
+
+- 基本設計コミット`c2c98c0`（`Document the TVT downstream boundary observation basic design`）は保存・push済みである。
+- 下流境界観測部品の完全実装前仕様を確定した。Python実装とテストは未着手である。
+- observer正式名は`OrderControlBaselineDownstreamBoundaryObserver`。World属性は`_order_control_baseline_downstream_boundary_observer`。
+- 正式APIは`register_target_node_outlinks()`、`capture_before_transfer()`、`commit_after_transfer()`、`clear_pending()`、`export_result()`。
+- 結果は3段frozen構造。outlink / 対象Node / 全体。`ForkResult`必須フィールドは`downstream_boundary_result`。
+- 空baselineは`None`。観測済み0と未観測を区別する。
+- 対象Nodeは`target_node_names`順。各Nodeのoutlinkはネットワーク登録順。同一終端Nodeを共有するoutlinkも独立結果。
+- 同一outlink二重登録は`ValueError`。countだけを保存し、平均率は後段。
+- transfer例外ではbaseline停止。部分結果なし。原因修正後は実Worldシミュレーションを最初から手動でやり直す。
+- `DELTAN=1`はFCFS、BATCH、TVT共通。Node作成時と`set_order_control_for_nodes()`でだけ確認。timestep、baseline、observerでは再確認しない。処理名は`_validate_order_control_deltan`。
+- 実装はobserver単体から開始する。新規モジュールは`uxsim/order_control_baseline_downstream_boundary.py`、専用テストは`tests_order_control_baseline_downstream_boundary.py`。
+- 条件付き平均率、流出許可残高、局所mimic World、inlink始端、経済評価は対象外である。
+- 今回のMarkdown追記は未コミット。
+- `diagnostics/order_control.zip`は対象外である。
+
 #### 2026-08-29：TVT権利保有車両選定前の先頭非参加Vehicle先行確定の記録補修
 
 - 過去に確定済みだった、意思決定窓内 baseline 到着順位の先頭に連続する非参加 Vehicle の先行確定が、設計メモに明文化されていなかった

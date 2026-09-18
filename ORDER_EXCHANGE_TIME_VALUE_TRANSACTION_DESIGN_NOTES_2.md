@@ -1659,6 +1659,8 @@ surplus最大候補を選ぶ
 
 **2026-09-19更新（下流境界観測の基本設計確定）：** FIFO検査接続までは実装・検証・push済みである（保存済み実装コミット`33e6101`）。保存済み最新の局所仮想計算設計検討コミットは`5dd4be9`（`Document the TVT-MP candidate local virtual calculation design study`）である。候補別局所仮想計算は未実装である。下流境界観測の基本設計を確定した。`DELTAN=1`をTVT初期研究範囲の制度上の前提とする。activeは終端`Node.transfer()`直前の途中通過Vehicle待機で判定する。実流出台数は、transfer前に保持した途中通過Vehicleがtransfer後に元のoutlinkを離れた数とする。目的地到着Vehicleは集計対象外である。Node固定分類ではなくVehicleごとの目的地判定を使う。下流境界専用observerと、`OrderControlBaselineForkResult`から参照できる独立した読取専用結果を使う方向である。公開API、結果型、例外契約、局所適用処理は未確定である。Python実装と専用テストは未着手である。最新詳細は、本ファイルの「TVT-MP候補別局所仮想計算の設計検討記録」にある「2026-09-19更新：下流境界観測の調査結果と基本設計の確定」を参照する。
 
+**2026-09-19更新（下流境界観測部品・完全実装前仕様確定）：** 保存済み基本設計コミットは`c2c98c0`（`Document the TVT downstream boundary observation basic design`）である。下流境界観測部品の完全な実装前仕様を確定した。Python実装とテストは未着手である。observer正式名は`OrderControlBaselineDownstreamBoundaryObserver`、World属性名は`_order_control_baseline_downstream_boundary_observer`である。正式APIは`register_target_node_outlinks()`、`capture_before_transfer()`、`commit_after_transfer()`、`clear_pending()`、`export_result()`である。結果は重複を避けた3段frozen構造である。`OrderControlBaselineForkResult`へ必須フィールド`downstream_boundary_result`を追加する。空baselineは`None`であり、観測済みcount 0と区別する。対象Nodeは`target_node_names`順、各Nodeのoutlinkはネットワーク登録順である。同一outlinkの二重登録はbaseline開始前の`ValueError`である。transfer例外時はbaseline停止し、部分結果を返さない。`DELTAN=1`はFCFS、BATCH、TVTに共通するorder control設定時検査であり、処理名は`_validate_order_control_deltan`である。平均率はbaseline observerの責務外である。次は保存済み完全仕様に従うPython実装である。最新詳細は、本ファイルの「全World baseline下流境界観測部品の完全な実装前仕様」を参照する。
+
 # 具体的買い手候補集合生成部品の実装前仕様
 
 本節は、具体的買い手候補集合生成部品の実装前仕様の最新正本である。
@@ -6379,6 +6381,1377 @@ baselineで、Oを目的地とするVehicleが多数trip-endし、Oを途中通�
 
 ただし、inlink始端新規流入、局所mimic World全体、経済性評価にはまだ進まない。FIFO検査接続部品を再考しない。`preserves_inlink_fifo()`を変更しない。一般形順位再構成を変更しない。直ちに局所仮想計算を実装しない。
 
+**2026-09-19更新注記：** 上記「次の作業開始点」は、下流境界観測の基本設計確定時点の記録である。残る設計判断は完了した。Python実装時の最新正本は、直後の「全World baseline下流境界観測部品の完全な実装前仕様」である。
+
+## 全World baseline下流境界観測部品の完全な実装前仕様
+
+記録日：2026-09-19
+
+本節は、下流境界観測部品の**完全な実装前仕様**である。下流境界観測部品については、Python実装へ進むために必要な主要判断を完了した。
+
+本節は、TVT候補別局所仮想計算全体の完全な実装前仕様ではない。
+
+Python実装と専用テストはまだ未着手である。実装済み、テスト済みとは記載しない。
+
+保存済み基本設計コミットは`c2c98c0`（`Document the TVT downstream boundary observation basic design`）である。直前の「2026-09-19更新：下流境界観測の調査結果と基本設計の確定」は調査と基本設計確定の歴史的記録として残す。本節をPython実装時の最新正本とする。既存の基本設計記録は削除・短縮・置換しない。
+
+今回のMarkdown追記は記録時点では未コミットである。
+
+条件付き平均率、流出許可残高、制約付きsink、局所mimic World、inlink始端、経済評価は今回の実装対象外である。
+
+制度ロジックの観測方法（active、途中通過Vehicle、Vehicle参照方式、`cum_departure`非正本、共通`exec_simulation()` hook、専用observer、Vehicleごとの目的地判定、実在有向Linkのみ）は、直前の基本設計を維持する。本節で再考しない。
+
+### 非技術的な目的
+
+TVT対象交差点から出た道路の先が詰まっている場合、その道路は対象交差点から新しいVehicleを受け入れにくくなる。
+
+候補別局所仮想計算でこの影響をおおまかに再現するため、先に行う全World baseline計算で、対象交差点から出る各道路について、次を記録する。
+
+- 道路の終端で、さらに先へ進もうとするVehicleが待っていた時間
+- そのうち、実際に先へ進めたVehicle数
+
+この部品は、起きた事実を数えて保存することだけを担当する。
+
+平均値の計算、その平均値の局所仮想計算への適用、使わなかった流出枠の繰越し等は、この部品の仕事ではない。
+
+### 正式な実装範囲
+
+今回の下流境界観測部品の正式な実装範囲は次である。
+
+- TVT対象Nodeから出る実在outlinkの登録
+- outlink終端Nodeの`transfer()`直前に、途中通過Vehicleの待機状態を観測
+- `transfer()`正常終了後に、元のoutlinkを離れた途中通過Vehicle数を集計
+- `transfer()`失敗時に、そのtimestepの一時観測を破棄
+- 対象Node別、outlink別の累計を保持
+- 名前と非負整数だけからなる読取専用結果を作成
+- baseline driverへ結果を受け渡す
+- baseline未実行状態を観測済みゼロと区別
+- FCFS、BATCH、TVTに共通する`DELTAN=1`の設定時検査
+
+正式な実装範囲外:
+
+- 条件付き平均流出率の算出
+- 条件付き平均率の保存
+- 流出許可残高
+- 流出枠の繰越し
+- outlink流出容量と終端Node容量による局所境界処理
+- active=0時の制約付きsink
+- 目的地Vehicleの局所mimic World上の具体的trip-end処理
+- 局所mimic World全体
+- inlink始端新規流入
+- TVT候補の経済評価
+- 成立候補選択
+- 実Worldへの順位反映
+
+### DELTAN=1のorder control共通前提
+
+`DELTAN=1`はTVTだけでなく、FCFS、BATCH、TVTに共通するorder control全体の制度前提である。
+
+2026-09-19の基本設計は、TVT初期研究範囲として`DELTAN=1`を述べた。本節では、同じ制度上の理由をorder control全体へ確定する。FCFSとBATCHもVehicleオブジェクトごとに順序を制御するためである。基本設計本文は削除しない。
+
+理由:
+
+- UXsimでは一つのVehicleオブジェクトが`DELTAN`台を代表する
+- FCFS、BATCH、TVTはVehicleオブジェクトごとに順序を制御する
+- `DELTAN`が1より大きいと、一つのVehicleオブジェクトが複数台を代表し、個別車両順位という研究制度と一致しない
+- TVTではさらに、Vehicleごとの参加、VOT、買い手、売り手、支払い、補償を扱う
+- 一つのVehicleオブジェクトを実車一台に対応させる必要がある
+
+正式な共通検証処理名:
+
+```python
+_validate_order_control_deltan
+```
+
+既存の`_validate_order_control_batch_t_trigger_level()`等と同様、`uxsim/uxsim.py`の設定入口から呼ぶvalidatorとする。この処理は、少なくとも次を受け取る、または参照できる構造とする。
+
+- Worldの`DELTAN`
+- 必要なら`order_control_type`
+- 必要ならNode名
+
+具体的な引数形は、既存のvalidator形式と整合させて実装時に最小限の形を選ぶ。ただし、処理名と責務は確定事項である。
+
+呼出位置:
+
+1. Node作成時に、`order_control_type`として`"fcfs"`、`"batch"`、`"time_value"`のいずれかを直接指定する経路
+2. `World.set_order_control_for_nodes()`で、`"fcfs"`、`"batch"`、`"time_value"`のいずれかを設定する経路
+
+`order_control_type="none"`では検証しない。
+
+`World.set_order_control_for_randomly_selected_eligible_nodes()`は、最終的に`set_order_control_for_nodes()`へ合流する。ランダム選択処理内に重複検証を追加しない。
+
+検証時期:
+
+- order controlの設定時
+- NodeまたはNode群の設定を変更する前
+- シミュレーション実行前
+
+検証しない場所:
+
+- 各timestep
+- 各Vehicle
+- 各`Node.transfer()`
+- 各baseline計算
+- 各observer観測
+- 各局所仮想計算
+
+`DELTAN != 1`の場合:
+
+- `ValueError`
+- 設定変更前に停止
+- エラー文へ実際の`DELTAN`値を含める
+- FCFS、BATCH、TVTは個別Vehicleオブジェクトの順位を制御するため`DELTAN=1`が必要である旨を含める
+
+エラー文の確定趣旨:
+
+```text
+Intersection order control requires DELTAN=1 because FCFS, BATCH, and TVT control individual Vehicle objects; got DELTAN=<actual value>.
+```
+
+既存コードの文体に合わせて改行等を調整してよいが、意味を変更しない。
+
+`set_order_control_for_nodes()`では、いずれかの指定Nodeを変更する前に検証する。`DELTAN != 1`なら、複数Nodeの一部だけを先に変更しない。
+
+検査済みフラグは追加しない。
+
+設定関数がネットワーク準備時に複数回呼ばれれば、その設定時に再度検査される可能性はあるが、各timestepや各baselineで繰り返されるものではない。
+
+### 新規本番モジュール
+
+下流境界observer、結果型、登録・観測・export処理は、新しい専用モジュールへ置く。
+
+正式モジュール名:
+
+```text
+uxsim/order_control_baseline_downstream_boundary.py
+```
+
+このモジュールへ次を実装する。
+
+- outlink単位の読取専用結果型
+- 対象Node単位の読取専用結果型
+- 全体の読取専用結果型
+- observer
+- 必要な入力検証helper
+- 監視outlink登録
+- transfer前capture
+- transfer後commit
+- pending情報破棄
+- 読取専用結果export
+
+このモジュールは次を所有しない。
+
+- Worldの複製
+- baseline forwardの実行
+- Visit collector
+- snapshot固定Visit登録
+- TVT順位
+- 条件付き平均率
+- 局所仮想計算
+- 経済性評価
+
+循環参照:
+
+`uxsim.py`の`exec_simulation()`は、World属性上のobserverメソッドをduck typingで呼ぶ。`uxsim.py`は本モジュールを実行時importしない。本モジュールは実行時に`from uxsim.uxsim import World`しない。driverは本モジュールと`World`の両方をimportしてよい。型ヒントが必要なら`TYPE_CHECKING`を使う。過度な抽象化は避ける。
+
+### observerの正式名称と責務
+
+正式クラス名:
+
+```python
+OrderControlBaselineDownstreamBoundaryObserver
+```
+
+正式な責務:
+
+- 各対象Nodeから出る実在outlinkを監視対象として登録
+- 終端Node単位の索引を構築
+- transfer直前の途中通過Vehicle参照を一時保持
+- transfer正常終了後にactive timestepと実流出台数を確定
+- transfer失敗時に、そのtimestepの一時情報だけを破棄
+- 登録順を維持した読取専用結果をexport
+
+責務外:
+
+- 平均率計算
+- 局所仮想計算
+- sink処理
+- 流出許可残高
+- Vehicleの移動
+- Link容量変更
+- Node容量変更
+- route choice
+- order-control順位
+- Visit記録
+- World複製
+- baseline driverの制御
+
+### World上の正式属性
+
+正式属性名:
+
+```python
+_order_control_baseline_downstream_boundary_observer
+```
+
+`World.__init__`で次の初期値を設定する。
+
+```python
+W._order_control_baseline_downstream_boundary_observer = None
+```
+
+実Worldでは原則として`None`のままにする。
+
+`World.copy()`後のfork Worldでも、observer接続前は`None`であることを要求する。既存collectorのcopy直後検査と同じ契約である。
+
+baseline driverが、fork Worldのみにobserverを生成・接続する。
+
+実Worldにはobserverを接続しない。
+
+observer自身は通常のpickle可能なPythonオブジェクトとして実装する。
+
+次を持たない。
+
+- lambda
+- closure
+- generator
+- 開いたファイル
+- 外部リソース
+- pickle不可能な状態
+
+observerのexport結果へ、World、Node、Link、Vehicleオブジェクト参照を残さない。
+
+### observerの正式API
+
+次の正式メソッド名を使用する。
+
+```python
+register_target_node_outlinks()
+capture_before_transfer()
+commit_after_transfer()
+clear_pending()
+export_result()
+```
+
+#### `register_target_node_outlinks()`
+
+- fork World内の一つのTVT対象Nodeについて、そのNodeから出る実在outlinkを登録する
+- 対象Nodeの`node.outlinks`に実際に登録されているoutlinkだけを扱う
+- 存在しない逆方向Linkは補完しない
+- 各outlinkの`end_node`を終端Nodeとして記録する
+- 同じ終端Nodeを共有するoutlinkも別々の監視単位として登録する
+- 対象Nodeのoutlink登録順を維持する
+- 登録時に必要な整合性を一度だけ検証する
+- 同じoutlinkの二重登録を拒否する
+
+引数の最終形は、実装時に既存オブジェクト関係を踏まえて明示的で可読性の高い形とする。
+
+少なくとも、対象Node名、対象Nodeオブジェクト、またはそのoutlinkを安全に取得できる情報を受け取る。
+
+一般化のためだけに過度に抽象化しない。driverは`fixed_target_node_names`順に`fork_W.get_node(node_name)`し、各Nodeについて本メソッドを呼ぶ。
+
+登録時に検証する事項:
+
+- 対象Node名が空でない文字列
+- 対象Nodeがfork World内のNodeである
+- 各outlinkがその対象Nodeの実在`outlinks`に属する
+- 終端Nodeが`outlink.end_node`である
+- 同一fork World内outlinkオブジェクトの二重登録がない
+
+#### `capture_before_transfer()`
+
+- `World.exec_simulation()`の共通Node transferループから、`node.transfer()`直前に呼ぶ
+- 渡されたNodeが監視対象outlinkの終端Nodeでなければ、何もせず正常に返る
+- 監視対象終端Nodeなら、そのNodeの`incoming_vehicles`を確認する
+- 各監視対象outlinkについて、`vehicle.link is monitored_outlink`となるVehicle参照を一時保持する
+- 一台以上保持したoutlinkを、そのtimestepのactive候補とする
+- 同一outlinkに複数Vehicleが存在しても、activeは一つのtimestepとして一回だけ数える
+- この時点では正式累計へ加算しない
+- transferが正常終了した場合だけcommitする
+- pendingが残ったまま新しいcaptureが来た場合は、掃除漏れまたは呼出順不整合として`RuntimeError`
+
+目的地判定を各Vehicleへcapture時に再実行しない。`incoming_vehicles`に入っているVehicleを途中通過Vehicleとして扱う。`single_trip`では目的地到着Vehicleは`incoming_vehicles`に入らない。
+
+#### `commit_after_transfer()`
+
+- `node.transfer()`が例外なく正常終了した場合だけ呼ぶ
+- captureしたNodeとcommit対象Nodeが一致することを要求する。不一致は`RuntimeError`
+- pendingなしのcommitは呼出順不整合として`RuntimeError`
+- capture時に途中通過Vehicleが一台以上存在したoutlinkについて、`active_timestep_count`を1増やす
+- capture時に保持したVehicleについて、transfer後の`vehicle.link`を確認する
+- 次の両条件を満たすVehicleだけを、実際に元のoutlinkを離れた途中通過Vehicleとして数える
+
+```text
+vehicle.link is not None
+かつ
+vehicle.link is not monitored_outlink
+```
+
+`vehicle.link is None`なら、trip-endまたは走行終了であり、途中通過成功として数えない。
+
+`vehicle.link is monitored_outlink`のままなら、元のoutlinkに残っているため流出として数えない。
+
+次Linkオブジェクトへ変わっている場合だけ、流出Vehicle数を1増やす。
+
+同一Nodeの一回のtransferで、複数outlinkのVehicleが移動した場合は、それぞれ正しいoutlink結果へ加算する。
+
+正常commit後は、そのtimestepのpending情報を消去可能な状態にする。`finally`の`clear_pending()`が残差を捨てられる。
+
+#### `clear_pending()`
+
+- そのtimestepのcaptureで一時保持した情報だけを消す
+- 過去に正常commit済みの累計値は消さない
+- transfer正常終了後にも、例外終了後にも、`finally`から必ず呼び出せる構造とする
+- pendingがない場合の動作は、実装前仕様上は安全なno-opとする
+- baseline全体の累計初期化には使用しない
+
+#### `export_result()`
+
+- 現在までの確定済み累計を、3段構造のfrozen resultへ変換する
+- 対象Node順とoutlink順を維持する
+- 内部の可変辞書やVehicle参照を返さない
+- World、Node、Link、Vehicleオブジェクトを返さない
+- 名前と非負整数だけをresultへ保存する
+- 平均流出率を計算しない
+- pendingが残っている状態でexportしようとした場合は、未確定timestepを正常結果へ混ぜないため`RuntimeError`とする
+- export後の結果は、observer内部が後から変化しても変更されない
+
+### 二重登録
+
+正常な構造では、一つの実在outlinkは一つの開始Nodeに属するため、同じoutlinkの二重登録は発生しない前提である。
+
+それでも二重登録が発生した場合は、将来の実装ミスまたは登録処理の不整合である。
+
+確定仕様:
+
+- 同じfork World内outlinkオブジェクトの二重登録を禁止
+- 上書きしない
+- 無視しない
+- 二重集計しない
+- baseline forward開始前に`ValueError`
+- エラー文へ対象Node名とoutlink名を含める
+- 各timestepでは重複検査しない
+
+原因修正後は、実Worldシミュレーションを最初から手動でやり直す。
+
+自動修復、自動再実行、baselineだけの自動再試行は実装しない。
+
+二重登録失敗時、その登録呼出しより前に成功した別outlink登録を自動で巻き戻す必要はない。ただし、その失敗によりbaseline forwardは開始せず、`OrderControlBaselineForkResult`は返さない。既存の正常登録を壊して別の監視単位へ付け替えない。
+
+### 結果型の正式構造
+
+結果は、重複情報を避けた3段構造とする。
+
+すべて`@dataclass(frozen=True)`とする。
+
+#### outlink 1本分
+
+正式名称:
+
+```python
+OrderControlBaselineDownstreamBoundaryOutlinkResult
+```
+
+正式フィールド:
+
+```python
+outlink_name: str
+terminal_node_name: str
+active_timestep_count: int
+transferred_vehicle_count: int
+```
+
+保存しないもの:
+
+- 対象Node名
+- configured horizon
+- 平均流出率
+- Nodeオブジェクト
+- Linkオブジェクト
+- Vehicleオブジェクト
+- pending情報
+
+対象Node名は親のNode結果に存在するため、outlink結果へ重複保存しない。
+
+`outlink_name`と`terminal_node_name`は空でない文字列とする。
+
+`active_timestep_count`と`transferred_vehicle_count`は、boolではない非負整数とする。
+
+#### 対象Node 1つ分
+
+正式名称:
+
+```python
+OrderControlBaselineDownstreamBoundaryNodeResult
+```
+
+正式フィールド:
+
+```python
+node_name: str
+outlink_results: tuple[
+    OrderControlBaselineDownstreamBoundaryOutlinkResult,
+    ...
+]
+```
+
+`node_name`は空でない文字列とする。
+
+`outlink_results`は、そのNodeの実在outlinkをネットワーク登録順で保存する。
+
+outlinkが0本の対象Nodeは正式研究条件では想定しないが、今回のobserverは存在しないoutlinkを補完しない。
+
+対象Nodeの妥当性は、既存のtarget Node準備とeligibility契約を前提とする。端点が誤ってorder control対象になる特殊構造を防ぐ新しい実行時検査は追加しない。
+
+#### baseline全体分
+
+正式名称:
+
+```python
+OrderControlBaselineDownstreamBoundaryResult
+```
+
+正式フィールド:
+
+```python
+node_results: tuple[
+    OrderControlBaselineDownstreamBoundaryNodeResult,
+    ...
+]
+```
+
+`node_results`は`target_node_names`順とする。
+
+configured horizonは既存`OrderControlBaselineForkResult.configured_horizon_steps`にあるため、下流境界結果へ重複保存しない。
+
+全体結果へ平均率や観測statusを追加しない。未観測は`OrderControlBaselineForkResult.downstream_boundary_result is None`で表す。
+
+### 同じ終端Nodeを共有するoutlink
+
+次のようなネットワークを正式に扱う。
+
+```text
+対象Node A
+  A → B
+
+対象Node D
+  D → B
+```
+
+または、
+
+```text
+対象Node A
+  A → B
+  A → C
+
+対象Node D
+  D → B
+```
+
+終端Node Bが共通でも、
+
+- `A → B`
+- `D → B`
+
+は別の監視対象outlinkである。
+
+結果は終端Node名だけで統合しない。
+
+一回のBの`Node.transfer()`直前に、Bの`incoming_vehicles`から、
+
+- `vehicle.link is A_to_B`
+- `vehicle.link is D_to_B`
+
+を別々に識別する。
+
+一回のBの`Node.transfer()`後に、それぞれのcapture済みVehicleが元のoutlinkを離れたかを別々に判定する。
+
+Node結果は、それぞれのorigin対象Nodeの下へ保存する。
+
+内部索引は終端Nodeから監視outlink一覧を引けるようにする。export順の正本は、対象Node登録順と各Nodeのoutlink登録順である。索引用辞書の走査順を結果順にしない。
+
+### 結果順序
+
+正式な結果順序:
+
+1. 対象Nodeは、`fixed_target_node_names`または`target_node_names`の入力順
+2. 各対象Nodeのoutlinkは、`node.outlinks`のネットワーク登録順
+
+Link名による追加sortは行わない。
+
+既存snapshot物理順がinlink登録順を利用している方針とも整合させる。
+
+結果順序をsetや辞書の偶然の走査順へ依存させず、登録時に明示的なlistまたはtupleとして固定する。
+
+内部索引として辞書を使う場合も、export順の正本は登録時の明示的な順序構造とする。
+
+### baseline結果への接続
+
+`OrderControlBaselineForkResult`へ、次の必須フィールドを追加する。
+
+正式フィールド名:
+
+```python
+downstream_boundary_result: (
+    OrderControlBaselineDownstreamBoundaryResult | None
+)
+```
+
+意味:
+
+```text
+None
+→ baseline forwardを実行しておらず、下流境界を観測していない
+```
+
+```text
+OrderControlBaselineDownstreamBoundaryResult
+→ baseline forwardを実行し、設定horizonについて下流境界を観測した
+```
+
+フィールドにデフォルト値を設けない。
+
+必須引数とする。
+
+理由:
+
+- 設定漏れと意図的な未観測を区別する
+- 既存テストhelperも状態を明示する
+- 空tupleの暗黙デフォルトで未観測を観測済みゼロに見せない
+
+既存の`collector`フィールドの意味を変えない。
+
+`OrderControlBaselineForkResult`自体は現行どおりnon-frozen dataclassのままとする。
+
+下流境界結果の内部だけをfrozen構造にする。
+
+`fork_W`は返さない。observer本体も`ForkResult`へ載せない。
+
+### 空baseline結果
+
+現在のbaseline driverでは、実時点Tのsnapshotで、指定されたTVT対象Nodeについてsnapshot固定Visitの登録総数が0の場合、
+
+```text
+registered_visit_count == 0
+```
+
+となり、baseline forwardを実行しない。
+
+これは次の意味ではない。
+
+- World全体にVehicleがいない
+- baselineを実行した結果、意思決定窓内Vehicleが0だった
+- 下流境界を観測したところ途中通過Vehicleが0だった
+
+snapshot固定Visit登録後、baseline実行前に登録総数が0と判明したため、forward自体を省略した状態である。
+
+この場合:
+
+```python
+downstream_boundary_result = None
+```
+
+とする。
+
+observerを生成・接続しない。
+
+下流境界のactive countやtransfer countを0として作らない。
+
+理由:
+
+- 0は観測済みを意味する
+- この経路ではhorizon観測を実行していない
+- TVT候補も形成されない
+- 候補別局所仮想計算にも進まない
+
+局所仮想計算が`downstream_boundary_result is None`の通常空経路へ進むことはない。
+
+その不変条件の具体的な後続検査は、局所仮想計算接続仕様で必要に応じて定める。今回は実装しない。
+
+### baseline実行済みでcountが0の場合
+
+baseline forwardを実際に設定horizon全体について実行した場合は、全監視対象outlinkについて結果を返す。
+
+途中通過Vehicleが一度も終端Nodeの`incoming_vehicles`に現れなかったoutlinkは、
+
+```text
+active_timestep_count = 0
+transferred_vehicle_count = 0
+```
+
+となる。
+
+この状態は観測済みである。
+
+考えられる状況には少なくとも次がある。
+
+- そのoutlink上にVehicleが一台も存在しなかった
+- Vehicleは存在したが、horizon中にoutlink終端まで到達しなかった
+- 終端へ到着したVehicleがすべて目的地到着Vehicleであり、途中通過Vehicleがいなかった
+- 途中通過Vehicleによる下流通過要求がhorizon中に生じなかった
+
+このobserverは理由を分類しない。
+
+観測したcountだけを返す。
+
+後段の局所仮想計算では、有力な既存基本設計として次を使う予定である。
+
+- 終端NodeがVehicleの目的地なら通常のtrip-end
+- 終端Nodeが目的地でないVehicleには、outlink流出容量と終端Node容量による制約付き境界流出
+- 下流Link流入容量は使わない
+
+ただし、この局所処理のPython実装は今回の対象外である。
+
+### activeとtransferの組合せ
+
+正常な観測済み結果では、少なくとも次を区別する。
+
+#### active 0、transfer 0
+
+```text
+active_timestep_count == 0
+transferred_vehicle_count == 0
+```
+
+途中通過Vehicleの終端待ちをhorizon内に観測しなかった。
+
+観測未実行ではない。
+
+観測未実行は`downstream_boundary_result is None`で表す。
+
+#### active 1以上、transfer 0
+
+```text
+active_timestep_count >= 1
+transferred_vehicle_count == 0
+```
+
+途中通過Vehicleが待っていたが、horizon内に一台も次Linkへ進めなかった。
+
+後段ではhorizon内閉塞の材料になる。
+
+observerは閉塞statusや平均率を保存しない。
+
+#### active 1以上、transfer 1以上
+
+```text
+active_timestep_count >= 1
+transferred_vehicle_count >= 1
+```
+
+途中通過Vehicleの待機と実流出があった。
+
+後段で条件付き平均流出率を計算する材料になる。
+
+#### active 0、transfer 1以上
+
+通常の観測契約では起こらない重大不整合である。
+
+途中通過Vehicleがtransferしたなら、その直前には当該outlink由来で`incoming_vehicles`に存在し、activeとなるはずである。
+
+observerの公開結果作成時またはcommit時に、この状態をわざわざ重複検査するかは、明示的な追加検査を増やさない方針に従う。
+
+実装上の処理順から自然に発生しないように構築し、専用テストで保証する。
+
+処理順:
+
+1. capture時に1台以上保持したoutlinkだけをactive候補とする
+2. commit時に、そのactive候補だけ`active_timestep_count`を1増やす
+3. transferred countは、同じcapture保持Vehicleのうち、`link is not None`かつ`link is not monitored_outlink`の台数だけ増やす
+
+保持Vehicleがいないoutlinkのtransfer countは増やさない。
+
+### 平均率の計算責任
+
+baseline observerとbaseline結果には、次だけを保存する。
+
+- `active_timestep_count`
+- `transferred_vehicle_count`
+
+条件付き平均流出率を保存しない。
+
+平均率候補:
+
+```text
+transferred_vehicle_count
+/
+active_timestep_count
+```
+
+この計算は、候補別局所仮想計算側で必要になった時点で行う。
+
+observerは次を行わない。
+
+- active=0時の除算
+- active>0かつtransfer=0時の閉塞判定
+- service rate保存
+- 流出許可残高
+- sink fallback
+- 容量制約適用
+
+理由:
+
+- observerは観測事実を保存する部品である
+- 条件付き平均境界方式は局所仮想計算の近似方式である
+- 観測部品と近似適用部品の責務を混在させない
+- 将来、局所側の境界方式を変更してもbaseline観測結果を再利用できる
+
+### `World.exec_simulation()`への接続
+
+`World.exec_simulation()`内の次の既存共通ループへ、observer hookを追加する。
+
+既存概念:
+
+```python
+for node in W.NODES:
+    node.transfer()
+```
+
+実装後の概念:
+
+```text
+for each node:
+
+    observerをWorld属性から取得
+
+    observerが存在する場合:
+        node.transfer()直前のcaptureを呼ぶ
+
+    try:
+        node.transfer()
+
+        observerが存在する場合:
+            正常終了後のcommitを呼ぶ
+
+    finally:
+        observerが存在する場合:
+            そのtimestepのpendingを破棄する
+```
+
+observer取得や条件分岐は、可読性を優先して明示的に書く。
+
+高度なcontext managerやdecoratorへ抽象化しない。
+
+observerが`None`の場合:
+
+- captureしない
+- commitしない
+- clearしない
+- `incoming_vehicles`を走査しない
+- RNGを消費しない
+- Vehicle、Node、Link、capacityを変更しない
+- 通常UXsimの結果を変えない
+
+Nodeのtransfer順序を変更しない。
+
+標準、FCFS、BATCHの`Node.transfer()`内部へ境界observer通知を追加しない。
+
+`W.rng`と`W.order_control_rng`を観測処理から呼ばない。
+
+User設定の`Node.user_function`および`World.user_function`を上書きしない。
+
+### transfer例外時の扱い
+
+`node.transfer()`が例外を出した場合:
+
+- `commit_after_transfer()`を呼ばない
+- `finally`で`clear_pending()`を呼ぶ
+- 失敗したtimestepのactiveやtransferを正式累計へ加えない
+- 例外を捕捉して正常化しない
+- 元の例外を上位へ伝える
+- baseline計算を停止する
+- `OrderControlBaselineForkResult`を返さない
+- 候補別局所仮想計算へ進まない
+
+過去の正常timestepでobserver内部に累計済みの値は、例外発生時に全消去しなくてよい。
+
+ただし、baseline driverが結果を返さないため、部分累計を正常結果として外部へ返さない。
+
+例外原因を修正した後は、実Worldシミュレーションを最初から手動でやり直す。
+
+次は実装しない。
+
+- 自動修復
+- 自動再実行
+- baseline計算だけの自動再試行
+- 途中時点からの再開
+- 部分結果利用
+
+BATCHの`transfer_batch()`は、例外時に`incoming_vehicles`を変えず例外を伝播する。observerはそれを解釈せず、commitせずpendingを捨てる。
+
+### driverでのobserver準備
+
+通常baseline経路`run_snapshot_fixed_baseline_fork()`と、TVT順位台帳登録付き経路`run_snapshot_fixed_baseline_fork_with_tvt_rank_ledger_registration()`は、どちらも`_complete_baseline_fork_after_registration()`へ合流する。
+
+監視対象登録とobserver接続は、この共通経路で行う。
+
+処理順:
+
+1. snapshot固定Visit登録
+2. registered Visit countの整合確認
+3. `registered_visit_count == 0`なら空結果を返す
+   - observerを生成しない
+   - `downstream_boundary_result=None`
+4. 非空経路なら残りhorizonの検証
+5. observer生成
+6. `fixed_target_node_names`順に対象Nodeを取得
+7. 各対象Nodeの`node.outlinks`を登録順でobserverへ登録
+8. fork Worldの正式observer属性へ接続
+9. `fork_W.exec_simulation(...)`
+10. baseline forward完了検証
+11. Visit count再整合
+12. real_W不変検査
+13. observerからfrozen resultをexport
+14. completed baseline resultへ格納
+
+observer準備時点は、snapshot登録完了後、登録件数整合確認後、baseline forward開始前とする。
+
+二重登録`ValueError`はforward開始前に起きる。その場合も`ForkResult`を返さない。
+
+export時にpendingが残っていれば`RuntimeError`とし、部分結果を返さない。
+
+### real_W不変
+
+既存driverは、少なくとも次についてreal_W不変を確認する。
+
+- `real_W.T`
+- `real_W.TIME`
+- `real_W._order_control_baseline_collector`
+
+新observer属性についても、real_Wでは実行前後とも`None`のままであることを確認する契約を追加する。
+
+`_BaselineForkPrepared`へ、必要ならreal Worldのobserver参照を保存する。既存collectorの`real_world_collector_before`と同じ形でよい。
+
+正式研究経路では開始前に`None`を要求する。real_Wにobserverが付いている場合は、既存collector契約と同様に入力エラーとする。
+
+fork側だけにobserverを接続する。
+
+copy直後のfork observerが`None`であることも、既存collectorのcopy検査と同様に確認する。
+
+ただし、同じ不変条件を各timestepで重複検査しない。
+
+### 既存ForkResult生成箇所の更新
+
+`OrderControlBaselineForkResult`へ必須フィールドを追加するため、既存の直接生成箇所をすべて更新する。
+
+本番コード:
+
+- `uxsim/order_control_baseline_driver.py`
+  - `_build_empty_baseline_result()` → `downstream_boundary_result=None`
+  - `_build_completed_baseline_result()` → observerの`export_result()`
+
+既存テストhelper:
+
+- `tests_order_control_tvt_arrived_undetermined_confirmation.py`
+- `tests_order_control_tvt_candidate_visit_set.py`
+- `tests_order_control_tvt_inlink_candidate_physical_order.py`
+- `tests_order_control_tvt_leading_nonparticipating_confirmation.py`
+- `tests_order_control_tvt_right_of_entry_selection.py`
+
+検索により、実装時点の全`OrderControlBaselineForkResult(`を再確認する。
+
+テストhelperでは、当該テストが下流境界を使用しない場合でも、新必須フィールドを明示する。
+
+既存helperの意味に応じて、
+
+- 非空baselineを模擬するなら、最小の読取専用結果
+- 空baselineを模擬するなら`None`
+
+を指定する。
+
+無関係なテストを通すためだけにフィールドへ安易なデフォルト値を追加しない。
+
+### 目的地到着Vehicleと途中通過Vehicle
+
+既存基本設計を維持する。
+
+目的地到着Vehicle:
+
+```text
+monitored_outlink.end_node is vehicle.dest
+```
+
+- `single_trip`では`incoming_vehicles`に入らない
+- active対象外
+- transferred count対象外
+- 平均率対象外
+- 通常のtrip-end
+
+途中通過Vehicle:
+
+```text
+monitored_outlink.end_node is not vehicle.dest
+```
+
+- `incoming_vehicles`に入る
+- active対象
+- transferred count対象
+- 後段の平均率対象
+
+captureは、目的地判定を改めて各Vehicleへ重複実行するのではなく、`incoming_vehicles`に入っている途中通過Vehicleを対象とする。
+
+ただし、commitでは`vehicle.link is not None`を要求し、走行終了を途中通過成功として誤計上しない。
+
+`taxi`固有処理を初期実装の一般規則として採用しない。
+
+### 単車線物理順
+
+現在の正式研究範囲は単車線である。複車線への完全対応は初期実装範囲外である。
+
+前方が途中通過Vehicle、後方が目的地到着Vehicleの場合:
+
+- 後方Vehicleは前方を追い越してtrip-endしない
+- 前方Vehicleが元のoutlinkを離れた後、後方Vehicleが物理先頭になってtrip-endする
+- 目的地Vehicleを平均境界の対象外としても、追越しを意味しない
+
+observerは物理順を変更しない。
+
+observerがVehicleの`end_trip()`を直接呼ばない。
+
+### 内部状態
+
+登録後に固定し、各timestepで再検証しないもの:
+
+- 対象Node名の明示的な順序tuple
+- 各対象Nodeのoutlink名の明示的な順序tuple
+- `(origin_node_name, outlink_name)`から累計スロットへの索引
+- 終端Nodeから、そのNodeを終端とする監視outlink一覧への索引
+- 監視outlinkオブジェクト参照（capture時の`is`判定用。export結果には残さない）
+
+実行中だけ持つもの:
+
+- 現在のpending。終端Node1つ分
+- pending対象Node
+- outlinkごとの保持Vehicleリスト
+- そのtimestepのactive候補
+
+確定累計:
+
+- 各監視outlinkの`active_timestep_count`
+- 各監視outlinkの`transferred_vehicle_count`
+- 初期値はPythonの`int`の`0`
+- 加算は`+= 1`
+
+pendingと確定累計を別属性として持つ。混在させない。
+
+### 実行時検査の方針
+
+登録時に保証済みの不変条件を、各timestepで重複検証しない。
+
+登録時に検証する事項:
+
+- non-empty name
+- 対象Node
+- 実在outlink
+- outlinkと開始Nodeの関係
+- 終端Node
+- 同一outlink二重登録
+- 登録順
+- `DELTAN=1`はorder-control設定入口
+
+実行時に確認する事項:
+
+- pending中の二重capture
+- captureとcommitのNode不一致
+- pendingなしcommit
+- pendingありexport
+- transfer後の`vehicle.link`
+- 例外時のpending破棄
+
+原因不明の停止や誤計上を防ぐ重大不整合だけを必要最小限に検査する。
+
+### 実装時の可読性方針
+
+研究用コードでは正しく動くことを最優先とする。
+
+その上で、時間価値取引の根幹部分では、短さや高度なPython技法より、初学者が後から理解しやすい明示的な実装を優先する。
+
+具体的には次を守る。
+
+- 過度な内包表記を避ける
+- 複雑なone-linerを避ける
+- 状態遷移を明示する
+- pendingと確定累計を別の属性として持つ
+- 登録順の正本を明示的なlistまたはtupleで保持する
+- 索引用辞書と結果順の正本を混同しない
+- capture、commit、clearの責務を分ける
+- 例外時の処理を明示的に書く
+- World hookを過度に抽象化しない
+- 変数名でNode、outlink、terminal Node、Vehicleを区別する
+- 実装済みの確定仕様を、巧妙な一般化で置き換えない
+
+### 専用テストファイル
+
+新規専用テストファイルの正式名称:
+
+```text
+tests_order_control_baseline_downstream_boundary.py
+```
+
+既存プロジェクトのテスト実行方式に合わせる。
+
+既存テストがファイル末尾の`TESTS`一覧と直接実行を使う場合は、その流儀へ合わせる。
+
+pytest専用の仕組みを突然導入しない。
+
+DELTAN validatorの設定入口テストは、実装単位2の対象である。専用observerテストへ無理に混在させず、既存のNode order-control設定テストへ追加するか、専用ファイル内の独立節として明示する。実装時に既存テスト配置を再確認する。
+
+### observer単体テスト契約
+
+少なくとも次を含める。
+
+#### 結果型
+
+- 3つの結果型がfrozen
+- outlink結果のフィールドが確定仕様どおり
+- Node結果がoutlink tupleを保持
+- 全体結果がNode tupleを保持
+- 結果にNode、Link、Vehicle、World参照を含めない
+- 結果作成後にobserver内部が変化しても、既存結果が変化しない
+
+#### 登録
+
+- 単一対象Node、単一outlink
+- 一つの対象Nodeに複数outlink
+- 複数対象Node
+- 同じ終端Nodeを共有する複数outlink
+- target Node順を維持
+- outlink登録順を維持
+- 存在しない逆方向Linkを補完しない
+- 同一outlink二重登録で`ValueError`
+- エラー文にNode名とoutlink名
+- 二重登録失敗で既存正常登録を壊さない
+
+#### capture
+
+- 対象外Nodeでは何も起きない
+- 監視対象終端Nodeで、対象outlink由来のincoming Vehicleを保持
+- 同一終端Nodeの別outlinkを区別
+- 同一outlinkに複数Vehicleがいてもactive候補は一回
+- pending中の二重captureで`RuntimeError`
+- captureだけでは正式累計を増やさない
+
+#### commit
+
+- 元のoutlinkのままならtransfer countを増やさない
+- 次Linkへ変わったら1増やす
+- 複数Vehicleが移動したらその数だけ増やす
+- `vehicle.link is None`なら増やさない
+- capture時にVehicleがいたoutlinkだけactiveを1増やす
+- captureと異なるNodeのcommitを拒否
+- pendingなしcommitを拒否
+- 同じ終端Nodeを共有するoutlinkを別々に集計
+- commit後に正しい結果をexport可能
+
+#### clear_pending
+
+- capture後にpendingだけを破棄
+- 過去の確定累計を消さない
+- pendingなしでは安全なno-op
+- clear後に次のcaptureが可能
+
+#### export
+
+- 登録順で3段結果を返す
+- pendingが残る状態で`RuntimeError`
+- countが非負整数
+- 平均率を含まない
+- observer本体を返さない
+
+### UXsim hookテスト契約
+
+少なくとも次を含める。
+
+- observer属性の初期値が`None`
+- observerが`None`なら既存の`node.transfer()`呼出順が変わらない
+- observerが`None`なら`incoming_vehicles`の追加走査を行わない
+- observerが`None`なら乱数状態を変えない
+- observerがある場合にcapture、transfer、commit、clearの順
+- transfer正常終了後にcommit
+- transfer例外時にcommitしない
+- transfer例外時にもclear
+- 元の例外をそのまま伝える
+- 標準Node
+- FCFS Node
+- BATCH Node
+- 各個別transfer実装へobserver通知を追加していない
+- Nodeの順序を変えない
+- route choice、capacity、Vehicle順序を変えない
+- user_functionを上書きしない
+
+### driver統合テスト契約
+
+少なくとも次を含める。
+
+#### 非空baseline
+
+- observerをforkだけへ接続
+- real_W observerは`None`
+- copy直後のfork observerは`None`
+- baseline forward直前に登録
+- configured horizon全体を観測
+- `downstream_boundary_result`がNoneではない
+- target Node順
+- outlink登録順
+- active 0、transfer 0の観測済み結果
+- active 1以上、transfer 0
+- active 1以上、transfer 1以上
+
+#### 空baseline
+
+- `registered_visit_count == 0`
+- `fork_steps_executed == 0`
+- `exec_simulation()`を呼ばない
+- observerを生成・接続しない
+- `downstream_boundary_result is None`
+- 0 countの観測済み結果を作らない
+
+#### 通常経路とTVT順位台帳付き経路
+
+- 両方が同じobserver準備経路へ合流
+- 同じWorld状態とtarget Node集合なら、同じ下流境界結果
+- 既存Visit collector結果を壊さない
+
+#### 失敗
+
+- observer登録失敗ならbaseline forwardを開始しない
+- transfer例外ならForkResultを返さない
+- pendingを破棄
+- 部分結果を外部へ返さない
+- real_W不変
+- 自動再実行しない
+
+#### ForkResult
+
+- 新必須フィールドが存在
+- 完了結果ではfrozen result
+- 空結果ではNone
+- `fork_W`を保持しない
+- observer本体を保持しない
+
+### DELTAN検証テスト契約
+
+少なくとも次を含める。
+
+#### Node作成時
+
+- `DELTAN=1`かつ`order_control_type="fcfs"`で成功
+- `DELTAN=1`かつ`"batch"`で成功
+- `DELTAN=1`かつ`"time_value"`で成功
+- `DELTAN!=1`かつ各方式で`ValueError`
+- `order_control_type="none"`ではDELTANが1以外でもこのvalidatorを理由に拒否しない
+- エラー前にNodeのorder-control設定を部分変更しない
+- エラー文に実際のDELTAN
+- エラー文にFCFS、BATCH、TVT
+- エラー文にindividual Vehicle objectsを制御する趣旨
+
+#### `set_order_control_for_nodes()`
+
+- `DELTAN=1`で各方式成功
+- `DELTAN!=1`で各方式`ValueError`
+- 複数Nodeの一部だけを先に変更しない
+- `none`への解除ではこのvalidatorを理由に拒否しない
+- ランダム選択経路はsetterへの合流で検査され、別の重複validatorを持たない
+
+#### 頻度
+
+- baseline driverでDELTAN再検証しない
+- observerでDELTAN再検証しない
+- timestepでDELTAN再検証しない
+- VehicleごとにDELTAN再検証しない
+
+### 既存回帰テスト
+
+実装後、少なくとも次を実行する契約とする。実装時にファイル名と実行方法を実リポジトリから再確認する。
+
+- 新規専用テスト
+- `tests_order_control_baseline_driver.py`
+- `tests_order_control_baseline_collector.py`
+- `tests_order_control_baseline_collector_uxsim.py`
+- `tests_order_control_baseline_snapshot.py`
+- `tests_order_control_tvt_arrived_undetermined_confirmation.py`
+- `tests_order_control_tvt_candidate_visit_set.py`
+- `tests_order_control_tvt_inlink_candidate_physical_order.py`
+- `tests_order_control_tvt_leading_nonparticipating_confirmation.py`
+- `tests_order_control_tvt_right_of_entry_selection.py`
+- Node order-control属性・設定関連テスト
+- FCFS transfer関連テスト
+- BATCH transfer関連テスト
+- BATCH Level 2関連テスト
+
+全テストを盲目的に一括実行するだけでなく、新規単体、接続、driver、関連回帰の順に確認する。
+
+### 実装順序
+
+#### 実装単位1
+
+新規モジュールとobserver単体テスト。
+
+対象:
+
+- 3つのfrozen結果型
+- observer
+- 登録
+- capture
+- commit
+- clear
+- export
+- 二重登録
+- pending
+- `vehicle.link is None`非加算
+
+この時点では`uxsim.py`へhookしない。
+
+`World.exec_simulation()`、baseline driver、`ForkResult`、DELTAN validator、既存テストhelperはまだ変更しない。
+
+#### 実装単位2
+
+order control共通`DELTAN=1` validatorと設定入口テスト。
+
+対象:
+
+- `_validate_order_control_deltan`
+- Node作成時
+- `set_order_control_for_nodes()`
+- ランダム経路の非重複
+- FCFS、BATCH、TVT
+- none非対象
+
+observer本体と混同せず、order control全体の不変条件として実装する。
+
+#### 実装単位3
+
+World属性と`exec_simulation()`共通hook。
+
+対象:
+
+- World属性None
+- capture
+- `node.transfer()`
+- commit
+- finally clear
+- observerなし回帰
+- 例外伝播
+- RNG非侵襲性
+
+標準、FCFS、BATCH内部へ通知を追加しない。
+
+#### 実装単位4
+
+baseline driver、ForkResult、既存helper更新、統合テスト。
+
+対象:
+
+- observer準備
+- target Node/outlink登録
+- empty result None
+- completed result
+- mandatory ForkResult field
+- real_W不変
+- 通常baseline経路
+- 順位台帳付き経路
+- 既存ForkResult helper更新
+- 統合テスト
+
+#### 実装後
+
+- 詳細正本へ実装完了記録
+- `ORDER_EXCHANGE_PROGRESS.md`へ概略
+- 実装済み範囲
+- テスト結果
+- 未実装境界
+- 次の作業開始点
+
+### コミット境界
+
+実装途中のコミット境界は、実際の変更状態とテスト結果を見てCopilotと利用者が判断する。
+
+概念上の候補:
+
+1. observer本体と専用単体テスト
+2. DELTAN共通validatorと設定入口テスト
+3. World hookと接続テスト
+4. baseline driver、ForkResult、統合テスト
+5. 実装完了の文書記録
+
+ただし、無理に5コミットへ固定しない。
+
+一つの実装単位が次の単位なしでは正常に動かず、独立した安全な保存点にならない場合は、関連単位をまとめてよい。
+
+Git操作は利用者がTerminalで行う。
+
+Cursorは確認・報告だけを行い、Git変更操作をしない。
+
+メモを含むコミット名には`document`を含める。
+
+### 今回の未実装範囲
+
+今回のMarkdown記録時点では、次は未実装である。Python実装済み、テスト済みとは記載しない。
+
+- `uxsim/order_control_baseline_downstream_boundary.py`
+- 3つの結果型
+- observer
+- observer World属性
+- `exec_simulation` hook
+- `_validate_order_control_deltan`
+- order-control設定入口へのvalidator接続
+- baseline driver observer準備
+- ForkResult新フィールド
+- empty result None
+- completed result export
+- 専用テスト
+- 既存helper更新
+
+次も引き続き未実装であり、本部品の後段である。
+
+- 条件付き平均流出率の算出
+- 流出許可残高
+- 制約付きsink
+- 局所mimic World
+- inlink始端新規流入
+- TVT候補別局所仮想計算全体
+- 経済性評価
+- 成立候補選択
+- 実WorldへのTVT反映
+
+### 次の作業開始点
+
+保存済み完全実装前仕様に従い、まず次を実装する。
+
+- 新規本番モジュール: `uxsim/order_control_baseline_downstream_boundary.py`
+- 新規専用テスト: `tests_order_control_baseline_downstream_boundary.py`
+
+最初の実装単位:
+
+- 3つのfrozen結果型
+- `OrderControlBaselineDownstreamBoundaryObserver`
+- outlink登録
+- capture
+- commit
+- clear
+- export
+- 二重登録
+- pending管理
+- `vehicle.link is None`非加算
+- 専用単体テスト
+
+この最初の実装単位では、まだ次を変更しない。
+
+- `World.exec_simulation()`
+- baseline driver
+- ForkResult
+- DELTAN validator
+- 既存テストhelper
+- 局所仮想計算
+- 経済性評価
+
+実装開始前に、新規モジュールが`uxsim.py`をimportすると循環参照を起こす可能性を確認する。
+
+必要ならduck typingまたは`TYPE_CHECKING`を使用するが、過度な抽象化は避ける。
+
+基本設計の観測方法は再考しない。条件付き平均率、流出許可残高、局所mimic World、inlink始端、経済評価へ進まない。FIFO検査接続部品を再考しない。
+
 # 次の作業開始点
 
 次の直接作業は、具体的買い手候補集合生成部品の実装前仕様を、既存の公開型と接続できる形で確定することである。
@@ -6413,6 +7786,8 @@ baselineで、Oを目的地とするVehicleが多数trip-endし、Oを途中通�
 **2026-09-18更新（最新の再開情報）：** FIFO検査接続部品は実装・検証・push済みである（保存済み実装コミット`33e6101`）。候補別局所仮想計算は未実装である。今回は完全な実装前仕様を確定せず、設計検討記録を追加した。通過試行順の基本方針は採用した。outlink終端の条件付き平均境界サービス方式は有力案である。inlink始端の新規流入、baseline境界観測の保存場所と観測位置、公開API、結果型等は未確定である。次の直接作業は、全World baseline実行中に各対象Nodeの各outlinkについて、終端Nodeのtransfer処理直前のactive状態と当該outlinkから終端Nodeを実際に通過した台数を、どこで・どの処理順で・どの単位で観測できるかを調査することである。この調査が終わるまでは完全な実装前仕様を作らない。直ちに局所仮想計算を実装しない。経済性評価、成立候補選択には進まない。最新詳細は、本ファイルの「TVT-MP候補別局所仮想計算の設計検討記録」を参照する。
 
 **2026-09-19更新（最新の再開情報）：** FIFO検査接続部品は実装・検証・push済みである（保存済み実装コミット`33e6101`）。保存済み最新の局所仮想計算設計検討コミットは`5dd4be9`である。候補別局所仮想計算は未実装である。下流境界観測の基本設計を確定した。`DELTAN=1`をTVT初期研究範囲の制度上の前提とする。activeは終端`Node.transfer()`直前の途中通過Vehicle待機で判定する。実流出台数は、transfer前に保持した途中通過Vehicleがtransfer後に元のoutlinkを離れた数とする。目的地到着Vehicleは集計対象外である。Node固定分類ではなくVehicleごとの目的地判定を使う。下流境界専用observerと独立した読取専用結果を使う方向である。公開API、結果型、例外契約、局所適用処理は未確定である。Python実装と専用テストは未着手である。次の直接作業は、今回の境界観測基本設計を前提に、下流境界観測部品の完全な実装前仕様に必要な残る設計判断を整理することである。判断対象は、observerの正式名称と責務、World属性名、登録API、transfer前後観測API、outlink別・対象Node別・全体結果型、`OrderControlBaselineForkResult`への追加フィールド、結果順序、active=0およびactive>0かつtransfer=0の表現、条件付き平均率の計算位置、`DELTAN=1`の検証位置、空baseline経路、失敗時の部分状態、専用テスト契約である。inlink始端新規流入、局所mimic World全体、経済性評価にはまだ進まない。直ちに局所仮想計算を実装しない。最新詳細は、本ファイルの「TVT-MP候補別局所仮想計算の設計検討記録」にある「2026-09-19更新：下流境界観測の調査結果と基本設計の確定」を参照する。今回のMarkdown追記は記録時点では未コミットである。
+
+**2026-09-19追記（最新の再開情報）：** 下流境界観測部品の完全な実装前仕様を確定した。保存済み基本設計コミットは`c2c98c0`である。Python実装と専用テストは未着手である。次の直接作業は、保存済み仕様に従い`uxsim/order_control_baseline_downstream_boundary.py`と`tests_order_control_baseline_downstream_boundary.py`を実装することである。まず新規observerモジュールと専用単体テストから着手する。3つのfrozen結果型、`OrderControlBaselineDownstreamBoundaryObserver`、登録、capture、commit、clear、export、二重登録、pending、`vehicle.link is None`非加算を最初の実装単位とする。この単位では`World.exec_simulation()`、baseline driver、ForkResult、DELTAN validator、既存テストhelperはまだ変更しない。既存基本設計は再考しない。条件付き平均率、流出許可残高、局所mimic World、inlink始端、経済評価へ進まない。最新詳細は、本ファイルの「全World baseline下流境界観測部品の完全な実装前仕様」を参照する。今回のMarkdown追記は未コミットである。
 
 # 新しいチャットでの再開方法
 
