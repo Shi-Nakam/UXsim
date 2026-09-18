@@ -6003,6 +6003,25 @@ helper の実装、専用テスト、設計メモの整合を最終確認した�
 - 次の直接作業は、baseline実行中の終端境界観測位置の調査。この調査が終わるまで実装前仕様を作らない。
 - 今回のMarkdown追記は未コミット。`diagnostics/order_control.zip`は対象外である。
 
+##### 2026-09-19追記：TVT下流境界観測の基本設計を確定
+
+- 前回の設計検討記録はコミット`5dd4be9`（`Document the TVT-MP candidate local virtual calculation design study`）で保存・push済みである。
+- Cursor Grok 4.6の報告だけで確定せず、既存コードとTerminal出力で独立確認した。
+- TVTの初期研究範囲では`DELTAN=1`を制度上の前提とする。一つのVehicleオブジェクトを一台として扱う。検証位置と例外文は未確定。timestepごとの重複検証はしない方向。
+- 下流境界は終端`Node.transfer()`の直前・直後で、`World.exec_simulation()`の共通呼出位置から観測する。標準・FCFS・BATCHの個別transferへ重複実装しない。
+- activeは途中通過Vehicleの待機状態である。終端`incoming_vehicles`のうち`vehicle.link is monitored_outlink`が1台以上。
+- 実流出台数は、transfer前に保持したVehicleがtransfer後に元のoutlinkを離れた数である。
+- `cum_departure`差は正式台数の正本にしない。補助確認の余地は残す。
+- 目的地到着Vehicleは平均境界集計対象外。途中通過Vehicleだけを集計対象にする。
+- Nodeを端点・内部で一律分類せず、Vehicleごとの目的地判定を使う。端点Nodeもコード上は途中通過され得る。
+- 一方通行限定ではなく、実在する有向Linkだけを扱う。存在しない逆方向Linkを補完しない。
+- 下流境界専用observerをfork Worldだけで動かす方向。結果はbaseline結果の独立した読取専用情報とする方向。正式名称とフィールド名は未確定。
+- 端点Nodeが誤ってorder control対象になる特殊構造は想定しないが、ネットワーク構築上の留意事項である。この誤設定を防ぐ新しい実行時検査は追加しない方向。
+- Python実装とテストは未着手。完全な局所仮想計算実装前仕様は未作成。
+- 次は実装前仕様に必要な残る設計判断を整理する。inlink始端新規流入、局所mimic World全体、経済性評価にはまだ進まない。
+- 今回のMarkdown追記は未コミット。
+- `diagnostics/order_control.zip`は対象外である。
+
 #### 2026-08-29：TVT権利保有車両選定前の先頭非参加Vehicle先行確定の記録補修
 
 - 過去に確定済みだった、意思決定窓内 baseline 到着順位の先頭に連続する非参加 Vehicle の先行確定が、設計メモに明文化されていなかった

@@ -1657,6 +1657,8 @@ surplus最大候補を選ぶ
 
 **2026-09-18更新（候補別局所仮想計算・設計検討）：** FIFO検査接続までは実装・検証・push済みである（保存済み実装コミット`33e6101`）。候補別局所仮想計算は未実装である。今回は完全な実装前仕様を作らず、設計検討記録を追加した。通過試行順の基本方針は採用した。outlink終端の条件付き平均境界サービス方式は有力案である。ただし、baseline境界観測、inlink始端、新規流入、公開API、結果型等は未確定である。最新詳細は、本ファイルの「TVT-MP候補別局所仮想計算の設計検討記録」を参照する。
 
+**2026-09-19更新（下流境界観測の基本設計確定）：** FIFO検査接続までは実装・検証・push済みである（保存済み実装コミット`33e6101`）。保存済み最新の局所仮想計算設計検討コミットは`5dd4be9`（`Document the TVT-MP candidate local virtual calculation design study`）である。候補別局所仮想計算は未実装である。下流境界観測の基本設計を確定した。`DELTAN=1`をTVT初期研究範囲の制度上の前提とする。activeは終端`Node.transfer()`直前の途中通過Vehicle待機で判定する。実流出台数は、transfer前に保持した途中通過Vehicleがtransfer後に元のoutlinkを離れた数とする。目的地到着Vehicleは集計対象外である。Node固定分類ではなくVehicleごとの目的地判定を使う。下流境界専用observerと、`OrderControlBaselineForkResult`から参照できる独立した読取専用結果を使う方向である。公開API、結果型、例外契約、局所適用処理は未確定である。Python実装と専用テストは未着手である。最新詳細は、本ファイルの「TVT-MP候補別局所仮想計算の設計検討記録」にある「2026-09-19更新：下流境界観測の調査結果と基本設計の確定」を参照する。
+
 # 具体的買い手候補集合生成部品の実装前仕様
 
 本節は、具体的買い手候補集合生成部品の実装前仕様の最新正本である。
@@ -5183,6 +5185,8 @@ BATCHの単純sinkをTVTへそのまま適用する案は保留する。
 
 観測時点は、終端Nodeのtransfer処理直前に固定する方針である。
 
+**2026-09-19更新注記：** 上記の観測方針は、2026-09-18時点の有力案である。activeの確定定義、途中通過Vehicleに限定した集計、Vehicle参照方式による実流出台数、`cum_departure`差を正本にしないこと、共通`exec_simulation()` hook、専用observerは、後続の「2026-09-19更新：下流境界観測の調査結果と基本設計の確定」を最新とする。条件付き平均境界サービス方式そのものの正式採用、平均率の保存場所、局所適用処理は、引き続き有力案であり未確定である。
+
 同一Vehicleが複数timestep待機した場合は、複数のactive timestepとして数える。
 
 これはVehicle数ではなく、流出需要が存在した時間を分母にするためである。
@@ -5394,6 +5398,8 @@ baselineで条件付き平均1.46台が実現した場合:
 
 ただし、コード上の観測位置と既存`Node.transfer()`実行順をさらに確認してから正式確定する。
 
+**2026-09-19更新注記：** 上記は2026-09-18時点の検討である。当時の「trip-end Vehicleは研究対象外である」は、旧メモ§1.3の研究シナリオ前提を指す。これを、「監視対象outlink上で目的地到着Vehicleが存在しない」または「端点Nodeが途中通過されない」ことのコード保証として読まない。最新整理では、Nodeを端点・内部で一律分類せず、Vehicleごとに目的地到着か途中通過かを判定する。目的地到着Vehicleはactiveと実流出台数の集計対象外である。途中通過Vehicleだけを集計する。観測位置と実流出台数の数え方は、後続の「2026-09-19更新：下流境界観測の調査結果と基本設計の確定」で確定した。
+
 ## inlink始端境界（未確定）
 
 BATCHでは:
@@ -5477,6 +5483,17 @@ baseline境界観測について、次もまだ未確定である。
 
 将来の実装には、baseline実行中に終端境界を観測して結果へ受け渡す仕組みが必要である。観測機能自体はまだ存在しない。
 
+**2026-09-19更新注記：** 上記未確定一覧のうち、次は後続の「2026-09-19更新：下流境界観測の調査結果と基本設計の確定」で基本設計として確定した。当時の未確定一覧は削除せず残す。
+
+- active timestepの観測位置は、終端`Node.transfer()`直前である
+- 実流出台数の正本は、transfer直前に保持した途中通過Vehicle参照が、transfer後に元のoutlinkを離れた数である
+- `cum_departure`差は正式台数の正本にしない
+- TVT初期研究範囲では`DELTAN=1`を制度上の前提とする。検証位置と例外文は未確定である
+- 下流境界観測は既存Visit collectorへ混在させず、専用observerと独立した結果として返す方向である
+- 監視対象は各TVT対象Nodeの実在outlinkであり、終端Nodeの制御方式によらず共通観測する
+
+条件付き平均境界方式の正式採用、平均率の保存場所、局所適用処理、公開API、結果型名、例外契約は引き続き未確定である。
+
 ## 採用していない案
 
 現時点で第一候補としない案と理由。永久に排除したとは記載しない。
@@ -5544,6 +5561,824 @@ baseline境界観測について、次もまだ未確定である。
 
 この調査が終わるまでは、完全な実装前仕様を作らない。FIFO検査接続部品を再考しない。`preserves_inlink_fifo()`を変更しない。一般形順位再構成を変更しない。直ちに局所仮想計算を実装しない。経済性評価、成立候補選択には進まない。
 
+**2026-09-19更新注記：** 上記「次の調査開始点」は2026-09-18時点の記録である。その調査は実施済みである。調査結果と確定した基本設計は、直後の「2026-09-19更新：下流境界観測の調査結果と基本設計の確定」を最新とする。
+
+## 2026-09-19更新：下流境界観測の調査結果と基本設計の確定
+
+記録日：2026-09-19
+
+本更新節は、全World baselineにおけるoutlink終端境界観測について、調査結果と確定した基本設計を保存する。
+
+- 今回は下流境界観測に関する基本設計を確定した。
+- TVT局所仮想計算全体の完全な実装前仕様を確定したわけではない。
+- Python実装と専用テストは未着手である。
+- Cursor Grok 4.6の調査報告だけで確定せず、既存コードとTerminal出力による独立確認を行った。
+- 今回のMarkdown変更は記録時点では未コミットである。
+- 保存済み最新の局所仮想計算設計検討コミットは`5dd4be9`である。本更新節はその後の追記である。
+- 公開API、クラス名、フィールド名、例外契約、モジュール名、テスト名は、本節で独自判断して確定しない。
+
+前回2026-09-18の設計検討記録は削除しない。前回記録のうち、active観測方針、条件付き平均境界サービス、BATCH式sink、trip-end研究対象外、collector保存場所などは、当時の検討状態である。本更新節が下流境界観測の最新正本である。条件付き平均境界サービス方式そのものの正式採用は、引き続き有力案であり、本節でも正式採用とは記載しない。
+
+### 非技術的な説明
+
+TVT対象交差点から出た道路の先が混雑していると、道路上の車両が先へ進めず、対象交差点から新しいVehicleを受け入れにくくなる。
+
+その影響を局所仮想計算へ反映するため、全World baselineで、対象交差点から出る各道路の終端において、次を観測する。
+
+- 先へ進もうとするVehicleが待っていた時間
+- 実際に先へ進めたVehicle数
+
+目的地へ到着してそこで走行を終えるVehicleと、さらに先へ進む途中通過Vehicleは、同じNodeへ到着しても処理が異なる。
+
+目的地到着Vehicleは通常どおり走行を終える。
+
+平均的な下流境界サービス制約を適用するのは、さらに先へ進もうとする途中通過Vehicleだけである。
+
+### 確認済みコード事実と設計契約の位置づけ
+
+本節のコード事実は、少なくとも次を実際に開いて確認した。
+
+- `uxsim/uxsim.py`
+- `uxsim/order_control_baseline_driver.py`
+- `uxsim/order_control_baseline_collector.py`
+- `uxsim/order_control_baseline_snapshot.py`
+- `uxsim/order_control_tvt_baseline_fork_alignment.py`
+- `uxsim/order_control_batch_level_2_reference.py`
+- 関連baseline、FCFS、BATCHテスト
+- 旧メモ`ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES.md`の研究シナリオ前提、三つの計算世界、局所仮想計算
+- BATCH設計メモ`ORDER_EXCHANGE_PHASE4-6_BATCH_PROCESSING_DESIGN_NOTES.md`のLevel 2 mimic World、dummy upstream Node、sink Node、trigger通過時早期終了、outlink Vehicle前進とsink end-trip
+
+行番号は確認時点の目安である。実装前仕様では、その時点のコードを再確認する。
+
+### DELTAN=1の制度上の前提
+
+TVT研究では、初期研究範囲について`DELTAN=1`を制度上の前提とする。これは今回確定した基本設計である。
+
+理由:
+
+- UXsimの`DELTAN`は、一つのVehicleオブジェクトが代表するVehicle台数である。`World.__init__`の`deltan`説明は platoon size であり、既定値は5である。
+- `DELTAN`が1より大きい場合、一つのVehicleオブジェクトが複数台を表す。
+- TVTではVehicleごとに、参加・非参加、VOT、買い手・売り手、順位、支払い、補償、Visitを扱う。
+- 一つのVehicleオブジェクトが複数台を代表すると、個別Vehicle間の順位交換と経済取引の制度が一致しない。
+- したがって、TVTの初期研究範囲では、一つのVehicleオブジェクトを一台として扱う必要がある。
+
+これにより、下流境界観測で数えたVehicleオブジェクト数を、そのままVehicle台数として扱う。
+
+`DELTAN`が1より大きいTVTへの一般化は初期実装範囲外である。
+
+既存メモや個別実験にある`deltan=1`という実験条件だけを根拠としない。今回確定したのは、TVT制度がVehicle単位の参加、順位、支払い、補償を扱うための制度上の理由である。
+
+未確定として残す事項:
+
+- `DELTAN=1`をどの公開処理で検証するか
+- どの例外を出すか
+- 例外文の正式表現
+
+登録時に一度保証した後、各timestepで重複検証する設計にはしない方向である。現行`order_control_baseline_driver.py`は`DELTAN`を検証していない。検証位置は実装前仕様で確定する。
+
+### UXsimのNodeとVehicleごとの目的地判定
+
+UXsimはNode自体を、固定的なsink Nodeまたは途中通過Nodeとして分類していない。
+
+Vehicleが現在Linkの終端へ到着した際に、`Vehicle.update()`がVehicleごとに次を判定する。確認位置は`uxsim/uxsim.py`の`Vehicle.update()`である。
+
+```text
+current_link.end_node == vehicle.dest
+```
+
+コード上の対応:
+
+```text
+s.link.end_node == s.dest
+```
+
+一致する場合:
+
+- そのVehicleにとって終端Nodeは目的地Dである
+- `single_trip` Vehicleは`flag_waiting_for_trip_end`が設定される
+- そのVehicleがLinkの物理先頭であれば`end_trip()`が実行される
+- `incoming_vehicles`へは登録されない
+- 次Linkを選択しない
+
+一致しない場合:
+
+- そのVehicleにとって終端Nodeは途中通過Nodeである
+- `route_next_link_choice()`により次Linkを選択する
+- 終端Nodeの`incoming_vehicles`へ登録される
+- 後続timestepの`Node.transfer()`で次Linkへの通過を試す
+
+`taxi` modeは目的地一致時に次の目的地へ進み、`incoming_vehicles`へ登録し得る。現在の正式研究対象は`single_trip`である。taxi固有処理をTVT初期実装の一般規則として採用しない。
+
+したがって、同じNodeについて、あるVehicleには目的地D、別のVehicleには途中通過Nodeとなることがコード上可能である。
+
+Nodeを端点か内部Nodeかに固定分類して、境界処理を一律に変える設計にはしない。
+
+### 端点Nodeを途中通過する可能性
+
+UXsimの自動経路選択は、実在する有向Linkと、目的地までの最短経路情報を使う。
+
+あるNodeが他VehicleのOまたはDとして使われる端点Nodeであること自体は、経路選択上の通過禁止条件ではない。
+
+端点Nodeと内部Nodeの間について、一方通行だけを許可する仕組みはない。
+
+Linkは有向Linkとして個別に登録される。`Link`生成時に、開始Nodeの`outlinks`と終了Nodeの`inlinks`へ登録される。確認位置は`uxsim/uxsim.py`のLink初期化である。
+
+```text
+start_node.outlinks[link.name] = link
+end_node.inlinks[link.name] = link
+```
+
+- `O → A`だけ登録すれば一方通行である
+- `O → A`と`A → O`の両方を登録すれば両方向通行である
+- UXsimが存在しない逆方向Linkを自動生成することはない
+
+端点Nodeへ入るLinkと、端点Nodeから出るLinkの両方が存在し、その端点Nodeを経由する経路が選択された場合、別のVehicleがその端点Nodeを途中通過する可能性をコード上は排除していない。
+
+そのため、
+
+「端点Nodeは必ず全VehicleにとってOまたはDであり、途中通過されない」
+
+という前提をコード保証済み事項として扱わない。
+
+旧メモ§1.3の研究シナリオ前提は維持する。
+
+- 比較対象内部交差点Nodeを目的地としない端点間ODを使用する
+- trip-end Vehicleは現在の研究対象外である
+
+これは正式研究ネットワークの作成前提である。UXsimコードが端点途中通過を禁止していること、または監視対象outlink上に目的地到着Vehicleが存在しないことを保証するものではない。
+
+局所境界処理は、Nodeの固定分類ではなくVehicleごとの目的地判定に基づく。
+
+### 目的地到着Vehicleと途中通過Vehicle
+
+下流境界観測と局所仮想計算では、同じ監視対象outlink上のVehicleを次の2種類に分ける。
+
+#### 目的地到着Vehicle
+
+監視対象outlinkの終端Nodeが当該Vehicleの`dest`である。
+
+```text
+monitored_outlink.end_node is vehicle.dest
+```
+
+このVehicleは:
+
+- 終端Nodeで走行を終了する
+- `incoming_vehicles`に入らない
+- 下流へ続く通過要求を持たない
+- baselineのactive timestepの判定対象に含めない
+- baselineの実流出台数に含めない
+- 条件付き平均下流境界サービス率の分母と分子に含めない
+- 局所仮想計算でも通常のUXsimと同じtrip-end処理を行う
+- 途中通過Vehicle向けの平均境界サービス制約を適用しない
+
+#### 途中通過Vehicle
+
+監視対象outlinkの終端Nodeが当該Vehicleの`dest`ではない。
+
+```text
+monitored_outlink.end_node is not vehicle.dest
+```
+
+このVehicleは:
+
+- さらに次のLinkへ進む
+- 終端Nodeの`incoming_vehicles`に入る
+- baselineのactive timestep判定対象になる
+- baselineの実流出台数集計対象になる
+- 局所仮想計算では、条件付き平均下流境界サービス率の制約対象になる
+
+同じoutlink上に、目的地到着Vehicleと途中通過Vehicleの両方が存在し得る。
+
+同じ終端Nodeにおいて、大多数のVehicleが目的地到着としてtrip-endし、一部のVehicleだけが途中通過する場合も扱える必要がある。
+
+平均境界サービス率が2台であっても、その2台制約は途中通過Vehicleだけへ適用する。
+
+目的地到着Vehicleを2台制約で滞留させない。
+
+### 単車線における物理順とtrip-end
+
+現在の正式研究条件は単車線である。
+
+同じoutlink上で、
+
+- 前方Vehicleが途中通過Vehicle
+- 後方Vehicleが終端Nodeを目的地とするVehicle
+
+である場合、後方の目的地到着Vehicleは前方Vehicleを追い越して先にtrip-endしない。
+
+`Vehicle.update()`では、目的地到着時に`flag_waiting_for_trip_end`を設定するが、`end_trip()`は`s.link.vehicles[0] == s`のときだけ実行する。
+
+後方Vehicleが目的地Nodeへ到着しても、Linkの物理先頭でなければ、
+
+- `flag_waiting_for_trip_end`は設定される
+- `end_trip()`はまだ実行されない
+
+前方の途中通過Vehicleが終端Nodeを通過してLinkを離れ、後方Vehicleが物理先頭になった後に、後方Vehicleの`end_trip()`が実行される。標準transferおよびFCFS transferは、通過後に後続のtrip-end待ち先頭車を処理する。
+
+したがって、目的地到着Vehicleを平均境界サービス率の制約対象から除外しても、前方の途中通過Vehicleを物理的に追い越す処理にはならない。
+
+### active timestepの確定定義
+
+監視単位は、各TVT対象Nodeから出る各実在outlinkである。
+
+各監視対象outlinkについて、終端Nodeの`Node.transfer()`直前にactive状態を観測する。
+
+activeである条件:
+
+- 終端Nodeの`incoming_vehicles`に1台以上のVehicleが存在する
+- そのVehicleの現在Linkが、監視対象outlinkと同じfork World内Linkオブジェクトである
+
+概念式:
+
+```text
+active
+=
+any(
+    vehicle.link is monitored_outlink
+    for vehicle in terminal_node.incoming_vehicles
+)
+```
+
+目的地到着Vehicleは`incoming_vehicles`に入らないため、このactive判定へ自然に含まれない。
+
+このため、activeは実質的に、監視対象outlinkから来た途中通過Vehicleが、終端Nodeで次Linkへの通過を待っている状態を表す。
+
+同じ途中通過Vehicleが複数timestep待機した場合は、各timestepをそれぞれactiveとして数える。`incoming_vehicles`は当該timestepの`transfer()`後にclearされ、次にリンク終端へ到達したVehicleが後続の`Vehicle.update()`で再登録される。
+
+active timestep countはVehicle数ではなく、途中通過Vehicleによる下流通過要求が存在した時間の長さを表す。
+
+同じ終端Nodeへ複数の監視対象outlinkが接続していても、`vehicle.link is monitored_outlink`によりoutlink別に区別する。
+
+同一timestepに複数の途中通過Vehicleが待機していても、そのoutlinkのactive countは1だけ増える。activeは「待っていたか」であり、「何台待っていたか」ではない。
+
+### 実流出台数の確定した観測方法
+
+`cum_departure`の前後差を、下流境界の実流出台数の正本にはしない。
+
+ただし、正式研究条件では比較対象内部交差点を目的地とせず、trip-end VehicleをTVT対象外としていることも明記する。これは旧メモ§1.3の研究シナリオ前提である。
+
+`cum_departure`を正本にしない主な理由は、今回測りたい意味に直接対応する方法が別にあるためである。補助理由として、一般的なUXsimコードでは`end_trip()`も`cum_departure`を増加させる。
+
+採用する観測方法:
+
+1. 終端Nodeの`transfer()`直前に、監視対象outlink由来で`incoming_vehicles`に入っているVehicle参照を保持する。
+2. 終端Nodeの`transfer()`を既存どおり実行する。
+3. `transfer()`直後に、保持したVehicleごとに現在Linkを確認する。
+4. `vehicle.link is not monitored_outlink`となったVehicleを、そのtimestepに監視対象outlinkから実際に流出した途中通過Vehicleとして数える。
+
+この方式が数えるもの:
+
+- transfer直前に途中通過を要求して待っていた
+- 実際に終端Nodeの通過処理を受けた
+- その結果、元のoutlinkを離れた
+
+というVehicleである。
+
+目的地到着Vehicleは`incoming_vehicles`に入らないため、保持対象にならず、実流出台数にも含まれない。
+
+`transfer()`終了後は`incoming_vehicles`がclearされる。確認位置:
+
+- 標準`Node.transfer()`
+- `Node.transfer_fcfs_clearance()`
+- `Node.transfer_batch()`
+
+このため、transfer後の`incoming_vehicles`件数差だけで流出台数を数えない。
+
+また、標準、FCFS、BATCHの各transfer成功箇所へ個別に同じ記録処理を重複実装しない。
+
+### cum_departureの位置付け
+
+UXsimでは、Link間通過成功時に流出元Linkの`cum_departure[-1]`が増加する。確認例:
+
+- 標準transfer
+- BATCH service queue内部のLink間遷移
+- FCFS transfer
+
+`Vehicle.end_trip()`でも現在Linkの`cum_departure[-1]`が増加する。確認位置は`Vehicle.end_trip()`である。続けて`s.link = None`となる。
+
+したがって、一般的なUXsimコードとしては、`cum_departure`の増加だけから、
+
+- 次Linkへ進んだ途中通過Vehicle
+- 目的地でtrip-endしたVehicle
+
+を区別できない場合がある。
+
+本研究ではVehicleごとの目的地判定と`incoming_vehicles`を使って途中通過Vehicleだけを直接保持できるため、Vehicle参照方式を実流出台数の正本とする。
+
+`cum_departure`は、必要なら補助的な整合確認へ使用する余地を残すが、正式台数の正本とはしない。
+
+### UXsimの1 timestep内の実行順
+
+コード確認済み事実として、一つのtimestepの主要実行順は次である。確認位置は`World.exec_simulation()`である。
+
+1. 全Linkの`Link.update()`
+2. 全Nodeの`Node.generate()`
+3. 全Nodeの`Node.update()`
+4. 全Nodeの`Node.transfer()`
+5. 全実行中Vehicleの`Vehicle.carfollow()`
+6. 全生存Vehicleの`Vehicle.update()`
+
+終端Nodeの`transfer()`直前には、その時点で次Linkへの通過待ちとなっている途中通過Vehicleが`incoming_vehicles`に存在する。それらは前timestepの`Vehicle.update()`でリンク終端到達後に登録され、当該timestepの`transfer()`まで残る。
+
+全Nodeの`transfer()`は、`World.exec_simulation()`内の共通ループから順に呼ばれる。標準、FCFS、BATCHの分岐は各`Node.transfer()`内部で行われる。
+
+### 観測hookの確定配置方針
+
+下流境界観測は、標準、FCFS、BATCH等の個別transfer実装へ重複して追加しない。
+
+`World.exec_simulation()`内の、全Nodeについて`node.transfer()`を呼ぶ共通位置で観測する。
+
+概念的な処理順:
+
+```text
+各Nodeについて:
+
+1. baseline下流境界observerが存在し、
+   今回のNodeが監視対象outlinkの終端Nodeなら、
+   transfer直前の待機Vehicle参照を取得する
+
+2. node.transfer()を既存どおり実行する
+
+3. observerが存在し、
+   直前観測を行っていた場合、
+   transfer直後に元のoutlinkを離れたVehicleを数える
+```
+
+この配置により、終端Nodeの制御方式が、
+
+- UXsim標準
+- FCFS
+- BATCH
+- その他、既存`Node.transfer()`分岐
+
+のいずれであっても、同じ共通観測方法を適用できる。
+
+これは各制御方式をTVTへ取り込む意味ではない。
+
+終端境界で実現した待機と流出を、制御方式にかかわらず共通の方法で観測するためである。
+
+具体的な補助関数名、hookの行単位実装、observerの公開メソッド名は、実装前仕様で確定する。
+
+### 観測hookの非侵襲性
+
+下流境界observerは、全World baselineのfork Worldでのみ有効とする。
+
+実Worldではobserver参照は`None`とする。既存`World.__init__`は`_order_control_baseline_collector = None`である。observer参照も同様に、実Worldでは`None`とする方向である。正式属性名は未確定である。
+
+observerが`None`の通常シミュレーションでは、追加の境界観測処理を行わない。
+
+観測処理は次を行わない。
+
+- RNGを消費しない
+- Vehicle順位を変更しない
+- `incoming_vehicles`を変更しない
+- Link所属を変更しない
+- Node状態を変更しない
+- capacityを変更しない
+- route choiceを実行しない
+- User設定の`Node.user_function`を上書きしない
+- 実Worldへ観測結果を書き込まない
+- Nodeのtransfer順序を変更しない
+
+観測対象外Nodeと観測対象外Linkを記録しない。同じtimestepを重複記録しない。途中失敗時に部分結果を正常結果として返さない。
+
+`World.copy()`は`pickle.loads(pickle.dumps(W))`である。実Worldはobserverが`None`のままcopyされる方向とする。fork Worldへのobserver接続はcopy後に行う方向である。pickle可能性を損なわない。
+
+### 下流境界専用observer
+
+下流境界観測は、既存`OrderControlBaselineCollector`のVisit記録へ直接混在させない。
+
+理由:
+
+- 既存collectorの責務はsnapshot固定Visitの到着・通過記録である
+- 既存collectorはVehicle名、Visit ID、Node名等によるVisit台帳である
+- 下流境界観測は、対象Node、outlink、終端Node、horizon集計による道路境界情報である
+- Visit記録と道路境界集計では、キーと責務が異なる
+- 既存のVisit件数照合やsnapshot登録用validation collectorへ影響させない方が明確である
+
+既存コードはcollectorの内部辞書へ直接依存せず、公開メソッドを利用している。確認例:
+
+- `register_snapshot_visit()`
+- `record_baseline_arrival()`
+- `prepare_baseline_passage_recording()`
+- `apply_baseline_passage_timestep()`
+- `export_node_baseline_visits()`
+- `get_baseline_visit_snapshot()`
+
+fork Worldには、既存baseline collectorとは別に、下流境界専用observerへの参照を持たせる方向とする。
+
+概念上の候補名は次である。正式名称として確定しない。
+
+- `OrderControlBaselineDownstreamBoundaryObserver`
+- `_order_control_baseline_downstream_boundary_observer`
+
+正式なクラス名、World属性名、公開メソッド名は完全な実装前仕様で確定する。
+
+### 観測結果の保存先
+
+下流境界の集計結果は、`OrderControlBaselineForkResult`から参照できる独立情報として返す。
+
+既存の`collector`フィールドの意味を変更しない。
+
+`OrderControlBaselineForkResult`は`fork_W`を保持しない。境界観測結果はfork終了後も残る独立情報とする必要がある。
+
+結果は、後続処理から変更されない読取専用構造とする方向である。
+
+候補:
+
+- frozen dataclass
+- tuple
+- 対象Node別のimmutable result
+- outlink別のimmutable result
+
+正式な結果型名とフィールド名は未確定とする。
+
+各outlink境界結果に必要となる情報の候補:
+
+- TVT対象Node名
+- 監視対象outlink名
+- 終端Node名
+- configured horizon
+- active timestep count
+- transferred Vehicle count
+- 必要なら観測状態または補助情報
+
+条件付き平均サービス率そのものをbaseline結果へ保存するか、
+
+- active timestep count
+- transferred Vehicle count
+
+だけを保存し、局所仮想計算接続側で平均率を計算するかは、まだ未確定として残す。
+
+### 監視対象の準備位置
+
+通常baseline実行経路`run_snapshot_fixed_baseline_fork()`と、TVT順位台帳登録付きbaseline実行経路`run_snapshot_fixed_baseline_fork_with_tvt_rank_ledger_registration()`は、いずれも`_complete_baseline_fork_after_registration()`へ合流する。
+
+そのため、下流境界observerと監視対象outlinkの準備は、
+
+- snapshot固定Visit登録完了後
+- 登録Visit件数の整合確認後
+- `fork_W.exec_simulation(...)`呼出し直前
+
+の共通位置で行う方向とする。
+
+ただし、具体的な補助関数名と行単位の実装は、実装前仕様で確定する。
+
+監視対象の作成には、fork World内の対象Nodeとその実在outlinkを使用する。
+
+対象Node名は、既存の`fixed_target_node_names`を使用する。
+
+各対象Nodeについて、実際に登録されている`node.outlinks`だけを列挙する。
+
+各outlinkの終端Nodeは`outlink.end_node`である。同じ終端Nodeへ複数outlinkが接続しても、監視単位はoutlinkである。
+
+対象Node内のoutlink順をdict登録順にするか、Link名順に固定するかは未確定である。同一outlinkの重複登録時の例外契約も未確定である。
+
+### 有向Linkと存在しない逆方向Link
+
+UXsimのLinkは有向Linkである。
+
+Link登録時に、
+
+- `start_node.outlinks`
+- `end_node.inlinks`
+
+へ登録される。
+
+存在しない逆方向Linkは自動生成されない。
+
+したがって、対象Nodeの監視対象は、fork World内で実際に`target_node.outlinks`に登録されているLinkだけである。
+
+例えば、
+
+```text
+O → A
+```
+
+だけが存在する場合、
+
+```text
+A → O
+```
+
+をAのoutlinkとして推測、補完、登録しない。
+
+存在しない逆方向Linkがないことを、異常として扱わない。
+
+一方通行または両方向通行のいずれも、ネットワークに実際に登録された有向Linkに従って扱う。
+
+### order control対象Nodeに関する留意事項
+
+既存の自動eligibility判定は、概ね次の構造条件を使用する。確認位置は`World.infer_order_control_eligible_nodes()`である。
+
+```text
+inlink数 >= 2
+かつ
+outlink数 >= 1
+```
+
+outlinkが2本以上であることは要求していない。
+
+そのため、outlinkが1本だけの内部合流Nodeもorder control対象になり得る。
+
+自動判定は、NodeがOまたはDとして使われる端点Nodeかどうかを確認しない。
+
+正式な研究シナリオでは次を前提とする。
+
+- OまたはDとして使用する端点Nodeをorder control対象にしない
+- 端点Nodeにinlinkが2本以上かつoutlinkが1本以上ある特殊構造は想定しない
+- 端点Nodeを手動で`order_control_eligible=True`にすることも想定しない
+
+ただし、ネットワーク定義を誤った場合、端点Nodeが自動eligibility条件を満たす可能性は理論上残る。
+
+これはネットワーク構築上の留意事項として記録する。
+
+この誤設定を防ぐための新しい実行時検査は、現時点では追加しない。
+
+理由:
+
+- 正式研究ネットワークの作成時点で保証する前提である
+- 登録時に保証した不変条件を実行時に重複検証しない既存方針に従う
+- 現時点で実際に発生していない特殊ケースのために本番処理を複雑化しない
+
+異常が疑われる場合は、まずネットワーク定義と対象Node設定を確認する。
+
+### 目的地到着と途中通過が混在する端点Node
+
+あるTVT対象Node Aから出る監視対象outlinkが、端点Node Oへ接続しているとする。
+
+UXsim上、Oから別の内部Nodeへ戻る有向Linkも存在する場合、Oは次の二つの役割をVehicleごとに持ち得る。
+
+Vehicle P:
+
+```text
+P.dest is O
+```
+
+- Oでtrip-endする
+- active判定対象外である
+- transferred count対象外である
+- 条件付き平均境界サービス対象外である
+
+Vehicle Q:
+
+```text
+Q.dest is not O
+```
+
+- Oを途中通過する
+- Oの`incoming_vehicles`に入る
+- active判定対象である
+- Oの`Node.transfer()`で別Linkへの移動を試す
+- 実際に監視対象outlinkを離れた場合、transferred countへ加算する
+- 局所仮想計算では平均境界サービス制約の対象である
+
+baselineで、Oを目的地とするVehicleが多数trip-endし、Oを途中通過するVehicleが少数だけ存在した結果、途中通過Vehicleの条件付き平均サービス率が2台となった場合:
+
+- 局所仮想計算で2台制約を適用するのは、Oを途中通過するVehicleだけである
+- Oを目的地とするVehicleへ2台制約を適用しない
+- 目的地到着Vehicleは通常どおりtrip-endする
+- ただし、単車線上で前方に途中通過Vehicleが残っている場合、後続の目的地到着Vehicleは前方Vehicleを追い越してtrip-endしない
+
+この例により、Node全体へ一律に平均2台制約を掛けるのではなく、途中通過Vehicleだけへ適用することを明確にする。
+
+### 前回記録からの修正事項
+
+2026-09-18の設計検討記録には、当時の検討として次の趣旨が含まれ得る。既存本文は削除しない。当時の検討段階の記述であり、本更新節が最新である。
+
+当時の考え方と今回の最新整理:
+
+- 「終端Nodeが端点なら一律にsinkとする」
+  - 最新: Node固定分類ではなく、Vehicleごとに目的地か途中通過かを判定する。BATCH Level 2のsink NodeはBATCH mimic Worldの参考事実であり、TVT下流境界の正本ではない。
+- 「端点Nodeでは平均境界サービス率を作らない」
+  - 最新: 端点Nodeでも途中通過Vehicleが存在すれば境界平均の観測対象になり得る。
+- 「端点Nodeが途中通過されないことがコード上保証されている」
+  - 最新: コード上は保証されていない。研究シナリオで端点途中通過を意図していなくても、UXsimコード上は禁止されていない。
+- 「Node単位で内部Nodeと端点Nodeを分類すれば十分である」
+  - 最新: 同じNodeがVehicleごとに目的地にも途中通過Nodeにもなり得る。
+- 「`cum_departure`差をそのまま正式台数とする」
+  - 最新: 実流出台数の正本はVehicle参照方式である。`cum_departure`は補助情報に限る。
+- 「trip-end Vehicleが研究対象外なので、あらゆる監視outlinkでend-trip混入を考えなくてよい」
+  - 最新: TVT制度の研究対象外であることと、監視outlink上の物理的な目的地到着Vehicleの存在とは別である。目的地到着Vehicleは平均集計対象外とし、途中通過Vehicleだけを集計する。
+
+前回の有力案である条件付き平均境界サービス、流出許可残高、active=0時の制約付きsinkは、局所仮想計算側の近似方式として残る。ただし、分母と分子に入れるのは途中通過Vehicleのactiveとtransferだけである。目的地到着Vehicleを含めない。
+
+### 今回確定していない事項
+
+少なくとも次は未確定である。本節で独自判断して確定しない。
+
+- observerの正式クラス名
+- World上の正式属性名
+- observerの公開メソッド名
+- observerの内部データ構造
+- outlink別結果型の正式名称
+- 対象Node別結果型の正式名称
+- 全体結果型の正式名称
+- `OrderControlBaselineForkResult`へ追加する正式フィールド名
+- 対象Node内のoutlink順をdict登録順にするか、Link名順に固定するか
+- 同一outlinkの重複登録時の例外契約
+- `DELTAN=1`の検証位置と例外文
+- configured horizonをobserverへどう渡すか
+- observerの開始・終了状態
+- baseline失敗時の部分結果処理
+- 空baseline結果で境界結果を空tupleにするか別状態にするか
+- 条件付き平均サービス率をbaseline結果として保存するか
+- countだけを保存して局所計算側で平均を算出するか
+- active timestep countが0の場合の正式な結果表現
+- active>0かつtransferred count=0の場合の正式な結果表現
+- 局所仮想計算で平均サービス率を適用する具体的処理
+- 流出許可残高の正式データ型
+- outlink流出容量と終端Node容量を使う具体的処理
+- 目的地到着Vehicleの局所mimic World上のtrip-end処理
+- TVT局所仮想計算全体のresolved条件
+- inlink始端からの新規流入
+- performance counter
+- diagnostic情報
+- 専用テストの正式ファイル名
+
+条件付き平均境界方式の正式採用も未確定である。本節が確定したのは、全World baselineで途中通過Vehicleのactiveと実流出をどう観測し、どこへ保存する方向かの基本設計である。
+
+### 実装に必要となるテスト観点
+
+今回はテストを実装しない。後続の実装前仕様に必要なテスト観点は次である。正式テスト名は未確定である。
+
+#### DELTAN
+
+- `DELTAN=1`で正常動作すること
+- `DELTAN`が1以外の場合の拒否契約は未確定であること
+- `DELTAN`検証をtimestepごとに重複実行しないこと
+
+#### 単一境界
+
+- 単一TVT対象Node
+- 単一outlink
+- 単一終端Node
+- active timestepが正しく1回加算されること
+- 1台の途中通過Vehicleが流出し、transferred countが1になること
+
+#### 複数outlink
+
+- 一つの対象Nodeに複数outlink
+- outlinkごとにactiveとtransferを別集計すること
+- 同じ終端Nodeへ複数outlinkが接続すること
+- Vehicleの現在Link参照で流出元outlinkを区別すること
+
+#### 複数対象Node
+
+- 複数TVT対象Node
+- `target_node_names`の対象外Nodeを観測しないこと
+- 各対象Nodeのoutlinkだけを監視すること
+- 同じ終端Nodeを複数対象Nodeのoutlinkが共有する場合に区別すること
+
+#### active
+
+- active timestep countが0であること
+- 同一Vehicleが複数timestep待機し、複数active timestepとして数えられること
+- 同一timestepに複数Vehicleが待機していてもactive countは1だけ増えること
+- 目的地到着Vehicleだけが存在する場合、activeに含めないこと
+- 途中通過Vehicleが1台以上存在する場合、activeになること
+
+#### transfer
+
+- activeで1台流出すること
+- activeで複数台流出すること
+- activeだが0台流出すること
+- transfer前に保持したVehicleが元のoutlinkを離れた場合だけ数えること
+- `incoming_vehicles` clear後の件数差を使わないこと
+- destinationでのtrip-endをtransferred countへ含めないこと
+
+#### 制御方式
+
+終端Nodeが次の各方式であっても共通観測できること。
+
+- UXsim標準
+- FCFS
+- BATCH
+
+個別transfer実装へ境界記録コードを重複追加しないこと。
+
+#### 目的地と途中通過の混在
+
+同じ監視対象outlink上に、目的地到着Vehicleと途中通過Vehicleが混在するケース。
+
+目的地到着Vehicleはtrip-endするが、activeとtransferred countへ含まれない。
+
+途中通過Vehicleだけがactiveとtransferred countへ含まれる。
+
+#### 単車線物理順
+
+- 前方が途中通過Vehicle
+- 後方が目的地到着Vehicle
+- 後方目的地Vehicleは、前方Vehicleがoutlinkを離れる前にend-tripしない
+- 前方Vehicleが離れ、後方Vehicleが物理先頭になった後にend-tripする
+
+#### 一方通行と両方向通行
+
+- 実在する有向Linkだけを監視すること
+- 存在しない逆方向Linkを補完しないこと
+- 一方通行で正常動作すること
+- 両方向Linkが登録されたネットワークでも、実在outlinkだけを扱うこと
+
+#### baseline driver
+
+- 通常baseline経路
+- TVT順位台帳登録付きbaseline経路
+- 両経路で同じ境界観測結果になること
+- configured horizon全体を観測すること
+- 空baseline経路
+- `real_W`不変
+- fork Worldだけにobserverを接続すること
+- baseline失敗時に部分結果を正常返却しないこと
+
+#### 非侵襲性
+
+- observerが`None`なら既存動作不変であること
+- RNG状態を変えないこと
+- Vehicle順序を変えないこと
+- route choiceを変えないこと
+- capacityを変えないこと
+- `user_function`を上書きしないこと
+- Python pickleによる`World.copy`を壊さないこと
+- 結果が読取専用であること
+
+### 今回実装しない範囲
+
+今回は次を実装しない。Python実装済み、テスト済み、実装前仕様完成とは記載しない。
+
+- observerクラス
+- World属性
+- `exec_simulation()`へのhook
+- baseline driver変更
+- baseline result変更
+- `DELTAN`検証
+- active観測
+- transfer後観測
+- 結果型
+- 専用テスト
+- 条件付き平均サービス率
+- 流出許可残高
+- 制約付きsink
+- 局所mimic World
+- inlink始端新規流入
+- 経済性評価
+- TVT成立候補選択
+- 実Worldへの順位反映
+
+### 確認したファイル、関数、行番号の目安
+
+実装前仕様作成時に再確認する。行番号は2026-09-19確認時点の目安である。
+
+- `uxsim/uxsim.py`
+  - `World.exec_simulation()`の主要ループ、全Node `transfer()`呼出し
+  - `Node.transfer()`の標準、FCFS、BATCH分岐
+  - 標準transferおよびFCFS、BATCHでの`incoming_vehicles` clear
+  - `Vehicle.update()`の`s.link.end_node == s.dest`判定、trip-end待ち、`incoming_vehicles`登録
+  - `Vehicle.end_trip()`の`cum_departure`増加と`s.link = None`
+  - Link初期化時の`start_node.outlinks`、`end_node.inlinks`登録
+  - `World.infer_order_control_eligible_nodes()`の`inlinks >= 2`かつ`outlinks >= 1`
+  - `World.__init__`の`deltan`説明と`_order_control_baseline_collector = None`
+  - `World.copy()`のpickle複製
+- `uxsim/order_control_baseline_driver.py`
+  - `OrderControlBaselineForkResult`の既存フィールド。`fork_W`非保持
+  - `_prepare_baseline_fork()`のcollector接続
+  - `_complete_baseline_fork_after_registration()`への通常経路と順位台帳付き経路の合流
+  - 空baseline経路はforwardしない
+  - `exec_simulation(duration_t2=...)`によるconfigured horizon実行
+- `uxsim/order_control_baseline_collector.py`
+  - Visit記録責務と公開メソッド
+- `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES.md`
+  - §1.3研究シナリオ前提
+  - §16局所仮想計算範囲
+  - §25.25.34三つの計算世界
+- `ORDER_EXCHANGE_PHASE4-6_BATCH_PROCESSING_DESIGN_NOTES.md`
+  - Level 2 mimic Worldのdummy upstream、sink、trigger早期終了
+
+### 次の作業開始点
+
+今回の境界観測基本設計を前提に、下流境界観測部品の完全な実装前仕様に必要な残る設計判断を整理する。
+
+少なくとも次を判断対象とする。
+
+- observerの正式名称と責務
+- World属性名
+- observer登録API
+- transfer前後観測API
+- outlink別結果型
+- 対象Node別結果型
+- 全体結果型
+- `OrderControlBaselineForkResult`への追加フィールド
+- 結果順序
+- active=0の表現
+- active>0かつtransfer=0の表現
+- 条件付き平均率をどこで計算するか
+- `DELTAN=1`の検証位置
+- 空baseline経路
+- baseline失敗時の部分状態
+- 専用テスト契約
+
+ただし、inlink始端新規流入、局所mimic World全体、経済性評価にはまだ進まない。FIFO検査接続部品を再考しない。`preserves_inlink_fifo()`を変更しない。一般形順位再構成を変更しない。直ちに局所仮想計算を実装しない。
+
 # 次の作業開始点
 
 次の直接作業は、具体的買い手候補集合生成部品の実装前仕様を、既存の公開型と接続できる形で確定することである。
@@ -5576,6 +6411,8 @@ baseline境界観測について、次もまだ未確定である。
 **2026-09-15更新（最新の再開情報）：** FIFO検査接続部品は実装・検証済みである。最新の実装完了事実は、本ファイルの「TVT-MP FIFO検査接続部品の実装完了記録」を参照する。実装前仕様の保存済み・push済みコミットは`25764b8`である。次の直接作業は、`preserves_inlink_fifo=True`の候補だけを対象とする候補別局所仮想計算接続部品の**実装前仕様**を確定することである。FIFO検査接続部品を再考しない。`preserves_inlink_fifo()`自体を変更しない。一般形順位再構成を変更しない。直ちに局所仮想計算を実装しない。まず既存の局所仮想計算関係の設計・部品・入力要件を確認する。経済性評価、成立候補選択には進まない。
 
 **2026-09-18更新（最新の再開情報）：** FIFO検査接続部品は実装・検証・push済みである（保存済み実装コミット`33e6101`）。候補別局所仮想計算は未実装である。今回は完全な実装前仕様を確定せず、設計検討記録を追加した。通過試行順の基本方針は採用した。outlink終端の条件付き平均境界サービス方式は有力案である。inlink始端の新規流入、baseline境界観測の保存場所と観測位置、公開API、結果型等は未確定である。次の直接作業は、全World baseline実行中に各対象Nodeの各outlinkについて、終端Nodeのtransfer処理直前のactive状態と当該outlinkから終端Nodeを実際に通過した台数を、どこで・どの処理順で・どの単位で観測できるかを調査することである。この調査が終わるまでは完全な実装前仕様を作らない。直ちに局所仮想計算を実装しない。経済性評価、成立候補選択には進まない。最新詳細は、本ファイルの「TVT-MP候補別局所仮想計算の設計検討記録」を参照する。
+
+**2026-09-19更新（最新の再開情報）：** FIFO検査接続部品は実装・検証・push済みである（保存済み実装コミット`33e6101`）。保存済み最新の局所仮想計算設計検討コミットは`5dd4be9`である。候補別局所仮想計算は未実装である。下流境界観測の基本設計を確定した。`DELTAN=1`をTVT初期研究範囲の制度上の前提とする。activeは終端`Node.transfer()`直前の途中通過Vehicle待機で判定する。実流出台数は、transfer前に保持した途中通過Vehicleがtransfer後に元のoutlinkを離れた数とする。目的地到着Vehicleは集計対象外である。Node固定分類ではなくVehicleごとの目的地判定を使う。下流境界専用observerと独立した読取専用結果を使う方向である。公開API、結果型、例外契約、局所適用処理は未確定である。Python実装と専用テストは未着手である。次の直接作業は、今回の境界観測基本設計を前提に、下流境界観測部品の完全な実装前仕様に必要な残る設計判断を整理することである。判断対象は、observerの正式名称と責務、World属性名、登録API、transfer前後観測API、outlink別・対象Node別・全体結果型、`OrderControlBaselineForkResult`への追加フィールド、結果順序、active=0およびactive>0かつtransfer=0の表現、条件付き平均率の計算位置、`DELTAN=1`の検証位置、空baseline経路、失敗時の部分状態、専用テスト契約である。inlink始端新規流入、局所mimic World全体、経済性評価にはまだ進まない。直ちに局所仮想計算を実装しない。最新詳細は、本ファイルの「TVT-MP候補別局所仮想計算の設計検討記録」にある「2026-09-19更新：下流境界観測の調査結果と基本設計の確定」を参照する。今回のMarkdown追記は記録時点では未コミットである。
 
 # 新しいチャットでの再開方法
 
