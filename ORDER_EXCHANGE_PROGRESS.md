@@ -6039,6 +6039,29 @@ helper の実装、専用テスト、設計メモの整合を最終確認した�
 - 今回のMarkdown追記は未コミット。
 - `diagnostics/order_control.zip`は対象外である。
 
+##### 2026-09-20追記：TVT下流境界observerの本体・hook・baseline driver正式接続を完了
+
+- observer本体を専用モジュール`uxsim/order_control_baseline_downstream_boundary.py`へ実装済み（コミット`f475294`）。専用単体テスト`tests_order_control_baseline_downstream_boundary.py`。
+- UXsimの共通transfer loop（`World.exec_simulation()`内）へhook済み（コミット`c72e38a`）。専用テスト`tests_order_control_baseline_downstream_boundary_uxsim.py`。
+- FCFS、BATCH、TVTに共通するorder control設定時の`DELTAN=1`検査を実装済み（コミット`7c1d5a4`、`_validate_order_control_deltan`）。専用テスト17件成功。
+- 全World baseline driver（`uxsim/order_control_baseline_driver.py`）へ正式接続済み（コミット`7f00520`）。専用統合テスト`tests_order_control_baseline_downstream_boundary_driver.py`（15件）。
+- `OrderControlBaselineForkResult`へ必須フィールド`downstream_boundary_result`を追加済み（デフォルトなし）。
+- 空baseline（`registered_visit_count == 0`）は`downstream_boundary_result = None`。`exec_simulation()`は呼ばない。
+- 完了baselineは、全countが0でも観測済みfrozen結果を返す。未観測`None`と区別する。
+- observerはfork Worldの`_order_control_baseline_downstream_boundary_observer`へだけ接続する。
+- real Worldのobserver属性は開始前後とも`None`（開始前非`None`は`ValueError`、copy直後fork非`None`は`RuntimeError`）。
+- observer登録失敗時はforwardを開始しない。部分observerをforkへ接続しない。
+- forward失敗時は`export_result()`も完了結果作成も行わない。部分`ForkResult`を返さない。自動再試行しない。
+- 結果順序：`target_node_names`順、`node.outlinks`登録順。同一終端Node共有outlinkを統合しない。
+- 実装コミット：`7c1d5a4`、`c72e38a`、`7f00520`（およびobserver本体`f475294`）。
+- `7f00520`は`origin/feature/intersection-order-control`へpush済み。
+- Terminalで関連テスト493件を群ごとに確認し、すべて成功。`7f00520`で変更した8ファイルの`py_compile`成功。
+- 存在しない`tests_order_control_fcfs_transfer.py`指定による最初のコマンド停止はテスト失敗ではない。Terminalで実在する正式な関連テストファイル名を再確認し、次の6ファイルを再実行して209件すべて成功した：`tests_order_control_baseline_collector.py`、`tests_order_control_baseline_collector_uxsim.py`、`tests_order_control_baseline_snapshot.py`、`tests_order_control_batch_node_transfer_integration.py`、`tests_order_control_batch_service_queue_transfer.py`、`tests_order_control_batch_transfer.py`。
+- 条件付き平均流出率、流出許可残高、制約付きsink、局所mimic World、inlink始端新規流入、候補別局所仮想計算、経済性評価、成立候補選択、実WorldへのTVT反映は未実装。
+- 次の再開地点：候補別局所仮想計算へ進むために必要な残る入力・境界設計の整理（本追記では新規制度確定しない）。
+- 詳細は`ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_2.md`の「全World baseline下流境界観測部品の実装完了記録」を参照。
+- `diagnostics/order_control.zip`は対象外である。
+
 #### 2026-08-29：TVT権利保有車両選定前の先頭非参加Vehicle先行確定の記録補修
 
 - 過去に確定済みだった、意思決定窓内 baseline 到着順位の先頭に連続する非参加 Vehicle の先行確定が、設計メモに明文化されていなかった

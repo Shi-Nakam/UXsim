@@ -7752,6 +7752,259 @@ Cursorは確認・報告だけを行い、Git変更操作をしない。
 
 基本設計の観測方法は再考しない。条件付き平均率、流出許可残高、局所mimic World、inlink始端、経済評価へ進まない。FIFO検査接続部品を再考しない。
 
+## 全World baseline下流境界観測部品の実装完了記録
+
+記録日：2026-09-20
+
+本節は、直前の「全World baseline下流境界観測部品の完全な実装前仕様」を置き換えない。当該仕様は実装前の設計正本として残す。本節は、2026-09-20時点で実装・検証・commit・push済みとなった事実の正本である。
+
+### 非技術的な完了内容
+
+全World baseline計算（実Worldをcopyしたfork World上で、設定horizonだけ先に進める計算）の実行中に、TVT対象交差点から出る各道路（outlink）の終端Nodeにおいて、途中通過Vehicleが待っていた状態と、実際に先の道路へ進めた台数を観測できるようになった。
+
+observerは実Worldには接続しない。snapshot固定Visitの登録とcollector接続のあと、baseline forwardを実行するのはcopy後のfork Worldだけである。fork Worldの正式属性`_order_control_baseline_downstream_boundary_observer`へだけobserverを接続する。
+
+baseline forwardが正常に完了したあと、呼び出し側へ返るのはWorldオブジェクトやobserver本体ではなく、Link名・終端Node名・非負整数のcountだけを含む読取専用（frozen）結果である。これは`OrderControlBaselineForkResult`の必須フィールド`downstream_boundary_result`から取得する。
+
+この観測結果は、将来の候補別局所仮想計算において、下流側の受入れにくさを近似するための材料である。条件付き平均流出率の計算、平均率の保存、流出許可残高、制約付きsink、局所mimic Worldへの適用は、本実装の範囲外であり、まだ実装していない。
+
+### 実装済み範囲
+
+#### observer本体（専用モジュール）
+
+- 本番モジュール：`uxsim/order_control_baseline_downstream_boundary.py`
+- 専用単体テスト：`tests_order_control_baseline_downstream_boundary.py`
+- observer正式名：`OrderControlBaselineDownstreamBoundaryObserver`
+- World正式属性名：`_order_control_baseline_downstream_boundary_observer`（`uxsim/uxsim.py`上。初期値`None`）
+- 公開API：
+  - `register_target_node_outlinks(target_node)`
+  - `capture_before_transfer(node)` → 監視対象終端なら`True`（pending作成）、非監視なら`False`
+  - `commit_after_transfer(node)`
+  - `clear_pending()`
+  - `export_result()`
+- 3段frozen結果型：
+  - outlink別：`OrderControlBaselineDownstreamBoundaryOutlinkResult`
+  - 対象Node別：`OrderControlBaselineDownstreamBoundaryNodeResult`
+  - 全体：`OrderControlBaselineDownstreamBoundaryResult`
+- **active**（`active_timestep_count`）：監視対象outlinkの終端Nodeで`Node.transfer()`が呼ばれる直前に、そのoutlink上にさらに先へ進もうとして待っている途中通過Vehicleが1台以上いるtimestepを1回として数える。
+- **transfer**（`transferred_vehicle_count`）：capture時に保持した途中通過Vehicleのうち、正常なtransfer処理のあと`vehicle.link`が`None`（trip-end）でもなく、かつ元の監視outlinkでもない台数を数える。
+- **目的地到着Vehicle**：監視outlinkの`end_node`がVehicleの目的地である場合、通常のtrip-end経路となり、activeおよびtransferの集計対象外である。
+- Nodeを端点・内部で固定分類せず、Vehicleごとの目的地とoutlink終端の関係で判定する。
+- `cum_departure`差を正式な実流出台数の正本にしない。
+- observerはVehicleの交通状態、物理順、RNGを変更しない。
+
+observer本体の実装・検証コミット（git履歴で確認済み）：
+
+- `68bc8aa` — `Document the pre-implementation specification for TVT downstream boundary observation`（完全実装前仕様の文書。Python本体はこのコミットでは未実装）
+- `f475294` — `Implement the downstream boundary observer core and tests`
+
+#### UXsim共通transfer loop hook
+
+- `World.exec_simulation()`内の、全Nodeに対する共通`node.transfer()`呼出位置へ接続済み。
+- 標準、`Node.transfer()`、FCFSの`transfer_fcfs_clearance()`、BATCHの`transfer_batch()`の**内部**へobserver通知を重複追加していない。
+- observer属性が`None`の通常経路では、capture・commit・clearを行わず、既存UXsimの結果を変えない。
+- `capture_before_transfer()`が`True`を返した場合のみ、そのtimestepでcapture → transfer → 成功時commit → `finally`で`clear_pending()`。
+- transferが例外を出した場合はcommitせず、`finally`でpendingを破棄する。
+
+実装コミット：
+
+- `c72e38a` — `Connect the downstream boundary observer to the UXsim transfer loop in preparation for TVT local virtual calculation`
+
+専用接続テスト：`tests_order_control_baseline_downstream_boundary_uxsim.py`
+
+### DELTAN=1の共通設定時検査
+
+- `DELTAN=1`はTVTだけでなく、FCFS・BATCH・TVTに共通するorder control前提である。
+- `Node`作成時と`World.set_order_control_for_nodes()`で、order controlを有効化する入口において検査する。
+- timestepごと、baselineごと、observerごとに重複検査しない。
+- 検査処理名：`_validate_order_control_deltan`（`uxsim/uxsim.py`）
+- 実装コミット：`7c1d5a4` — `Enforce DELTAN one for FCFS, BATCH, and TVT order control`
+- 専用テスト：`tests_order_control_deltan.py`（17件成功）
+
+文献ポジショニング用メモのコミット`9174abf`（`Document the three-stage literature positioning framework for TVT-MP`）は、下流境界observer実装の主要コミットではない。
+
+### baseline driverへの正式接続
+
+observer本体とhookは、baseline driver接続**以前**のコミットで実装済みである。baseline driverへの正式接続は別コミットである。
+
+- 本番ファイル：`uxsim/order_control_baseline_driver.py`
+- 通常経路`run_snapshot_fixed_baseline_fork()`と、順位台帳登録付き経路`run_snapshot_fixed_baseline_fork_with_tvt_rank_ledger_registration()`は、従来どおり共通の`_complete_baseline_fork_after_registration()`へ合流する。
+- observerの生成、対象Node/outlink登録、fork World属性への接続は、snapshot固定Visit登録と`registered_visit_count`の整合確認のあと、`fork_W.exec_simulation(...)`直前に**一度だけ**行う。
+- 準備helper：`_prepare_downstream_boundary_observer_for_fork(fork_W, fixed_target_node_names=...)`
+- helperの処理順：
+  1. `fork_W._order_control_baseline_downstream_boundary_observer`が`None`であることを確認（非`None`なら`RuntimeError`）
+  2. 新しい`OrderControlBaselineDownstreamBoundaryObserver`を生成
+  3. `fixed_target_node_names`の入力順に`fork_W.get_node(node_name)`で対象Nodeを取得
+  4. 各Nodeで`observer.register_target_node_outlinks(target_node)`（outlink順は`node.outlinks`登録順をobserverへ委ねる）
+  5. 全登録が成功した場合にだけ、fork Worldの正式属性へobserverを接続
+  6. observerを呼出側へ返す（`export_result()`はhelper内では呼ばない）
+- 登録途中で例外が起きた場合、部分登録済みobserverをfork World属性へ接続しない。
+- forward開始直前に`fork_timestep_before = prepared.fork_W.T`を保存する。
+- forward完了後に、既存の完了検証（`fork_W.T`の進み、終端前余裕）、Visit count再整合、実World不変検査を実行する。
+- それらがすべて成功したあと、呼出側で`observer.export_result()`を**一度だけ**実行し、返却されたfrozen結果を完了baseline結果へ格納する。
+
+実装コミット：
+
+- `7f00520` — `Integrate downstream boundary observation into the baseline driver`
+
+専用統合テスト：`tests_order_control_baseline_downstream_boundary_driver.py`（新規）
+
+### OrderControlBaselineForkResultの変更
+
+- 既存フィールドの後方へ、必須フィールドを追加した（デフォルト値なし）：
+
+```python
+downstream_boundary_result: (
+    OrderControlBaselineDownstreamBoundaryResult | None
+)
+```
+
+- `None`：baseline forward自体を実行しておらず、下流境界を観測していない（`registered_visit_count == 0`の空baseline経路）。
+- frozen結果：設定horizon全体について下流境界を観測した完了baseline。
+- 観測済みcountがすべて0でも、forwardを実行した完了baselineではfrozen結果を返す。未観測の`None`と区別する。
+- `fork_W`とobserver本体は`ForkResult`へ格納しない。
+- 既存の`OrderControlBaselineForkResult(`直接生成箇所（本番driverのempty/completed builder、後続TVTテストhelper）を、新必須フィールド明示で更新した。
+
+### 空baseline
+
+- `registered_visit_count == 0`の場合：
+  - observerを生成しない
+  - fork Worldへobserverを接続しない
+  - `exec_simulation()`を呼ばない
+  - `downstream_boundary_result = None`
+  - `fork_steps_executed = 0`
+  - count 0のfrozen境界結果を作らない
+- これは候補別局所仮想計算へ進む通常の非空baseline経路ではない。
+
+### 実World不変条件
+
+- baseline fork開始前：`real_W._order_control_baseline_downstream_boundary_observer`が`None`でなければ`ValueError`。エラー文に`must be None before baseline fork`と実際の値を含む。
+- copy直後：`fork_W._order_control_baseline_downstream_boundary_observer`が`None`でなければ`RuntimeError`。エラー文に`must be None immediately after copy`と実際の値を含む。
+- `_BaselineForkPrepared`は`real_world_downstream_boundary_observer_before`を保持する（collectorの`real_world_collector_before`と同型の意図）。正式研究経路では開始前後とも`None`。
+- return直前の既存実World不変検査に、`real_W.T`、`real_W.TIME`、`real_W._order_control_baseline_collector`とともに、observer属性の同一性（`is`）確認を統合した。各timestepでは重複検査しない。
+- observerはreal Worldへ接続しない。
+
+### 失敗時契約
+
+**observer登録失敗時**
+
+- 元の例外をそのまま伝播する。
+- baseline forwardを開始しない。
+- `OrderControlBaselineForkResult`を返さない。
+- 部分observerをfork World属性へ接続しない。
+
+**forward失敗時**（`fork_W.exec_simulation(...)`が例外）
+
+- 例外を正常結果へ変換しない。
+- `observer.export_result()`を呼ばない。
+- `_build_completed_baseline_result()`を呼ばない。
+- 部分`OrderControlBaselineForkResult`を返さない。
+- 自動再試行しない。
+- 原因修正後は、実Worldシミュレーションを最初から手動でやり直す。
+
+**transfer失敗時**（hook契約）
+
+- そのtimestepのpendingを`clear_pending()`で破棄する。
+- 正常完了していないtransferを正式累計へcommitしない。
+- baseline全体を停止し、driverは完了結果を返さない。
+
+### 結果順序
+
+- 全体の`node_results`は`target_node_names`（driver入力の固定順）に従う。
+- 各Nodeの`outlink_results`は、そのNodeの`node.outlinks`登録順に従う。
+- Link名によるsortはしない。
+- 同じ終端Nodeを共有する別origin対象Nodeのoutlinkを、終端Node名で統合しない。
+- origin対象Nodeごとの独立した境界結果を維持する。
+
+### 更新ファイル（実装コミット`7f00520`）
+
+`7f00520`で変更した8ファイル：
+
+1. `uxsim/order_control_baseline_driver.py`
+2. `tests_order_control_baseline_downstream_boundary_driver.py`（新規）
+3. `tests_order_control_baseline_driver.py`
+4. `tests_order_control_tvt_arrived_undetermined_confirmation.py`
+5. `tests_order_control_tvt_candidate_visit_set.py`
+6. `tests_order_control_tvt_inlink_candidate_physical_order.py`
+7. `tests_order_control_tvt_leading_nonparticipating_confirmation.py`
+8. `tests_order_control_tvt_right_of_entry_selection.py`
+
+`7f00520`では、observer本体モジュール、`uxsim/uxsim.py`、Markdownは変更していない。observer本体とUXsim hookは、それ以前のコミット（`f475294`、`c72e38a`等）で実装済みである。
+
+### 検証結果
+
+2026-09-20にTerminalで独立確認したテスト群（単一の一括pytest実行ではない。群ごとに実行し、件数を合算した）。
+
+| 群 | ファイル（代表） | 件数 |
+| --- | --- | ---: |
+| baseline driver統合（下流境界） | `tests_order_control_baseline_downstream_boundary_driver.py` | 15 |
+| baseline driver既存 | `tests_order_control_baseline_driver.py` | 69 |
+| observer本体 + UXsim hook | `tests_order_control_baseline_downstream_boundary.py`、`tests_order_control_baseline_downstream_boundary_uxsim.py` | 68 |
+| DELTAN | `tests_order_control_deltan.py` | 17 |
+| 後続TVT（ForkResult helper更新5群） | arrived / candidate / inlink physical order / leading / right-of-entry | 115 |
+| collector・snapshot・BATCH transfer | `tests_order_control_baseline_collector.py`、`tests_order_control_baseline_collector_uxsim.py`、`tests_order_control_baseline_snapshot.py`、`tests_order_control_batch_node_transfer_integration.py`、`tests_order_control_batch_service_queue_transfer.py`、`tests_order_control_batch_transfer.py` | 209 |
+
+**合計：493 tests passed**
+
+上記8ファイルに対する`python -m py_compile`はすべて成功した。
+
+最初の関連回帰確認では、存在しないファイル名`tests_order_control_fcfs_transfer.py`を指定したためpytest実行前に停止した。これはテスト失敗ではない。Terminalで実在する正式な関連テストファイル名を再確認し、collector・snapshot・BATCH transfer系の6ファイル（上表）を再実行して、209件すべて成功した。
+
+### 保存済みコミットとpush状態
+
+下流境界観測に関する主要実装コミット（時系列の概略）：
+
+| hash | 内容 |
+| --- | --- |
+| `7c1d5a4` | FCFS・BATCH・TVT共通のorder control設定時`DELTAN=1`検査 |
+| `f475294` | 下流境界observer本体と専用単体テスト |
+| `c72e38a` | UXsim共通transfer loopへのobserver hook |
+| `7f00520` | 全World baseline driverへの正式接続と`OrderControlBaselineForkResult`からのfrozen観測結果返却 |
+
+- `7f00520`は`origin/feature/intersection-order-control`へpush済みである。
+- 記録時点でローカルHEADと`origin/feature/intersection-order-control`は`7f00520`で一致する想定である（Git操作は文書記録時にCursorは行わない。利用者がTerminalで確認する）。
+- 未追跡の`diagnostics/order_control.zip`は対象外である。
+
+### 今回未実装
+
+下流境界観測の**実装完了**は、候補別局所仮想計算全体の完成ではない。次は引き続き未実装である。
+
+- 条件付き平均流出率
+- 平均率の保存
+- 流出許可残高
+- 制約付きsink
+- 局所mimic World
+- inlink始端新規流入
+- 候補別局所仮想計算
+- 局所仮想計算結果型
+- 経済性評価
+- 買い手価値G
+- 売り手必要補償R
+- G >= R判定
+- surplus
+- 成立候補選択
+- 同値候補選択
+- 支払いと補償
+- 実WorldへのTVT反映
+
+### 次の直接作業
+
+下流境界observerの本体、UXsim hook、`DELTAN=1`前提、baseline driver接続、および`OrderControlBaselineForkResult.downstream_boundary_result`の返却契約は、保存済み完全実装前仕様と本実装完了記録の範囲で**再考しない**。
+
+次の作業候補は、候補別局所仮想計算へ進むために必要な残りの入力・境界設計を整理することである。少なくとも次が未確定である。
+
+- inlink始端の新規流入
+- 条件付き平均境界サービス率の正式採用
+- active timestepとtransfer countからの平均率算出位置
+- 流出許可残高
+- active 0時の制約付きsink
+- 局所mimic Worldの正式範囲
+- 局所仮想計算の公開API
+- 局所仮想計算の結果型
+- resolved / unresolved条件
+
+本節（2026-09-20文書記録）では、上記を新たに制度確定しない。
+
 # 次の作業開始点
 
 次の直接作業は、具体的買い手候補集合生成部品の実装前仕様を、既存の公開型と接続できる形で確定することである。
@@ -7788,6 +8041,8 @@ Cursorは確認・報告だけを行い、Git変更操作をしない。
 **2026-09-19更新（最新の再開情報）：** FIFO検査接続部品は実装・検証・push済みである（保存済み実装コミット`33e6101`）。保存済み最新の局所仮想計算設計検討コミットは`5dd4be9`である。候補別局所仮想計算は未実装である。下流境界観測の基本設計を確定した。`DELTAN=1`をTVT初期研究範囲の制度上の前提とする。activeは終端`Node.transfer()`直前の途中通過Vehicle待機で判定する。実流出台数は、transfer前に保持した途中通過Vehicleがtransfer後に元のoutlinkを離れた数とする。目的地到着Vehicleは集計対象外である。Node固定分類ではなくVehicleごとの目的地判定を使う。下流境界専用observerと独立した読取専用結果を使う方向である。公開API、結果型、例外契約、局所適用処理は未確定である。Python実装と専用テストは未着手である。次の直接作業は、今回の境界観測基本設計を前提に、下流境界観測部品の完全な実装前仕様に必要な残る設計判断を整理することである。判断対象は、observerの正式名称と責務、World属性名、登録API、transfer前後観測API、outlink別・対象Node別・全体結果型、`OrderControlBaselineForkResult`への追加フィールド、結果順序、active=0およびactive>0かつtransfer=0の表現、条件付き平均率の計算位置、`DELTAN=1`の検証位置、空baseline経路、失敗時の部分状態、専用テスト契約である。inlink始端新規流入、局所mimic World全体、経済性評価にはまだ進まない。直ちに局所仮想計算を実装しない。最新詳細は、本ファイルの「TVT-MP候補別局所仮想計算の設計検討記録」にある「2026-09-19更新：下流境界観測の調査結果と基本設計の確定」を参照する。今回のMarkdown追記は記録時点では未コミットである。
 
 **2026-09-19追記（最新の再開情報）：** 下流境界観測部品の完全な実装前仕様を確定した。保存済み基本設計コミットは`c2c98c0`である。Python実装と専用テストは未着手である。次の直接作業は、保存済み仕様に従い`uxsim/order_control_baseline_downstream_boundary.py`と`tests_order_control_baseline_downstream_boundary.py`を実装することである。まず新規observerモジュールと専用単体テストから着手する。3つのfrozen結果型、`OrderControlBaselineDownstreamBoundaryObserver`、登録、capture、commit、clear、export、二重登録、pending、`vehicle.link is None`非加算を最初の実装単位とする。この単位では`World.exec_simulation()`、baseline driver、ForkResult、DELTAN validator、既存テストhelperはまだ変更しない。既存基本設計は再考しない。条件付き平均率、流出許可残高、局所mimic World、inlink始端、経済評価へ進まない。最新詳細は、本ファイルの「全World baseline下流境界観測部品の完全な実装前仕様」を参照する。今回のMarkdown追記は未コミットである。
+
+**2026-09-20更新（最新の再開情報）：** 下流境界observer本体、UXsim transfer loop hook、FCFS・BATCH・TVT共通の`DELTAN=1`設定時検査、全World baseline driverへの正式接続は、実装・検証・commit・push済みである。最新の下流境界関連実装コミットは`7f00520`（`Integrate downstream boundary observation into the baseline driver`）である。observer本体は`f475294`、UXsim hookは`c72e38a`、`DELTAN=1`検査は`7c1d5a4`で実装済みである。観測結果は`OrderControlBaselineForkResult.downstream_boundary_result`から取得する。空baselineは`None`、完了baselineは観測済みcount 0を含むfrozen結果である。専用統合テストを含む493件をTerminalで群ごとに独立確認し、すべて成功した。変更8ファイル（`7f00520`）の`py_compile`も成功した。下流境界observerの実装済み部分（本体・hook・DELTAN前提・driver接続・ForkResult返却契約）を再考しない。条件付き平均率、流出許可残高、局所mimic World、inlink始端新規流入、候補別局所仮想計算、経済性評価、成立候補選択、実WorldへのTVT反映は未実装である。次の直接作業は、候補別局所仮想計算へ進むために必要な残る入力・境界設計を整理することである。本節ではそれらを新たに確定しない。最新詳細は、本ファイルの「全World baseline下流境界観測部品の実装完了記録」を参照する。`diagnostics/order_control.zip`は対象外である。
 
 # 新しいチャットでの再開方法
 
