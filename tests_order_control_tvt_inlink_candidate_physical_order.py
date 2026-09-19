@@ -13,6 +13,9 @@ from dataclasses import FrozenInstanceError
 from unittest.mock import patch
 
 from uxsim.order_control_baseline_collector import OrderControlBaselineCollector
+from uxsim.order_control_baseline_downstream_boundary import (
+    OrderControlBaselineDownstreamBoundaryResult,
+)
 from uxsim.order_control_baseline_driver import OrderControlBaselineForkResult
 from uxsim.order_control_baseline_snapshot import (
     OrderControlBaselineSnapshotInlinkPhysicalOrder,
@@ -151,6 +154,10 @@ def _fork_result(
         final_fork_timestep=60,
         registered_visit_count=1,
         inlink_physical_orders=inlink_physical_orders,
+        # This test helper does not exercise downstream boundary observation.
+        downstream_boundary_result=OrderControlBaselineDownstreamBoundaryResult(
+            node_results=(),
+        ),
     )
 
 

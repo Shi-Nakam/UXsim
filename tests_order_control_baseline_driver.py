@@ -12,6 +12,9 @@ from unittest.mock import patch
 from uxsim import World
 from uxsim.analyzer import Analyzer
 from uxsim.order_control_baseline_collector import OrderControlBaselineCollector
+from uxsim.order_control_baseline_downstream_boundary import (
+    OrderControlBaselineDownstreamBoundaryResult,
+)
 from uxsim.order_control_baseline_driver import (
     OrderControlBaselineForkResult,
     run_snapshot_fixed_baseline_fork,
@@ -168,6 +171,9 @@ def _real_world_snapshot(W):
         "T": W.T,
         "TIME": W.TIME,
         "collector": W._order_control_baseline_collector,
+        "downstream_boundary_observer": (
+            W._order_control_baseline_downstream_boundary_observer
+        ),
     }
 
 
@@ -724,6 +730,7 @@ def test_zero_total_result_fields():
     assert isinstance(result.collector, OrderControlBaselineCollector)
     assert result.collector.export_node_baseline_visits("junction_a") == []
     assert result.collector.export_node_baseline_visits("junction_b") == []
+    assert result.downstream_boundary_result is None
 
 
 def test_zero_total_registered_visits_skips_insufficient_margin_validation():
@@ -1898,6 +1905,10 @@ def test_completed_result_fields():
     assert not hasattr(result, "return_code")
     assert not hasattr(result, "early_terminated")
     assert not hasattr(result, "fork_W")
+    assert isinstance(
+        result.downstream_boundary_result,
+        OrderControlBaselineDownstreamBoundaryResult,
+    )
 
 
 def test_general_driver_result_includes_inlink_physical_orders():

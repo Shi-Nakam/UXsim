@@ -11,6 +11,10 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 
 from uxsim.order_control_baseline_collector import OrderControlBaselineCollector
+from uxsim.order_control_baseline_downstream_boundary import (
+    OrderControlBaselineDownstreamBoundaryObserver,
+    OrderControlBaselineDownstreamBoundaryResult,
+)
 from uxsim.order_control_baseline_snapshot import (
     OrderControlBaselineSnapshotInlinkPhysicalOrder,
     apply_snapshot_fixed_visit_registration_plan,
@@ -35,6 +39,9 @@ class OrderControlBaselineForkResult:
     final_fork_timestep: int
     registered_visit_count: int
     inlink_physical_orders: tuple[OrderControlBaselineSnapshotInlinkPhysicalOrder, ...]
+    downstream_boundary_result: (
+        OrderControlBaselineDownstreamBoundaryResult | None
+    )
 
 
 @dataclass
@@ -50,6 +57,7 @@ class _BaselineForkPrepared:
     real_world_t_before: int
     real_world_time_before: float
     real_world_collector_before: object
+    real_world_downstream_boundary_observer_before: object
 
 
 def _validate_and_freeze_target_node_names(target_node_names) -> tuple[str, ...]:
@@ -132,6 +140,12 @@ def _validate_copied_fork(
             "fork_W._order_control_baseline_collector must be None immediately "
             f"after copy; got {fork_W._order_control_baseline_collector!r}."
         )
+    if fork_W._order_control_baseline_downstream_boundary_observer is not None:
+        raise RuntimeError(
+            "fork_W._order_control_baseline_downstream_boundary_observer must be "
+            "None immediately after copy; "
+            f"got {fork_W._order_control_baseline_downstream_boundary_observer!r}."
+        )
 
 
 def _validate_remaining_baseline_steps(
@@ -184,6 +198,7 @@ def _validate_real_world_unchanged(
     real_world_t_before: int,
     real_world_time_before: float,
     real_world_collector_before,
+    real_world_downstream_boundary_observer_before,
 ) -> None:
     if real_W.T != real_world_t_before:
         raise RuntimeError(
@@ -201,6 +216,16 @@ def _validate_real_world_unchanged(
             "fork driver execution: "
             f"before={real_world_collector_before!r}, "
             f"after={real_W._order_control_baseline_collector!r}."
+        )
+    if (
+        real_W._order_control_baseline_downstream_boundary_observer
+        is not real_world_downstream_boundary_observer_before
+    ):
+        raise RuntimeError(
+            "real_W._order_control_baseline_downstream_boundary_observer changed "
+            "during baseline fork driver execution: "
+            f"before={real_world_downstream_boundary_observer_before!r}, "
+            f"after={real_W._order_control_baseline_downstream_boundary_observer!r}."
         )
 
 
@@ -221,6 +246,7 @@ def _build_empty_baseline_result(
         final_fork_timestep=baseline_timestep_T,
         registered_visit_count=0,
         inlink_physical_orders=inlink_physical_orders,
+        downstream_boundary_result=None,
     )
 
 
@@ -233,6 +259,7 @@ def _build_completed_baseline_result(
     fork_W: World,
     registered_visit_count: int,
     inlink_physical_orders: tuple[OrderControlBaselineSnapshotInlinkPhysicalOrder, ...],
+    downstream_boundary_result: OrderControlBaselineDownstreamBoundaryResult,
 ) -> OrderControlBaselineForkResult:
     return OrderControlBaselineForkResult(
         collector=collector,
@@ -243,6 +270,7 @@ def _build_completed_baseline_result(
         final_fork_timestep=fork_W.T,
         registered_visit_count=registered_visit_count,
         inlink_physical_orders=inlink_physical_orders,
+        downstream_boundary_result=downstream_boundary_result,
     )
 
 
@@ -264,10 +292,19 @@ def _prepare_baseline_fork(
             "real_W._order_control_baseline_collector must be None before "
             f"baseline fork; got {real_W._order_control_baseline_collector!r}."
         )
+    if real_W._order_control_baseline_downstream_boundary_observer is not None:
+        raise ValueError(
+            "real_W._order_control_baseline_downstream_boundary_observer must be "
+            "None before baseline fork; "
+            f"got {real_W._order_control_baseline_downstream_boundary_observer!r}."
+        )
 
     real_world_t_before = real_W.T
     real_world_time_before = real_W.TIME
     real_world_collector_before = real_W._order_control_baseline_collector
+    real_world_downstream_boundary_observer_before = (
+        real_W._order_control_baseline_downstream_boundary_observer
+    )
     baseline_timestep_T = real_W.T
 
     fork_W = real_W.copy()
@@ -290,7 +327,31 @@ def _prepare_baseline_fork(
         real_world_t_before=real_world_t_before,
         real_world_time_before=real_world_time_before,
         real_world_collector_before=real_world_collector_before,
+        real_world_downstream_boundary_observer_before=(
+            real_world_downstream_boundary_observer_before
+        ),
     )
+
+
+def _prepare_downstream_boundary_observer_for_fork(
+    fork_W: World,
+    *,
+    fixed_target_node_names: tuple[str, ...],
+) -> OrderControlBaselineDownstreamBoundaryObserver:
+    if fork_W._order_control_baseline_downstream_boundary_observer is not None:
+        raise RuntimeError(
+            "fork_W._order_control_baseline_downstream_boundary_observer must be "
+            "None before observer connection; "
+            f"got {fork_W._order_control_baseline_downstream_boundary_observer!r}."
+        )
+
+    observer = OrderControlBaselineDownstreamBoundaryObserver()
+    for node_name in fixed_target_node_names:
+        target_node = fork_W.get_node(node_name)
+        observer.register_target_node_outlinks(target_node)
+
+    fork_W._order_control_baseline_downstream_boundary_observer = observer
+    return observer
 
 
 def _complete_baseline_fork_after_registration(
@@ -312,6 +373,9 @@ def _complete_baseline_fork_after_registration(
             real_world_t_before=prepared.real_world_t_before,
             real_world_time_before=prepared.real_world_time_before,
             real_world_collector_before=prepared.real_world_collector_before,
+            real_world_downstream_boundary_observer_before=(
+                prepared.real_world_downstream_boundary_observer_before
+            ),
         )
         return _build_empty_baseline_result(
             collector=prepared.collector,
@@ -324,6 +388,11 @@ def _complete_baseline_fork_after_registration(
     _validate_remaining_baseline_steps(
         prepared.fork_W,
         prepared.baseline_horizon_steps,
+    )
+
+    observer = _prepare_downstream_boundary_observer_for_fork(
+        prepared.fork_W,
+        fixed_target_node_names=prepared.fixed_target_node_names,
     )
 
     fork_timestep_before = prepared.fork_W.T
@@ -347,8 +416,12 @@ def _complete_baseline_fork_after_registration(
         real_world_t_before=prepared.real_world_t_before,
         real_world_time_before=prepared.real_world_time_before,
         real_world_collector_before=prepared.real_world_collector_before,
+        real_world_downstream_boundary_observer_before=(
+            prepared.real_world_downstream_boundary_observer_before
+        ),
     )
 
+    downstream_boundary_result = observer.export_result()
     return _build_completed_baseline_result(
         collector=prepared.collector,
         fixed_target_node_names=prepared.fixed_target_node_names,
@@ -357,6 +430,7 @@ def _complete_baseline_fork_after_registration(
         fork_W=prepared.fork_W,
         registered_visit_count=registered_visit_count,
         inlink_physical_orders=inlink_physical_orders,
+        downstream_boundary_result=downstream_boundary_result,
     )
 
 
