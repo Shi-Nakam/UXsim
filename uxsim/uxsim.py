@@ -44,6 +44,15 @@ def _validate_order_control_batch_t_trigger_level(value, node_name=None):
         )
 
 
+def _validate_order_control_deltan(deltan):
+    if not isinstance(deltan, int) or isinstance(deltan, bool) or deltan != 1:
+        raise ValueError(
+            "Intersection order control requires DELTAN=1 because FCFS, BATCH, and "
+            f"TVT control individual Vehicle objects; got DELTAN={deltan!r} with type "
+            f"{type(deltan).__name__}."
+        )
+
+
 def _validate_order_control_batch_virtual_horizon(value, node_name=None):
     if not isinstance(value, int) or isinstance(value, bool):
         if node_name is not None:
@@ -212,6 +221,9 @@ class Node:
             raise ValueError(
                 'A node must be order_control_eligible=True before using fcfs, batch, or time_value order control.'
             )
+
+        if order_control_type != "none":
+            _validate_order_control_deltan(W.DELTAN)
 
         _validate_order_control_batch_t_trigger_level(
             order_control_batch_t_trigger_level,
@@ -4164,6 +4176,9 @@ class World:
 
         _validate_order_control_batch_t_trigger_level(order_control_batch_t_trigger_level)
         _validate_order_control_batch_virtual_horizon(order_control_batch_virtual_horizon)
+
+        if order_control_type != "none":
+            _validate_order_control_deltan(W.DELTAN)
 
         nodes_to_configure = []
         for node_name in node_names:
