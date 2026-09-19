@@ -296,12 +296,15 @@ class OrderControlBaselineDownstreamBoundaryObserver:
                 outlink_state
             )
 
-    def capture_before_transfer(self, node: Any) -> None:
+    def capture_before_transfer(self, node: Any) -> bool:
         """
         Snapshot passing vehicles at a terminal Node before ``transfer()``.
 
-        No-op for Nodes that are not terminals of registered outlinks. Does not
-        change committed counts or mutate simulation state.
+        Returns True if ``node`` is a monitored outlink terminal and a pending
+        capture was created. Returns False if ``node`` is not monitored. True
+        does not mean that any vehicle was waiting. Does not change committed
+        counts or mutate simulation state. Pending is assigned only after the
+        snapshot is complete, so a failed capture leaves no pending.
         """
         if self._pending_capture is not None:
             raise RuntimeError(
@@ -314,7 +317,7 @@ class OrderControlBaselineDownstreamBoundaryObserver:
             terminal_node_id
         )
         if monitored_outlink_states is None:
-            return
+            return False
 
         incoming_vehicles = getattr(node, "incoming_vehicles", None)
         if incoming_vehicles is None:
@@ -338,6 +341,7 @@ class OrderControlBaselineDownstreamBoundaryObserver:
             terminal_node=node,
             outlink_vehicle_snapshots=outlink_vehicle_snapshots,
         )
+        return True
 
     def commit_after_transfer(self, node: Any) -> None:
         """

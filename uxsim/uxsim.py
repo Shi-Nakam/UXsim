@@ -4064,6 +4064,9 @@ class World:
         W.order_control_batch_level_2_level_1_fallback_count = 0
         # Fork-only baseline visit collector; real_W keeps None (see design memo §25.11).
         W._order_control_baseline_collector = None
+        # Fork-only downstream boundary observer for all-World baseline; real_W keeps None.
+        # Baseline driver connection is a later implementation unit.
+        W._order_control_baseline_downstream_boundary_observer = None
 
     def addNode(W, name: str, x: float, y: float, signal: list[float]=[0], signal_offset: float=0, signal_offset_old: float|None=None, flow_capacity: float|None=None, number_of_lanes: int=None, auto_rename=False, attribute=None, user_attribute=None, user_function=None, order_control_type="none", batch_size=1, transaction_case=None, order_control_eligible=False, order_control_batch_t_trigger_level=1, order_control_batch_virtual_horizon=30) -> Node:
         """
@@ -4962,7 +4965,24 @@ class World:
                 node.update()
                 
             for node in W.NODES:
-                node.transfer()
+                downstream_boundary_observer = (
+                    W._order_control_baseline_downstream_boundary_observer
+                )
+                if downstream_boundary_observer is None:
+                    node.transfer()
+                    continue
+
+                capture_created = False
+                try:
+                    capture_created = (
+                        downstream_boundary_observer.capture_before_transfer(node)
+                    )
+                    node.transfer()
+                    if capture_created:
+                        downstream_boundary_observer.commit_after_transfer(node)
+                finally:
+                    if capture_created:
+                        downstream_boundary_observer.clear_pending()
 
             for veh in W.VEHICLES_RUNNING.values():
                 veh.carfollow()

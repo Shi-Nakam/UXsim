@@ -483,7 +483,8 @@ def test_capture_on_unregistered_terminal_is_no_op():
     origin, _, _ = _link_chain("A", "A_to_B", "B")
     observer.register_target_node_outlinks(origin)
     unrelated = FakeNode("Z", incoming_vehicles=_TrapIncomingList())
-    observer.capture_before_transfer(unrelated)
+    created = observer.capture_before_transfer(unrelated)
+    assert created is False
     assert observer._pending_capture is None
     exported = observer.export_result()
     assert exported.node_results[0].outlink_results[0].active_timestep_count == 0
@@ -531,6 +532,50 @@ def test_capture_does_not_change_committed_counts():
     assert outlink_state.active_timestep_count == 0
     assert outlink_state.transferred_vehicle_count == 0
     observer.clear_pending()
+
+
+def test_capture_returns_true_for_monitored_terminal():
+    observer = _new_observer()
+    origin, link_ab, terminal_b = _link_chain("A", "A_to_B", "B")
+    observer.register_target_node_outlinks(origin)
+    terminal_b.incoming_vehicles = [FakeVehicle("v1", link_ab)]
+    created = observer.capture_before_transfer(terminal_b)
+    assert created is True
+    assert observer._pending_capture is not None
+    observer.clear_pending()
+
+
+def test_capture_returns_true_for_monitored_terminal_with_no_vehicles():
+    observer = _new_observer()
+    origin, _, terminal_b = _link_chain("A", "A_to_B", "B")
+    observer.register_target_node_outlinks(origin)
+    terminal_b.incoming_vehicles = []
+    created = observer.capture_before_transfer(terminal_b)
+    assert created is True
+    assert observer._pending_capture is not None
+    observer.commit_after_transfer(terminal_b)
+    out = observer.export_result().node_results[0].outlink_results[0]
+    assert out.active_timestep_count == 0
+    assert out.transferred_vehicle_count == 0
+
+
+def test_capture_exception_during_vehicle_scan_leaves_no_pending():
+    observer = _new_observer()
+    origin, _, terminal_b = _link_chain("A", "A_to_B", "B")
+    observer.register_target_node_outlinks(origin)
+
+    class _RaisingLinkVehicle:
+        @property
+        def link(self):
+            raise RuntimeError("vehicle.link access failed")
+
+    terminal_b.incoming_vehicles = [_RaisingLinkVehicle()]
+    try:
+        observer.capture_before_transfer(terminal_b)
+        raise AssertionError("expected RuntimeError")
+    except RuntimeError as error:
+        assert str(error) == "vehicle.link access failed"
+    assert observer._pending_capture is None
 
 
 def test_double_capture_raises_runtime_error():
@@ -842,6 +887,9 @@ TESTS = [
     test_capture_keeps_only_vehicles_on_monitored_outlink,
     test_capture_multiple_vehicles_same_outlink,
     test_capture_does_not_change_committed_counts,
+    test_capture_returns_true_for_monitored_terminal,
+    test_capture_returns_true_for_monitored_terminal_with_no_vehicles,
+    test_capture_exception_during_vehicle_scan_leaves_no_pending,
     test_double_capture_raises_runtime_error,
     test_commit_vehicle_stays_on_outlink_zero_transfer,
     test_commit_vehicle_moves_to_other_link_counts_transfer,
