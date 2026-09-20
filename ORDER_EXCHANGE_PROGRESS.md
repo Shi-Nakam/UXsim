@@ -5993,6 +5993,7 @@ helper の実装、専用テスト、設計メモの整合を最終確認した�
 - BATCH Level 2とFCFSの既存規則を調査した。BATCHはtrigger 1台の通過時刻と早期終了が主目的、TVTは経済評価に必要な複数Visitの通過時刻取得が目的であり、終了条件が異なる。
 - 全Worldではなく局所計算とする制度上の理由は、同じ時点Tに他NodeのTVT結果が未確定であり、候補別全World計算が実際の将来Worldを表さないためである。計算負荷削減だけが理由ではない。
 - `trade_order`を通過試行順とする基本方針を採用した。未到着・物理・容量制約は一時スキップ、クリアランス未充足は走査終了。一時スキップは正式順位の変更ではない。
+- **2026-09-21注記：** 通過試行のskip/break規則は維持する。拘束対象を`trade_order`全体とする当時の方針は、後続の途中確定記録で`K_fixed`に基づく完全な局所拘束順位列へ更新した。完全な拘束順位列は`trade_order`の必要部分を材料に含み得るが、`trade_order`の単純prefixと同一とは限らない。最新は`ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_2.md`の「TVT-MP候補別局所仮想計算の入力・境界・順位拘束設計の途中確定記録」。
 - baseline保存済み`route_next_link_name`を使用し、局所計算中に`route_next_link_choice()`を呼び直さない。
 - 局所mimic Worldへ対象Nodeの全inlink・全outlinkとsnapshot時点の全Vehicleを含める案が有力。候補Visitだけを含める案は第一候補ではない。
 - horizonは可変である。30や50に限定せず、計算負荷が許せば100以上も試す。一つの実験条件ではbaselineと局所計算で同じhorizonを使う。
@@ -6060,6 +6061,26 @@ helper の実装、専用テスト、設計メモの整合を最終確認した�
 - 条件付き平均流出率、流出許可残高、制約付きsink、局所mimic World、inlink始端新規流入、候補別局所仮想計算、経済性評価、成立候補選択、実WorldへのTVT反映は未実装。
 - 次の再開地点：候補別局所仮想計算へ進むために必要な残る入力・境界設計の整理（本追記では新規制度確定しない）。
 - 詳細は`ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_2.md`の「全World baseline下流境界観測部品の実装完了記録」を参照。
+- `diagnostics/order_control.zip`は対象外である。
+
+##### 2026-09-21追記：TVT-MP候補別局所仮想計算の入力・境界・順位拘束を途中確定
+
+- 下流境界observerまでの実装は完了済みである。候補別局所仮想計算は未実装である。
+- 今回、入力、下流境界、horizon、早期終了、順位拘束範囲について途中確定した。完全な実装前仕様ではない。
+- 条件付き平均流出率方式を正式採用した。観測countを正本とし、局所計算側で必要時に算出する。baseline結果へ平均率を新たに保存しない。
+- 流出許可残高の小数部分と未使用整数部分の繰越しを採用した。残高は具体的候補別、outlink別に独立する。初期残高は0。人工的な上限は設けない。残高は物理的に貯蔵された容量ではない。
+- `active=0`は制約付きsinkへ分岐するが、具体実装は未確定である。`active=0`を無混雑の直接観測としない。
+- 時点`T`以後の新規流入なしを初期実装方針として採用した。影響が存在しないとは主張しない。局所予測が楽観的になり得る。
+- `configured_horizon_steps`をlocal horizon上限とする。別の自由入力horizonは設けない。全buyerと全sellerの必要情報が揃えば早期終了する。
+- buyerとsellerは別に識別する。buyerだから短縮、sellerだから遅延とは決めつけない。時間差を局所結果側で計算するか経済評価側で計算するかは未確定である。
+- `trade_order`全体を局所拘束順位として使用しない。局所仮想計算では、`K_fixed`制度に基づいて構築される完全な拘束順位列を使用する。この完全な拘束順位列は、`trade_order`の必要部分を材料に含み得るが、`N+1`位以降の意思決定窓内Visitも含み得るため、`trade_order`の単純prefixとは限らない。完全な拘束順位列を構築するための公開材料と接続方法は、次の直接調査事項である。それより後方のVehicleへbaseline順位を強制しない。
+- `candidate_visits`、意思決定窓、`trade_scope`は別概念である。一般形順位の制度ロジックと順位アルゴリズム、FIFO検査接続は再考しない。ただし、既存の公開結果型を含めて一切変更不要であるとは確定しない。
+- 拘束順位外Vehicleは標準transfer相当処理を用いる方向だが、詳細は未確定である。既存`Node.transfer()`を局所loop後段でそのまま呼ばない。
+- 局所mimic Worldは対象Nodeと全inlink・全outlink、時点`T`に存在する全Vehicleを含む。候補Visitだけを抜き出す方式は採用しない。含めた全VehicleへTVT順位を付与しない。
+- Python実装と専用テストは未着手である。
+- 詳細正本は`ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_2.md`の「TVT-MP候補別局所仮想計算の入力・境界・順位拘束設計の途中確定記録」。
+- 次の直接作業は、`K_fixed`に従う完全な局所拘束順位列を構築するために、現行の上流結果から取得可能なVisitと情報を調査し、不足する公開材料と最小の接続方法を確定することである。拘束順位を持たないVehicleへ適用するUXsim標準transfer相当処理の詳細設計は、その次の作業である。その後、制約付きsink、公開API、結果型、例外契約、専用テスト契約、完全な実装前仕様へ進む。
+- 今回のMarkdown追記は未コミットである。
 - `diagnostics/order_control.zip`は対象外である。
 
 #### 2026-08-29：TVT権利保有車両選定前の先頭非参加Vehicle先行確定の記録補修
