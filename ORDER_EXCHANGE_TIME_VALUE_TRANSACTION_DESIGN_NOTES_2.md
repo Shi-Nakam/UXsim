@@ -8944,6 +8944,8 @@ TVT形成前の確定済み順位にも、今回の候補成立時に新たに�
 
 **記録日：2026-09-21**
 
+**2026-09-22更新注記：** 本節は保存済みcommit `1613eb9` の正本であり、削除しない。本節作成時点では、拘束順位外Vehicleの処理とactive=0時の制約付きsinkは未確定であった。その後、2026-09-22の「TVT-MP候補別局所仮想計算の拘束順位外処理・下流境界・統合仕様の確定記録」で、拘束順位外Vehicleの進路4分類と一時的試行順、clearance、状態更新、active=0を含む下流境界3分岐、候補別局所仮想計算の統合仕様を確定した。本節の4区分、正式進路の永続保存、原子的確定、原因別最終分岐は維持する。それらを本節の「未確定」記述で上書きして読まない。現在の最新正本は当該2026-09-22節である。完全な実装前仕様は、同節でもまだ作成していない。
+
 本節は、2026-09-21の「TVT-MP候補別局所仮想計算の入力・境界・順位拘束設計の途中確定記録」の後続である。
 
 利用者との明示的な採否判断により、その後追加確定した内容を記録する。
@@ -9449,6 +9451,8 @@ TVT検討を行わない。
 
 ## 16. 拘束順位外Vehicleについて調査済みの事実
 
+**2026-09-22更新注記：** 本小節は2026-09-21時点の調査記録である。当時は正式採用に至っていなかった。2026-09-22の「TVT-MP候補別局所仮想計算の拘束順位外処理・下流境界・統合仕様の確定記録」で、進路4分類、一時的FCFS走査、clearance、incoming保持、物理移動の制度を確定した。本小節の調査事実は削除しない。本小節を現在も未確定の正本として読まない。
+
 拘束順位外Vehicleの処理は重要だが、正式採用には至っていない。調査済みだが、未確定である。
 
 確定済みまたは調査で確認済みの範囲は次である。
@@ -9501,7 +9505,11 @@ Vehicle IDによるoutlink選択は、BATCH Level 2の局所近似であり、UX
 
 TVTでは参考となる先例だが、正式採否は未確定である。
 
+**2026-09-22更新注記：** 上記「正式採否は未確定」は2026-09-21時点の記録である。その後、分類4（snapshotでも今回baselineでも対象Node向け進路が未判明の拘束順位外Vehicle）に限り、受入可能なoutlink集合へ実Vehicle IDの剰余を適用するBATCH Level 2型の仮想進路を採用した。分類3のbaseline進路を捨ててVehicle ID方式へ置き換える案は撤回済みである。全物理outlinkへ剰余を適用してから循環探索する旧案も撤回済みである。詳細は2026-09-22の「TVT-MP候補別局所仮想計算の拘束順位外処理・下流境界・統合仕様の確定記録」を参照する。
+
 ## 18. 拘束順位外Vehicleの未確定事項
+
+**2026-09-22更新注記：** 本小節の「まだ正式採用していない」は2026-09-21時点の記録である。一時的FCFS走査、clearance未充足時の当該timestep終了、残容量の共有、incoming保持、分類4のVehicle ID方式は、2026-09-22節で確定した。公開API名、結果型名、helper名、診断フィールドのPython型は、同節でも未確定のままである。本小節を現在の未確定一覧として読まない。
 
 拘束順位外Vehicleについて、次はまだ正式採用していない。
 
@@ -9571,6 +9579,8 @@ TVTでは参考となる先例だが、正式採否は未確定である。
 
 ## 20. 次の再開地点
 
+**2026-09-22更新注記：** この再開地点は、2026-09-21の追加途中確定記録を作成した時点の歴史的記録である。その後、拘束順位外Vehicleの対象Node向け進路4分類、一時的試行順、clearance、状態更新、物理移動、active=0を含む下流境界3分岐、候補別局所仮想計算の統合仕様を確定した。現在の最新正本は、後続の「TVT-MP候補別局所仮想計算の拘束順位外処理・下流境界・統合仕様の確定記録」である。現在の直接作業は、公開API、結果型、helper責務、診断型、例外契約、モジュール構成、専用テスト契約、既存上流結果との接続を含む完全な実装前仕様の作成である。この再開地点を現在の作業指示として読まない。
+
 次の直接作業は、今回確定した4区分、正式進路保存、原子的確定、最終分岐の再検討ではない。
 
 次の直接作業は次である。
@@ -9596,6 +9606,709 @@ TVTでは参考となる先例だが、正式採否は未確定である。
 - 単車線研究範囲で必要な最小処理
 
 この論点が確定した後に、active=0時の制約付きsinkへ進む。
+
+# TVT-MP候補別局所仮想計算の拘束順位外処理・下流境界・統合仕様の確定記録
+
+**記録日：2026-09-22**
+
+本節は、保存済みcommit `1613eb9`（`Document the four-part TVT-MP binding order and confirmation-time route preservation for local virtual calculation, and outcome-specific final rank confirmation rules`）以後に確定し、同commit時点では未記録だった事項の詳細正本である。
+
+本節は実装完了記録ではない。候補別局所仮想計算の制度設計、および次に作る完全な実装前仕様へ向けた確定記録である。
+
+Python実装と専用テストは未着手である。
+
+直前の「TVT-MP完全局所拘束順位列・確定時正式進路保存・最終分岐設計の追加途中確定記録」（記録日2026-09-21、保存済みcommit `1613eb9`）は削除しない。同節で確定済みの次は、本節で再確定せず、接続に必要な範囲で参照する。
+
+- 完全な局所拘束順位列の4区分
+- 順位確定時の対象Node向け正式進路
+- 順位と正式進路の原子的保存
+- 候補別順位表の構築と正式確定の分離
+- 採用候補あり、全候補却下、baseline情報不足、意思決定窓内Visitが0件の原因別最終分岐
+
+同節の作成時点では、拘束順位外Vehicleの処理とactive=0時の制約付きsinkは未確定であった。本節で、拘束順位外Vehicleの進路と通過処理、下流境界の3分岐、候補別局所仮想計算の統合仕様を確定する。
+
+公開API名、結果型名、private helper名、診断フィールドのPython型、モジュール名、専用テストファイル名を含む完全な実装前仕様は、本節ではまだ作成しない。
+
+一般形順位再構成、空き順位枠方式、FIFO検査、候補数上限N、`K_fixed`制度、baseline collectorの対象Node到着時進路記録は再考しない。
+
+状態表現:
+
+- 制度設計の主要採否は本節の範囲で確定
+- 完全な実装前仕様は未作成
+- Python実装未着手
+- 専用テスト未着手
+- 前回commit `1613eb9`の4区分、正式進路保存、原子的確定、原因別最終分岐は維持する
+- 拘束順位外Vehicle処理は、本節で進路4分類とtimestep手順まで確定した
+- active=0時の制約付きsinkは、本節で確定した
+- 公開API、結果型、helper名、診断のPython型は未確定
+- 今回はMarkdown記録だけを更新する
+
+後続実装では、本節末尾の可読性方針を必ず守る。正しく動くことを最優先とし、Python初学者が交通上の意味と処理順を追える明示的な実装を、短さや巧妙さより優先する。
+
+## 1. 完全な拘束順位列と拘束順位外Vehicleの関係
+
+完全な拘束順位列は、前回確定済みの4区分を次の順で連結したVisit列である。本節で4区分の中身を変更しない。
+
+区分1は、今回のbaseline開始前から順位確定済みで、局所計算開始時点で対象Nodeをまだ通過していないVisitである。
+
+区分2は、今回のbaseline結果により、TVT候補形成前に先行確定するVisitである。baseline到着timestepがT以下と判明したVisitと、意思決定窓先頭の連続する非参加Visitを含む。過去のbaselineで確定済みだったVisitではない。
+
+区分3は、今回の具体的TVT-MP候補の`trade_scope`内のVisitである。buyerとsellerには取引後順位を使う。非参加Visitは固定されたbaseline順位枠を維持する。区分3を「全Visitの順位が変わる範囲」とは扱わない。
+
+区分4は、`trade_scope`外だが`K_fixed`内にあり、baseline順位で追加確定されるVisitである。N+1位以降の意思決定窓内Visitも`K_fixed`内に含まれ得る。
+
+連結順は次である。
+
+```text
+区分1
+→ 区分2
+→ 区分3
+→ 区分4
+```
+
+`trade_order`全体をこの列として使わない。`trade_order`の単純prefixだけでこの列を作れるとも扱わない。
+
+完全な拘束順位列内のVisitがすべて到着する前に、拘束順位外Vehicleが対象Nodeへ到着することがあり得る。
+
+局所的な通過試行上、拘束順位外Vehicleの一時的な試行順は、各仮想timestepにおける完全な拘束順位列の走査後に置く。
+
+ただし、拘束順位Vehicle全員が将来通過し終わるまで、拘束順位外Vehicleを一切処理しないという意味ではない。
+
+ある仮想timestepで拘束順位Visitが未到着、inlink物理先頭でない、または通常の物理条件や容量条件を満たさないため一時スキップされた場合でも、clearanceによる停止がなく、残容量があれば、その同じ仮想timestepに拘束順位外Vehicleまで処理順が進み得る。
+
+したがって、拘束順位列の後方にまだ未通過のVisitが残っていても、そのtimestepの拘束順位走査がclearanceで止まっていなければ、余った容量を同じtimestepの拘束順位外Vehicleに使ってよい。
+
+## 2. 対象Node向け進路の4分類
+
+局所仮想計算で対象Nodeから出るときに使う進路は、Vehicleの状態に応じて4分類する。分類番号は、完全な拘束順位列の区分1から区分4とは別である。混同しない。
+
+### 分類1：snapshot時点で対象Node向け進路が決定済みのVehicle
+
+扱い:
+
+- snapshot進路を候補別局所仮想計算で固定使用する
+- 当該進路のoutlinkが一時的に受入不能でも、別outlinkへ変更しない
+- 通過可能になるまで待つ
+- 実Worldの進路を局所仮想計算から強制しない
+
+この分類は、拘束順位内Visitにも拘束順位外Vehicleにもなり得る。判定基準は「snapshot時点で対象Node向け進路が既に決まっているか」であり、拘束順位列に含まれるかではない。
+
+前回節の「区分1の正式進路は、過去の確定時に順位台帳へ保存した進路であり、今回のbaselineで上書きしない」は維持する。分類1は、局所仮想計算中にどのoutlinkへ進ませるかの使用規則である。順位台帳上の過去保存進路を、今回の局所計算結果で置き換えない。
+
+### 分類2：snapshot時点では進路未決定だが、今回の全World baselineで対象Node向け進路が判明し、完全な拘束順位列に含まれるVisit
+
+扱い:
+
+- そのVisitの順位確定をもたらしたbaselineの対象Node到着時進路を、候補別局所仮想計算で使用する
+- この進路の意味は、前回節の正式進路と同じである。対象Node通過後に下流Nodeで選ばれた別進路や、baseline終了時の`Vehicle.route_next_link`は使わない
+- 候補評価中は読取専用で一時使用する
+- 候補評価中に正式順位台帳を変更しない
+- その候補が最終採用された場合、またはbaseline順位で正式確定する分岐となった場合だけ、今回正式確定するVisitについて、確定順位と正式進路を順位台帳へ原子的に保存する
+- 実Worldで実際に走行する際には、このbaseline進路をVehicleへ強制しない
+- 実Worldの進路は通常のUXsim経路選択に任せる
+- 当該進路のoutlinkが一時的に受入不能でも、別outlinkへ変更しない
+
+前回節のとおり、区分1は過去に保存済みなので今回改めて保存しない。区分2は候補形成前に、順位と正式進路をすでに原子的に保存する。候補評価中に読取専用で使う分類2のうち、今回新たに正式確定する対象は、最終結果決定後の採用候補またはbaseline正式確定分岐に含まれるVisitである。不採用候補の順位表にだけ現れるVisitは、順位台帳へ保存しない。
+
+### 分類3：snapshot時点では進路未決定だが、今回の全World baselineで対象Node向け進路が判明した拘束順位外Vehicle
+
+扱い:
+
+- baseline進路を当該候補の局所仮想計算内で読取専用として一時使用する
+- 順位台帳へ保存しない
+- 正式進路とは呼ばない
+- 実Worldの進路を強制しない
+- 当該進路のoutlinkが一時的に受入不能でも、別outlinkへ変更しない
+
+分類3のbaseline進路は、分類2と同じく「今回の全World baselineで対象Node到着時に判明した進路」を候補評価中に読む。相違は保存である。分類3はこの局所計算を理由として順位台帳へ保存しない。最終結果が採用でも却下でも、分類3を正式進路として永続化しない。
+
+### 分類4：snapshot時点でも、今回の全World baselineでも、対象Node向け進路が判明しなかった拘束順位外Vehicle
+
+扱い:
+
+- 仮想通過を実際に試す時点で、BATCH Level 2型の仮想進路割当を行う
+- 順位台帳へ正式進路として保存しない
+- 実Worldの進路を強制しない
+
+分類4の具体手順は次節で定める。Nodeへの仮想到着時点では割り当てない。
+
+### 分類2と分類3の表現
+
+分類2と分類3のbaseline進路は、候補評価中はいずれも読取専用で一時使用する。
+
+相違は、最終結果決定後に正式保存対象になり得るかどうかである。
+
+分類2は、採用候補またはbaseline正式確定分岐において今回確定対象になったVisitだけが、順位と正式進路の原子的保存対象になり得る。
+
+分類3は、この局所計算を理由として順位台帳へ保存しない。分類3の一時使用進路を正式進路と呼ばない。
+
+いずれの分類でも、候補ごとに`route_next_link_choice()`を呼び直さない。局所仮想計算から実Worldの進路を書き換えない。
+
+## 3. 分類4のBATCH Level 2型仮想進路
+
+分類4のVehicleは、仮想通過を実際に試す時点で、次の順に処理する。
+
+1. Nodeへの仮想到着時点では進路を割り当てない
+2. 当該Vehicleの仮想通過を実際に試す時点で`acceptable_outlinks`を作る
+3. `acceptable_outlinks`を`outlink.id`昇順に並べる
+4. 実Vehicle IDを使って次を計算する
+
+```text
+selection_index = real_vehicle.id % len(acceptable_outlinks)
+```
+
+5. `acceptable_outlinks[selection_index]`を選ぶ
+6. 選択した処理内で直ちに仮想通過させる
+7. 実Worldの`W.rng`、局所乱数、`route_next_link_choice()`は使用しない
+8. 選択結果は候補別局所計算の診断情報として記録する
+9. 順位台帳へ正式進路として保存しない
+
+`acceptable_outlinks`は、評価時点で次の両方を満たす対象Nodeのoutlink集合である。
+
+- `outlink.capacity_in_remain >= DELTAN`
+- outlink入口にVehicleが入れる空間がある
+
+`acceptable_outlinks`が空の場合:
+
+- そのtimestepでは仮想進路を割り当てない
+- Vehicleを通過させない
+- 次の仮想timestepで再評価し得る
+
+この空集合は、通常の物理条件・容量条件による通過不能である。clearance未充足とは区別する。当該Vehicleを止め、別inlinkに属する後続の拘束順位外候補の通過可否は確認できる。
+
+位置付け:
+
+- 本当の将来進路を予測するものではない
+- 楽観的な仮想流入先への決定論的な分散である
+- 実Worldの乱数を消費しない
+- 局所乱数にも依存しない
+- 同じ入力なら同じ結果になる
+- 最適な負荷分散を保証しない
+- UXsim本来の`route_next_link_choice()`を再現したものではない
+- 候補によって交通状態と`acceptable_outlinks`集合が変われば、同じ拘束順位外Vehicleでも候補ごとに異なる仮想進路が選ばれ得る
+- この候補間の違いは許容する
+- ただし、それをUXsim本来の経路選択の再現とは説明しない
+
+採用方式の経緯:
+
+- 旧案では、全物理outlink数にVehicle ID剰余を適用し、選択先が受入不能なら次のoutlinkを循環探索する案があった
+- この旧案は、受入不能outlinkの直後に位置するoutlinkへ選択が偏る可能性があるため撤回された
+- 現行方式は、最初から`acceptable_outlinks`だけを抽出し、その集合へVehicle ID剰余を適用する
+
+この方式は分類4だけに使う。分類1、分類2、分類3の保存済みまたはbaseline上の進路を、受入不能だからといってVehicle ID方式へ切り替えない。
+
+## 4. 拘束順位外Vehicleの対象集合と一時的試行順
+
+拘束順位外Vehicleは、局所仮想計算の複数のtimestepにわたって順次対象Nodeへ到着する。最初の仮想timestepに全員が揃っているとは扱わない。
+
+各仮想timestepで、次をすべて満たすVehicleを処理対象集合として更新する。
+
+- その時点までに対象Nodeへ到着済み
+- 未通過
+- 完全な拘束順位列に含まれない
+- trip-end Vehicleではない
+
+次の仮想timestepでは、前timestepから残っている未通過Vehicleと、新たに到着したVehicleを合わせ、処理対象集合を再構成する。前timestepの走査順を固定したまま持ち越さない。
+
+各仮想timestepの一時的な走査順は、次の昇順である。
+
+1. 現在Visitの対象Node到着時刻
+2. 固定`arrival_tiebreaker`
+3. Vehicle ID
+
+この順序は、当該仮想timestepにおける一時的な通過試行順である。
+
+この順序は、正式なbaseline順位でもTVT順位でもない。順位台帳へ保存しない。次の仮想timestepでは、最新の到着済み未通過集合から再構成する。`merge_priority`を使用しない。乱数を使用しない。
+
+完全な拘束順位列に含まれるVisitを、この一時順へ混ぜない。拘束順位列側で一時スキップされたVisitを、拘束順位外集合へ移して再評価しない。
+
+## 5. 通過不能とclearanceの区別
+
+拘束順位内Visitと拘束順位外Vehicleの双方について、通常の物理条件または容量条件による通過不能と、clearance未充足を区別する。
+
+通常の物理条件・容量条件は、少なくとも次である。
+
+- 対象Nodeへ未到着
+- inlinkの物理先頭でない
+- 保存済み進路のoutlink入口空間不足
+- `outlink.capacity_in_remain`不足
+- `inlink.capacity_out_remain`不足
+- `node.flow_capacity_remain`不足
+- 分類4で`acceptable_outlinks`が空
+
+通常の物理条件・容量条件により通過不能の場合:
+
+- 当該Vehicleを通過させない
+- 拘束順位列そのものを変更しない
+- 別inlinkに属する後続候補の通過可否を確認できる
+- 同じinlinkの後続Vehicleは物理先頭条件により追い越せない
+- 次の仮想timestepで再評価する
+
+clearance未充足の場合:
+
+- 当該仮想timestepの残りの通過処理を終了する
+- 拘束順位走査中なら拘束順位外Vehicle処理へ進まない
+- 拘束順位外Vehicle走査中なら、それ以降の候補を確認しない
+- 次の仮想timestepで再評価する
+
+clearance待ちVehicle専用の新しい制御状態は必須としない。
+
+次の既存状態から、各仮想timestepで再判定する。
+
+- `last_order_control_inlink`
+- `last_order_control_entry_timestep`
+- `order_control_clearance_timesteps`
+- `incoming_vehicles`に残っているVehicle
+
+clearance充足条件は次である。
+
+```text
+current_virtual_timestep - last_order_control_entry_timestep
+> order_control_clearance_timesteps
+```
+
+診断用には、clearance待ちとなったVehicleと仮想timestepを記録する。この診断は局所結果に残し、順位台帳や実World baseline collectorへは書かない。
+
+一つの拘束順位Visitが通常の物理条件で通れないことは、clearance停止ではない。その場合は当該Visitを一時スキップし、走査を続ける。clearance未充足のときだけ、そのtimestepの残り通過処理を終える。
+
+## 6. 各仮想timestepの統合手順
+
+各仮想timestepで、次の順に処理する。
+
+### 6.1 容量状態を準備する
+
+局所計算開始timestepでは、snapshotの残容量をそのまま使用する。
+
+2つ目以降のtimestepでは、通常処理と整合する順で、transfer前に容量を補充する。
+
+同一仮想timestepの途中では補充しない。拘束順位走査の後、拘束順位外走査の前に容量を再補充しない。
+
+### 6.2 完全な拘束順位列を先頭から走査する
+
+- 未到着は一時スキップ
+- inlink物理先頭でなければ一時スキップ
+- 通常の物理条件または容量条件不足は一時スキップ
+- 通過可能なら、そのVehicleに対応する分類1または分類2の進路を使用して通過させる
+- 拘束順位列自体は変更しない
+- 受入不能を理由に、分類1または分類2の進路を別outlinkへ変えない
+
+通過に成功したVisitは、そのtimestepでは通過済みになる。列上の順位は変えない。次のtimestepでは、未通過の拘束順位Visitだけを、同じ完成列の先頭から再び見る。
+
+### 6.3 拘束順位走査でclearance未充足が発生した場合
+
+当該仮想timestepの通過処理を終了する。拘束順位外Vehicle処理へ進まない。
+
+### 6.4 clearance停止がなく、容量が残っている場合
+
+次をすべて満たす拘束順位外Vehicleを抽出する。
+
+- 到着済み
+- 未通過
+- 完全な拘束順位列に含まれない
+- trip-end Vehicleではない
+
+`node.flow_capacity_remain < DELTAN`であれば、この抽出と走査には進まず、当該timestepの通過処理を終了する。
+
+### 6.5 拘束順位外Vehicleを一時的なFCFS順で走査する
+
+走査順は次の昇順である。
+
+1. 到着時刻
+2. 固定`arrival_tiebreaker`
+3. Vehicle ID
+
+分類1または分類3なら、その固定進路または一時的baseline進路で通過を試す。分類4なら、試行時点で`acceptable_outlinks`を作り、空でなければVehicle ID方式で選んで直ちに通過させる。
+
+### 6.6 通過不能時
+
+通常の物理条件または容量条件なら、当該Vehicleを通過させず、別inlinkに属する後続候補の通過可否を確認できる。同じinlinkの後続は物理先頭でないため追い越せない。
+
+clearance未充足なら、当該仮想timestepの処理を終了する。それ以降の拘束順位外候補は確認しない。
+
+### 6.7 Node容量不足
+
+`node.flow_capacity_remain < DELTAN`となった場合、当該仮想timestepの通過処理を終了する。同じtimestep中に容量を再補充しない。
+
+### 6.8 次の仮想timestep
+
+完全な拘束順位列の先頭から再評価する。前timestepで一時スキップした拘束順位Visitも再評価する。
+
+拘束順位外Vehicleの一時的順序も、最新の到着済み未通過集合から再構成する。新たに到着したVehicleを加え、通過済みVehicleは含めない。
+
+### 6.9 この手順で守る意味
+
+- 完全な拘束順位列内の全Visitが将来通過し終わるまで、拘束順位外Vehicleを待たせるのではない
+- 各仮想timestep内で、拘束順位走査の後に余力があれば、拘束順位外Vehicleを処理する
+- 拘束順位Vehicleを後段で二重評価しない
+- 一つの拘束順位Vehicleが通常の物理条件で通れないだけで、拘束順位外処理を禁止しない
+- 同一仮想timestep内で複数Vehicleの通過を認める
+- 両走査は同じ残容量とclearance履歴を共有する
+
+## 7. 状態更新と物理移動
+
+### 7.1 `incoming_vehicles`
+
+局所仮想計算では、timestep末に`incoming_vehicles`を全消去しない。
+
+通過成功Vehicleだけを削除する。未通過Vehicleは残し、次の仮想timestepで再評価する。新たにNode端へ到着したVehicleは重複なく追加する。
+
+通常Worldの全消去後に`Vehicle.update()`が再登録する流れには依存しない。UXsim標準とは異なる局所専用処理を行う。
+
+### 7.2 容量
+
+最初の局所timestepはsnapshot残容量を使用する。
+
+2つ目以降は、transfer前に補充する。
+
+同一timestep内では、拘束順位処理と拘束順位外処理が同じ残容量を共有する。拘束順位処理後に再補充しない。
+
+### 7.3 通過成功時
+
+既存UXsimのLink間移動と同じ交通上の意味になるよう、少なくとも次を更新する。
+
+- 累積流出台数
+- 累積流入台数
+- Link旅行時間関連
+- inlink、outlink、Nodeの残容量
+- inlink物理先頭からの削除
+- outlinkへの追加
+- `Vehicle.link`
+- `link_arrival_time`
+- `x`
+- `v`
+- `lane`
+- leader
+- follower
+- `move_remain`
+- `vehicles_enter_log`
+- 新しいorder-control Visit
+- `incoming_vehicles`からの削除
+- `last_order_control_inlink`
+- `last_order_control_entry_timestep`
+
+Vehicleごとに仮想時刻を進めない。同一仮想timestep内の次Vehicleは、先行Vehicleの移動後の最新状態を使用する。
+
+### 7.4 clearance履歴
+
+実際に仮想通過した場合だけ更新する。通過不能の場合は更新しない。
+
+拘束順位処理で更新した履歴を、同じ仮想timestep内の拘束順位外Vehicleへ引き継ぐ。拘束順位外走査用に履歴を分割しない。
+
+### 7.5 inlink物理順
+
+物理先頭でなければ通過不可とする。同じinlinkの後続Vehicleは追い越し不可とする。別inlink候補の通過可否は確認可能とする。単車線研究条件を前提とする。複数車線への一般化は本節で確定しない。
+
+### 7.6 trip-endとsignal
+
+対象Nodeを目的地とするtrip-end Vehicleは研究対象外である。拘束順位外の通過候補へ含めない。
+
+signal統合は研究対象外である。局所通過判定へsignal条件を入れない。
+
+### 7.7 baseline collector
+
+候補別局所仮想計算から、実World baseline collectorへ書き込まない。
+
+仮想通過時刻、仮想進路、停止理由等は、局所結果および診断へ記録する。
+
+## 8. outlink終端境界
+
+下流側の方式が次のいずれであっても、局所Worldで個別に再現しない。
+
+- signalized UXsim
+- 標準unsignalized transfer
+- FCFS
+- BATCH
+- TVT
+
+baseline horizon内の下流境界観測結果を使う。
+
+### 8.1 条件付き平均流出率
+
+baseline observerが保持するcountを正本とする。平均率は局所計算側で算出する。目的地到着Vehicleを含めず、途中通過Vehicleだけを観測対象とする。
+
+観測countの意味、`active`の判定、実流出台数の数え方は、実装済みの下流境界observer契約を再解釈しない。
+
+### 8.2 `active > 0`かつ総実流出台数 `> 0`
+
+条件付き平均流出率を、候補別・outlink別の流出許可残高へ、毎仮想timestep加算する。
+
+流出許可残高は候補別・outlink別に独立する。小数部分を繰り越す。未使用の整数部分も繰り越す。
+
+実際の流出台数は、流出許可残高だけで決めない。次のすべてが許す範囲で流出させる。
+
+- 流出許可残高の整数台数分
+- outlink終端の待機Vehicle数
+- 物理FIFO順
+- `outlink.capacity_out_remain`
+- 終端Nodeの`flow_capacity_remain`
+- `DELTAN=1`
+- その他、UXsim既存の物理条件
+
+独立した人工的なburst上限は新設しない。使用しなかった残高は次の仮想timestepへ繰り越す。
+
+大きな残高は、実Worldの物理容量を保存したものではない。baselineから推定した平均的な境界サービス機会を、候補固有の需要時刻へ再配分する近似である。
+
+### 8.3 `active > 0`かつ総実流出台数 `= 0`
+
+baselineの共通horizon中に途中通過待ちVehicleが存在したが、一台も流出しなかった場合である。
+
+観測した共通horizon内の下流境界サービス率を0とする。局所仮想計算でも、同じlocal horizon内は境界閉塞として扱う。horizon後も永続的に閉塞すると断定しない。
+
+この分岐では、条件付き平均流出率に基づく流出を行わない。流出許可残高を正にして流し始めない。
+
+### 8.4 `active = 0`
+
+baseline horizon中に、下流境界待ちが一度も観測されなかった場合である。下流混雑がないと断定しない。
+
+条件付き平均流出率と流出許可残高は使わない。無制約sinkではなく、制約付きsinkへ分岐する。
+
+処理:
+
+- outlink終端に到達した物理FIFO先頭Vehicleから処理する
+- 次のUXsim条件が許す範囲で、標準`end_trip()`により局所Worldから除去する
+  - outlink終端の待機Vehicle数
+  - 物理FIFO順
+  - `outlink.capacity_out_remain`
+  - 終端Nodeに`flow_capacity`がある場合の`flow_capacity_remain`
+  - `DELTAN=1`
+  - その他、既存UXsim上必要な物理条件
+- 流出成功時には、outlink流出容量と終端Node容量を通常どおり消費する
+- 下流Linkは局所Worldに存在しないため、下流Linkの`capacity_in_remain`は使わない
+- 人工的な最大1台制限は設けない
+- 同一timestepに複数台を流出できるかは、人工的上限ではなく、UXsim既存の容量条件、物理条件、FIFOによって決まる
+
+局所Worldではsink Nodeが仮想目的地として構成されるため`end_trip()`を使用する。これは実World上の本来の旅行終了を意味しない。
+
+「UXsim既存の物理的なtrip-end条件を満たすVehicle」という曖昧な追加条件は設けない。使う条件は、物理FIFO先頭、outlink終端到達、outlink流出容量、終端Node容量、`DELTAN=1`、および上記の既存UXsim上必要な物理条件である。
+
+`active = 0`を、境界流出の完全停止として扱わない。
+
+### 8.5 BATCH Level 2の単純sinkとの差
+
+BATCH Level 2参照コードのsinkは、物理FIFO先頭を確認し、outlink終端到達後に`end_trip()`で除去する単純sinkである。
+
+BATCH Level 2のsinkでは、sink流出時に`outlink.capacity_out_remain`や終端Nodeの`flow_capacity_remain`を確認・消費しない。
+
+TVT-MPの`active = 0`時は、BATCH Level 2の単純sinkをそのまま使わない。
+
+TVT-MPでは、outlink流出容量および終端Node容量等を確認し、流出成功時に消費する制約付きsinkとする。
+
+この相違を今後混同しない。BATCH Level 2がFIFO制約を持つ単純sinkであることと、TVT-MPの`active = 0`分岐がFIFOに加えてoutlink流出容量と終端Node容量等を確認・消費する制約付きsinkであることは、別契約である。
+
+## 9. 実装境界と診断契約
+
+### 9.1 局所仮想計算から直接呼ばない処理
+
+局所仮想計算から次を直接呼ばない。
+
+- `Node.transfer()`
+- `transfer_fcfs_clearance()`
+- BATCHのservice queue処理全体
+
+理由:
+
+- 拘束順位Vehicleの再評価
+- `incoming_vehicles`全消去
+- 対象外状態変更
+- 二重評価
+- TVT局所契約との不整合
+
+### 9.2 局所専用処理の2責務
+
+TVT局所専用処理を、少なくとも次の2責務に分ける。
+
+A. 通過試行統括
+
+- 完全な拘束順位列の走査
+- 拘束順位外Vehicleの一時的FCFS走査
+- clearance停止
+- 通過不能時の後続候補確認
+- 同一仮想timestepの終了判断
+
+B. 1台分の物理移動
+
+- 容量消費
+- inlinkからの除去
+- outlinkへの追加
+- Vehicle位置とLink更新
+- leaderとfollower
+- `move_remain`
+- `incoming_vehicles`からの削除
+- clearance履歴更新
+
+既存`Node.transfer()`から大規模な共通helperを直ちに抽出しない。まずTVT局所モジュール内に、BATCH Level 2の`_transfer_vehicle_reference()`相当の局所専用処理を設ける方向とする。
+
+この「方向」は責務分割の採用である。関数名、引数、戻り値、配置モジュール名は本節で確定しない。
+
+### 9.3 候補別結果に最低限残す情報
+
+候補別結果に、最低限次を残す。フィールドのPython型、クラス名、公開API名は本節で確定しない。
+
+- 候補識別
+- resolved / unresolved
+- unresolvedまたは終了理由
+- Vehicleごとの対象Node仮想通過timestep
+- 拘束順位内または拘束順位外
+- 使用進路の種類
+  - snapshot進路
+  - 拘束順位内のbaseline進路
+  - 拘束順位外の一時的baseline進路
+  - Vehicle ID方式の仮想進路
+- Vehicle ID方式で選択したoutlink
+- 各仮想timestepの通過Vehicle
+- clearance待ちのtimestepとVehicle
+- 仮想計算で進めたtimestep数
+- outlink別の条件付き平均流出率
+- outlink別の流出許可残高推移
+- `active > 0`かつ流出0の境界閉塞
+- `active = 0`用制約付きsinkの使用
+- outlink境界で流出したVehicle
+- horizon末の必要な状態
+
+これらは局所結果へ記録する。次へは書き込まない。
+
+- 順位台帳
+- 実World baseline collector
+- 実WorldのVehicle、Link、Node
+- 他候補の状態
+
+### 9.4 正常なunresolved候補
+
+次は、候補を壊れた計算として扱わず、理由を持つ正常なunresolvedとする。
+
+- virtual horizonまでに必要な評価対象Vehicleが通過しない
+- 条件付き平均境界近似下でも閉塞が解消しない
+- `active > 0`かつ総実流出台数0の境界閉塞がhorizonまで影響する
+- clearance待ちまたは容量不足がhorizonまで継続する
+- 分類4Vehicleにhorizon中`acceptable_outlinks`が得られない
+- 下流境界条件により必要な評価情報が揃わない
+
+全buyerおよび全sellerについて、経済性評価に必要な対象Node通過timestepが揃えば、`configured_horizon_steps`へ達する前でも早期終了し、resolvedとする。必要情報が揃わないまま`configured_horizon_steps`へ達した場合は、上記のような具体的理由を持つ正常なunresolvedとする。
+
+理由を表す正式なEnum名または文字列定数は、本節で確定しない。
+
+### 9.5 重大不整合
+
+次は推測で修復せず、例外停止する。
+
+- 完全な拘束順位列のVisitKey重複
+- 拘束順位内Visitの進路欠落
+- 保存進路が対象Nodeのoutlinkではない
+- VisitとVehicle状態の対応不整合
+- 同じVehicleの同一timestep二重通過
+- 容量が不正な負値
+- inlink物理先頭でないVehicleを移動させようとする
+- 必須状態欠落
+
+例外クラス名とメッセージ文言は、本節で確定しない。自動削除、片側採用、進路の再選択、容量の切り上げでは継続しない。
+
+### 9.6 候補ごとの独立性
+
+候補ごとに独立したmimic状態を使用する。
+
+候補別局所計算は次を変更しない。
+
+- 実WorldのVehicle
+- 実WorldのLink
+- 実WorldのNode
+- 実Worldの乱数状態
+- 正式順位台帳
+- baseline collector
+- 他候補のmimic状態
+
+不採用候補の順位、正式進路、分類3の一時進路、分類4の仮想進路を、順位台帳へ残さない。
+
+## 10. 最終統合仕様
+
+次の統合仕様を採用済みとする。
+
+1. 候補ごとに、実Worldから独立した局所状態を構築する
+2. 各仮想timestepで、完全な拘束順位列を先に走査し、clearance停止がなく余力があれば、拘束順位外Vehicleを一時的FCFS順で走査する
+3. 両走査は、同じ物理状態、残容量、clearance履歴を共有する
+4. outlink終端境界は観測結果により次へ分岐する
+   - `active > 0`かつ総実流出台数 `> 0`
+   - `active > 0`かつ総実流出台数 `= 0`
+   - `active = 0`
+5. `active > 0`かつ総実流出台数 `> 0`では、条件付き平均流出率と流出許可残高だけでなく、終端待機Vehicle数、物理FIFO、outlink流出容量、終端Node容量、`DELTAN=1`、その他のUXsim物理条件をすべて適用する
+6. `active = 0`では、BATCH Level 2の単純sinkと異なる、outlink流出容量および終端Node容量を確認・消費する制約付きsinkを使用する
+7. 全buyerおよび全sellerについて経済性評価に必要な対象Node通過timestepが得られれば、local horizon上限前でも早期終了し、resolvedとする
+8. 必要情報が揃わないまま`configured_horizon_steps`へ達した場合は、具体的な理由を持つ正常なunresolvedとする
+9. 候補評価中は、実World、正式順位台帳、baseline collector、実World乱数、他候補の状態を変更しない
+10. 候補評価後にのみ、採用候補またはbaseline正式確定分岐に応じて、今回確定するVisitの順位と正式進路を原子的に保存する
+
+この統合後、新たな制度上の論理矛盾は確認されていない。
+
+前回節の原因別最終分岐は維持する。採用候補がある場合の確定範囲、全候補却下時およびbaseline情報不足時の意思決定窓内Visit全体、意思決定窓内Visitが0件のときの確定対象なし、は本節で変更しない。本節の統合項目10は、その分岐が選んだ「今回確定するVisit」について、順位と正式進路を評価後に原子的保存する、という前回契約の接続である。
+
+## 11. Python実装時に必ず守る可読性方針
+
+今後の完全な実装前仕様およびPython実装で、必ず次を守る。
+
+- 正しく動くことを最優先とする
+- 高度で巧妙なPythonテクニックより、Python初学者が処理を順番に追える明示的で可読性の高い実装を選ぶ
+- 複数の実装方法がある場合は、短さや美しさより可読性を優先する
+- 条件分岐や状態更新を過度に圧縮しない
+- 複雑な内包表記、多重処理、暗黙的な副作用を避ける
+- TVT-MPの根幹処理では、少し長くなっても処理段階と判断理由がコード上で追える構造にする
+- 変数名、関数名、結果型名、診断フィールド名は、長くても見ただけで交通上および処理上の意味をイメージできる名称にする
+- Vehicle、Visit、Node、inlink、outlink、timestep、順位、進路、境界観測、流出許可残高を曖昧な短縮名で混同しない
+- 登録時に保証済みの不変条件を、実行時に不要に重複検証しない
+- 実行時検証は、実行中に変化し得る状態と、原因不明の停止や誤計算を招く重大不整合に限定する
+- 確定済み制度設計を、実装の都合で簡略化、再解釈、変更しない
+- コードコメントとdocstringでは、Python上の動作だけでなく交通上の意味も説明する
+
+本節は、この方針に合わせて関数名や型名を今決めない。名前を短く確定すること自体が、次の実装前仕様の作業である。
+
+## 12. 撤回済み誤案
+
+次は採用事項ではない。採用済み仕様に混入させない。誤って再提案しないための撤回済み案としてだけ記録する。
+
+- `active = 0`で境界流出を完全停止する案
+- `active = 0`で人工的に最大1台／timestepとする案
+- `active = 0`で未使用sink枠を繰り越さない案
+- `active = 0`で同一timestepに2台以上を無条件に禁止する案
+- BATCH Level 2の単純sinkをTVT-MPの`active = 0`分岐へそのまま適用する案
+- `route_pref`に基づく確率と局所仮想乱数を使う案
+- 分類3のbaseline進路を捨て、分類3と分類4を両方Vehicle ID方式で処理する案
+- 全物理outlink数にVehicle ID剰余を適用し、受入不能なら次のoutlinkを循環探索する案
+
+`route_pref`と局所仮想乱数の案は撤回済みである。今後の推奨案または未確定候補として復活させない。
+
+分類3をVehicle ID方式へ置き換える案も撤回済みである。分類3はbaseline進路の読取専用一時使用のままとする。
+
+BATCH Level 2はFIFO制約を持つ単純sinkである。TVT-MPの`active = 0`分岐は、FIFOに加えてoutlink流出容量と終端Node容量等を確認・消費する制約付きsinkである。この差を消す実装を採用しない。
+
+## 13. 今回確定しない実装契約
+
+次は、本節で独自に確定しない。次の完全な実装前仕様で確定する実装契約として残す。
+
+- 公開API名
+- 公開結果型名
+- private helper名
+- 新規本番モジュール名
+- 専用テストファイル名
+- 診断フィールドの具体的なPython型
+- unresolved reasonの正式なEnumまたは文字列名
+- 各helperの最終シグネチャ
+- 既存上流結果型へ追加する具体フィールド
+- 完全な拘束順位列を上流結果から受け渡す具体API
+- mimic状態を構築する具体的クラス構成
+- 実装単位の分割順
+- 性能最適化
+- 複数車線対応
+- `DELTAN`が1以外の場合の一般化
+
+これらが未確定であることは、本節の制度採否が未確定という意味ではない。通過順、進路4分類、clearance、状態更新、下流境界3分岐、候補独立性、正常unresolvedと重大不整合の区別は確定している。未確定なのは、それをPythonの名前と型とファイル境界へ落とす契約である。
+
+## 14. 次の再開地点
+
+次の直接作業は、本節で確定した拘束順位外処理、下流境界3分岐、統合仕様の再検討ではない。
+
+次の直接作業は、公開API、結果型、helper責務、診断型、例外契約、モジュール構成、専用テスト契約、既存上流結果との接続を含む、完全な実装前仕様の作成である。
+
+その実装前仕様では、本節の制度を簡略化しない。可読性方針を守る。撤回済みの`route_pref`案、分類3のVehicle ID置換、`active = 0`の流出停止、`active = 0`の人工的な最大1台制限、BATCH Level 2単純sinkの流用を、採用候補へ戻さない。
+
+Python実装と専用テストは、その実装前仕様が確定するまで着手しない。
 
 # 次の作業開始点
 
@@ -9637,6 +10350,8 @@ TVTでは参考となる先例だが、正式採否は未確定である。
 **2026-09-20更新（最新の再開情報）：** 下流境界observer本体、UXsim transfer loop hook、FCFS・BATCH・TVT共通の`DELTAN=1`設定時検査、全World baseline driverへの正式接続は、実装・検証・commit・push済みである。最新の下流境界関連実装コミットは`7f00520`（`Integrate downstream boundary observation into the baseline driver`）である。observer本体は`f475294`、UXsim hookは`c72e38a`、`DELTAN=1`検査は`7c1d5a4`で実装済みである。観測結果は`OrderControlBaselineForkResult.downstream_boundary_result`から取得する。空baselineは`None`、完了baselineは観測済みcount 0を含むfrozen結果である。専用統合テストを含む493件をTerminalで群ごとに独立確認し、すべて成功した。変更8ファイル（`7f00520`）の`py_compile`も成功した。下流境界observerの実装済み部分（本体・hook・DELTAN前提・driver接続・ForkResult返却契約）を再考しない。条件付き平均率、流出許可残高、局所mimic World、inlink始端新規流入、候補別局所仮想計算、経済性評価、成立候補選択、実WorldへのTVT反映は未実装である。次の直接作業は、候補別局所仮想計算へ進むために必要な残る入力・境界設計を整理することである。本節ではそれらを新たに確定しない。最新詳細は、本ファイルの「全World baseline下流境界観測部品の実装完了記録」を参照する。`diagnostics/order_control.zip`は対象外である。
 
 **2026-09-21更新（最新の再開情報）：** 下流境界observerまでの実装は完了済みである。候補別局所仮想計算は未実装である。今回、入力、下流境界、horizon、早期終了、順位拘束範囲について途中確定した。条件付き平均流出率方式を正式採用し、観測countを正本として局所計算側で算出する。流出許可残高は具体的候補別・outlink別に独立し、小数部分と未使用整数部分を繰り越す。`active=0`は制約付きsinkへ分岐するが、具体実装は未確定である。時点`T`以後の新規流入なしを初期実装方針として採用した。local horizon上限は`configured_horizon_steps`であり、全buyerと全sellerの必要情報が揃えば早期終了する。buyerとsellerは別に識別し、役割から短縮・遅延を決めつけない。局所仮想計算では`trade_order`全体を拘束順位として使用しない。完全な局所拘束順位列は、TVT形成前の未通過確定済みVisitと、`K_fixed`まで新たに確定されるVisit列である。この完全な拘束順位列は`trade_order`の必要部分を材料に含み得るが、`N+1`位以降の意思決定窓内Visitも含み得るため、`trade_order`の単純prefixとは限らない。完全な拘束順位列を構築するための公開材料と接続方法は未確定である。それより後方のVehicleへbaseline順位を強制しない。拘束順位外Vehicleは標準transfer相当処理を用いる方向だが、詳細は未確定である。既存の`Node.transfer()`を局所loop後段でそのまま呼ばない。一般形順位の制度ロジックと順位アルゴリズム、FIFO検査接続は再考しない。ただし、既存の公開結果型を含めて一切変更不要であるとは確定しない。Python実装と専用テストは未着手である。完全な実装前仕様ではない。次の直接作業は、`K_fixed`に従う完全な局所拘束順位列を構築するために、現行の上流結果から取得できるVisitと情報を調査し、不足する公開材料と最小の接続方法を確定することである。標準transfer相当処理の詳細設計はその次の作業である。最新詳細は、本ファイルの「TVT-MP候補別局所仮想計算の入力・境界・順位拘束設計の途中確定記録」を参照する。今回のMarkdown追記は未コミットである。`diagnostics/order_control.zip`は対象外である。
+
+**2026-09-22更新（最新の再開情報）：** 上記2026-09-21の再開情報、および保存済みcommit `1613eb9`の「TVT-MP完全局所拘束順位列・確定時正式進路保存・最終分岐設計の追加途中確定記録」は歴史的記録として残す。`1613eb9`では4区分、確定時正式進路、原子的保存、原因別最終分岐を記録し、拘束順位外Vehicleとactive=0時の制約付きsinkは未確定のままであった。2026-09-22に、拘束順位外Vehicleの進路4分類、一時的FCFS走査、clearanceと通常の通過不能の区別、incoming保持と物理移動、下流境界の3分岐、active=0の制約付きsink、候補別統合仕様を確定した。候補別局所仮想計算は未実装である。Python実装と専用テストは未着手である。完全な実装前仕様は未作成である。公開API名、結果型名、helper名、診断のPython型は未確定である。次の直接作業は、公開API、結果型、helper責務、診断型、例外契約、モジュール構成、専用テスト契約、既存上流結果との接続を含む完全な実装前仕様の作成である。実装時は初学者が処理順を追える可読性を、短さより優先する。撤回済みの`route_pref`局所乱数案、分類3のVehicle ID置換、active=0の流出停止、active=0の人工的な最大1台制限、BATCH Level 2単純sinkの流用は再採用しない。最新詳細は、本ファイルの「TVT-MP候補別局所仮想計算の拘束順位外処理・下流境界・統合仕様の確定記録」を参照する。今回のMarkdown追記は未コミットである。Git操作は利用者がTerminalで行う。
 
 # 新しいチャットでの再開方法
 
