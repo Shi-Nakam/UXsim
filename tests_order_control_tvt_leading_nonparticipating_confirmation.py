@@ -29,6 +29,7 @@ from uxsim.order_control_tvt_baseline_fork_alignment import (
 from uxsim.order_control_tvt_leading_nonparticipating_confirmation import (
     OrderControlTvtLeadingNonparticipatingConfirmationResult,
     OrderControlTvtNodeLeadingNonparticipatingConfirmationResult,
+    _valid_outlink_names_at_target_node,
     confirm_leading_nonparticipating_decision_window_visits,
 )
 from uxsim.order_control_tvt_node_rank_state import (
@@ -83,6 +84,47 @@ def _alignment_result(
     )
 
 
+class _NamedOutlink:
+    def __init__(self, name: str) -> None:
+        self.name = name
+
+
+class _TargetNode:
+    def __init__(self, outlink_names: tuple[str, ...]) -> None:
+        self.outlinks = {
+            outlink_name: _NamedOutlink(outlink_name)
+            for outlink_name in outlink_names
+        }
+
+
+class _RealWorldAtBaselineTime:
+    def __init__(self, timestep_T: int, node_names: tuple[str, ...]) -> None:
+        self.T = timestep_T
+        self._node_by_name = {
+            node_name: _TargetNode(("out", "side"))
+            for node_name in node_names
+        }
+
+    def get_node(self, node_name: str) -> _TargetNode:
+        if node_name not in self._node_by_name:
+            raise Exception(f"'{node_name}' is not Node in this World")
+        return self._node_by_name[node_name]
+
+
+def _collector_with_arrival_route(route_next_link_name: str = "out") -> MagicMock:
+    collector = MagicMock()
+
+    def snapshot(vehicle_name: str, visit_id: int) -> dict[str, object]:
+        return {
+            "vehicle_name": vehicle_name,
+            "visit_id": visit_id,
+            "route_next_link_name": route_next_link_name,
+        }
+
+    collector.get_baseline_visit_snapshot.side_effect = snapshot
+    return collector
+
+
 def _fork_result(
     *,
     target_node_names: tuple[str, ...],
@@ -90,7 +132,7 @@ def _fork_result(
     configured_horizon_steps: int = 6,
 ) -> OrderControlBaselineForkResult:
     return OrderControlBaselineForkResult(
-        collector=MagicMock(),
+        collector=_collector_with_arrival_route(),
         target_node_names=target_node_names,
         baseline_timestep_T=baseline_timestep_T,
         configured_horizon_steps=configured_horizon_steps,
@@ -150,10 +192,15 @@ def _confirm(
     rank_states_by_node_name: dict[str, OrderControlTvtNodeRankState],
     participates_by_visit_key: dict[OrderControlTvtVisitKey, bool],
 ) -> OrderControlTvtLeadingNonparticipatingConfirmationResult:
+    fork_result = arrived_confirmation_result.alignment_fork_result.fork_result
     return confirm_leading_nonparticipating_decision_window_visits(
         arrived_confirmation_result,
         rank_states_by_node_name=rank_states_by_node_name,
         participates_by_visit_key=participates_by_visit_key,
+        real_W=_RealWorldAtBaselineTime(
+            fork_result.baseline_timestep_T,
+            fork_result.target_node_names,
+        ),
     )
 
 
@@ -231,14 +278,17 @@ def test_horizon_five_raises_before_any_confirm():
         ),
     )
     confirm_count = 0
-    original_confirm = rank_state.confirm_visits_in_order
+    original_confirm = rank_state.confirm_visits_and_formal_target_node_routes_atomically
 
-    def counting_confirm(visit_keys_in_order):
+    def counting_confirm(visits_with_formal_routes_in_order, target_node_outlink_names):
         nonlocal confirm_count
         confirm_count += 1
-        return original_confirm(visit_keys_in_order)
+        return original_confirm(
+            visits_with_formal_routes_in_order,
+            target_node_outlink_names,
+        )
 
-    rank_state.confirm_visits_in_order = counting_confirm  # type: ignore[method-assign]
+    rank_state.confirm_visits_and_formal_target_node_routes_atomically = counting_confirm  # type: ignore[method-assign]
     _expect_value_error(
         lambda: _confirm(
             arrived_result,
@@ -341,14 +391,17 @@ def test_zero_decision_window_visits_calls_empty_confirm_and_empty_remaining():
         ),
     )
     confirm_count = 0
-    original_confirm = rank_state.confirm_visits_in_order
+    original_confirm = rank_state.confirm_visits_and_formal_target_node_routes_atomically
 
-    def counting_confirm(visit_keys_in_order):
+    def counting_confirm(visits_with_formal_routes_in_order, target_node_outlink_names):
         nonlocal confirm_count
         confirm_count += 1
-        return original_confirm(visit_keys_in_order)
+        return original_confirm(
+            visits_with_formal_routes_in_order,
+            target_node_outlink_names,
+        )
 
-    rank_state.confirm_visits_in_order = counting_confirm  # type: ignore[method-assign]
+    rank_state.confirm_visits_and_formal_target_node_routes_atomically = counting_confirm  # type: ignore[method-assign]
     result = _confirm(arrived_result, {"merge": rank_state}, {})
     assert confirm_count == 1
     node_result = result.node_confirmation_results[0]
@@ -748,19 +801,25 @@ def test_multi_node_processes_in_target_node_order():
         ),
     )
     confirm_events: list[str] = []
-    original_confirm_a = rank_state_a.confirm_visits_in_order
-    original_confirm_b = rank_state_b.confirm_visits_in_order
+    original_confirm_a = rank_state_a.confirm_visits_and_formal_target_node_routes_atomically
+    original_confirm_b = rank_state_b.confirm_visits_and_formal_target_node_routes_atomically
 
-    def tracking_confirm_a(visit_keys_in_order):
+    def tracking_confirm_a(visits_with_formal_routes_in_order, target_node_outlink_names):
         confirm_events.append("node_a")
-        return original_confirm_a(visit_keys_in_order)
+        return original_confirm_a(
+            visits_with_formal_routes_in_order,
+            target_node_outlink_names,
+        )
 
-    def tracking_confirm_b(visit_keys_in_order):
+    def tracking_confirm_b(visits_with_formal_routes_in_order, target_node_outlink_names):
         confirm_events.append("node_b")
-        return original_confirm_b(visit_keys_in_order)
+        return original_confirm_b(
+            visits_with_formal_routes_in_order,
+            target_node_outlink_names,
+        )
 
-    rank_state_a.confirm_visits_in_order = tracking_confirm_a  # type: ignore[method-assign]
-    rank_state_b.confirm_visits_in_order = tracking_confirm_b  # type: ignore[method-assign]
+    rank_state_a.confirm_visits_and_formal_target_node_routes_atomically = tracking_confirm_a  # type: ignore[method-assign]
+    rank_state_b.confirm_visits_and_formal_target_node_routes_atomically = tracking_confirm_b  # type: ignore[method-assign]
     result = _confirm(
         arrived_result,
         {"node_a": rank_state_a, "node_b": rank_state_b},
@@ -784,14 +843,17 @@ def test_alignment_node_name_mismatch_raises_before_confirm():
         alignment_results=(_alignment_result("wrong_name"),),
     )
     confirm_count = 0
-    original_confirm = rank_state.confirm_visits_in_order
+    original_confirm = rank_state.confirm_visits_and_formal_target_node_routes_atomically
 
-    def counting_confirm(visit_keys_in_order):
+    def counting_confirm(visits_with_formal_routes_in_order, target_node_outlink_names):
         nonlocal confirm_count
         confirm_count += 1
-        return original_confirm(visit_keys_in_order)
+        return original_confirm(
+            visits_with_formal_routes_in_order,
+            target_node_outlink_names,
+        )
 
-    rank_state.confirm_visits_in_order = counting_confirm  # type: ignore[method-assign]
+    rank_state.confirm_visits_and_formal_target_node_routes_atomically = counting_confirm  # type: ignore[method-assign]
     _expect_runtime_error(
         lambda: _confirm(arrived_result, {"merge": rank_state}, {}),
         "expected target_node_names entry 'merge'",
@@ -851,12 +913,10 @@ def test_mid_failure_preserves_prior_node_and_skips_later_nodes():
             ),
         ),
     )
-    original_confirm_b = rank_state_b.confirm_visits_in_order
-
-    def fail_confirm_b(visit_keys_in_order):
+    def fail_confirm_b(visits_with_formal_routes_in_order, target_node_outlink_names):
         raise ValueError("confirm failed on node_b")
 
-    rank_state_b.confirm_visits_in_order = fail_confirm_b  # type: ignore[method-assign]
+    rank_state_b.confirm_visits_and_formal_target_node_routes_atomically = fail_confirm_b  # type: ignore[method-assign]
     _expect_value_error(
         lambda: _confirm(
             arrived_result,
@@ -931,6 +991,278 @@ def test_does_not_rerun_upstream_processing():
         patched_arrived.assert_not_called()
         patched_align.assert_not_called()
         patched_fork.assert_not_called()
+
+
+def test_atomic_confirm_saves_leading_nonparticipant_arrival_routes():
+    rank_state = _new_rank_state("merge")
+    _register_undetermined(rank_state, ("veh_n1", 1), ("veh_n2", 2), ("veh_p3", 3))
+    arrived_result = _arrived_confirmation_result(
+        target_node_names=("merge",),
+        baseline_timestep_T=10,
+        alignment_results=(
+            _alignment_result(
+                "merge",
+                resolved=(
+                    _resolved("veh_n1", 1, baseline_arrival_timestep=11),
+                    _resolved("veh_n2", 2, baseline_arrival_timestep=12),
+                    _resolved("veh_p3", 3, baseline_arrival_timestep=13),
+                ),
+            ),
+        ),
+    )
+
+    def snapshot(vehicle_name: str, visit_id: int) -> dict[str, object]:
+        routes = {
+            ("veh_n1", 1): "out",
+            ("veh_n2", 2): "side",
+            ("veh_p3", 3): "out",
+        }
+        return {"route_next_link_name": routes[(vehicle_name, visit_id)]}
+
+    arrived_result.alignment_fork_result.fork_result.collector.get_baseline_visit_snapshot.side_effect = snapshot
+
+    def reject_rank_only_confirm(*args, **kwargs):
+        raise AssertionError("confirm_visits_in_order must not be called")
+
+    rank_state.confirm_visits_in_order = reject_rank_only_confirm  # type: ignore[method-assign]
+    result = _confirm(
+        arrived_result,
+        {"merge": rank_state},
+        {
+            ("veh_n1", 1): False,
+            ("veh_n2", 2): False,
+            ("veh_p3", 3): True,
+        },
+    )
+    node_result = result.node_confirmation_results[0]
+    assert node_result.confirmed_leading_nonparticipating_visit_keys == (
+        ("veh_n1", 1),
+        ("veh_n2", 2),
+    )
+    assert node_result.remaining_decision_window_visit_keys == (("veh_p3", 3),)
+    assert rank_state.formal_route_next_link_name(("veh_n1", 1)) == "out"
+    assert rank_state.formal_route_next_link_name(("veh_n2", 2)) == "side"
+    assert rank_state.is_undetermined(("veh_p3", 3))
+
+
+def test_all_nonparticipants_save_formal_routes_in_baseline_order():
+    rank_state = _new_rank_state("merge")
+    _register_undetermined(rank_state, ("veh_n1", 1), ("veh_n2", 2))
+    arrived_result = _arrived_confirmation_result(
+        target_node_names=("merge",),
+        baseline_timestep_T=10,
+        alignment_results=(
+            _alignment_result(
+                "merge",
+                resolved=(
+                    _resolved("veh_n1", 1, baseline_arrival_timestep=11),
+                    _resolved("veh_n2", 2, baseline_arrival_timestep=12),
+                ),
+            ),
+        ),
+    )
+    _confirm(
+        arrived_result,
+        {"merge": rank_state},
+        {("veh_n1", 1): False, ("veh_n2", 2): False},
+    )
+    assert rank_state.confirmed_visit_keys_in_order() == (("veh_n1", 1), ("veh_n2", 2))
+    assert rank_state.formal_route_next_link_name(("veh_n1", 1)) == "out"
+    assert rank_state.formal_route_next_link_name(("veh_n2", 2)) == "out"
+
+
+def test_missing_route_leaves_leading_confirmation_unchanged():
+    rank_state = _new_rank_state("merge")
+    _register_undetermined(rank_state, ("veh_n1", 1), ("veh_n2", 2))
+    arrived_result = _arrived_confirmation_result(
+        target_node_names=("merge",),
+        baseline_timestep_T=10,
+        alignment_results=(
+            _alignment_result(
+                "merge",
+                resolved=(
+                    _resolved("veh_n1", 1, baseline_arrival_timestep=11),
+                    _resolved("veh_n2", 2, baseline_arrival_timestep=12),
+                ),
+            ),
+        ),
+    )
+
+    def snapshot(vehicle_name: str, visit_id: int) -> dict[str, object]:
+        route = None if (vehicle_name, visit_id) == ("veh_n2", 2) else "out"
+        return {"route_next_link_name": route}
+
+    arrived_result.alignment_fork_result.fork_result.collector.get_baseline_visit_snapshot.side_effect = snapshot
+    before_export = rank_state.export_state()
+    _expect_value_error(
+        lambda: _confirm(
+            arrived_result,
+            {"merge": rank_state},
+            {("veh_n1", 1): False, ("veh_n2", 2): False},
+        ),
+        "route_next_link_name",
+    )
+    assert rank_state.export_state() == before_export
+    assert rank_state.undetermined_visit_keys() == frozenset({("veh_n1", 1), ("veh_n2", 2)})
+
+
+def test_confirm_uses_real_world_get_node_for_outlink_names():
+    rank_state = _new_rank_state("merge")
+    _register_undetermined(rank_state, ("veh_n1", 1))
+    arrived_result = _arrived_confirmation_result(
+        target_node_names=("merge",),
+        baseline_timestep_T=10,
+        alignment_results=(
+            _alignment_result(
+                "merge",
+                resolved=(_resolved("veh_n1", 1, baseline_arrival_timestep=11),),
+            ),
+        ),
+    )
+    real_W = _RealWorldAtBaselineTime(10, ("merge",))
+    with patch.object(real_W, "get_node", wraps=real_W.get_node) as get_node_mock:
+        confirm_leading_nonparticipating_decision_window_visits(
+            arrived_result,
+            rank_states_by_node_name={"merge": rank_state},
+            participates_by_visit_key={("veh_n1", 1): False},
+            real_W=real_W,
+        )
+        get_node_mock.assert_called_once_with("merge")
+
+
+class _RealWorldWithUnexpectedGetNodeFailure:
+    def __init__(self, timestep_T: int) -> None:
+        self.T = timestep_T
+
+    def get_node(self, node_name: str) -> _TargetNode:
+        raise RuntimeError("internal world failure")
+
+
+class _RealWorldWithoutCallableGetNode:
+    T = 10
+    get_node = "not-callable"
+
+
+def test_missing_target_node_via_get_node_leaves_leading_confirmation_unchanged():
+    rank_state = _new_rank_state("merge")
+    _register_undetermined(rank_state, ("veh_n1", 1))
+    arrived_result = _arrived_confirmation_result(
+        target_node_names=("merge",),
+        baseline_timestep_T=10,
+        alignment_results=(
+            _alignment_result(
+                "merge",
+                resolved=(_resolved("veh_n1", 1, baseline_arrival_timestep=11),),
+            ),
+        ),
+    )
+    real_W = _RealWorldAtBaselineTime(10, ())
+    before_export = rank_state.export_state()
+    _expect_value_error(
+        lambda: confirm_leading_nonparticipating_decision_window_visits(
+            arrived_result,
+            rank_states_by_node_name={"merge": rank_state},
+            participates_by_visit_key={("veh_n1", 1): False},
+            real_W=real_W,
+        ),
+        "merge",
+    )
+    assert rank_state.export_state() == before_export
+
+
+def test_uxsim_missing_node_exception_becomes_value_error_with_node_name():
+    real_W = _RealWorldAtBaselineTime(10, ())
+    try:
+        _valid_outlink_names_at_target_node(real_W, "merge")
+        raise AssertionError("Expected ValueError for missing target Node")
+    except ValueError as exc:
+        assert "merge" in str(exc)
+        assert exc.__cause__ is not None
+        assert str(exc.__cause__) == "'merge' is not Node in this World"
+
+
+def test_unexpected_get_node_runtime_error_is_reraised_without_conversion():
+    rank_state = _new_rank_state("merge")
+    _register_undetermined(rank_state, ("veh_n1", 1))
+    arrived_result = _arrived_confirmation_result(
+        target_node_names=("merge",),
+        baseline_timestep_T=10,
+        alignment_results=(
+            _alignment_result(
+                "merge",
+                resolved=(_resolved("veh_n1", 1, baseline_arrival_timestep=11),),
+            ),
+        ),
+    )
+    real_W = _RealWorldWithUnexpectedGetNodeFailure(10)
+    before_export = rank_state.export_state()
+    atomic_called = False
+
+    def reject_atomic_confirm(*args, **kwargs):
+        nonlocal atomic_called
+        atomic_called = True
+        raise AssertionError("atomic confirm must not be called")
+
+    rank_state.confirm_visits_and_formal_target_node_routes_atomically = reject_atomic_confirm  # type: ignore[method-assign]
+    try:
+        confirm_leading_nonparticipating_decision_window_visits(
+            arrived_result,
+            rank_states_by_node_name={"merge": rank_state},
+            participates_by_visit_key={("veh_n1", 1): False},
+            real_W=real_W,
+        )
+        raise AssertionError("Expected RuntimeError from get_node")
+    except RuntimeError as exc:
+        assert str(exc) == "internal world failure"
+    assert atomic_called is False
+    assert rank_state.export_state() == before_export
+
+
+def test_non_callable_get_node_raises_value_error_without_type_error():
+    _expect_value_error(
+        lambda: _valid_outlink_names_at_target_node(
+            _RealWorldWithoutCallableGetNode(),
+            "merge",
+        ),
+        "callable get_node",
+    )
+
+
+def test_empty_outlink_name_from_values_raises_and_leaves_ledger_unchanged():
+    real_W = _RealWorldAtBaselineTime(10, ("merge",))
+    real_W._node_by_name["merge"] = _TargetNode(("",))
+    _expect_value_error(
+        lambda: _valid_outlink_names_at_target_node(real_W, "merge"),
+        "non-empty name",
+    )
+
+
+def test_invalid_outlink_route_leaves_leading_confirmation_unchanged():
+    rank_state = _new_rank_state("merge")
+    _register_undetermined(rank_state, ("veh_n1", 1))
+    arrived_result = _arrived_confirmation_result(
+        target_node_names=("merge",),
+        baseline_timestep_T=10,
+        alignment_results=(
+            _alignment_result(
+                "merge",
+                resolved=(_resolved("veh_n1", 1, baseline_arrival_timestep=11),),
+            ),
+        ),
+    )
+    arrived_result.alignment_fork_result.fork_result.collector = _collector_with_arrival_route(
+        "north"
+    )
+    before_export = rank_state.export_state()
+    _expect_value_error(
+        lambda: _confirm(
+            arrived_result,
+            {"merge": rank_state},
+            {("veh_n1", 1): False},
+        ),
+        "formal_route_next_link_name",
+    )
+    assert rank_state.export_state() == before_export
 
 
 def test_existing_result_types_remain_unchanged():

@@ -89,6 +89,47 @@ def _alignment_result(
     )
 
 
+class _NamedOutlink:
+    def __init__(self, name: str) -> None:
+        self.name = name
+
+
+class _TargetNode:
+    def __init__(self, outlink_names: tuple[str, ...]) -> None:
+        self.outlinks = {
+            outlink_name: _NamedOutlink(outlink_name)
+            for outlink_name in outlink_names
+        }
+
+
+class _RealWorldAtBaselineTime:
+    def __init__(self, timestep_T: int, node_names: tuple[str, ...]) -> None:
+        self.T = timestep_T
+        self._node_by_name = {
+            node_name: _TargetNode(("out", "side"))
+            for node_name in node_names
+        }
+
+    def get_node(self, node_name: str) -> _TargetNode:
+        if node_name not in self._node_by_name:
+            raise Exception(f"'{node_name}' is not Node in this World")
+        return self._node_by_name[node_name]
+
+
+def _collector_with_arrival_route(route_next_link_name: str = "out") -> MagicMock:
+    collector = MagicMock()
+
+    def snapshot(vehicle_name: str, visit_id: int) -> dict[str, object]:
+        return {
+            "vehicle_name": vehicle_name,
+            "visit_id": visit_id,
+            "route_next_link_name": route_next_link_name,
+        }
+
+    collector.get_baseline_visit_snapshot.side_effect = snapshot
+    return collector
+
+
 def _fork_result(
     *,
     target_node_names: tuple[str, ...],
@@ -96,7 +137,7 @@ def _fork_result(
     configured_horizon_steps: int = 6,
 ) -> OrderControlBaselineForkResult:
     return OrderControlBaselineForkResult(
-        collector=MagicMock(),
+        collector=_collector_with_arrival_route(),
         target_node_names=target_node_names,
         baseline_timestep_T=baseline_timestep_T,
         configured_horizon_steps=configured_horizon_steps,
@@ -156,10 +197,15 @@ def _leading_confirmation_via_pipeline(
     rank_states_by_node_name: dict[str, OrderControlTvtNodeRankState],
     participates_by_visit_key: dict[OrderControlTvtVisitKey, bool],
 ) -> OrderControlTvtLeadingNonparticipatingConfirmationResult:
+    fork_result = arrived_result.alignment_fork_result.fork_result
     return confirm_leading_nonparticipating_decision_window_visits(
         arrived_result,
         rank_states_by_node_name=rank_states_by_node_name,
         participates_by_visit_key=participates_by_visit_key,
+        real_W=_RealWorldAtBaselineTime(
+            fork_result.baseline_timestep_T,
+            fork_result.target_node_names,
+        ),
     )
 
 
