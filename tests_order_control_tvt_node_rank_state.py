@@ -16,6 +16,7 @@ from uxsim.order_control_tvt_node_rank_state import (
     OrderControlTvtConfirmResult,
     OrderControlTvtNodeRankState,
     OrderControlTvtVisitKey,
+    OrderControlTvtVisitKeyWithFormalRoute,
     _verify_candidate_confirmed_state,
 )
 
@@ -43,6 +44,7 @@ def _register(
 
 def test_public_types_importable_from_dedicated_module():
     assert OrderControlTvtVisitKey is not None
+    assert OrderControlTvtVisitKeyWithFormalRoute is not None
     assert OrderControlTvtConfirmResult is not None
     assert OrderControlTvtNodeRankState is not None
 
@@ -624,9 +626,16 @@ def test_export_state_structure_and_sort_orders():
         "vehicle_name": "veh_b",
         "visit_id": 2,
         "assigned_rank": 1,
+        "formal_route_next_link_name": None,
     }
     for item in confirmed_visits:
-        assert set(item.keys()) == {"vehicle_name", "visit_id", "assigned_rank"}
+        assert set(item.keys()) == {
+            "vehicle_name",
+            "visit_id",
+            "assigned_rank",
+            "formal_route_next_link_name",
+        }
+        assert item["formal_route_next_link_name"] is None
 
     undetermined_visits = exported["undetermined_visits"]
     assert undetermined_visits == [
@@ -677,7 +686,12 @@ def test_export_state_isolation_from_nested_mutations():
     exported["node_name"] = "changed"
     exported["k_confirmed"] = 999
     exported["confirmed_visits"].append(
-        {"vehicle_name": "hack", "visit_id": 9, "assigned_rank": 99}
+        {
+            "vehicle_name": "hack",
+            "visit_id": 9,
+            "assigned_rank": 99,
+            "formal_route_next_link_name": None,
+        }
     )
     exported["confirmed_visits"][0]["assigned_rank"] = 99
     exported["undetermined_visits"].append({"vehicle_name": "hack", "visit_id": 9})
@@ -728,14 +742,288 @@ def test_confirm_runtime_error_during_candidate_verification_leaves_state_unchan
     assert state.export_state() == before_export
 
 
+def _default_outlinks() -> frozenset[str]:
+    return frozenset({"out_east", "out_west"})
+
+
+def test_atomic_confirm_single_visit_saves_rank_and_formal_route():
+    state = _new_state()
+    _register(state, ("veh_a", 1))
+    result = state.confirm_visits_and_formal_target_node_routes_atomically(
+        [(("veh_a", 1), "out_east")],
+        _default_outlinks(),
+    )
+    assert result.newly_confirmed_count == 1
+    assert state.assigned_rank(("veh_a", 1)) == 1
+    assert state.formal_route_next_link_name(("veh_a", 1)) == "out_east"
+    exported = state.export_state()
+    assert exported["confirmed_visits"][0]["formal_route_next_link_name"] == "out_east"
+
+
+def test_atomic_confirm_multiple_visits_preserves_input_order_and_routes():
+    state = _new_state()
+    _register(state, ("veh_a", 1), ("veh_b", 1), ("veh_c", 1))
+    pairs = [
+        (("veh_a", 1), "out_east"),
+        (("veh_b", 1), "out_west"),
+        (("veh_c", 1), "out_east"),
+    ]
+    state.confirm_visits_and_formal_target_node_routes_atomically(
+        pairs,
+        _default_outlinks(),
+    )
+    assert state.confirmed_visit_keys_in_order() == (
+        ("veh_a", 1),
+        ("veh_b", 1),
+        ("veh_c", 1),
+    )
+    assert state.formal_route_next_link_name(("veh_b", 1)) == "out_west"
+
+
+def test_atomic_confirm_empty_input_is_no_op():
+    state = _new_state()
+    _register(state, ("veh_a", 1))
+    state.confirm_visits_in_order([("veh_a", 1)])
+    before = _snapshot_state(state)
+    result = state.confirm_visits_and_formal_target_node_routes_atomically(
+        [],
+        _default_outlinks(),
+    )
+    assert result.newly_confirmed_count == 0
+    assert _snapshot_state(state) == before
+
+
+def test_confirm_visits_in_order_leaves_formal_route_none():
+    state = _new_state()
+    _register(state, ("veh_a", 1))
+    state.confirm_visits_in_order([("veh_a", 1)])
+    assert state.formal_route_next_link_name(("veh_a", 1)) is None
+
+
+def test_formal_route_read_matches_assigned_rank_membership_contract():
+    state = _new_state()
+    _register(state, ("veh_a", 1), ("veh_b", 1))
+    state.confirm_visits_and_formal_target_node_routes_atomically(
+        [(("veh_a", 1), "out_east")],
+        _default_outlinks(),
+    )
+    assert state.formal_route_next_link_name(("veh_a", 1)) == "out_east"
+    assert state.formal_route_next_link_name(("veh_b", 1)) is None
+    assert state.formal_route_next_link_name(("veh_z", 1)) is None
+
+
+def test_formal_route_read_rejects_invalid_visit_key():
+    state = _new_state()
+    try:
+        state.formal_route_next_link_name(("", 1))
+        raise AssertionError("Expected ValueError for invalid VisitKey")
+    except ValueError as exc:
+        assert "vehicle_name" in str(exc) or "visit_key" in str(exc)
+
+
+def test_atomic_and_rank_only_confirm_coexist_on_same_ledger():
+    state = _new_state()
+    _register(state, ("veh_a", 1), ("veh_b", 1), ("veh_c", 1))
+    state.confirm_visits_and_formal_target_node_routes_atomically(
+        [(("veh_a", 1), "out_east")],
+        _default_outlinks(),
+    )
+    state.confirm_visits_in_order([("veh_b", 1)])
+    state.confirm_visits_and_formal_target_node_routes_atomically(
+        [(("veh_c", 1), "out_west")],
+        _default_outlinks(),
+    )
+    assert state.formal_route_next_link_name(("veh_a", 1)) == "out_east"
+    assert state.formal_route_next_link_name(("veh_b", 1)) is None
+    assert state.formal_route_next_link_name(("veh_c", 1)) == "out_west"
+
+
+def test_atomic_confirm_leaves_state_unchanged_on_middle_unregistered():
+    state = _new_state()
+    _register(state, ("veh_a", 1), ("veh_c", 1))
+    before = _snapshot_state(state)
+    try:
+        state.confirm_visits_and_formal_target_node_routes_atomically(
+            [
+                (("veh_a", 1), "out_east"),
+                (("veh_b", 1), "out_west"),
+                (("veh_c", 1), "out_east"),
+            ],
+            _default_outlinks(),
+        )
+        raise AssertionError("Expected ValueError for middle unregistered key")
+    except ValueError:
+        pass
+    assert _snapshot_state(state) == before
+
+
+def test_atomic_confirm_leaves_state_unchanged_on_middle_reconfirm():
+    state = _new_state()
+    _register(state, ("veh_a", 1), ("veh_b", 1), ("veh_c", 1))
+    state.confirm_visits_and_formal_target_node_routes_atomically(
+        [(("veh_a", 1), "out_east")],
+        _default_outlinks(),
+    )
+    before = _snapshot_state(state)
+    try:
+        state.confirm_visits_and_formal_target_node_routes_atomically(
+            [
+                (("veh_b", 1), "out_west"),
+                (("veh_a", 1), "out_east"),
+                (("veh_c", 1), "out_east"),
+            ],
+            _default_outlinks(),
+        )
+        raise AssertionError("Expected ValueError for middle re-confirm")
+    except ValueError as exc:
+        assert "already confirmed" in str(exc)
+    assert _snapshot_state(state) == before
+
+
+def test_atomic_confirm_leaves_state_unchanged_on_duplicate_visit_key():
+    state = _new_state()
+    _register(state, ("veh_a", 1))
+    before = _snapshot_state(state)
+    try:
+        state.confirm_visits_and_formal_target_node_routes_atomically(
+            [
+                (("veh_a", 1), "out_east"),
+                (("veh_a", 1), "out_west"),
+            ],
+            _default_outlinks(),
+        )
+        raise AssertionError("Expected ValueError for duplicate VisitKey")
+    except ValueError as exc:
+        assert "Duplicate VisitKey" in str(exc)
+    assert _snapshot_state(state) == before
+
+
+def test_atomic_confirm_rejects_empty_string_formal_route_before_mutation():
+    state = _new_state()
+    _register(state, ("veh_a", 1))
+    before = _snapshot_state(state)
+    try:
+        state.confirm_visits_and_formal_target_node_routes_atomically(
+            [(("veh_a", 1), "")],
+            _default_outlinks(),
+        )
+        raise AssertionError("Expected ValueError for empty formal route")
+    except ValueError as exc:
+        assert "formal_route_next_link_name" in str(exc)
+    assert _snapshot_state(state) == before
+
+
+def test_atomic_confirm_rejects_none_formal_route_before_mutation():
+    state = _new_state()
+    _register(state, ("veh_a", 1))
+    before = _snapshot_state(state)
+    before_k_confirmed = state.k_confirmed()
+    before_export = state.export_state()
+    try:
+        state.confirm_visits_and_formal_target_node_routes_atomically(
+            [(("veh_a", 1), None)],  # type: ignore[list-item]
+            _default_outlinks(),
+        )
+        raise AssertionError("Expected ValueError for None formal route")
+    except ValueError as exc:
+        assert "formal_route_next_link_name" in str(exc)
+    assert state.k_confirmed() == before_k_confirmed
+    assert state.confirmed_visit_keys_in_order() == before["confirmed"]
+    assert state.undetermined_visit_keys() == before["undetermined"]
+    assert state.export_state() == before_export
+    assert _snapshot_state(state) == before
+
+
+def test_atomic_confirm_rejects_invalid_outlink_before_mutation():
+    state = _new_state()
+    _register(state, ("veh_a", 1), ("veh_b", 1))
+    before = _snapshot_state(state)
+    try:
+        state.confirm_visits_and_formal_target_node_routes_atomically(
+            [
+                (("veh_a", 1), "out_east"),
+                (("veh_b", 1), "out_north"),
+            ],
+            _default_outlinks(),
+        )
+        raise AssertionError("Expected ValueError for invalid outlink")
+    except ValueError as exc:
+        assert "out_north" in str(exc) or "outlink" in str(exc)
+    assert _snapshot_state(state) == before
+
+
+def test_atomic_confirm_rejects_non_string_formal_route_in_pair():
+    state = _new_state()
+    _register(state, ("veh_a", 1))
+    before = _snapshot_state(state)
+    try:
+        state.confirm_visits_and_formal_target_node_routes_atomically(
+            [(("veh_a", 1), 123)],  # type: ignore[list-item]
+            _default_outlinks(),
+        )
+        raise AssertionError("Expected ValueError for non-str formal route")
+    except ValueError as exc:
+        assert "formal_route_next_link_name" in str(exc)
+    assert _snapshot_state(state) == before
+
+
+def test_atomic_confirm_rejects_invalid_pair_shape():
+    state = _new_state()
+    _register(state, ("veh_a", 1))
+    before = _snapshot_state(state)
+    try:
+        state.confirm_visits_and_formal_target_node_routes_atomically(
+            [("veh_a", 1, "out_east")],  # type: ignore[list-item]
+            _default_outlinks(),
+        )
+        raise AssertionError("Expected ValueError for invalid pair shape")
+    except ValueError as exc:
+        assert "length-2" in str(exc)
+    assert _snapshot_state(state) == before
+
+
+def test_atomic_confirm_rejects_invalid_outlink_names_container():
+    state = _new_state()
+    _register(state, ("veh_a", 1))
+    try:
+        state.confirm_visits_and_formal_target_node_routes_atomically(
+            [(("veh_a", 1), "out_east")],
+            {"out_east": True},  # type: ignore[arg-type]
+        )
+        raise AssertionError("Expected ValueError for dict outlink container")
+    except ValueError as exc:
+        assert "target_node_outlink_names" in str(exc)
+
+
+def test_atomic_runtime_error_during_verification_leaves_state_unchanged():
+    state = _new_state()
+    _register(state, ("veh_a", 1))
+    before = _snapshot_state(state)
+    with patch(
+        "uxsim.order_control_tvt_node_rank_state._verify_candidate_confirmed_state",
+        side_effect=RuntimeError("forced atomic verification failure"),
+    ):
+        try:
+            state.confirm_visits_and_formal_target_node_routes_atomically(
+                [(("veh_a", 1), "out_east")],
+                _default_outlinks(),
+            )
+            raise AssertionError("Expected RuntimeError from verification")
+        except RuntimeError as exc:
+            assert str(exc) == "forced atomic verification failure"
+    assert _snapshot_state(state) == before
+
+
 def test_runtime_error_on_candidate_list_dict_length_mismatch():
     confirmed_list = [("veh_a", 1)]
     rank_dict: dict[OrderControlTvtVisitKey, int] = {}
+    formal_route_dict: dict[OrderControlTvtVisitKey, str | None] = {}
     undetermined_set: set[OrderControlTvtVisitKey] = set()
     try:
         _verify_candidate_confirmed_state(
             confirmed_list,
             rank_dict,
+            formal_route_dict,
             undetermined_set,
             k_confirmed_before=0,
             k_confirmed_after=1,
@@ -750,11 +1038,13 @@ def test_runtime_error_on_candidate_list_dict_length_mismatch():
 def test_runtime_error_on_candidate_rank_position_mismatch():
     confirmed_list = [("veh_a", 1)]
     rank_dict = {("veh_a", 1): 2}
+    formal_route_dict = {("veh_a", 1): "out_east"}
     undetermined_set: set[OrderControlTvtVisitKey] = set()
     try:
         _verify_candidate_confirmed_state(
             confirmed_list,
             rank_dict,
+            formal_route_dict,
             undetermined_set,
             k_confirmed_before=0,
             k_confirmed_after=1,
@@ -770,11 +1060,13 @@ def test_runtime_error_when_confirmed_visit_remains_in_undetermined_set():
     visit_key = ("veh_a", 1)
     confirmed_list = [visit_key]
     rank_dict = {visit_key: 1}
+    formal_route_dict = {visit_key: "out_east"}
     undetermined_set = {visit_key}
     try:
         _verify_candidate_confirmed_state(
             confirmed_list,
             rank_dict,
+            formal_route_dict,
             undetermined_set,
             k_confirmed_before=0,
             k_confirmed_after=1,
@@ -791,11 +1083,13 @@ def test_runtime_error_when_confirmed_visit_remains_in_undetermined_set():
 def test_runtime_error_on_confirm_result_count_mismatch():
     confirmed_list = [("veh_a", 1)]
     rank_dict = {("veh_a", 1): 1}
+    formal_route_dict = {("veh_a", 1): "out_east"}
     undetermined_set: set[OrderControlTvtVisitKey] = set()
     try:
         _verify_candidate_confirmed_state(
             confirmed_list,
             rank_dict,
+            formal_route_dict,
             undetermined_set,
             k_confirmed_before=0,
             k_confirmed_after=1,
@@ -862,6 +1156,23 @@ TESTS = [
     test_runtime_error_on_candidate_rank_position_mismatch,
     test_runtime_error_when_confirmed_visit_remains_in_undetermined_set,
     test_runtime_error_on_confirm_result_count_mismatch,
+    test_atomic_confirm_single_visit_saves_rank_and_formal_route,
+    test_atomic_confirm_multiple_visits_preserves_input_order_and_routes,
+    test_atomic_confirm_empty_input_is_no_op,
+    test_confirm_visits_in_order_leaves_formal_route_none,
+    test_formal_route_read_matches_assigned_rank_membership_contract,
+    test_formal_route_read_rejects_invalid_visit_key,
+    test_atomic_and_rank_only_confirm_coexist_on_same_ledger,
+    test_atomic_confirm_leaves_state_unchanged_on_middle_unregistered,
+    test_atomic_confirm_leaves_state_unchanged_on_middle_reconfirm,
+    test_atomic_confirm_leaves_state_unchanged_on_duplicate_visit_key,
+    test_atomic_confirm_rejects_empty_string_formal_route_before_mutation,
+    test_atomic_confirm_rejects_none_formal_route_before_mutation,
+    test_atomic_confirm_rejects_invalid_outlink_before_mutation,
+    test_atomic_confirm_rejects_non_string_formal_route_in_pair,
+    test_atomic_confirm_rejects_invalid_pair_shape,
+    test_atomic_confirm_rejects_invalid_outlink_names_container,
+    test_atomic_runtime_error_during_verification_leaves_state_unchanged,
 ]
 
 
