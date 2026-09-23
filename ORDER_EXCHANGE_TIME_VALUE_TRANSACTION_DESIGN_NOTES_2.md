@@ -8315,6 +8315,8 @@ TVT候補別局所仮想計算は、通常の`World.exec_simulation()`を使用�
 - この順序は、通常UXsimでNodeのtransfer処理がVehicle前進より先に行われる時間順と整合する
 - outlink上のVehicleを先に前進させてから、すでに終端で待っていたVehicleを探す順序にはしない
 
+**2026-09-21処理順への2026-09-24注記：** 上記の「境界処理を対象Node通過より前に置く」「その時刻の前進で終端へ着いたVehicleは同じ時刻に境界サービスを受けない」は、2026-09-21時点の処理順である。削除しない。最新の仮想timestep順は、完全な実装前仕様のとおり、対象Node通過、局所前進、新着incoming登録のあと、同じ仮想時刻にoutlink終端境界を行う。実装済み範囲と未実装の境界処理は「TVT-MP候補別局所仮想計算の実装進捗・確定実装契約・下流境界追加設計記録」を参照する。
+
 ## local horizonと早期終了
 
 local horizonの上限には、対応する全World baseline結果の`configured_horizon_steps`を使用する。
@@ -10383,6 +10385,8 @@ Python実装と専用テストは、その実装前仕様が確定するまで�
 
 準備、局所状態、仮想計算の順でファイルを追える構成を優先する。これより細かいモジュールには分けない。
 
+**2026-09-24注記：** 上記は実装前のモジュール予定である。保存済み実装は、仮想計算を1ファイルにまとめず、仮想時計、拘束順位の対象Node通過、局所Vehicle前進を別モジュールにした。統括ファイル `order_control_tvt_mp_candidate_local_virtual_calculation.py` は未作成である。最新の実装状況は、本ファイルの「TVT-MP候補別局所仮想計算の実装進捗・確定実装契約・下流境界追加設計記録」を参照する。
+
 `Node.transfer()`、`transfer_fcfs_clearance()`、BATCHのservice queue全体は直接呼ばない。BATCH Level 2の `_transfer_vehicle_reference()` も直接呼ばない。既存 `Node.transfer()` から大規模な共通helperを直ちに抽出しない。交通上同じ意味となる更新は、TVT専用処理として明示的に書く。
 
 対応する専用テストは、既存の `tests_order_control_tvt_node_rank_state.py` へ原子的確定のケースを追加し、新規3モジュールに対応する次のテストファイルを置く。
@@ -10632,6 +10636,9 @@ buyerとsellerの必要通過timestepが揃ったかどうかの記録は、そ�
 2. 必要な累積配列を現在の仮想時刻まで延長する。
 3. 完成した拘束順位列を先頭から走査する。未到着、inlinkの物理先頭でないこと、通常の容量不足または入口空間不足は、そのVisitを残して次を見る。通過できるVisitは、そのVisitの進路分類に対応する進路で通過させる。拘束順位列の順番は変えない。拘束順位の走査中にclearanceが未充足なら、対象Node通過処理を終える。拘束順位外Vehicleの処理へ進まない。
 4. clearanceで止まっておらず、対象Nodeの `flow_capacity_remain` が `DELTAN` 以上あるとき、その時刻までに到着済み、未通過、完成した拘束順位列に含まれない、trip-endではないVehicleを抽出し、現在Visitの対象Node到着時刻、固定 `arrival_tiebreaker`、Vehicle IDの昇順で走査する。この順は正式なbaseline順位でもTVT順位でもなく、順位台帳へ保存しない。通常の物理条件または容量条件で通れないときは、そのVehicleだけを残す。別inlinkに属する後続の通過可否は確認できる。同じinlinkの後続は、物理先頭でないため追い越せない。clearance未充足なら、拘束順位外の残りを確認しない。対象Nodeの `flow_capacity_remain` が `DELTAN` 未満になったら、対象Node通過処理を終える。拘束順位走査のあと、拘束順位外走査の前、および対象Node通過処理の途中では、容量を再補充しない。
+
+**2026-09-24注記：** 保存済みの拘束順位走査では、Node流量容量不足は走査終了ではない。未到着、物理先頭でないこと、容量不足、入口空間不足と同じ一時スキップであり、同じ走査で後続Visitを試す。走査を途中で終えるのはclearance未充足だけである。`binding_sequence_completed` は、Node流量が残っているという意味ではない。最新契約は「TVT-MP候補別局所仮想計算の実装進捗・確定実装契約・下流境界追加設計記録」を参照する。
+
 5. 対象Node通過成功Vehicleの通過timestepを記録する。
 6. buyerとsellerの必要な対象Node通過timestepが揃った場合は、「この仮想timestep末でresolvedとして終了する」ことを記録する。ここでは候補計算全体は終了しない。
 7. inlink上の局所対象Vehicleを前進させる。
@@ -10681,7 +10688,11 @@ buyerとsellerが揃った後も時刻末処理は完了するが、次は同じ
 
 **clearanceまたはNode容量による通過処理終了後**
 
-clearance未充足またはNode容量不足により対象Node通過処理が終了した場合も、その仮想timestep全体を直ちに打ち切る意味にはしない。その仮想timestep内で引き続き、inlink上の局所対象Vehicleの前進、新たな対象Node端到着Vehicleの登録、outlink上の局所対象Vehicleの前進、outlink終端境界処理、容量および状態の更新、診断の完成、resolvedまたはunresolvedの判定を行う。ただし、対象Node通過処理へは戻らない。
+clearance未充足またはNode容量不足により対象Node通過処理が終了した場合も、その仮想timestep全体を直ちに打ち切る意味にはしない。
+
+**2026-09-24注記：** 前進と境界処理を続ける、という後半は維持する。ただし保存済みの拘束順位走査は、Node流量容量不足では走査を終えず、一時スキップとして後続を試す。走査終了はclearance未充足だけである。詳細は「TVT-MP候補別局所仮想計算の実装進捗・確定実装契約・下流境界追加設計記録」を参照する。
+
+その仮想timestep内で引き続き、inlink上の局所対象Vehicleの前進、新たな対象Node端到着Vehicleの登録、outlink上の局所対象Vehicleの前進、outlink終端境界処理、容量および状態の更新、診断の完成、resolvedまたはunresolvedの判定を行う。ただし、対象Node通過処理へは戻らない。
 
 **BATCH Level 2との違い**
 
@@ -10935,6 +10946,540 @@ resolvedとなる仮想timestepの完了契約では、次を固定する。
 
 直ちにPython実装へ進まない。全区分を一度に実装しない。事前合意のないStep体系は導入しない。
 
+**2026-09-24注記：** 上記は、完全な実装前仕様を記録した時点の再開情報である。現在の作業指示としては読まない。実装済み範囲、未実装、未確定、および次の直接作業は、直後の「TVT-MP候補別局所仮想計算の実装進捗・確定実装契約・下流境界追加設計記録」を参照する。
+
+# TVT-MP候補別局所仮想計算の実装進捗・確定実装契約・下流境界追加設計記録
+
+**記録日：2026-09-24**
+
+本節は、直前の「TVT-MP候補別局所仮想計算の完全な実装前仕様」（2026-09-22、2026-09-23補修）を削除せず、その後に保存された実装と、outlink終端境界へ追加した設計判断を記録する。
+
+完全な実装前仕様に基づき、候補別局所仮想計算を複数モジュールへ分けて実装した。当初予定の単一モジュール `order_control_tvt_mp_candidate_local_virtual_calculation.py` は、まだ存在しない。仮想時計、拘束順位に従う対象Node通過、局所Vehicle前進は、責務別の別モジュールとして実装済みである。仮想timestep全体を統括する上位loopは、まだ未実装である。
+
+本節のうち「実装済み」は、保存済みcommit `d23a385` までのコードに対応する。outlink終端の専用境界退出は、設計として確定したが、コードへは未実装である。未確定欄にある事項は、境界処理本体の実装を始める前に決める必要がある。
+
+## 1. 記録の位置付けと参照関係
+
+最新の実装前仕様は、2026-09-22の完全な実装前仕様と、その2026-09-23補修である。本節は、その仕様を置き換えず、その後の実装結果を足す追加記録である。
+
+2026-09-18の設計検討、2026-09-19の下流境界基本設計、2026-09-21の途中確定、2026-09-22の統合仕様は、歴史的記録として残す。それらを現在の作業指示として読まない。食い違う箇所では、本節の実装済み契約、または本節の未実装追加設計を最新参照先とする。
+
+実装済みと、設計確定済みだが未実装と、未確定は、混ぜない。
+
+- 実装済みは、`d23a385` までの保存済みコードで確認できる契約である。
+- 設計確定済みだが未実装は、outlink終端境界の3状態と、下流待ちあり・実流出ありの専用境界退出の基本契約である。境界処理の本番モジュールは無い。
+- 未確定は、専用境界退出の添字や式など、実装を始める前に決める細部である。推測で埋めない。
+
+## 2. 保存済みコミットと実装区分
+
+前提となる詳細設計の保存済みcommitは `c35f944` である。そのMarkdownが、両メモの最終更新である。その後、次の実装commitが保存されている。各commitの作成時に、その区分の専用テストと関連する回帰テストを確認した。今回の文書更新では、それらのテストを再実行していない。
+
+棚卸し時に、現行の専用テストファイルにある `def test_` の数を数えた。これは成功件数ではない。
+
+| commit | 実装区分 | 主な本番モジュール | 専用テスト | 後続接続上の意味 |
+|---|---|---|---|---|
+| `df3e27c` | 順位と正式進路の原子的確定 | `uxsim/order_control_tvt_node_rank_state.py` | `tests_order_control_tvt_node_rank_state.py`（棚卸し時の `def test_` は71） | 順位と正式進路を、全件成功のときだけ一緒に保存する |
+| `a6285e3` | 既到着Visitと先頭連続非参加Visitの原子的先行確定 | `uxsim/order_control_tvt_arrived_undetermined_confirmation.py`、`uxsim/order_control_tvt_leading_nonparticipating_confirmation.py` | 両モジュールの専用テスト。権利保有選定のテストも、新しい引数に合わせて更新されている | 候補形成前に、区分2の順位と正式進路が台帳へ残る。結果型の形は変えていない |
+| `2052674` | 完全な拘束順位列 | `uxsim/order_control_tvt_mp_local_binding_rank_sequence.py` | `tests_order_control_tvt_mp_local_binding_rank_sequence.py` | 仮想計算の前に、通過順と正式進路の完成列を作る。車は動かさない |
+| `4916556` | 拘束順位列への `baseline_timestep_T` 追加 | 同上 | 同上（棚卸し時の `def test_` は46） | 局所状態が、コピー前に実Worldの時刻Tと照合できる |
+| `03aed6a` | 候補別局所状態 | `uxsim/order_control_tvt_mp_candidate_local_state.py` | `tests_order_control_tvt_mp_candidate_local_state.py`（棚卸し時の `def test_` は14） | 候補ごとに独立したWorld全体のコピーと、更新してよい範囲を固定する |
+| `07ca0d9` | 仮想時計、局所容量補充、累積台数延長 | `uxsim/order_control_tvt_mp_candidate_virtual_time.py` | `tests_order_control_tvt_mp_candidate_virtual_time.py`（棚卸し時の `def test_` は12） | offset 0はsnapshot残容量のまま。2時刻目以降だけ、対象範囲の容量を1段補充する |
+| `dfdd0d6` | 一時スキップとclearance停止による拘束順位Node通過 | `uxsim/order_control_tvt_mp_candidate_binding_transfer.py` | `tests_order_control_tvt_mp_candidate_binding_transfer.py`（棚卸し時の `def test_` は15） | 完成列の順に、通れるVisitだけを正式進路へ出す |
+| `d23a385` | 局所Vehicle前進と新着incoming登録 | `uxsim/order_control_tvt_mp_candidate_local_vehicle_advance.py` | `tests_order_control_tvt_mp_candidate_local_vehicle_advance.py`（棚卸し時の `def test_` は14） | 通過走査のあと、対象Link上の車を1回進め、今回新着した車だけをincomingへ足す |
+
+`df3e27c` より前の下流境界観測は、`f475294`、`c72e38a`、`7f00520` で実装済みである。本節は、その結果の受け渡しだけを追加で書く。観測そのものの契約は再考しない。
+
+## 3. 正式進路付き順位台帳と原子的確定
+
+実装済みである。保存済みcommitは `df3e27c` である。
+
+交通上の意味は、確定したVisitについて、交差点での順番と、その交差点から出る正式進路を、別々のタイミングで片方だけ残さないことである。
+
+公開APIは `confirm_visits_and_formal_target_node_routes_atomically` である。入力は、確定順の VisitKey と `formal_route_next_link_name` の組、および対象Nodeのoutlink名集合である。全件を検証し、成功したときだけ台帳へ書く。1件でも不整合なら、順位も正式進路も変えない。入力の形の誤りは `ValueError` である。代入前の内部整合が崩れていた場合は `RuntimeError` であり、その場合も代入しない。0件のときは台帳を変えない。
+
+読取は次を維持する。
+
+- `confirmed_visit_keys_in_order()`
+- `assigned_rank()`
+- `formal_route_next_link_name()`
+
+未保存の正式進路は `None` である。空文字ではない。古い `confirm_visits_in_order()` は、既存テストと互換のために残す。そのAPIで確定した正式進路は `None` である。新しい本番経路で、正式進路の保存が必要な確定に、この古いAPIは使わない。
+
+台帳上の正式進路が `None` であることだけでは、そのVisitを一律に重大不整合とはしない。局所通過にその進路が必要になった時点で、snapshot進路の規則にも当たらなければ、そのとき停止する。
+
+候補評価中は、この原子的確定APIを呼ばない。
+
+## 4. 既到着Visitの原子的先行確定
+
+実装済みである。保存済みcommitは `a6285e3` である。
+
+交通上の意味は、baseline開始時点Tまでに、すでに対象Nodeへ到着しているVisitを、候補を作る前に、順位と正式進路付きで確定することである。到着順は並べ直さない。
+
+公開関数は次である。
+
+```text
+confirm_already_arrived_undetermined_visits(
+    alignment_fork_result,
+    *,
+    rank_states_by_node_name,
+    real_W,
+)
+```
+
+`real_W.T` が `fork_result.baseline_timestep_T` と違うときは `ValueError` である。台帳は変えない。過去の時刻へ戻して確定しない。
+
+対象Nodeは `real_W.get_node(node_name)` で得る。`get_node` が callable でないときは `ValueError` である。UXsimが Node 欠落時に出す `'{node_name}' is not Node in this World` と一致する例外だけを、Node欠落の `ValueError` へ変換する。それ以外の例外は、変換せずそのまま再送出する。
+
+有効なoutlink名は、`Node.outlinks.values()` の各Linkの名前である。確定するVisitの進路から、この集合を作らない。
+
+正式進路は、`fork_result.collector.get_baseline_visit_snapshot` の `route_next_link_name` である。これは対象Nodeへ到着したときの進路であり、baseline終了時の進路ではない。snapshotが無い、または進路が空なら `ValueError` である。台帳は、そのNodeの原子的確定に入る前には変えない。原子的確定の失敗時も、台帳は変えない。
+
+Nodeごとに、原子的確定を1回呼ぶ。`target_node_names` と alignment の Node 名が一致しないときは `RuntimeError` である。0件のNodeも、原子的APIを呼ぶ。その戻りは台帳不変であり、`newly_confirmed_count` は0である。
+
+結果型 `OrderControlTvtArrivedUndeterminedConfirmationResult` と、Node結果の `confirmed_arrived_visit_keys` は、従来どおり VisitKey の列である。進路付きの組へは変えていない。進路は台帳側に保存する。
+
+実World、baseline fork、alignment、collectorの中身は、この関数が書き換えない。
+
+## 5. 先頭連続非参加Visitの原子的先行確定
+
+実装済みである。保存済みcommitは `a6285e3` である。
+
+交通上の意味は、既到着Visitを確定したあと、意思決定窓の先頭に連続する非参加Visitを、正式進路付きで先行確定することである。参加するVisitが現れたところで、この先行確定は止まる。
+
+入力は、既到着確定の結果である。既到着確定の後に実行する。公開関数は `confirm_leading_nonparticipating_decision_window_visits` であり、キーワード引数に `rank_states_by_node_name`、`participates_by_visit_key`、`real_W` を取る。
+
+`real_W.T` と `baseline_timestep_T` の一致、`get_node`、outlink名、collector進路、Nodeごとの原子的確定、例外時の台帳不変は、既到着確定と同じである。`configured_horizon_steps >= 6` という既存契約は維持する。
+
+確定する列は `confirmed_leading_nonparticipating_visit_keys` である。順位は、既到着確定の末尾の次から連続する。正式進路は、collectorの対象Node到着時 `route_next_link_name` だけを使う。
+
+権利保有Visitの選定は、これまでどおり `remaining_decision_window_visit_keys` を使う。結果型のフィールドは変えていない。実Worldは変えない。
+
+## 6. 完全な拘束順位列
+
+実装済みである。保存済みcommitは `2052674` と `4916556` である。
+
+交通上の意味は、仮想計算を始める前に、その候補ではどのVisitを、どの順番で、どの正式進路へ通すかを、完成した一覧にすることである。この段階では車を動かさない。順位台帳もcollectorも書き換えない。
+
+公開関数は次である。
+
+```text
+build_tvt_mp_local_binding_rank_sequence(
+    fifo_inspection_set_result,
+    candidate_fifo_inspection_result,
+    rank_state,
+)
+```
+
+候補は、FIFO検査結果の中にあるオブジェクトそのもので探す。一般形順位、既到着確定、先頭非参加確定、`fork_result` を、別引数として重ねて渡さない。
+
+結果型は `OrderControlTvtMpLocalBindingRankSequence` である。要素型は `OrderControlTvtMpLocalBindingRankVisit` である。区分は `OrderControlTvtMpLocalBindingPartition`、進路由来は `OrderControlTvtMpLocalBindingRouteOrigin`、役割は `OrderControlTvtMpLocalBindingTradeRole` である。結果は frozen である。
+
+4区分の値と意味は次である。連結順もこの順である。
+
+1. `confirmed_before_this_baseline`。今回のbaselineより前から確定済みで、時点Tに対象範囲へ残っているVisit。
+2. `preconfirmed_by_this_baseline`。今回のbaselineで、候補形成前に先行確定したVisit。
+3. `trade_scope_of_this_candidate`。この候補の取引範囲のうち、最後のbuyerまで。
+4. `outside_trade_scope_inside_k_fixed`。取引範囲の外だが、`k_fixed` の中にあるVisit。
+
+完成列の `binding_rank` は1から連続する。`k_last_buyer` は既存の `last_buyer_rank` である。`k_decision_window` は `remaining_decision_window_visit_keys` の件数である。`k_fixed` は両者の最大である。`baseline_timestep_T` は `fork_result.baseline_timestep_T` を保存する。boolではない Python int であり、0以上である。
+
+区分1は、既到着確定結果の `k_confirmed_before` までの台帳prefixを、台帳の確定順のまま見る。collectorにsnapshotがあるVisitだけを列へ入れる。すでに対象範囲を離れてcollectorに記録が無い過去確定Visitは、列へ入れない。正式進路が `None` であることだけを理由に、構築全体を止めない。snapshot時点で進路が決まっていれば、そのsnapshot進路を使う。そうでなければ、台帳の過去正式進路を使う。両方無ければ `RuntimeError` である。collectorの別の値や、現在の `Vehicle.route_next_link` では補わない。役割は `outside_trade_scope` である。
+
+区分2は、既到着Visitのあとへ、先頭連続非参加Visitを続ける。使う進路は台帳の正式進路だけである。空なら `ValueError` であり、collectorの値では埋めない。役割は `outside_trade_scope` である。両 confirm result の確定範囲が、台帳の対応するprefixと一致することを確認する。一致しなければ停止する。
+
+区分3は `trade_order[:last_buyer_rank]` である。`trade_scope` 自体のbaseline順ではない。1始まりの件数 `last_buyer_rank` を、0始まりスライスの終端として使う。各Visitは buyer、seller、非参加のいずれかちょうど1つである。0個または2個以上は `RuntimeError` である。`trade_scope` と、この prefix は、順序ではなくVisitの集合が一致することを確認する。
+
+区分4は、`k_last_buyer` が `k_decision_window` 以上なら空である。小さいときは `remaining_decision_window_visit_keys[k_last_buyer:]` である。0始まりの開始位置は `k_last_buyer` そのものである。baseline順を維持する。上限Nで候補から落ちた窓内Visitも、P-1の対象外でも意思決定窓の中にあるVisitも、落とさない。役割は `outside_trade_scope` である。
+
+`decision_window_visit_keys` は、先頭連続非参加と `remaining_decision_window_visit_keys` の連結と一致することを確認する。
+
+区分3と区分4の進路は、snapshot時点で決まっていればsnapshot進路、そうでなければbaselineの対象Node到着時進路である。空なら `ValueError` である。
+
+区分内でも区分間でも、同じVisitKeyが2回出れば `RuntimeError` である。黙って除外しない。
+
+downstream boundaryの観測結果は、この型へ保持していない。
+
+## 7. 候補別局所状態
+
+実装済みである。保存済みcommitは `03aed6a` である。
+
+交通上の意味は、実Worldを変えずに、候補ごとに別のWorld全体のコピーを作り、後続の局所処理が更新してよいNode、Link、Vehicleを明示することである。候補Aの更新が候補Bや実Worldへ届かないようにする。
+
+公開関数は次である。
+
+```text
+build_tvt_mp_candidate_local_state(
+    real_W,
+    binding_rank_sequence,
+)
+```
+
+コピーする前に、`real_W.T` と `binding_rank_sequence.baseline_timestep_T` を照合する。違うときは `ValueError` であり、コピーしない。過去の時刻へ戻さない。
+
+コピーは `real_W.copy()` によるWorld全体である。対象外のNode、Link、Vehicleは削除しない。削除すると、進路、目的地、leaderの参照が壊れるためである。対象外がコピーの中に残ることと、対象外を走行させることは別である。局所更新の対象には入れない。
+
+型は `OrderControlTvtMpCandidateLocalState`、Link上の車列は `OrderControlTvtMpLocalLinkVehicleState`、拘束Visitとコピー車の組は `OrderControlTvtMpBindingVisitLocalVehiclePair` である。構成を指すフィールドは frozen である。`local_world` の内部は、後続処理が変えてよい。
+
+対象Nodeは、コピーWorldの `get_node()` で得る。inlinkとoutlinkは、そのNodeの登録順である。`Link.vehicles` は物理順である。`incoming_vehicles` は、コピー時点の既存順である。
+
+`local_vehicles` の初回出現順は、次である。
+
+1. inlinkの登録順。各Linkの中は物理順。
+2. outlinkの登録順。各Linkの中は物理順。
+3. まだ入っていない incoming。
+
+同じコピーVehicleは、`local_vehicles` へ1回だけ入れる。inlink、outlink、incomingの所属は、別の列で持つ。各inlinkを1台へ縮約しない。incomingに同じinlinkの車が複数いても、そのまま残す。
+
+実Vehicle名とコピーVehicleの対応は、双方向のmappingで持つ。コピー後の名前は、実Worldの名前と同じである。
+
+拘束順位列の各Visitは、コピーWorldの同名Vehicleと組む。現在Visitの `visit_id` が VisitKey と一致し、そのVisitの node がコピー側の対象Nodeであることを確認する。同じ車の再訪は、`visit_id` で区別する。
+
+`link`、`route_next_link`、leader、follower が、実Worldのオブジェクトを指していれば `RuntimeError` である。コピー側の登録オブジェクトであることを確認する。
+
+この構築は、Vehicleを動かさない。実Worldの乱数状態も変えない。候補ごとに別のコピーを作るので、World、Node、Link、Vehicle、mappingを候補間で共有しない。
+
+## 8. 候補別仮想時計、容量補充、累積台数延長
+
+実装済みである。保存済みcommitは `07ca0d9` である。
+
+交通上の意味は、候補のコピーWorldの時計を、baseline開始時刻Tから1段ずつ進めることである。最初の時刻は、snapshotに残っていた容量のまま使う。2時刻目以降だけ、対象のLinkと対象Nodeへ、通常のUXsimと同じ補充を1回入れる。
+
+型は `OrderControlTvtMpCandidateVirtualTimeState` である。公開関数は次である。
+
+```text
+initialize_tvt_mp_candidate_virtual_time_state(
+    candidate_local_state,
+)
+
+advance_tvt_mp_candidate_virtual_time_one_step(
+    virtual_time_state,
+)
+```
+
+`current_offset` が0のとき、`current_virtual_timestep` は `baseline_timestep_T` である。一般に `current_virtual_timestep = baseline_timestep_T + current_offset` である。`simulated_timestep_count` は、時刻Tから時計を進めた回数である。offset 0では0である。offsetが h のときは h である。snapshotの時刻そのものは数えない。これらの値は property であり、外から代入して時計を進められない。進めるのは、1段前進の関数だけである。
+
+初期化では、容量を補充しない。`cum_arrival` と `cum_departure` だけ、indexがTまで届く最短の長さへ延長する。延長は、直前の値を後ろへコピーする。空のlistは0から始める。過去の要素は書き換えない。`traveltime_actual` と `vehicles_enter_log` は延長しない。
+
+1段前進は、必ず1timestepだけ進む。次の残容量と、次の累積listを先に計算する。その計算が通ったあとで、コピーWorldの `T`、対象Linkの残容量、対象Nodeの `flow_capacity_remain`、累積list、offset、`simulated_timestep_count` を書く。
+
+Linkの補充式は `Link.in_out_flow_constraint` と同じである。`capacity_in is None` のときは、流入残りと流出残りを、どちらも UXsim の無制限表現 `10e10` にする。有限なときは、残りが `DELTAN * number_of_lanes` 未満のときだけ、`capacity * DELTAT` を足す。閾値以上なら、その側は足さない。
+
+Nodeの補充式は `Node.flow_capacity_update` と同じである。`flow_capacity is None` のときは残りを `10e10` にする。有限なときは、残りが `DELTAN * number_of_lanes` 未満のときだけ、`flow_capacity * DELTAT` を足す。
+
+補充と累積延長の対象は、対象Nodeと、対象inlinkおよび対象outlinkだけである。同じLinkオブジェクトは1回だけ補充する。自己ループのように、inlinkとoutlinkの両方に同じLinkが出ても、二重に補充しない。対象外のLinkとNodeは変えない。Vehicle、`incoming_vehicles`、clearance履歴は、この段階では変えない。
+
+## 9. 拘束順位に従う対象Node通過
+
+実装済みである。保存済みcommitは `dfdd0d6` である。
+
+交通上の意味は、各仮想時刻で、完成した拘束順位列を先頭から見て、今通せるVisitだけを、保存済みの正式進路へ出すことである。通常の理由で通れないVisitは、列から消さず、その場に残して後続を試す。その仮想時刻の通過走査を途中で終えるのは、clearanceが足りないときだけである。
+
+公開関数は次である。
+
+```text
+initialize_tvt_mp_candidate_binding_transfer_state(
+    virtual_time_state,
+)
+
+scan_and_transfer_tvt_mp_binding_visits_at_current_timestep(
+    binding_transfer_state,
+)
+```
+
+型は `OrderControlTvtMpCandidateBindingTransferState`、1回の走査結果は `OrderControlTvtMpBindingTransferScanResult`、1件の一時スキップは `OrderControlTvtMpBindingVisitTemporarySkip` である。停止理由と一時スキップ理由は、それぞれ Enum である。
+
+一時スキップの理由は、次の6つだけである。
+
+- 未到着。対象Nodeの `incoming_vehicles` にまだいない。
+- inlinkの物理先頭でない。
+- inlinkの流出容量が `DELTAN` 未満。
+- 正式進路のoutlinkの流入容量が `DELTAN` 未満。
+- Node流量容量不足。対象Nodeの流量残りが `DELTAN` 未満。
+- 正式進路のoutlinkの入口に、車が入る空間が無い。
+
+一時スキップしたVisitは、拘束順位列から削除しない。その走査の通過済み列へも入れない。同じ走査の中で、後ろのVisitを試す。次の仮想時刻では、通過済みを除き、列の先頭からもう一度評価する。
+
+走査を途中で返すのは、clearance未充足だけである。停止理由は `clearance_not_satisfied` である。止まったVisitより後ろは、その走査では見ない。clearanceの判定は、前回通ったinlinkと違うinlinkのとき、`current_virtual_timestep - last_order_control_entry_timestep > order_control_clearance_timesteps` である。記録が片方だけ入っているときは `RuntimeError` である。同じinlinkの連続通過は、clearanceでは止めない。
+
+列の最後まで見たときの停止理由は `binding_sequence_completed` である。この理由は、Nodeの流量容量が残っているという意味ではない。Node流量が `DELTAN` 未満でも、走査は終えず、流量不足の一時スキップとして後続を試す。容量はNodeで共有するので、有限容量が `DELTAN` 未満の間は、後続も同じ理由で残ることがある。
+
+`incoming_vehicles` には、同じinlinkから来た既到着Vehicleが複数いてよい。先頭が通過したあと、新しい物理先頭が条件を満たせば、同じ仮想時刻の同じ走査で、その次の車も通過できる。同じinlinkの、まだ物理先頭でない車は、追い越さない。
+
+通過に使うoutlinkは、binding Visitの `route_next_link_name` である。`route_next_link_choice()` は呼ばない。その名前が対象Nodeのoutlinkに無ければ、交通を変える前に `ValueError` である。コピーVehicleの `route_next_link` が別のoutlinkを指していれば、交通を変える前に `RuntimeError` である。`route_next_link` が `None` のときは、この不一致検査では止めない。使う進路は、あくまで binding Visit の正式進路名である。
+
+1台の移動は、`Node.transfer` の内側と、BATCH Level 2の1台分参照処理が更新する項目に合わせる。`Node.transfer()` 自体は呼ばない。`end_trip()` も呼ばない。`incoming_vehicles` を全消去しない。通過した1台だけを incoming から除く。`begin_order_control_visit_on_link_entry()` を呼び、outlink進入時の新しい order-control Visit を始める。
+
+成功時に消費する量は `DELTAN` である。対象Nodeの `flow_capacity` が有限なときだけ、`flow_capacity_remain` から `DELTAN` を引く。無制限の `10e10` は、有限容量として減算しない。
+
+書き換える主な状態は次である。
+
+- 出たinlinkの `cum_departure` の末尾。仮想時計が累積を現在時刻まで延長したあとでは、この末尾が現在の仮想時刻の枠である。
+- 入ったoutlinkの `cum_arrival` の末尾。
+- 出たinlinkの `traveltime_actual`。
+- inlinkの `capacity_out_remain` と、outlinkの `capacity_in_remain`。
+- 有限な対象Nodeの `flow_capacity_remain`。
+- inlink物理先頭からの削除と、outlinkの `vehicles` への追加。
+- outlinkの `vehicles_enter_log`。
+- `Vehicle.link`、`link_arrival_time`、`x`、`v`、`lane`、leader、follower、`move_remain`。
+- 新しい order-control Visit。
+- incomingからの、その1台の削除。
+- `last_order_control_inlink` と `last_order_control_entry_timestep`。
+
+容量が負になる移動は、それらの書き込みの前に `RuntimeError` とする。物理先頭でない車を動かそうとした場合も `RuntimeError` である。
+
+通過済みのVisitKeyだけを、状態側に残す。公開の `transferred_binding_visit_keys` は tuple であり、外から要素を足せない。通過済みは、次の走査で再通過しない。
+
+この走査関数自体は、同じ仮想時刻の2回目を拒否しない。2回目では、通過済みは飛ばす。一時スキップしたVisitは、もう一度試す。将来の統括loopは、1仮想時刻につき、この走査を原則1回だけ呼ぶ。これは、まだ未実装の統括loopが守る契約である。
+
+拘束順位外Vehicleの一時的FCFS走査は、未実装である。このモジュールは扱わない。
+
+## 10. 局所Vehicle前進と新着incoming登録
+
+実装済みである。保存済みcommitは `d23a385` である。
+
+交通上の意味は、その仮想時刻の対象Node通過が終わったあと、対象inlinkと対象outlinkの上にいる車を1回だけ前へ進め、今回はじめて対象Nodeの端へ着いた車だけを `incoming_vehicles` の後ろへ足すことである。今回新着した車は、同じ仮想時刻には交差点を通さない。次の仮想時刻の通過走査で、はじめて評価する。
+
+通常のUXsimでは、LinkとNodeの更新のあと、走っている車の追従位置を先に計算し、livingの登録順で位置を反映し、Link終端へ着いた車を incoming へ足す。この段階は、その順の交通上の意味に合わせる。`Vehicle.update()`、`Vehicle.carfollow()`、`route_next_link_choice()`、`end_trip()` は呼ばない。追従の式と、到着記録の公式メソッドだけを使う。
+
+公開関数は次である。
+
+```text
+initialize_tvt_mp_candidate_local_vehicle_advance_state(
+    binding_transfer_state,
+)
+
+advance_tvt_mp_candidate_local_vehicles_and_register_new_arrivals(
+    advance_state,
+    binding_transfer_scan_result,
+)
+```
+
+型は `OrderControlTvtMpCandidateLocalVehicleAdvanceState` と `OrderControlTvtMpLocalVehicleAdvanceResult` である。
+
+前進の入力である走査結果は、同じNode、同じ仮想時刻の、拘束順位通過がすでに戻った証明である。走査結果の転送キーが空でないときは、状態側の通過済み列の末尾と一致しなければならない。空のときは、Pythonの `[-0:]` が列全体になるため、別に判定する。時刻かNodeが違えば `RuntimeError` であり、車は動かさない。この前進関数は、拘束順位走査を再呼び出ししない。時計も容量も進めない。
+
+動かす車は、今、対象inlinkまたは対象outlinkの `Link.vehicles` にいる車である。処理順は `VEHICLES_LIVING` の登録順である。`state` は `"run"`、`mode` は `"single_trip"`、`VEHICLES_RUNNING` に登録されていること。taxiは扱わず、`RuntimeError` である。leaderまたはfollowerが別Linkにいる、または相互参照が切れているときは、位置を書く前に `RuntimeError` である。
+
+位置は、全車の次位置を、まだ誰も動いていない `leader.x` で先に計算する。式は `Vehicle.carfollow` と同じである。そのあとで、`v`、`x_old`、`x_next`、`move_remain`、`x` を書く。自由流がLink長を超える分は `move_remain` に残し、`x` はLink終端へ揃える。超えないときは、既存の `move_remain` を維持する。inlinkとoutlinkの両方を、この1回で進める。
+
+既存incomingは、前進を始める前から `incoming_vehicles` にいる車である。同じinlinkに複数いてよい。その順を維持する。各inlinkを1台へ縮約しない。重複削除しない。同じ車が incoming に2回入っていれば、重大不整合として `RuntimeError` である。既存の車を再追加しない。`arrival_time` と `arrival_tiebreaker` を記録し直さない。
+
+新着は、その前進前のincomingに無く、今回の `x_next` がinlink長と等しく、Linkの終端Nodeが対象Nodeであり、そのNodeが目的地ではなく、行き止まりの trip abort でもない車である。目的地がそのNodeの車は、incomingへ足さず、この段階では `end_trip()` もしない。追加順は `VEHICLES_LIVING` 順であり、既存列の後ろへ足す。記録は、コピーVehicleの `record_order_control_node_arrival()` である。対象Nodeへの初回到着の tiebreaker は、コピーWorldの `rng` から1回引く。再訪は、コピーWorldの `order_control_rng` から1回引く。レガシーの初回到着辞書は、初回だけ更新する。実Worldの乱数は使わない。
+
+新着として足す車の現在Visitは、dictであり、nodeはコピー側の対象Nodeであり、`visit_id` は bool ではない Python int であり、`arrival_time` と `arrival_tiebreaker` が両方 `None` であること。片方または両方がすでに入っていれば、書き込み前に `RuntimeError` である。既存incomingの車には、この未記録条件を要求しない。
+
+`record_order_control_node_arrival()` は、呼んだ瞬間に Visit、初回到着辞書、コピーWorldの乱数を書く。そのため、位置を書く前に次を保存する。
+
+- 対象車の位置、速度、`move_remain`。
+- incoming列。
+- 新着Visitの到着2項目。
+- 初回到着の2辞書。
+- `rng` と `order_control_rng` の状態。
+- コピーWorldに baseline collector があるときは、既存記録の `baseline_arrival_timestep`、`arrival_tiebreaker`、`route_next_link_name`。新しい記録は作らない。正式な候補コピーでは、この collector は `None` である。
+
+2台目以降の記録が失敗しても、1台目を含む、その呼出で書いた更新をすべて戻す。戻したあと、元の例外を再送出する。戻すこと自体が失敗したときは、元の例外を原因に持つ `RuntimeError` とする。`completed_virtual_timesteps` は、全件が成功したあとだけ増やす。同じ仮想時刻の2回目は `RuntimeError` であり、車、Link、incoming、乱数、完了記録を変えない。
+
+outlinkの終端へ着いた車は、終端へ揃えたまま、そのoutlinkの上に残す。下流Nodeの `incoming_vehicles` へ足さない。`end_trip()` しない。後続のoutlink終端境界処理へ渡す状態である。境界処理そのものは、このモジュールに無い。
+
+同じ仮想時刻の拘束順位通過へは戻らない。この関数が走査を再呼び出ししないことで保たれている。統括loopは未実装である。
+
+## 11. downstream boundary観測結果の受渡し
+
+下流境界の観測自体は、候補別局所計算より前に実装済みである。本節で足すのは、その結果を後続の境界処理へどう渡すかである。境界処理本体は未実装である。
+
+既存の型は次である。どれも frozen である。
+
+- `OrderControlBaselineDownstreamBoundaryResult`。`node_results` を持つ。
+- `OrderControlBaselineDownstreamBoundaryNodeResult`。`node_name` と `outlink_results` を持つ。
+- `OrderControlBaselineDownstreamBoundaryOutlinkResult`。`outlink_name`、`terminal_node_name`、`active_timestep_count`、`transferred_vehicle_count` を持つ。
+
+平均率は、この結果へ保存しない。公開経路は `OrderControlBaselineForkResult.downstream_boundary_result` だけである。型は、上記の全体結果または `None` である。
+
+`downstream_boundary_result is None` は、downstream boundary結果なしである。snapshot固定Visitが0件で、baseline forwardも観測もしていない空baselineである。count 0 ではない。観測未実施である。
+
+`active_timestep_count == 0` は、horizonを実行したあとの観測済み0である。途中通過の終端待ちが一度も無かったことを意味する。結果なしとは別である。
+
+`active_timestep_count > 0` は、下流終端で途中通過の待ちが観測されたことである。`transferred_vehicle_count` が0より大きいか0かで、実流出の有無が分かれる。
+
+Node順は `fork_result.target_node_names` と同じ登録順である。各Nodeのoutlink順は、その対象Nodeの `outlinks` の登録順である。名前または順序が、局所状態のoutlinkと一致しなければ停止する。欠落を0で補わない。
+
+現行の後続実装は、この結果を保持していない。拘束順位列、候補別局所状態、仮想時計、対象Node通過、局所前進のどれにもフィールドが無い。実Worldの observer は `None` のままなので、コピーWorldからも読めない。
+
+採用する渡し方は、新しいoutlink境界状態を初期化するとき、対象Nodeの既存 `OrderControlBaselineDownstreamBoundaryNodeResult` を、明示的な引数として渡すことである。新しい正規化profile型は作らない。`OrderControlBaselineForkResult` 全体を境界処理へ渡さない。拘束順位列や候補別局所状態へ、同じcountを重複して持たせない。共有する観測結果は読取専用であり、候補の計算が書き換えない。候補ごとに変わる流出許可残高は、境界状態の側で、outlink別に0から始める。
+
+候補を評価する経路で downstream boundary結果なしが現れた場合は `RuntimeError` である。待ちなしにも、観測済み0にも、正常なunresolvedにもしない。
+
+## 12. outlink終端境界の意味別3状態
+
+この小節は、設計として確定している。境界処理の本番モジュールは、まだ無い。未実装である。
+
+歴史的本文の「分岐A・B・C」は残す。本節の主表記は、次の意味名である。括弧内は旧称であり、新しい正式名ではない。
+
+下流待ちあり・実流出あり（歴史的本文の分岐A）の条件は、`active_timestep_count > 0` かつ `transferred_vehicle_count > 0` である。率は `transferred_vehicle_count / active_timestep_count` であり、局所側で計算する。観測結果へは保存しない。流出許可残高は、候補別かつoutlink別である。初期値は0である。各仮想時刻に、その率を1回だけ足す。小数と、使わなかった整数は、次の仮想時刻へ繰り越す。正本上の上限は無い。実際に流出した台数の整数だけを、残高から引く。
+
+流出できるのは、outlink終端へ着いていること、物理先頭からであること、残高の整数が許すこと、`outlink.capacity_out_remain` が `DELTAN` 以上であること、終端Nodeの流量容量が有限ならその残りが `DELTAN` 以上であること、が同時に成り立つときである。下流Linkの `capacity_in_remain` は使わない。同じ仮想時刻に複数台出せるかは、残高、容量、物理順で決まる。最大1台という人工的な上限は置かない。先頭が通常の待ちで出られないときは、そのoutlinkのその時刻の境界処理を止める。後ろの車を先に出さない。
+
+下流待ちあり・実流出なし（歴史的本文の分岐B）の条件は、`active_timestep_count > 0` かつ `transferred_vehicle_count == 0` である。同じlocal horizonの間は、終端から出さない。率は使わない。残高を正にして流し始めない。車はoutlinkの上に残す。`capacity_out_remain` も、終端Nodeの容量も消費しない。horizonのあとまで永久に閉塞している、とは断定しない。
+
+下流待ち観測なしの制約付きsink（歴史的本文の分岐C）の条件は、`active_timestep_count == 0` である。これは観測済みの0であり、downstream boundary結果なしではない。率も残高も使わない。終端到着、物理順、`outlink.capacity_out_remain`、有限な終端Nodeの `flow_capacity_remain`、`DELTAN` を確認する。下流Linkの `capacity_in_remain` は使わない。成功したとき、outlinkの流出容量と、有限な終端Node容量を消費する。その確認と消費のあと、コピーWorldの上で `end_trip()` を使い、局所範囲から除く。これは実Worldの旅行終了ではない。最大1台の人工的な上限は無い。BATCH Level 2の単純sinkは、容量を確認せず `end_trip()` する。その単純sinkは使わない。
+
+downstream boundary結果なしは、上の3状態に含めない。空baselineにより観測していない状態である。count 0へ変換しない。候補評価の経路で現れたら `RuntimeError` である。正常なunresolvedではない。
+
+## 13. 下流待ちあり・実流出ありの専用境界退出
+
+これは、2026-09-24に採用した確定判断である。コードへはまだ実装していない。完全な実装前仕様は、この状態を「流出させる」と書き、`end_trip()` を書くのは下流待ち観測なしの制約付きsinkだけである。本節は、その未記載だった退出後の基本状態を追加する。未確定の式は、確定したことにはしない。
+
+交通上の意味は、実旅行の完了ではない。その候補の局所計算の範囲から、車を出すことである。
+
+成功したとき採用する基本契約は、次である。
+
+- `end_trip()` を使わない。
+- outlinkの `vehicles` から、物理先頭の車を除く。
+- leaderとfollowerを解除する。解除のフィールド順は、未確定欄に残す。
+- `outlink.capacity_out_remain` から `DELTAN` を引く。
+- 終端Nodeの `flow_capacity` が有限なときだけ、`flow_capacity_remain` から `DELTAN` を引く。無制限の `10e10` は減算しない。
+- `cum_departure` を更新する。どのindexへ、どの量を足すかは未確定である。
+- `traveltime_actual` を更新する。更新式は未確定である。
+- `VEHICLES_RUNNING` から除く。
+- `VEHICLES_LIVING` から除く。
+- `vehicle.link` を `None` にする。
+- `vehicle.state` を `"end"` にする。
+- `arrival_time` を、実旅行の完了時刻としては記録しない。属性を無変更にするかは未確定である。
+- `record_log()` を、旅行終了としては呼ばない。
+- 専用の境界退出理由と、退出したVehicleの列へ記録する。理由と結果型の正式な名前は未確定である。
+- 下流待ち観測なしの制約付きsinkが使う `end_trip()` と、記録の上で区別する。
+- 実Worldと、別候補のコピーは変えない。
+- 下流Nodeの `incoming_vehicles` へ、通常の到着として登録しない。
+- 退出のあと、同じ仮想時刻の拘束順位通過へ戻らない。入口空間が戻っても、戻らない。
+
+次は未確定である。これらを決める前に、境界処理本体は実装しない。
+
+- `cum_departure` の正確なindex。
+- `traveltime_actual` の正確な更新式。
+- `vehicle.arrival_time` を、まったく変更しないか。
+- `World.VEHICLES` の辞書へ残すか。
+- leaderとfollowerを外すときの、フィールド単位の順序。
+- 専用の退出理由のEnum、または結果型の正式名称。
+
+`end_trip()` が行う `cum_departure[-1]` への加算、`(T+1)` を使う旅行時間、`arrival_time = W.T`、`record_log()` を、この専用退出へ無条件に流用しない。
+
+## 14. 実装済み処理順
+
+現在、コードとしてつながっている局所処理の順は、次である。統括loopは無いので、呼出側がこの順を守る。
+
+1. 候補別局所状態を構築する。
+2. offset 0の仮想時計を初期化する。容量は補充しない。累積だけ、時刻Tの枠まで延長する。
+3. その仮想時刻で、拘束順位の対象Node通過を1回走査する。
+4. 通過のあと、局所Vehicleを1回前進させる。
+5. 対象inlinkの終端へ今回着いた車を、incomingの後ろへ登録する。
+6. outlinkの終端へ着いた車は、outlinkの上に残す。
+
+未実装の続きは、次である。
+
+7. outlink終端境界処理。
+8. 拘束順位外Vehicleの一時的FCFS走査。
+9. 診断の完成。
+10. resolved判定。
+11. その仮想時刻の時刻末処理の完了。
+12. 次の仮想時刻へ進むか、horizonで終えるか。
+
+守る順は、次である。
+
+- 1仮想時刻の拘束順位走査は、原則1回である。走査関数自体には、同じ時刻の再呼出を拒むガードが無い。
+- 局所前進には、同じ仮想時刻の2回目を拒むガードがある。
+- 新着をincomingへ入れたあと、同じ仮想時刻の拘束順位走査へ戻らない。
+- 将来、境界流出でoutlinkの入口空間が戻っても、同じ仮想時刻の拘束順位走査へ戻らない。
+- 次の仮想時刻では、一時スキップしたVisitを含め、拘束順位列を先頭から再評価する。通過済みは再通過しない。
+- 2時刻目以降の容量補充は、その時刻の通過走査より前に、1段前進を1回だけ行う。走査の途中や、前進のあとでは補充しない。
+
+## 15. 古い記述との齟齬と最新参照
+
+古い本文は削除しない。次の読み替えだけを、本節を最新参照先として固定する。
+
+- 「Python実装は未着手」「次の直接作業は正式進路付き順位台帳」は、完全な実装前仕様を書いた時点の再開情報である。現在の作業指示ではない。実装済み範囲は本節の第2節から第10節である。
+- Node流量不足で対象Node通過走査を終える、と読める文は、実装前仕様の仮想timestep手順と、clearanceまたはNode容量の見出しにある。保存済み実装では、Node流量不足は一時スキップである。走査を途中で終えるのはclearance未充足だけである。
+- 仮想計算を1ファイルにまとめ、それより細かく分けない、という文は実装前の予定である。保存済み実装は、時計、通過、前進を別ファイルにした。統括ファイルは未作成である。
+- 2026-09-21の「境界処理を通過より前に置く」処理順は、当時の記録である。最新の順は、完全な実装前仕様の、前進と新着登録のあとに同じ仮想時刻で境界処理を行う順である。境界処理本体は未実装である。
+- 「分岐A・B・C」は歴史的表記として残す。2026-09-24以降の最新記録では、意味名を主表記にする。
+
+該当する歴史的箇所の末尾へ、本節への短い参照を付けた。同じ文を、ファイル中のすべての再開情報へは繰り返していない。
+
+## 16. 未実装事項
+
+次は、コードに無い。
+
+- outlink終端境界処理の本体。
+- 拘束順位外Vehicleの一時的FCFS走査。
+- 仮想timestep全体の統括loop。
+- buyerとsellerの対象Node通過時刻の収集。
+- resolved判定。
+- resolvedとなる仮想時刻の、時刻末処理の完了。
+- horizon終了。
+- unresolvedの理由と診断。
+- 候補別局所計算の結果型の完成。仕様上の名前はある。クラスは無い。
+- 経済性評価。
+- 候補の採用と却下。
+- 最終順位と正式進路の確定接続。
+- 上位driverへの統合。
+
+仮想時計、拘束順位の対象Node通過、局所Vehicle前進と新着incoming登録は、未実装に含めない。これらは `d23a385` まで実装済みである。
+
+## 17. 未確定事項
+
+次は、設計確定済みの一覧に入れない。実装を始める前に決める。
+
+- 拘束順位外Vehicleの一時的FCFSの、具体的な実装契約。進路4分類の制度は、2026-09-22の統合仕様にある。コードは無い。
+- buyerとsellerの通過時刻を持つ、正式な結果型とフィールド。
+- resolved判定を、未実装の統括loopのどこで行うか。完全な実装前仕様は、時刻末処理の完了後とする。統括が無いので、コード上の位置はまだ無い。
+- unresolved理由を複数保持する実装。
+- 最終確定接続が、評価に使った拘束順位列をどう受け取るか。
+- 専用境界退出の `cum_departure` のindex。
+- 専用境界退出の `traveltime_actual` の更新式。
+- 専用境界退出のとき、`vehicle.arrival_time` を変更するか。
+- 専用境界退出のあと、`World.VEHICLES` へ残すか。
+- leaderとfollowerを外す、フィールド単位の順序。
+- 専用境界退出の理由名と、退出結果型の名称。
+- Node流量不足のあと、未実装の拘束順位外FCFSへ進むかを、統括loopがどう判定するか。走査完了は、流量が残っているという意味ではない。
+
+## 18. 次の実装再開地点
+
+次の直接作業は、outlink終端境界処理である。ただし、その本体を書く前に、第17節のうち専用境界退出の未確定細部を確定する。式が決まる前に、境界処理の本番コードは書かない。
+
+予定する入力は、次の3つである。
+
+- local vehicle advance state。
+- local vehicle advance result。
+- 対象Nodeの `OrderControlBaselineDownstreamBoundaryNodeResult`。
+
+入力の契約は、次である。
+
+- downstream boundary結果なしは `RuntimeError` である。正常なunresolvedではない。
+- Node名とoutlinkの順序を、局所状態のoutlinkと照合する。一致しなければ停止する。0で補わない。
+- 終端Node名を、コピーWorldの `outlink.end_node` と照合する。
+- 観測結果を候補間で共有してよい。書き換えない。
+- 候補別の流出許可残高は、境界状態の側で、outlink別に0から始める。
+
+境界処理が実装されたあとに守る契約は、次である。
+
+- 実Worldと別候補を変えない。
+- 当該候補のコピーの中では、下流待ちあり・実流出ありと、下流待ち観測なしの制約付きsinkで、終端Nodeの流量容量が有限なときに `DELTAN` を消費する。
+- 下流Nodeの `incoming_vehicles` へ、通常の到着として登録しない。
+- 境界処理のあと、同じ仮想時刻の拘束順位通過へ戻らない。
+- 3状態は意味名で区別する。downstream boundary結果なしは、その3状態に入れない。
+- 下流待ちあり・実流出ありは、第13節の専用境界退出を使う。
+- 下流待ち観測なしの制約付きsinkは、容量を確認して消費したあと、コピーWorld上で `end_trip()` を使う。
+
+実装を再開するとき、最初に文章で決める事項は、次である。
+
+- 専用境界退出の累積の添字。
+- 旅行時間の式。
+- `arrival_time` を変えるか。
+- `World.VEHICLES` へ残すか。
+- leaderとfollowerを外す順。
+- 結果型と、退出理由の名前。
+
+境界処理のあとにも、拘束順位外の走査、仮想時刻の統括loop、resolved、unresolved、候補結果型、最終確定接続は残る。
+
 # 次の作業開始点
 
 次の直接作業は、具体的買い手候補集合生成部品の実装前仕様を、既存の公開型と接続できる形で確定することである。
@@ -10981,6 +11526,8 @@ resolvedとなる仮想timestepの完了契約では、次を固定する。
 **2026-09-22追記（最新の再開情報）：** 上記の「完全な実装前仕様は未作成」は、拘束順位外処理・下流境界・統合仕様を記録した時点の歴史的記録である。その後、公開API、結果型、helper責務、例外契約、診断契約、モジュール構成、専用テスト契約、実装区分を含む完全な実装前仕様を確定した。現在の最新正本は、本ファイルの「TVT-MP候補別局所仮想計算の完全な実装前仕様」である。候補別局所仮想計算のPython実装と専用テストは未着手である。直ちにPython実装へ進まない。次の直接作業は、この追記を独立確認し、利用者がMarkdownをcommitおよびpushしたあと、最初の実装区分「正式進路付き順位台帳と原子的確定」の目的と範囲を利用者へ提示し、合意後にその区分だけへ着手することである。事前合意のないStep体系は導入しない。上記の再開情報を現在の作業指示として読まない。今回のMarkdown追記は未コミットである。Git操作は利用者がTerminalで行う。
 
 **2026-09-23更新（最新の再開情報）：** 上記の実装前仕様へ、コード確認後の3点を補った。区分2の既到着確定と先頭連続非参加確定は、新しい本番経路で原子的確定APIへ接続する。その接続は、台帳実装の次の実装区分「既到着Visitと先頭連続非参加Visitの原子的先行確定接続」である。台帳区分の完了だけでは、本番経路が `confirm_visits_in_order()` を使わないことの確認を終えたことにはしない。局所状態はWorld全体のコピーを残し、対象外は更新しない。局所通過試行の最後の時刻は `T + configured_horizon_steps` である。Python実装と専用テストは未着手である。直ちに実装へ進まない。最新の作業順は、本ファイルの完全な実装前仕様にある「次の再開地点」に従う。
+
+**2026-09-24注記：** 上記「未着手」と「最初の実装区分は正式進路付き順位台帳」は、2026-09-23時点の再開情報である。現在の実装済み範囲と次の直接作業は「TVT-MP候補別局所仮想計算の実装進捗・確定実装契約・下流境界追加設計記録」を参照する。
 
 # 新しいチャットでの再開方法
 

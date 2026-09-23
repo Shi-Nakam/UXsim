@@ -6318,7 +6318,7 @@ BATCH Level 2から確認した参考情報：
 - Git操作は利用者がTerminalで行う。
 - `diagnostics/order_control.zip`は対象外である。
 
-**2026-09-22注記（最新参照先の更新）：** 上記「完全な実装前仕様はまだ作成していない」と「次の直接作業は完全な実装前仕様の作成」は、拘束順位外処理・下流境界・統合仕様を記録した時点の歴史的記録である。完全な実装前仕様は後続の「2026-09-22追記（完全な実装前仕様）」で確定した。最新正本は`ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_2.md`の「TVT-MP候補別局所仮想計算の完全な実装前仕様」である。現在の直接作業は、その追記の独立確認、利用者によるMarkdownのcommitとpushのあと、最初の実装区分の目的と範囲を提示し、合意後にその区分だけへ着手することである。直ちにPython実装へ進む指示ではない。上記を現在の作業指示として読まない。
+**2026-09-22注記（最新参照先の更新）：** 上記「完全な実装前仕様はまだ作成していない」と「次の直接作業は完全な実装前仕様の作成」は、拘束順位外処理・下流境界・統合仕様を記録した時点の歴史的記録である。完全な実装前仕様は後続の「2026-09-22追記（完全な実装前仕様）」で確定した。最新正本は`ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_2.md`の「TVT-MP候補別局所仮想計算の完全な実装前仕様」である。現在の直接作業は、その追記の独立確認、利用者によるMarkdownのcommitとpushのあと、最初の実装区分の目的と範囲を提示し、合意後にその区分だけへ着手することである。直ちにPython実装へ進む指示ではない。上記を現在の作業指示として読まない。2026-09-24注記: その後、局所前進まで実装済みである。最新は2026-09-24追記「TVT-MP候補別局所仮想計算の実装進捗・メモ未更新分の統合記録」を参照すること。
 
 ##### 2026-09-22追記（完全な実装前仕様）
 
@@ -6435,6 +6435,8 @@ horizonは、BATCH Level 2の `for offset in range(virtual_horizon + 1)` に合�
 
 resolvedとなる仮想timestepでも、対象Node通過および境界処理に伴う容量・累積台数・流出許可残高・Vehicle状態を通常どおり更新する。同じ仮想timestep内では、容量の再補充、拘束順位列の再走査、新着 `incoming_vehicles` の通過、対象Node通過処理への復帰、次timestepへの進行を行わない。clearance未充足またはNode容量不足で通過走査が終わっても、前進と境界処理は継続する。
 
+> 2026-09-24注記: 前進と境界処理を続ける部分は維持する。保存済みの拘束順位走査では、Node流量不足は走査終了ではなく一時スキップである。走査終了はclearance未充足だけである。詳細は2026-09-24追記を参照すること。
+
 **テスト契約（resolved完了契約の追加分）**
 
 - 最後のbuyerまたはseller通過後も、そのtimestepのinlink前進・到着登録・outlink前進・境界処理が実行される
@@ -6455,9 +6457,108 @@ resolvedとなる仮想timestepでも、対象Node通過および境界処理に
 
 本追記と2026-09-23補修（独立レビュー3点およびresolvedとなる仮想timestepの完了契約）を独立確認する。Markdownのcommitとpushは利用者がTerminalで行う。その後、最初の実装区分「正式進路付き順位台帳と原子的確定」の目的と範囲を利用者へ提示し、合意後にその区分だけへ着手する。その完了では、本番経路が旧確定APIを使わないことまでは確認しない。直ちにPython実装へ進まない。全区分を一度に実装しない。
 
+> 2026-09-24注記: これは当時の再開情報である。最新の実装済み範囲、未実装事項、および次の直接作業は、2026-09-24追記「TVT-MP候補別局所仮想計算の実装進捗・メモ未更新分の統合記録」を参照すること。
+
 - 今回のMarkdown追記は未commitである。
 - Git操作は利用者がTerminalで行う。
 - `diagnostics/order_control.zip`は対象外である。
+
+##### 2026-09-24追記：TVT-MP候補別局所仮想計算の実装進捗・メモ未更新分の統合記録
+
+**1. 今回の記録理由**
+
+- Markdownの最終更新commitは `c35f944` である。その後、HEAD `d23a385` までに、TVT-MP候補別局所仮想計算の複数区分が実装され、commitされている。
+- 設計・実装の節目で、`ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_2.md` と本ファイルが更新されていなかった。
+- この追記は、`d23a385` までの実装済み内容と、outlink終端境界へ追加した設計判断を、一箇所にまとめる。
+- 今回、Pythonとテストは変更しない。詳細な契約は、設計メモ本文の「TVT-MP候補別局所仮想計算の実装進捗・確定実装契約・下流境界追加設計記録」に書いた。
+
+**2. 実装済みコミット一覧**
+
+各commitの作成時に、その区分の専用テストと関連する回帰テストを確認した。今回の文書更新では再実行していない。
+
+- `df3e27c`：順位と正式進路を、`confirm_visits_and_formal_target_node_routes_atomically` で一緒に保存する。失敗時は台帳を変えない。古い `confirm_visits_in_order()` は互換のため残し、新しい本番経路の正式進路付き確定では使わない。
+- `a6285e3`：既到着Visitを先に、先頭連続非参加Visitをその後に、原子的確定へ接続する。正式進路はcollectorの対象Node到着時進路である。`real_W.T` が baseline開始時刻と違うときは確定しない。結果型は変えていない。
+- `2052674`：完全な拘束順位列を、4区分の連結として構築する。車も台帳も動かさない。
+- `4916556`：その列へ `baseline_timestep_T` を保存する。局所状態が、コピー前に実Worldの時刻と照合できる。
+- `03aed6a`：候補ごとに `real_W.copy()` でWorld全体をコピーする。対象外は削除しない。更新してよいNode、Link、Vehicleを明示する。
+- `07ca0d9`：仮想時計を追加する。offset 0はsnapshot残容量のまま、累積台数だけ現在時刻の枠まで延長する。2時刻目以降は、対象範囲の容量を1段だけ補充する。
+- `dfdd0d6`：拘束順位の対象Node通過を追加する。通常の理由は一時スキップであり、走査終了はclearance未充足だけである。同じinlinkに複数の既到着Vehicleがいても、先頭通過後に次の物理先頭を同じ仮想時刻で通せる。
+- `d23a385`：対象Link上のVehicleを1回前進し、今回新着した車だけをincomingへ足す。到着記録や乱数の途中失敗は、その呼出の更新をすべて戻す。
+
+**3. 現在実装済みの局所計算範囲**
+
+呼出側が守る順は、次である。統括loopはまだ無い。
+
+1. 候補別局所状態を構築する。
+2. offset 0の仮想時計を初期化する。
+3. その仮想時刻で、拘束順位の対象Node通過を走査する。
+4. 局所Vehicleを1回前進させる。
+5. 対象inlink終端へ今回着いた車を、incomingへ登録する。
+
+outlink終端境界処理以降は未実装である。outlink終端へ着いた車は、境界処理の前まで、そのoutlinkの上に残る。
+
+**4. 重要な最新契約**
+
+- 一時スキップは6理由である。未到着、inlink物理先頭でない、inlink流出容量不足、outlink流入容量不足、Node流量容量不足、outlink入口空間不足。
+- その仮想時刻の拘束順位走査を途中で終えるのは、clearance未充足だけである。
+- Node流量容量不足も一時スキップである。走査終了ではない。`binding_sequence_completed` は、Node流量が残っているという意味ではない。
+- 同じinlinkから、同じ仮想時刻に複数台が通過できる。先頭が通ったあと、新しい物理先頭を同じ走査で通せる。clearanceは、同じinlinkの連続通過を止めない。
+- 既存の `incoming_vehicles` には、同じinlinkの車が複数いてよい。縮約しない。再記録しない。
+- 今回新着した車は、次の仮想時刻ではじめて対象Node通過の評価を受ける。同じ仮想時刻には通さない。
+- 拘束順位走査は、原則として1仮想時刻に1回である。走査関数自体は、同じ時刻の再呼出を拒否しない。再呼出すると、一時スキップしたVisitを再試行する。
+- 局所前進は、同じ仮想時刻の2回目を `RuntimeError` で拒否し、状態を変えない。
+- 新着の到着記録は `record_order_control_node_arrival()` を使う。途中で失敗したときは、位置、incoming、Visit、初回到着辞書、両乱数、collectorがあるときの到着3項目を戻す。完了記録は、全件成功のあとだけ増やす。
+- outlink終端の車は、終端へ揃えてoutlink上に残す。下流Nodeのincomingへ入れない。`end_trip()` しない。
+
+`simulated_timestep_count` は、時刻Tから時計を進めた回数である。offset 0では0である。
+
+**5. downstream boundary受渡し**
+
+- 観測結果の公開経路は、`OrderControlBaselineForkResult.downstream_boundary_result` だけである。
+- 境界状態の初期化には、対象Nodeの既存 `OrderControlBaselineDownstreamBoundaryNodeResult` を明示的に渡す。新しいprofile型は作らない。fork結果全体は渡さない。
+- `None` は、空baselineにより観測していない状態である。`active_timestep_count == 0` へ変換しない。
+- 候補評価の経路で `None` が現れたら `RuntimeError` である。正常なunresolvedではない。上の3状態にも入れない。
+- 流出許可残高は、候補別・outlink別に0から始める。共有の観測結果は書き換えない。
+- Node名とoutlinkの順序を、局所状態と照合する。欠落を0で補わない。終端Node名は、コピーWorldの `outlink.end_node` と照合する。
+
+**6. outlink終端境界の追加設計**
+
+3状態の主表記は意味名である。歴史的本文の「分岐A・B・C」は残すが、この追記の主表記にはしない。境界処理本体は未実装である。
+
+- 下流待ちあり・実流出あり：`active_timestep_count > 0` かつ `transferred_vehicle_count > 0`。率は局所側で割って求める。残高は毎仮想時刻その率を足し、小数と未使用の整数を繰り越す。専用境界退出は、2026-09-24に採用した新しい確定判断であり、まだ未実装である。`end_trip()` は使わない。outlinkから除き、有限な終端Node容量と流出容量を `DELTAN` 消費し、`VEHICLES_RUNNING` と `VEHICLES_LIVING` から除き、`vehicle.link = None`、`vehicle.state = "end"` とする。`arrival_time` を実旅行完了としては記録しない。`record_log()` を旅行終了としては呼ばない。
+- 下流待ちあり・実流出なし：待ちは観測されたが、実流出は0である。local horizonの間は出さない。率も残高も使わない。車はoutlinkに残し、容量を消費しない。永久閉塞ではない。
+- 下流待ち観測なしの制約付きsink：`active_timestep_count == 0`。これは観測済みの0であり、`None` ではない。率と残高は使わない。容量を確認して消費したあと、コピーWorld上で `end_trip()` する。実Worldの旅行終了ではない。BATCHの単純sinkは使わない。
+
+downstream boundary結果なしは、この3状態ではない。候補評価では重大不整合である。
+
+専用境界退出で未確定のまま残すものは、`cum_departure` のindex、`traveltime_actual` の式、`arrival_time` を無変更にするか、`World.VEHICLES` へ残すか、leaderとfollowerを外す順、退出理由と結果型の名前である。これらが決まる前に、境界処理本体は実装しない。`end_trip()` の式を、この専用退出へ流用しない。
+
+**7. 未実装**
+
+outlink終端境界処理、拘束順位外の一時的FCFS、仮想timestepの統括loop、buyerとsellerの通過時刻、resolved、時刻末完了、horizon終了、unresolved診断、候補結果型、経済性評価、採用と却下、最終確定接続、上位driver統合。
+
+仮想時計、拘束順位通過、局所前進は、未実装に含めない。
+
+**8. 次の直接作業**
+
+境界処理を実装する前に、専用境界退出の未確定細部を文章で確定する。その後、outlink終端境界処理を、新規モジュールと専用テストで実装する。
+
+予定する入力は、local vehicle advance state、local vehicle advance result、対象Nodeの `OrderControlBaselineDownstreamBoundaryNodeResult` である。
+
+境界処理のあとにも、仮想timestepの統括loop、拘束順位外走査、resolved、unresolved、最終確定接続は残る。
+
+**9. テスト記録**
+
+- 各実装commitの作成時に、その区分の専用テストと関連する回帰テストを確認した。
+- 今回のMarkdown棚卸しと更新では、テストを再実行していない。
+- 現行の専用テストファイルは存在する。
+- 棚卸し時に数えた `def test_` の数は、成功件数として書かない。設計メモ本文のcommit表に、件数である旨を付けて残した。
+
+**10. Gitおよび作業ツリー**
+
+このMarkdown更新を始める前のHEADは `d23a385` である。
+
+既存の未追跡ファイル `diagnostics/order_control.zip` は対象外である。内容には触れない。
 
 #### 2026-08-29：TVT権利保有車両選定前の先頭非参加Vehicle先行確定の記録補修
 
