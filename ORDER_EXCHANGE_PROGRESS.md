@@ -6533,6 +6533,27 @@ downstream boundary結果なしは、この3状態ではない。候補評価で
 
 専用境界退出で未確定のまま残すものは、`cum_departure` のindex、`traveltime_actual` の式、`arrival_time` を無変更にするか、`World.VEHICLES` へ残すか、leaderとfollowerを外す順、退出理由と結果型の名前である。これらが決まる前に、境界処理本体は実装しない。`end_trip()` の式を、この専用退出へ流用しない。
 
+> 2026-09-24追加確定: 上記の未確定一覧は、この追記を書いた時点の記録である。削除しない。最新契約は、設計メモ本文の「19. 専用outlink境界退出のフィールド単位確定契約」である。これらの項目は、現在の未確定としては読まない。
+
+**専用outlink境界退出の残存契約確定（2026-09-24）**
+
+専用境界退出は、まだ未実装である。詳細式とfield一覧は、設計メモ本文の「19. 専用outlink境界退出のフィールド単位確定契約」を正本とする。進捗上の確定事項は、次である。
+
+- 累積流出台数は、退出成功1台ごとに `outlink.cum_departure[-1] += local_world.DELTAN` である。反映前に `len(outlink.cum_departure) == local_world.T + 1` を要求する。不一致は `RuntimeError` であり、別indexへ補正しない。
+- outlink旅行時間は、Vehicle前進後の時刻末退出として、`traveltime_actual[start_timestep:]` へ `(local_world.T + 1) * local_world.DELTAT - vehicle.link_arrival_time` を書く。`start_timestep` は `int(vehicle.link_arrival_time / local_world.DELTAT)` である。UXsim本体の `(T + 1)` にTODOがあることは注意として残し、TVT-MPだけ `T` へ変えない。
+- `arrival_time`、`travel_time`、`link_arrival_time`、order-control Visitの到着2項目は変更しない。退出時刻秒は、除去記録の `boundary_exit_time_seconds = (local_world.T + 1) * local_world.DELTAT` へ書く。
+- `World.VEHICLES` には残す。`VEHICLES_RUNNING` と `VEHICLES_LIVING` から除く。新しいWorld共通登録列は作らない。
+- `state = "end"`、`link = None`、`leader = None`、`follower = None` とする。`x`、`x_old`、`x_next`、`v`、`move_remain` は終端値のまま残す。`end_trip()` の `x = 0` は流用しない。
+- 物理先頭は `outlink.vehicles[0]` である。検証のあと、`follower.leader = None`、退出Vehicleの `follower` と `leader` を `None`、`popleft()`、RUNNINGとLIVINGから除去、`link = None`、`state = "end"`、除去記録、の順である。
+- 同一outlinkはFIFOで、条件を満たす限り複数退出できる。通常待ちでは、先行成功を維持し、後続を飛ばさない。
+- 原子性は一台単位とoutlink単位である。通常待ちの2台目で1台目は戻さない。重大不整合は、そのoutlinkの最初の書込み前に検出し、当該outlinkを無変更で `RuntimeError` とする。反映中の予期しない例外では、当該outlinkだけ呼出前へ戻す。別outlinkの正常完了は戻さない。全outlinkの一括transactionにはしない。
+- 境界状態Enumは `OrderControlTvtMpOutlinkBoundaryMode` である。memberは `OBSERVED_WAIT_WITH_OUTFLOW`、`OBSERVED_WAIT_WITHOUT_OUTFLOW`、`NO_OBSERVED_WAIT_CONSTRAINED_SINK` である。
+- 除去理由Enumは `OrderControlTvtMpOutlinkBoundaryRemovalKind` である。memberは `OBSERVED_OUTFLOW_BOUNDARY_EXIT` と `CONSTRAINED_SINK_END_TRIP` である。
+- 状態型は `OrderControlTvtMpCandidateOutlinkBoundaryState` と `OrderControlTvtMpCandidateOutlinkBoundaryLinkState` である。結果型は `OrderControlTvtMpOutlinkBoundaryProcessResult` と `OrderControlTvtMpOutlinkBoundaryLinkProcessResult` である。除去記録型は `OrderControlTvtMpOutlinkBoundaryVehicleRemovalRecord` である。
+- 下流待ちあり・実流出ありだけが専用境界退出である。`end_trip()` は呼ばない。下流待ち観測なしの制約付きsinkは、容量確認と消費のあとコピーWorld上で `end_trip()` を使い、`removal_kind` は `CONSTRAINED_SINK_END_TRIP` である。
+- 候補コピーWorldへ、通常Analyzerの旅行完了統計を適用しない。`state == "end"` だけでは通常旅行完了と読まない。
+- 実装時命名として残すのは、共通helperの関数分割だけである。上のfield契約は未確定に戻さない。
+
 **7. 未実装**
 
 outlink終端境界処理、拘束順位外の一時的FCFS、仮想timestepの統括loop、buyerとsellerの通過時刻、resolved、時刻末完了、horizon終了、unresolved診断、候補結果型、経済性評価、採用と却下、最終確定接続、上位driver統合。
@@ -6542,6 +6563,10 @@ outlink終端境界処理、拘束順位外の一時的FCFS、仮想timestepの�
 **8. 次の直接作業**
 
 境界処理を実装する前に、専用境界退出の未確定細部を文章で確定する。その後、outlink終端境界処理を、新規モジュールと専用テストで実装する。
+
+> 2026-09-24追加確定: 上記「未確定細部を文章で確定する」は完了した。現在の次の直接作業としては読まない。
+
+現在の次の直接作業は、outlink終端境界処理本体を新規モジュールとして実装し、専用テストを新規作成することである。入力は、local vehicle advance state、local vehicle advance result、対象Nodeの `OrderControlBaselineDownstreamBoundaryNodeResult` の3つである。downstream boundary結果なしは `RuntimeError` である。3種類は意味名で扱う。下流待ちあり・実流出ありでは、第19節の専用境界退出を使う。下流待ちあり・実流出なしでは、local horizon内に流出させない。下流待ち観測なしの制約付きsinkでは、容量確認と消費のあと `end_trip()` を使う。境界処理後に、同じ仮想timestepの binding transfer へ戻らない。
 
 予定する入力は、local vehicle advance state、local vehicle advance result、対象Nodeの `OrderControlBaselineDownstreamBoundaryNodeResult` である。
 

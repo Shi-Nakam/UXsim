@@ -10958,6 +10958,8 @@ resolvedとなる仮想timestepの完了契約では、次を固定する。
 
 本節のうち「実装済み」は、保存済みcommit `d23a385` までのコードに対応する。outlink終端の専用境界退出は、設計として確定したが、コードへは未実装である。未確定欄にある事項は、境界処理本体の実装を始める前に決める必要がある。
 
+**2026-09-24追加確定：** 専用境界退出の累積index、旅行時間の式、`arrival_time`、`World.VEHICLES`、leader・follower解除順、退出理由名、境界状態型と結果型の名称、一台単位とoutlink単位の原子性は、「19. 専用outlink境界退出のフィールド単位確定契約」で確定した。境界処理本体は未実装である。第17節の専用退出項目は、当時の未確定一覧として残し、現在の未確定としては読まない。
+
 ## 1. 記録の位置付けと参照関係
 
 最新の実装前仕様は、2026-09-22の完全な実装前仕様と、その2026-09-23補修である。本節は、その仕様を置き換えず、その後の実装結果を足す追加記録である。
@@ -10967,8 +10969,8 @@ resolvedとなる仮想timestepの完了契約では、次を固定する。
 実装済みと、設計確定済みだが未実装と、未確定は、混ぜない。
 
 - 実装済みは、`d23a385` までの保存済みコードで確認できる契約である。
-- 設計確定済みだが未実装は、outlink終端境界の3状態と、下流待ちあり・実流出ありの専用境界退出の基本契約である。境界処理の本番モジュールは無い。
-- 未確定は、専用境界退出の添字や式など、実装を始める前に決める細部である。推測で埋めない。
+- 設計確定済みだが未実装は、outlink終端境界の3状態と、下流待ちあり・実流出ありの専用境界退出である。フィールド単位の契約は「専用outlink境界退出のフィールド単位確定契約」にある。境界処理の本番モジュールは無い。
+- 未確定は、第17節の「現在も未確定として残すもの」である。専用境界退出の添字と式は、そこへ残さない。推測で埋めない。
 
 ## 2. 保存済みコミットと実装区分
 
@@ -11363,6 +11365,8 @@ downstream boundary結果なしは、上の3状態に含めない。空baseline�
 
 `end_trip()` が行う `cum_departure[-1]` への加算、`(T+1)` を使う旅行時間、`arrival_time = W.T`、`record_log()` を、この専用退出へ無条件に流用しない。
 
+> 2026-09-24追加確定: 上記の未確定一覧は、本節を書いた時点の記録である。削除しない。`cum_departure` のindex、`traveltime_actual` の式、`arrival_time` を変更しないこと、`World.VEHICLES` へ残すこと、leader・followerの解除順、退出理由名、境界状態型と結果型の名称、一台単位とoutlink単位の原子性は、後続調査により確定した。最新契約は「19. 専用outlink境界退出のフィールド単位確定契約」を参照する。`cum_departure[-1]` と `(T + 1) * DELTAT` は、その最新契約で採用する。`arrival_time = W.T` と、旅行終了としての `record_log()` は、引き続き専用境界退出では使わない。
+
 ## 14. 実装済み処理順
 
 現在、コードとしてつながっている局所処理の順は、次である。統括loopは無いので、呼出側がこの順を守る。
@@ -11439,11 +11443,24 @@ downstream boundary結果なしは、上の3状態に含めない。空baseline�
 - 専用境界退出のあと、`World.VEHICLES` へ残すか。
 - leaderとfollowerを外す、フィールド単位の順序。
 - 専用境界退出の理由名と、退出結果型の名称。
+
+> 2026-09-24追加確定: 上記6項目は後続調査により確定した。最新契約は「19. 専用outlink境界退出のフィールド単位確定契約」を参照する。現在の未確定一覧として読まない。
+
+現在も未確定として残すものは、次だけである。
+
+- 拘束順位外Vehicleの一時的FCFSの、具体的な実装契約。進路4分類の制度は、2026-09-22の統合仕様にある。コードは無い。
+- buyerとsellerの通過時刻を持つ、正式な結果型とフィールド。
+- resolved判定を、未実装の統括loopのどこで行うか。完全な実装前仕様は、時刻末処理の完了後とする。統括が無いので、コード上の位置はまだ無い。
+- unresolved理由を複数保持する実装。
+- 最終確定接続が、評価に使った拘束順位列をどう受け取るか。
 - Node流量不足のあと、未実装の拘束順位外FCFSへ進むかを、統括loopがどう判定するか。走査完了は、流量が残っているという意味ではない。
+- 境界処理モジュール内部の共通helperの関数分割。第19節は共通helper候補の責務だけを書き、関数名は実装時命名とする。
 
 ## 18. 次の実装再開地点
 
 次の直接作業は、outlink終端境界処理である。ただし、その本体を書く前に、第17節のうち専用境界退出の未確定細部を確定する。式が決まる前に、境界処理の本番コードは書かない。
+
+> 2026-09-24追加確定: 専用境界退出の未確定細部を文章で決める作業は完了した。現在の次の直接作業は、outlink終端境界処理本体を新規モジュールと専用テストとして実装することである。フィールド契約は「19. 専用outlink境界退出のフィールド単位確定契約」である。下記「最初に文章で決める事項」は、当時の再開条件であり、現在の作業指示としては読まない。
 
 予定する入力は、次の3つである。
 
@@ -11479,6 +11496,503 @@ downstream boundary結果なしは、上の3状態に含めない。空baseline�
 - 結果型と、退出理由の名前。
 
 境界処理のあとにも、拘束順位外の走査、仮想時刻の統括loop、resolved、unresolved、候補結果型、最終確定接続は残る。
+
+現在の直接作業は、上の注記のとおり、outlink終端境界処理本体と専用テストの実装である。入力は local vehicle advance state、local vehicle advance result、対象Nodeの `OrderControlBaselineDownstreamBoundaryNodeResult` の3つである。downstream boundary結果なしは `RuntimeError` である。3状態は意味名で扱う。下流待ちあり・実流出ありは第19節の専用境界退出である。下流待ちあり・実流出なしは、local horizonの間、終端から出さない。下流待ち観測なしの制約付きsinkは、容量を確認して消費したあと、コピーWorld上で `end_trip()` を使う。境界処理のあと、同じ仮想timestepの binding transfer へ戻らない。
+
+## 19. 専用outlink境界退出のフィールド単位確定契約
+
+**追記日：2026-09-24（残存契約の追加確定）**
+
+本節は、第13節の基本契約を削除せず、その時点で未確定だったフィールド単位の契約を確定する。対象は、下流待ちあり・実流出ありの専用境界退出だけである。下流待ち観測なしの制約付きsinkは、容量確認と容量消費のあと、コピーWorld上で `end_trip()` を使う既存契約を維持する。
+
+コードは未実装である。本節を実装済みと読まない。
+
+交通上の意味は、実際の trip completion ではない。Vehicleが目的地へ到着したことでもない。意味は、TVT-MP候補別局所仮想計算の対象outlink終端から、その候補の局所計算範囲外へ退出したことである。
+
+行わない更新:
+
+- `Vehicle.end_trip()` の呼出し。
+- 実旅行完了時刻としての `vehicle.arrival_time` の記録。
+- `vehicle.travel_time` の旅行完了値への更新。
+- 旅行終了としての `record_log()` の呼出し。
+
+行う更新:
+
+- `outlink.cum_departure`
+- `outlink.traveltime_actual`
+- `outlink.capacity_out_remain`
+- 有限な終端Nodeの `flow_capacity_remain`
+- `Link.vehicles`
+- leaderとfollower
+- 走行中および更新対象のWorld登録
+- 専用境界退出記録
+- 候補別outlink流出許可残高
+
+### 1. cum_departure
+
+専用境界退出に成功したVehicle 1台ごとに、退出前に所属していたoutlinkについて次を行う。
+
+```python
+outlink.cum_departure[-1] += local_world.DELTAN
+```
+
+意味は、当該仮想timestepに、そのVehicle 1台分がoutlink終端境界から退出した累積流出量を記録することである。増加量はVehicle数の1ではなく、UXsimの車群単位 `DELTAN` である。同一仮想timestepに複数Vehicleが退出した場合、退出成功1台ごとに `DELTAN` を加算する。
+
+記録先は、現行UXsimの `Vehicle.end_trip()`、`Node.transfer()`、BATCH Level 2参照、TVT-MP binding transferと同じく、累積listの末尾 `[-1]` を、現在処理中の時刻枠として用いる。
+
+境界処理の反映前に、次を検証する。
+
+```python
+len(outlink.cum_departure) == local_world.T + 1
+```
+
+この検証の意味は、次である。
+
+- `cum_departure` は、時刻ごとの累積流出台数を index 0 から順に保持する。
+- 現在の仮想timestepが `T` であれば、index 0 から index `T` までの `T+1` 個の時刻枠が必要である。
+- 長さが `T+1` であれば、list末尾 `[-1]` は index `T` であり、現在の仮想timestepの累積流出台数欄を指す。
+- 長さが `T+1` より短い場合、現在時刻の記録欄が存在しない。
+- 長さが `T+1` より長い場合、list末尾は現在時刻より後の時刻枠を指す。`[-1]` への加算は、現在時刻の退出を将来時刻へ誤記録する。
+- この確認は、境界退出台数を過去または将来の誤った時刻欄へ書き込まないために行う。
+
+不一致のときは `RuntimeError` である。別indexへ自動補正しない。listを境界処理内で延長または切詰めしない。Vehicle、容量、allowance、累積値を変更しない。
+
+仮想時計モジュールは、正常な候補状態で `cum_departure` を `current_virtual_timestep` まで延長する。コピー元が将来時刻の枠まで持つ可能性がある場合も、境界処理で黙って末尾へ記録しない。現行UXsimの `[-1]` 契約と、現在仮想時刻への正確な記録の双方を守るため、長さの一致を境界処理の事前条件とする。実装時には、現在時刻に対応する枠を別indexで補正して使うのではなく、入力状態の時刻整合が崩れている重大不整合として停止する。
+
+### 2. traveltime_actual
+
+専用境界退出するVehicleがoutlinkへ進入した時刻以降について、outlinkの実旅行時間を更新する。
+
+開始index:
+
+```python
+start_timestep = int(
+    vehicle.link_arrival_time / local_world.DELTAT
+)
+```
+
+更新:
+
+```python
+outlink.traveltime_actual[start_timestep:] = (
+    (local_world.T + 1) * local_world.DELTAT
+    - vehicle.link_arrival_time
+)
+```
+
+各値の意味は、次である。
+
+- `vehicle.link_arrival_time` は、そのVehicleがoutlinkへ入った時刻を秒で保持する。
+- `local_world.DELTAT` は、1 timestepが表す秒数である。
+- `vehicle.link_arrival_time / local_world.DELTAT` により、そのVehicleがoutlinkへ入ったtimestepのindexを得る。
+- `start_timestep:` は、その進入時刻以降の旅行時間推定値を同じ実績値で更新する、現行UXsimのslice契約である。
+- `local_world.T` は、現在処理中の仮想timestepである。
+- outlink終端境界処理は、その仮想timestepのVehicle前進後に実行される。
+- 境界退出時刻は、当該仮想timestepの開始時点ではなく、当該timestepの移動を終えた終了時点として扱う。
+- `(local_world.T + 1) * local_world.DELTAT` は、その終了時点を秒へ変換した値である。
+- 退出時刻秒からoutlink進入時刻秒を引いた値が、そのVehicleのoutlink上の実旅行時間となる。
+
+`Node.transfer()` との差は、次である。
+
+- `Node.transfer()` は、対象timestepにおけるVehicle前進より前に、inlinkからoutlinkへVehicleを移す。
+- そのため、`Node.transfer()` のinlink離脱時間は、現在timestepの開始境界である `T * DELTAT` を用いる。
+- 専用outlink境界退出は、Vehicle前進後にoutlink終端から退出させる。
+- そのため、現在timestepの終了境界である `(T + 1) * DELTAT` を用いる。
+- 専用outlink境界退出は、処理順の意味として `Vehicle.end_trip()` のLink終端離脱と同じ端点を使用する。
+
+単一indexだけでなく、`start_timestep:` のsliceへ同じ値を設定する。現行UXsimのLink離脱時の `traveltime_actual` 更新契約に合わせる。
+
+現行UXsimの `Vehicle.end_trip()` には、`T + 1` の端点について精査余地を示すTODOがある。TVT-MPだけ独自に `T` へ変更しない。現行UXsimの「Vehicle前進後の時刻末離脱」契約へ合わせる。将来UXsim本体の端点契約が変更された場合、TVT-MP境界退出との再整合が必要である。
+
+第13節の「`(T+1)` を使う旅行時間を無条件に流用しない」は、`end_trip()` 一式の流用を禁じた記録である。本節は、そのうち旅行時間の端点だけを、前進後の時刻末退出として採用する。`end_trip()` の呼出し、`arrival_time = W.T`、`record_log()` は採用しない。
+
+### 3. Vehicleの時刻情報
+
+専用境界退出では、次を変更しない。
+
+- `vehicle.arrival_time`
+- `vehicle.travel_time`
+- `vehicle.link_arrival_time`
+- order-control Visitの `arrival_time`
+- order-control Visitの `arrival_tiebreaker`
+
+理由は、次である。
+
+- 専用境界退出は実旅行完了ではない。
+- `vehicle.arrival_time` と `vehicle.travel_time` を設定すると、通常の trip completion と誤認される。
+- `link_arrival_time` は、`outlink.traveltime_actual` の計算に使用したoutlink進入時刻であり、退出後も診断用の元情報として保持する。
+- order-control Visit到着記録は対象Node到着の記録であり、下流局所境界退出では変更しない。
+
+専用境界退出時刻は、Vehicleの通常旅行完了fieldへ書かず、境界処理の専用退出記録へ次を保存する。
+
+- `virtual_timestep`
+- `boundary_exit_time_seconds`
+- `outlink_name`
+- `terminal_node_name`
+- `vehicle_name`
+- VisitKey
+- `removal_kind`
+
+`boundary_exit_time_seconds` は次である。
+
+```python
+(local_world.T + 1) * local_world.DELTAT
+```
+
+### 4. VehicleのWorld登録
+
+専用境界退出後も、Vehicle objectはコピーWorld内で診断および候補結果から参照可能にする。
+
+採用契約:
+
+- `World.VEHICLES` には残す。
+- `World.VEHICLES_RUNNING` から除く。
+- `World.VEHICLES_LIVING` から除く。
+- 新しいWorld共通Vehicle登録列は追加しない。
+- candidate local stateの既存Vehicle mappingは変更しない。
+- 専用境界状態または結果の退出記録に、Vehicle名およびVisitKeyを保持する。
+
+理由は、次である。
+
+- `World.VEHICLES` は、全生成Vehicleを名前で保持する参照辞書として機能する。
+- 通常の `end_trip()` も、`World.VEHICLES` からVehicleを削除しない。
+- `World.VEHICLES` から削除すると、Vehicle名による診断、VisitKey対応、候補結果参照を壊す。
+- `VEHICLES_RUNNING` と `VEHICLES_LIVING` から除けば、後続のcar-following、位置更新、局所前進の対象にならない。
+
+コピーWorldの用途制限は、次である。
+
+- 専用境界退出Vehicleは `state == "end"` だが、`arrival_time` および `travel_time` を旅行完了値へ更新しない。
+- したがって、この候補別コピーWorldを通常のUXsim全体解析や通常の旅行完了統計へ渡さない。
+- 候補別コピーWorldは、TVT-MP局所候補評価と専用診断だけに用いる。
+- 通常Analyzerによる completed trip 集計を、このコピーWorldへ適用しない。
+- 専用境界退出Vehicleの正式な意味は、`state` 単独ではなく、専用Vehicle除去記録の `removal_kind` によって判定する。
+
+### 5. 退出後のVehicle field
+
+変更するfield:
+
+```text
+state = "end"
+link = None
+leader = None
+follower = None
+```
+
+World登録:
+
+```text
+VEHICLES_RUNNINGから除去
+VEHICLES_LIVINGから除去
+World.VEHICLESには残す
+```
+
+変更しないfield:
+
+```text
+arrival_time
+travel_time
+link_arrival_time
+x
+x_old
+x_next
+v
+move_remain
+route_next_link
+flag_waiting_for_trip_end
+order_control_current_visit
+order_control_visit_id
+order-control Visit履歴
+```
+
+位置関連fieldを変更しない理由は、次である。
+
+- Vehicleはoutlink終端へ到達した状態で専用境界退出する。
+- 最後に到達した位置、前時刻位置、次位置、速度、未使用移動量を診断情報として保持する。
+- `x` を 0 へ変更すると、outlink入口へ戻ったように見える。
+- 通常の `end_trip()` が行う `x = 0` は、専用境界退出へ流用しない。
+
+`route_next_link` 等を変更しない理由は、次である。
+
+- 局所境界退出後は `VEHICLES_RUNNING` および `VEHICLES_LIVING` から外れるため、通常のroute処理へ戻らない。
+- 診断時に退出直前の状態を確認できるよう保持する。
+- 実装時に、これらのfieldを使ってVehicleを再び処理対象へ戻してはならない。
+
+### 6. leader・followerの検証と解除順
+
+対象は、単車線研究条件におけるoutlink終端側の物理先頭Vehicleである。
+
+`Link.vehicles` の物理先頭は `outlink.vehicles[0]` である。除去は `outlink.vehicles.popleft()` である。
+
+正常状態:
+
+- 退出Vehicleは `outlink.vehicles[0]` である。
+- `vehicle.link is outlink` である。
+- 物理先頭Vehicleの `leader` は `None` である。
+- 後続Vehicleがいる場合、退出Vehicleの `follower` が次の物理先頭候補である。
+- `follower.leader is exiting_vehicle` である。
+
+一台分の反映前検証:
+
+1. `outlink.vehicles` が空でない。
+2. `outlink.vehicles[0] is exiting_vehicle`。
+3. `exiting_vehicle.link is outlink`。
+4. `exiting_vehicle.leader is None`。
+5. followerがある場合、`follower.link is outlink`、`follower.leader is exiting_vehicle`、followerが `Link.vehicles` 内の次の物理位置と整合する。
+6. `World.VEHICLES` の同名登録が `exiting_vehicle`。
+7. `VEHICLES_RUNNING` と `VEHICLES_LIVING` の同名登録が `exiting_vehicle`。
+8. `state == "run"`。
+
+不整合のときは `RuntimeError` である。当該outlinkについて境界状態を変更しない。自動修復しない。
+
+解除と除去の順:
+
+1. 退出前に `cum_departure`、`traveltime_actual`、容量、allowance等に必要な値を計算する。
+2. followerがあれば、`follower.leader = None`。
+3. `exiting_vehicle.follower = None`。
+4. `exiting_vehicle.leader = None`。
+5. `outlink.vehicles.popleft()`。
+6. `World.VEHICLES_RUNNING` から除去する。
+7. `World.VEHICLES_LIVING` から除去する。
+8. `exiting_vehicle.link = None`。
+9. `exiting_vehicle.state = "end"`。
+10. 専用退出記録へ追加する。
+
+実装では、1台分の検証と更新を原子的に扱う。
+
+`end_trip()` は `follower.leader = None` のあと `popleft()` し、退出Vehicle自身の `leader` と `follower` はクリアしない。専用境界退出は、診断上の残留参照を残さないため、退出Vehicleの `follower` と `leader` も `None` にする。この差は、`end_trip()` を呼ばない専用退出に限る。
+
+### 7. 同一outlinkの連続退出
+
+同じ仮想timestepに、同一outlinkから複数Vehicleを退出させ得る。
+
+処理順:
+
+1. `outlink.vehicles[0]` を現在の物理先頭として評価する。
+2. 終端到着、allowance、outlink流出容量、有限終端Node容量を確認する。
+3. 1台分の専用境界退出を反映する。
+4. `popleft()` 後の新しい `outlink.vehicles[0]` を次の物理先頭として再評価する。
+5. 条件を満たす限り繰り返す。
+
+各Vehicleを1台ずつFIFO順に処理する。人工的な最大1台制限は設けない。
+
+通常停止条件:
+
+- 次の物理先頭Vehicleがoutlink終端へ到達していない。
+- allowanceの整数部分がVehicle 1台分に足りない。
+- `outlink.capacity_out_remain` が `DELTAN` 未満。
+- 有限な terminal Node の `flow_capacity_remain` が `DELTAN` 未満。
+- 下流待ちあり・実流出なし。
+- その他、正本で通常待ちとされる条件。
+
+通常停止時は、例外にしない。それまでに成功したVehicleの退出を維持する。待機Vehicleをoutlink上へ残す。未使用allowanceを次時刻へ繰り越す。容量を追加消費しない。後続Vehicleを飛ばさない。
+
+### 8. 原子性単位
+
+採用する原子性は、次の2段階である。
+
+一台単位:
+
+- 1台分の必要条件と更新値をすべて検証・計算してから反映する。
+- 1台分の途中状態を残さない。
+
+outlink単位:
+
+- 当該仮想timestepに、そのoutlinkで境界処理の対象になり得る物理先頭側Vehicle列について、登録、Link所属、物理順、leader・followerの重大不整合を、outlinkへの最初の書込み前に事前検証する。
+- 重大不整合を事前に検出した場合、そのoutlinkを無変更で `RuntimeError` とする。
+- 別outlinkですでに正常完了した処理は戻さない。
+- 別outlinkは登録順に独立処理する。
+
+正常な部分成功:
+
+- 1台目が正常退出し、2台目が通常待ち条件になった場合、1台目は戻さない。
+- これは異常ではなく、当該時刻に許可された正常な部分流出である。
+
+重大不整合:
+
+- 事前全件検証で検出することを基本とする。
+- 反映中に予期しない例外が起きる可能性に備え、実装時には当該outlinkの限定snapshotとrollbackを実装する。
+- 当該outlinkについて、反映中の予期しない例外が発生した場合は、同じ呼出しで当該outlinkへ反映した退出、容量、allowance、累積台数、旅行時間、Vehicle登録、leader・follower、退出記録を呼出前へ戻す。
+- 別outlinkですでに正常完了した処理は戻さない。
+- 予見可能な重大不整合を、1台目退出後まで放置しない。
+
+仮想timestepの全outlinkを一括transactionにはしない。理由は、次である。
+
+- outlinkごとの下流境界状態とallowanceは独立している。
+- 後続outlinkの不整合により、先行outlinkの正常な境界流出を戻す必要はない。
+- 可読性と交通上の独立性を維持する。
+
+既存の局所前進は、新着incoming登録の失敗時にその呼出全体を戻す。binding transferと `end_trip()` には、2台目の失敗で1台目を戻す契約は無い。専用境界退出のoutlink単位rollbackは、この境界処理のために新しく採用する実装契約であり、UXsim本体の `end_trip()` の挙動ではない。
+
+### 9. 専用退出理由と境界状態型の名称
+
+実装時の正式名称は、次である。
+
+境界状態種別Enumは `OrderControlTvtMpOutlinkBoundaryMode` である。memberは次である。
+
+```text
+OBSERVED_WAIT_WITH_OUTFLOW
+OBSERVED_WAIT_WITHOUT_OUTFLOW
+NO_OBSERVED_WAIT_CONSTRAINED_SINK
+```
+
+それぞれ、下流待ちあり・実流出あり、下流待ちあり・実流出なし、下流待ち観測なしの制約付きsinkに対応する。downstream boundary結果なしは、このEnumに入れない。
+
+Vehicle除去理由Enumは `OrderControlTvtMpOutlinkBoundaryRemovalKind` である。memberは次である。
+
+```text
+OBSERVED_OUTFLOW_BOUNDARY_EXIT
+CONSTRAINED_SINK_END_TRIP
+```
+
+`ExitKind` ではなく `RemovalKind` を採用する理由は、次である。
+
+- 専用境界退出と `end_trip()` による除去の双方を、一つの診断軸で表せる。
+- 制約付きsink側を、専用境界退出と誤って同一視しない。
+- 境界処理によって local World の通常更新対象から除かれた理由を表現できる。
+
+### 10. 境界状態型と結果型
+
+次の型名を、実装時の正式名称とする。
+
+- 候補全体の可変状態: `OrderControlTvtMpCandidateOutlinkBoundaryState`
+- outlink別の可変状態: `OrderControlTvtMpCandidateOutlinkBoundaryLinkState`
+- 一回の全体処理結果: `OrderControlTvtMpOutlinkBoundaryProcessResult`
+- 一回のoutlink別処理結果: `OrderControlTvtMpOutlinkBoundaryLinkProcessResult`
+- 専用Vehicle除去記録: `OrderControlTvtMpOutlinkBoundaryVehicleRemovalRecord`
+
+Vehicle除去記録のfield:
+
+```text
+vehicle_name
+visit_key
+outlink_name
+terminal_node_name
+virtual_timestep
+boundary_exit_time_seconds
+removal_kind
+```
+
+候補全体状態の最低限field:
+
+```text
+local_vehicle_advance_state
+downstream_boundary_node_result
+outlink_states
+completed_virtual_timesteps
+vehicle_removal_records
+```
+
+outlink別可変状態の最低限field:
+
+```text
+outlink_name
+terminal_node_name
+boundary_mode
+active_timestep_count
+transferred_vehicle_count
+observed_average_outflow_rate
+flow_allowance
+cumulative_observed_outflow_exit_vehicle_names
+cumulative_constrained_sink_end_trip_vehicle_names
+```
+
+全体処理結果の最低限field:
+
+```text
+node_name
+virtual_timestep
+outlink_results
+```
+
+outlink別結果の最低限field:
+
+```text
+outlink_name
+terminal_node_name
+boundary_mode
+flow_allowance_before
+flow_allowance_added
+flow_allowance_after
+vehicle_names_at_end_before
+observed_outflow_boundary_exit_vehicle_names
+constrained_sink_end_trip_vehicle_names
+waiting_vehicle_names_after
+capacity_out_remain_before
+capacity_out_remain_after
+terminal_node_flow_capacity_remain_before
+terminal_node_flow_capacity_remain_after
+```
+
+型設計原則:
+
+- 結果型とVehicle除去記録は frozen dataclass である。
+- 順序を持つ列は tuple である。
+- 可変allowanceと処理済み時刻は、境界状態だけに保持する。
+- baseline観測結果は読取専用である。書き換えない。
+- 専用退出Vehicleと制約付きsink Vehicleを、別列で診断可能にする。
+
+内部helperのファイル内分割は、実装時のコード構造に残してよい。上の型名、Enum member、field契約は、その分割で変えない。
+
+### 11. 制約付きsinkとの共通部分と相違
+
+共通事前条件:
+
+- outlink終端へ到達している。
+- 物理FIFOである。
+- `outlink.capacity_out_remain >= DELTAN`。
+- terminal Nodeの `flow_capacity` が有限なら、`flow_capacity_remain >= DELTAN`。
+- 下流Linkの `capacity_in_remain` は使わない。
+- terminal Nodeの `incoming_vehicles` へ登録しない。
+- 同じ仮想timestepの binding transfer へ戻らない。
+- 人工的な最大1台制限を設けない。
+
+下流待ちあり・実流出あり:
+
+- observed average outflow rate を使う。
+- `flow_allowance` を使う。
+- 専用境界退出を使う。
+- `end_trip()` を呼ばない。
+- `arrival_time` と `travel_time` を変更しない。
+- `record_log()` を呼ばない。
+- `removal_kind` は `OBSERVED_OUTFLOW_BOUNDARY_EXIT` である。
+
+下流待ち観測なしの制約付きsink:
+
+- rateを使わない。
+- allowanceを使わない。
+- 容量確認と容量消費のあと `end_trip()` を呼ぶ。
+- `removal_kind` は `CONSTRAINED_SINK_END_TRIP` である。
+- `end_trip()` の通常副作用を、コピーWorld内で受ける。
+- 実Worldの旅行終了を意味しない。
+
+実装時の共通helper候補:
+
+- outlinkとterminal Nodeの対応検証。
+- 物理先頭検証。
+- `capacity_out_remain` 検証。
+- 有限な terminal Node 容量の検証。
+- FIFO候補抽出。
+- outlink別診断値の取得。
+
+別処理にする部分:
+
+- allowanceの更新と消費。
+- 専用境界退出本体。
+- `end_trip()` 呼出し。
+- Vehicle除去後field。
+- `RemovalKind`。
+- 累積退出Vehicle列。
+
+### 12. 注意事項
+
+今回確定した専用境界退出は、候補別コピーWorld専用である。
+
+- 実Worldへ適用しない。
+- 通常UXsimの trip completion へ適用しない。
+- 通常Analyzerの旅行完了統計を、候補コピーWorldへ適用しない。
+- `state == "end"` だけを見て、通常旅行完了と解釈しない。
+- 専用Vehicle除去記録を正本とする。
+- 実装後のテストでは、`World.VEHICLES` へ残ることと、`VEHICLES_RUNNING` および `VEHICLES_LIVING` から外れることを、別々に確認する。
 
 # 次の作業開始点
 
