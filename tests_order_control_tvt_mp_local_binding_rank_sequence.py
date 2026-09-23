@@ -120,6 +120,7 @@ def _build_chain(
     trade_rank_result: OrderControlTvtMpGeneralTradeRankResult,
     k_confirmed_before: int,
     preserves_fifo: bool = True,
+    baseline_timestep_T: int = 10,
 ):
     alignment = OrderControlTvtSnapshotUndeterminedAlignmentResult(
         node_name="merge",
@@ -130,10 +131,10 @@ def _build_chain(
     fork_result = OrderControlBaselineForkResult(
         collector=collector,  # type: ignore[arg-type]
         target_node_names=("merge",),
-        baseline_timestep_T=10,
+        baseline_timestep_T=baseline_timestep_T,
         configured_horizon_steps=6,
         fork_steps_executed=6,
-        final_fork_timestep=16,
+        final_fork_timestep=baseline_timestep_T + 6,
         registered_visit_count=1,
         inlink_physical_orders=(),
         downstream_boundary_result=OrderControlBaselineDownstreamBoundaryResult(
@@ -334,7 +335,31 @@ def _arrived_node(fifo_set):
     return arrived.node_confirmation_results[0]
 
 
-def _rebuild_with_confirmation(fifo_set, *, arrived_node=None, leading_node=None):
+def _rebuild_with_fork_result(fifo_set, **fork_fields):
+    """Copy one valid chain and replace only fork_result fields."""
+    leading = _leading_confirmation(fifo_set)
+    arrived = leading.arrived_confirmation_result
+    alignment_fork = arrived.alignment_fork_result
+    fork = alignment_fork.fork_result
+    new_fork = dataclasses.replace(fork, **fork_fields)
+    new_alignment_fork = dataclasses.replace(alignment_fork, fork_result=new_fork)
+    new_arrived = dataclasses.replace(
+        arrived,
+        alignment_fork_result=new_alignment_fork,
+    )
+    return _rebuild_with_confirmation(
+        fifo_set,
+        arrived_confirmation_result=new_arrived,
+    )
+
+
+def _rebuild_with_confirmation(
+    fifo_set,
+    *,
+    arrived_node=None,
+    leading_node=None,
+    arrived_confirmation_result=None,
+):
     """Copy one valid chain and replace only the named confirmation node."""
     trade_set = fifo_set.general_trade_rank_set_result
     concrete = trade_set.concrete_buyer_candidate_set_result
@@ -343,7 +368,9 @@ def _rebuild_with_confirmation(fifo_set, *, arrived_node=None, leading_node=None
     right = visit_set.right_of_entry_selection_result
     leading = right.leading_confirmation_result
     arrived = leading.arrived_confirmation_result
-    if arrived_node is not None:
+    if arrived_confirmation_result is not None:
+        arrived = arrived_confirmation_result
+    elif arrived_node is not None:
         arrived = dataclasses.replace(
             arrived,
             node_confirmation_results=(arrived_node,),
@@ -1340,6 +1367,97 @@ def test_last_buyer_rank_past_trade_order_is_value_error():
     _assert_builder_error(ValueError, fifo_set, candidate, rank_state, "last_buyer_rank")
 
 
+def _fork_result_from_fifo_set(fifo_set):
+    leading = _leading_confirmation(fifo_set)
+    return leading.arrived_confirmation_result.alignment_fork_result.fork_result
+
+
+def test_baseline_timestep_T_matches_fork_result():
+    fifo_set, candidate, rank_state, _collector = _ready_case()
+    fork_result = _fork_result_from_fifo_set(fifo_set)
+    result = build_tvt_mp_local_binding_rank_sequence(
+        fifo_set,
+        candidate,
+        rank_state,
+    )
+    assert result.baseline_timestep_T == fork_result.baseline_timestep_T
+    assert result.baseline_timestep_T == 10
+    assert result.baseline_timestep_T != fork_result.final_fork_timestep
+    assert "baseline_timestep_T" in {
+        field.name for field in dataclasses.fields(OrderControlTvtMpLocalBindingRankSequence)
+    }
+    second = build_tvt_mp_local_binding_rank_sequence(
+        fifo_set,
+        candidate,
+        rank_state,
+    )
+    assert second.baseline_timestep_T == result.baseline_timestep_T
+    try:
+        result.baseline_timestep_T = 99  # type: ignore[misc]
+        raise AssertionError("expected frozen baseline_timestep_T")
+    except dataclasses.FrozenInstanceError:
+        pass
+
+
+def test_baseline_timestep_T_is_distinct_from_visit_arrival_and_final_fork():
+    rank_state = OrderControlTvtNodeRankState("merge")
+    _confirm_formal(rank_state, ("arr", 1), "out")
+    fifo_set, candidate, rank_state = _build_chain(
+        rank_state=rank_state,
+        collector=_Collector(
+            {
+                ("arr", 1): _record(
+                    "arr",
+                    1,
+                    vehicle_id=2,
+                    route="out",
+                    arrived=True,
+                ),
+                ("buy", 1): _record("buy", 1, vehicle_id=4, route="out", arrived=False),
+                ("sell", 1): _record("sell", 1, vehicle_id=5, route="side", arrived=False),
+            }
+        ),
+        arrived_keys=(("arr", 1),),
+        leading_keys=(),
+        remaining_keys=(("buy", 1), ("sell", 1)),
+        trade_rank_result=_trade_rank(),
+        k_confirmed_before=0,
+        baseline_timestep_T=7,
+    )
+    fork_result = _fork_result_from_fifo_set(fifo_set)
+    result = build_tvt_mp_local_binding_rank_sequence(
+        fifo_set,
+        candidate,
+        rank_state,
+    )
+    assert result.baseline_timestep_T == 7
+    assert fork_result.final_fork_timestep == 13
+    assert result.baseline_timestep_T != fork_result.final_fork_timestep
+    assert result.preconfirmed_by_this_baseline_visits[0].baseline_arrival_timestep == 10
+
+
+def test_fork_baseline_timestep_T_bool_is_runtime_error():
+    fifo_set, candidate, rank_state, collector = _ready_case()
+    broken = _rebuild_with_fork_result(fifo_set, baseline_timestep_T=True)
+    before_records = dict(collector.records)
+    before_window = _leading_node(fifo_set).decision_window_visit_keys
+    _assert_builder_error(RuntimeError, broken, candidate, rank_state, "baseline_timestep_T")
+    assert collector.records == before_records
+    assert _leading_node(fifo_set).decision_window_visit_keys == before_window
+
+
+def test_fork_baseline_timestep_T_non_int_is_runtime_error():
+    fifo_set, candidate, rank_state, _collector = _ready_case()
+    broken = _rebuild_with_fork_result(fifo_set, baseline_timestep_T=10.0)
+    _assert_builder_error(RuntimeError, broken, candidate, rank_state, "baseline_timestep_T")
+
+
+def test_fork_baseline_timestep_T_negative_is_runtime_error():
+    fifo_set, candidate, rank_state, _collector = _ready_case()
+    broken = _rebuild_with_fork_result(fifo_set, baseline_timestep_T=-1)
+    _assert_builder_error(RuntimeError, broken, candidate, rank_state, "baseline_timestep_T")
+
+
 TESTS = (
     test_public_types_are_frozen_and_importable,
     test_four_partitions_orders_roles_and_k_values,
@@ -1382,6 +1500,11 @@ TESTS = (
     test_builder_does_not_touch_another_nodes_rank_ledger,
     test_completed_sequence_is_the_four_partitions_with_contiguous_ranks,
     test_last_buyer_rank_past_trade_order_is_value_error,
+    test_baseline_timestep_T_matches_fork_result,
+    test_baseline_timestep_T_is_distinct_from_visit_arrival_and_final_fork,
+    test_fork_baseline_timestep_T_bool_is_runtime_error,
+    test_fork_baseline_timestep_T_non_int_is_runtime_error,
+    test_fork_baseline_timestep_T_negative_is_runtime_error,
 )
 
 

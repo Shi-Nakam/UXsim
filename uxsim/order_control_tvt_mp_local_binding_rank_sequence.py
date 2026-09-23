@@ -75,6 +75,7 @@ class OrderControlTvtMpLocalBindingRankSequence:
     """Read-only binding order for one FIFO-passed concrete buyer candidate."""
 
     node_name: str
+    baseline_timestep_T: int
     concrete_buyer_candidate_set: OrderControlTvtMpConcreteBuyerCandidateSet
     confirmed_before_this_baseline_visits: tuple[
         OrderControlTvtMpLocalBindingRankVisit,
@@ -96,6 +97,26 @@ class OrderControlTvtMpLocalBindingRankSequence:
     k_last_buyer: int
     k_decision_window: int
     k_fixed: int
+
+
+def _require_fork_baseline_timestep_T(
+    baseline_timestep_T: object,
+    *,
+    node_name: str,
+) -> int:
+    """Baseline start timestep T from the upstream fork result, not a visit arrival."""
+    if type(baseline_timestep_T) is not int:
+        raise RuntimeError(
+            f"Node {node_name!r}: fork_result.baseline_timestep_T must be a "
+            f"Python int, not bool; got type {type(baseline_timestep_T).__name__} "
+            f"with value {baseline_timestep_T!r}."
+        )
+    if baseline_timestep_T < 0:
+        raise RuntimeError(
+            f"Node {node_name!r}: fork_result.baseline_timestep_T must be >= 0; "
+            f"got {baseline_timestep_T!r}."
+        )
+    return baseline_timestep_T
 
 
 def _require_fifo_passed_candidate(
@@ -885,6 +906,10 @@ def build_tvt_mp_local_binding_rank_sequence(
     leading_result = right_of_entry_result.leading_confirmation_result
     arrived_result = leading_result.arrived_confirmation_result
     fork_result = arrived_result.alignment_fork_result.fork_result
+    baseline_timestep_T = _require_fork_baseline_timestep_T(
+        fork_result.baseline_timestep_T,
+        node_name=node_name,
+    )
     if node_index >= len(fork_result.target_node_names):
         raise RuntimeError(
             f"fork_result.target_node_names has no entry at index {node_index}."
@@ -994,6 +1019,7 @@ def build_tvt_mp_local_binding_rank_sequence(
     ) = _split_completed_visits(visits_in_binding_order)
     return OrderControlTvtMpLocalBindingRankSequence(
         node_name=node_name,
+        baseline_timestep_T=baseline_timestep_T,
         concrete_buyer_candidate_set=trade_rank_result.concrete_buyer_candidate_set,
         confirmed_before_this_baseline_visits=confirmed_before_visits,
         preconfirmed_by_this_baseline_visits=preconfirmed_visits,
