@@ -6318,6 +6318,147 @@ BATCH Level 2から確認した参考情報：
 - Git操作は利用者がTerminalで行う。
 - `diagnostics/order_control.zip`は対象外である。
 
+**2026-09-22注記（最新参照先の更新）：** 上記「完全な実装前仕様はまだ作成していない」と「次の直接作業は完全な実装前仕様の作成」は、拘束順位外処理・下流境界・統合仕様を記録した時点の歴史的記録である。完全な実装前仕様は後続の「2026-09-22追記（完全な実装前仕様）」で確定した。最新正本は`ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_2.md`の「TVT-MP候補別局所仮想計算の完全な実装前仕様」である。現在の直接作業は、その追記の独立確認、利用者によるMarkdownのcommitとpushのあと、最初の実装区分の目的と範囲を提示し、合意後にその区分だけへ着手することである。直ちにPython実装へ進む指示ではない。上記を現在の作業指示として読まない。
+
+##### 2026-09-22追記（完全な実装前仕様）
+
+**現在地点**
+
+- 2026-09-22に、TVT-MP候補別局所仮想計算の完全な実装前仕様を確定した。これは実装完了記録ではない。保存済みcommit `5235089` までの制度と、現行コード接続調査と、それに基づく実装前仕様案を、公開API、結果型、helper責務、例外、診断、モジュール、テスト、実装区分へ落とした記録である。
+- 詳細正本は`ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_2.md`の「TVT-MP候補別局所仮想計算の完全な実装前仕様」。
+- 候補別局所仮想計算のPython実装と専用テストは未着手である。この記録と同時に実装を開始しない。
+- 既存の候補形成、一般形順位、FIFO検査、baseline collector、下流境界observerは維持する。`trade_order` を完全な拘束順位列へ改造しない。
+
+**追加する主要モジュール**
+
+- 既存`uxsim/order_control_tvt_node_rank_state.py`を正式進路付き順位台帳へ拡張する。別台帳は作らない。
+- 新規`uxsim/order_control_tvt_mp_local_binding_rank_sequence.py`は、既存結果と台帳から4区分の読取専用列を作る。車両は動かさない。台帳は変更しない。
+- 新規`uxsim/order_control_tvt_mp_candidate_local_state.py`は、時点Tの`real_W.copy()`で候補ごとのWorld全体のコピーを作る。対象外のNode、Link、Vehicleは削除せず、更新もしない。
+- 新規`uxsim/order_control_tvt_mp_candidate_local_virtual_calculation.py`は、公開入口、仮想timestep、1台通過、終端3分岐、結果作成を持つ。
+- 候補別局所状態と候補別結果は、拘束順位列を構築するためのものではない。完成済みの拘束順位列を使って計算し、通過時刻と診断を返すためのものである。
+
+**正式進路付き順位台帳と原子的確定**
+
+- 確定済み1件はVisitKey、`assigned_rank`、`formal_route_next_link_name`を持つ。未保存の進路は`None`であり、空文字ではない。
+- 本番の確定APIは`confirm_visits_and_formal_target_node_routes_atomically`である。全件検証のあとだけ一括反映する。1件でも不整合なら順位も進路も変更しない。入力不整合は`ValueError`、代入前の内部整合失敗は`RuntimeError`とし、どちらも無変更である。
+- 候補評価中はこのAPIを呼ばない。呼ぶのは、候補形成前の区分2先行確定と、最終結果決定後の既定の原因別分岐である。
+- 既存`confirm_visits_in_order()`は削除しない。既存テストと互換のため残す。このAPIで確定した正式進路は`None`である。新しいTVT-MP本番経路では使わない。
+- 区分1として必要になったVisitについて、台帳から局所通過に必要な正式進路が得られず、snapshot進路の規則にも該当しないときだけ、補完せず重大不整合として止める。collector進路や現在の`Vehicle.route_next_link`では補わない。古いAPIで確定したVisitのすべてを、それだけで重大不整合とはしない。
+
+**完全な拘束順位列**
+
+- 構築関数は`build_tvt_mp_local_binding_rank_sequence`である。結果型は`OrderControlTvtMpLocalBindingRankSequence`、要素型は`OrderControlTvtMpLocalBindingRankVisit`である。
+- 区分名は`confirmed_before_this_baseline`、`preconfirmed_by_this_baseline`、`trade_scope_of_this_candidate`、`outside_trade_scope_inside_k_fixed`である。番号では持たない。進路4分類の名前とも分ける。
+- 区分3の通過順は`trade_order`の先頭`last_buyer_rank`件である。`trade_scope`のbaseline順ではない。
+- `k_last_buyer`は既存`last_buyer_rank`、`k_decision_window`は`remaining_decision_window_visit_keys`の件数、`k_fixed`は両者の最大値である。
+- `k_last_buyer`が窓の件数より小さいとき、区分4は`remaining_decision_window_visit_keys[k_last_buyer:]`である。1始まり順位の先頭`k_last_buyer`件を除くため、0始まりの開始indexは`k_last_buyer`である。N+1位以降と、P-1対象外の遅い窓内Visitが入り得る。
+- 以上なら区分4は空である。完成列は4区分の連結である。重複と進路欠落は自動修復しない。
+- 評価に使った構築済み列を候補結果へ保持し、採用後に再計算しない。
+
+**公開入口と局所計算**
+
+- 公開入口は`evaluate_tvt_mp_candidate_local_virtual_calculations`である。引数は時点Tの`real_W`、FIFO検査結果、Node別順位台帳である。戻り値は`OrderControlTvtMpLocalVirtualCalculationSetResult`である。
+- FIFOを通過した候補だけを、候補ごとに独立した写しで評価する。FIFO却下と、候補未形成のNodeは実行しない。
+- `real_W.T`が`baseline_timestep_T`と違う場合は推測復元せず`ValueError`とする。
+- 評価中に変えてよいのは候補ごとの写しだけである。実World、実World乱数、台帳、collector、下流境界結果、他候補は変えない。原子的確定APIは呼ばない。
+- 仮想時刻はTから、最大`configured_horizon_steps`までである。最初の時刻はsnapshot残容量、2時刻目以降は通過前にだけ補充する。拘束順位列を先に走査し、clearanceで止まらず容量が残れば、到着時刻、tiebreaker、Vehicle IDの一時順で順位外を見る。`incoming_vehicles`は全消去しない。
+- 全buyerと全sellerの局所対象Node通過時刻が揃えば早期resolvedとする。buyerだから短縮、sellerだから遅延とは決めない。経済性評価はしない。揃わなければ理由列付きの正常なunresolvedとする。複数理由は1件に潰さない。
+- **2026-09-23補修（resolvedとなる仮想timestepの完了契約）：** 必要な通過timestepが揃った場合でも、対象Node通過処理の直後に候補計算を終了しない。その仮想timestepのinlink前進、到着登録、outlink前進、outlink終端境界処理、容量・状態・診断の更新を完了した後に `resolved` とする。BATCH Level 2のtrigger早期終了は採用しない。詳細はNOTES_2の完全な実装前仕様「仮想timestep loop」。
+- 候補結果型は`OrderControlTvtMpCandidateLocalVirtualCalculationResult`である。構築済み拘束順位列、通過時刻、進路分類、境界分岐、残高推移、horizon末状態を、無名の巨大dictではなく読取専用の型で持つ。
+
+**進路4分類**
+
+- `snapshot_route_already_decided`は拘束順位の内外の両方にあり得る。snapshot進路を固定し、受入不能でも別outlinkへ変えない。
+- `baseline_route_inside_binding_sequence`は拘束順位列の中であり、評価中は読取専用である。最終結果後に今回確定するVisitだけが正式保存の対象になり得る。
+- `baseline_route_outside_binding_sequence_temporary`は拘束順位外の一時使用である。正式進路とは呼ばず、台帳へ保存しない。
+- `vehicle_id_among_acceptable_outlinks`は、進路未判明の拘束順位外だけに使う。通過を試す時点で、入れるoutlinkをid昇順にし、`real_vehicle.id % 件数`で選んですぐ通過させる。空ならその時刻は通過させない。
+- `route_pref`、局所乱数、実World乱数、`route_next_link_choice()`は使わない。
+
+**下流境界3分岐**
+
+- `downstream_boundary_result is None`は空baselineであり、`active = 0`ではない。候補評価中に`None`なら不整合として停止する。
+- 分岐Aは`active_timestep_count > 0`かつ`transferred_vehicle_count > 0`である。平均率は局所側で、後者を前者で割って求める。候補別・outlink別の残高へ毎時刻加算し、小数と未使用整数を繰り越す。実流出は、残高の整数、終端待ち、物理FIFO、`capacity_out_remain`、終端Node容量、`DELTAN=1`、その他の物理条件がすべて許す範囲である。人工的なburst上限はない。
+- 分岐Bは待ちが観測されたが流出台数が0である。同じlocal horizonの間は境界閉塞とする。永久閉塞とは断定しない。
+- 分岐Cは`active_timestep_count == 0`である。平均率と残高は使わない。BATCH Level 2の単純sinkは使わない。物理FIFO、終端到達、outlink流出容量、終端Node容量を確認し、成功時に消費する制約付きsinkである。下流Linkの流入容量は使わない。人工的な最大1台制限はない。`end_trip()`は写しからの除去であり、実Worldの旅行終了ではない。
+- BATCH Level 2のsinkは、終端到達後に流出容量と終端Node容量を確認せず`end_trip()`する。TVTの分岐Cとは別契約である。
+
+**可読性**
+
+正しく動くことを最優先する。初学者が処理順を追える明示的な実装を、短さや巧妙さより優先する。名前は長くても、Vehicle、Visit、Node、inlink、outlink、timestep、順位、進路、境界状態を混同しない。確定済み制度を実装の都合で簡略化しない。性能最適化は、正しい基本実装とテストの後にする。
+
+**実装区分**
+
+番号付きの作業管理Stepとしては確定しない。内容名は次である。事前合意なく新しいStep体系へ変えない。各区分の着手前に、名称、目的、対象範囲を利用者へ提示し、合意後にその区分だけを実装する。
+
+- 正式進路付き順位台帳と原子的確定
+- 既到着Visitと先頭連続非参加Visitの原子的先行確定接続
+- 完全な拘束順位列の構築
+- 候補別局所状態の構築
+- 1台分の対象Node通過
+- 拘束順位と拘束順位外の同一timestep統括
+- outlink終端境界3分岐
+- 公開入口、早期resolved、理由付きunresolved
+- 最終結果後の正式確定接続
+
+最後の区分は、採用、全候補却下、baseline情報不足、意思決定窓0件の既定分岐に従って原子的確定APIを呼ぶ接続である。経済性評価と実Worldへの反映は含めない。採用時は評価に使った構築済み列を再利用する。区分2は、この最後の区分では再保存しない。区分2の保存は、候補形成前の先行確定接続で終える。
+
+最初の台帳区分の完了条件に、新しい本番経路が`confirm_visits_in_order()`を呼ばないことは含めない。その確認は、先行確定接続の完了条件である。
+
+**2026-09-23補修（コード確認後）**
+
+独立レビューの3点を、現行コードで確認してから仕様へ補った。制度の採否は変えていない。詳細はNOTES_2の完全な実装前仕様にある2026-09-23補修である。
+
+区分2の現行経路は、`confirm_already_arrived_undetermined_visits` が先に、`confirm_leading_nonparticipating_decision_window_visits` が後に、それぞれ `confirm_visits_in_order()` をNodeごとに1回呼ぶ。この2関数より上の本番統括関数は無い。本番コードで旧APIを呼ぶのはこの2関数だけである。進路は、その呼出位置の `fork_result.collector.get_baseline_visit_snapshot` の `route_next_link_name` で取得できる。alignment結果自体は進路を持たない。outlink名集合は現行引数に無く、時点Tの実Worldの対象Nodeから呼出側が渡す。返すVisitKey列は変えない。したがって、新しいTVT-MP本番経路の区分2は原子的確定APIへ移行できる。旧APIはテストと互換のために残す。
+
+Worldの写しは、`World.copy()` がpickleによる全体複製であることを確認した。採用するのは、候補ごとにWorld全体をコピーし、対象外オブジェクトを削除せず、TVT専用loopの更新対象だけを対象Node、全inlink、全outlink、それらに属するVehicleに固定する方式である。`exec_simulation()` と、コピー全体への `Node.update()`、`Link.update()`、`Vehicle.update()` は呼ばない。対象外を削除する方式と、BATCH Level 2型の小規模mimicを新規構築する方式は採用しない。対象外がコピー内に残ることと、対象外を走行させることは別である。
+
+horizonは、BATCH Level 2の `for offset in range(virtual_horizon + 1)` に合わせる。`configured_horizon_steps` が2のとき、通過試行する時刻はT、T+1、T+2である。`simulated_timestep_count` はTから時計を進めた回数なので、Tで揃えば0、T+2まで進めると2である。必要通過timestepが揃ったかの記録は各時刻の対象Node通過走査の後である。候補計算の終了と `resolved` の設定は、その仮想timestepの時刻末処理完了後である。T+2の試行で揃えば、そのtimestep末処理の後にresolvedとする。T+2の時刻末処理の後も不足ならunresolvedである。baselineの `final_fork_timestep` は `T + configured_horizon_steps` だが、baselineがその時刻の交通を実行したという意味ではない。baselineが実行するのはTから `T + configured_horizon_steps - 1` までである。局所loopはBATCHの端点に合わせ、`T + configured_horizon_steps` も試行する。
+
+**2026-09-23補修（resolved終了契約・仮想timestep内の処理順）**
+
+各仮想timestepの全体順序（1仮想timestep内部の番号であり、作業管理Stepではない）は次である。
+
+1. `offset > 0` のときだけ仮想時刻を進め容量を補充する
+2. 累積配列を現在の仮想時刻まで延長する
+3. 完全な拘束順位列を走査する
+4. clearance停止がなく余力があれば、拘束順位外Vehicleを一時的FCFS順で走査する
+5. 対象Node通過成功Vehicleの通過timestepを記録する
+6. buyerとsellerの必要通過timestepが揃った場合は、この仮想timestep末でresolved終了することを記録する（ここでは終了しない）
+7. inlink上の局所対象Vehicleを前進させる
+8. 新たな対象Node端到着Vehicleを `incoming_vehicles` へ重複なく追加する
+9. outlink上の局所対象Vehicleを前進させる
+10. outlink終端へ到達したVehicleについて、下流待ちあり・実流出あり、下流待ちあり・実流出なし、下流待ち観測なしの制約付きsinkのいずれかの下流境界処理を行う
+11. 容量、流出許可残高、累積台数、Vehicle状態、境界流出、診断を完成させる
+12. 手順6でresolved終了が決まっていれば、ここで候補計算を終了する
+13. resolvedでなく最終許容時刻で不足なら理由付きunresolvedとする
+14. それ以外は次の仮想timestepへ進む
+
+resolvedとなる仮想timestepでも、対象Node通過および境界処理に伴う容量・累積台数・流出許可残高・Vehicle状態を通常どおり更新する。同じ仮想timestep内では、容量の再補充、拘束順位列の再走査、新着 `incoming_vehicles` の通過、対象Node通過処理への復帰、次timestepへの進行を行わない。clearance未充足またはNode容量不足で通過走査が終わっても、前進と境界処理は継続する。
+
+**テスト契約（resolved完了契約の追加分）**
+
+- 最後のbuyerまたはseller通過後も、そのtimestepのinlink前進・到着登録・outlink前進・境界処理が実行される
+- resolved時も通過に伴う容量消費が反映される
+- 下流待ちあり・実流出ありで実流出分の残高と流出容量が更新される
+- 下流待ちあり・実流出なしでは流出しない
+- 下流待ち観測なしの制約付きsinkで成功時に容量を消費する
+- 入口空間回復後も同timestepの対象Node通過へ戻らない
+- 新着 `incoming_vehicles` を同timestepに通過させない
+- clearanceまたはNode容量停止後も前進と境界処理が実行される
+- resolved診断が最終仮想timestep末まで記録される
+- BATCH Level 2 trigger早期終了と異なること
+- buyerとsellerの対象Node通過timestepは時刻末処理で変わらないこと
+
+下流境界3状態の新規記述では、内容が分かる名称（下流待ちあり・実流出あり、下流待ちあり・実流出なし、下流待ち観測なしの制約付きsink）を原則として用いる。歴史的本文の説明用「分岐A・B・C」だけを新しい正式名称として固定しない。
+
+**次の直接作業**
+
+本追記と2026-09-23補修（独立レビュー3点およびresolvedとなる仮想timestepの完了契約）を独立確認する。Markdownのcommitとpushは利用者がTerminalで行う。その後、最初の実装区分「正式進路付き順位台帳と原子的確定」の目的と範囲を利用者へ提示し、合意後にその区分だけへ着手する。その完了では、本番経路が旧確定APIを使わないことまでは確認しない。直ちにPython実装へ進まない。全区分を一度に実装しない。
+
+- 今回のMarkdown追記は未commitである。
+- Git操作は利用者がTerminalで行う。
+- `diagnostics/order_control.zip`は対象外である。
+
 #### 2026-08-29：TVT権利保有車両選定前の先頭非参加Vehicle先行確定の記録補修
 
 - 過去に確定済みだった、意思決定窓内 baseline 到着順位の先頭に連続する非参加 Vehicle の先行確定が、設計メモに明文化されていなかった
