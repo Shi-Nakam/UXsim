@@ -80,6 +80,26 @@ class OrderControlTvtMpCandidateLocalState:
     ]
     local_vehicle_by_real_vehicle_name: Mapping[str, object]
     real_vehicle_name_by_local_vehicle_name: Mapping[str, str]
+    _real_vehicle_id_by_real_vehicle_name: Mapping[str, int]
+
+    def real_vehicle_id(self, real_vehicle_name: str) -> int:
+        if not isinstance(real_vehicle_name, str) or real_vehicle_name == "":
+            raise ValueError(
+                "real_vehicle_name must be a non-empty str; got "
+                f"{real_vehicle_name!r}."
+            )
+        if real_vehicle_name not in self._real_vehicle_id_by_real_vehicle_name:
+            raise RuntimeError(
+                f"Node {self.target_node_name!r}: real vehicle "
+                f"{real_vehicle_name!r} has no stored real vehicle id."
+            )
+        vehicle_id = self._real_vehicle_id_by_real_vehicle_name[real_vehicle_name]
+        if isinstance(vehicle_id, bool) or not isinstance(vehicle_id, int):
+            raise RuntimeError(
+                f"Node {self.target_node_name!r}: stored real vehicle id for "
+                f"{real_vehicle_name!r} is not a Python int; got {vehicle_id!r}."
+            )
+        return vehicle_id
 
 
 def _require_real_world(real_W: object) -> World:
@@ -567,40 +587,74 @@ def _real_and_local_vehicle_name_maps(
     node_name: str,
     real_W: World,
     local_vehicles: tuple[object, ...],
-) -> tuple[dict[str, object], dict[str, str]]:
+) -> tuple[dict[str, object], dict[str, str], dict[str, int]]:
     local_vehicle_by_real_vehicle_name: dict[str, object] = {}
     real_vehicle_name_by_local_vehicle_name: dict[str, str] = {}
+    real_vehicle_id_by_real_vehicle_name: dict[str, int] = {}
     for local_vehicle in local_vehicles:
         local_vehicle_name = local_vehicle.name
-        real_vehicle = real_W.VEHICLES.get(local_vehicle_name)
-        if real_vehicle is None:
+        if not isinstance(local_vehicle_name, str) or local_vehicle_name == "":
+            raise RuntimeError(
+                f"Node {node_name!r}: local Vehicle name must be a non-empty "
+                f"str; got {local_vehicle_name!r}."
+            )
+        if local_vehicle_name not in real_W.VEHICLES:
             raise RuntimeError(
                 f"Node {node_name!r}: copied local Vehicle "
                 f"{local_vehicle_name!r} has no same-named real Vehicle."
             )
+        real_vehicle = real_W.VEHICLES[local_vehicle_name]
         if real_vehicle is local_vehicle:
             raise RuntimeError(
                 f"Node {node_name!r}: local Vehicle {local_vehicle_name!r} "
                 "is the real Vehicle object."
             )
-        if real_vehicle.name != local_vehicle_name:
+        real_vehicle_name = real_vehicle.name
+        if not isinstance(real_vehicle_name, str) or real_vehicle_name == "":
             raise RuntimeError(
-                f"Node {node_name!r}: real Vehicle name {real_vehicle.name!r} "
+                f"Node {node_name!r}: real Vehicle name must be a non-empty "
+                f"str; got {real_vehicle_name!r}."
+            )
+        if real_vehicle_name != local_vehicle_name:
+            raise RuntimeError(
+                f"Node {node_name!r}: real Vehicle name {real_vehicle_name!r} "
                 f"does not match local Vehicle {local_vehicle_name!r}."
             )
-        if real_vehicle.id != local_vehicle.id:
+        real_vehicle_id = real_vehicle.id
+        if isinstance(real_vehicle_id, bool) or not isinstance(real_vehicle_id, int):
+            raise RuntimeError(
+                f"Node {node_name!r}: real Vehicle {real_vehicle_name!r} id "
+                f"is not a Python int; got {real_vehicle_id!r}."
+            )
+        if real_vehicle_id != local_vehicle.id:
             raise RuntimeError(
                 f"Node {node_name!r}: Vehicle {local_vehicle_name!r} id differs "
-                f"between real ({real_vehicle.id!r}) and copy "
+                f"between real ({real_vehicle_id!r}) and copy "
                 f"({local_vehicle.id!r})."
             )
-        local_vehicle_by_real_vehicle_name[real_vehicle.name] = local_vehicle
+        if real_vehicle_name in local_vehicle_by_real_vehicle_name:
+            raise RuntimeError(
+                f"Node {node_name!r}: real Vehicle {real_vehicle_name!r} is "
+                "registered twice in the local correspondence."
+            )
+        if (
+            real_vehicle_name in real_vehicle_id_by_real_vehicle_name
+            and real_vehicle_id_by_real_vehicle_name[real_vehicle_name]
+            != real_vehicle_id
+        ):
+            raise RuntimeError(
+                f"Node {node_name!r}: real Vehicle {real_vehicle_name!r} is "
+                "mapped to two different real vehicle ids."
+            )
+        local_vehicle_by_real_vehicle_name[real_vehicle_name] = local_vehicle
         real_vehicle_name_by_local_vehicle_name[local_vehicle_name] = (
-            real_vehicle.name
+            real_vehicle_name
         )
+        real_vehicle_id_by_real_vehicle_name[real_vehicle_name] = real_vehicle_id
     return (
         local_vehicle_by_real_vehicle_name,
         real_vehicle_name_by_local_vehicle_name,
+        real_vehicle_id_by_real_vehicle_name,
     )
 
 
@@ -685,6 +739,7 @@ def build_tvt_mp_candidate_local_state(
     (
         local_vehicle_by_real_vehicle_name,
         real_vehicle_name_by_local_vehicle_name,
+        real_vehicle_id_by_real_vehicle_name,
     ) = _real_and_local_vehicle_name_maps(
         node_name=target_node_name,
         real_W=real_world,
@@ -714,5 +769,8 @@ def build_tvt_mp_candidate_local_state(
         ),
         real_vehicle_name_by_local_vehicle_name=MappingProxyType(
             real_vehicle_name_by_local_vehicle_name
+        ),
+        _real_vehicle_id_by_real_vehicle_name=MappingProxyType(
+            real_vehicle_id_by_real_vehicle_name
         ),
     )

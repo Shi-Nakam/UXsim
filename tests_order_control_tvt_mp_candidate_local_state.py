@@ -393,6 +393,77 @@ def test_two_local_states_do_not_share_copied_objects():
     ]
 
 
+def test_real_vehicle_ids_are_stored_from_the_real_world():
+    world, sequence = _ready_case()
+    before = _real_snapshot(world)
+    ids_before = {}
+    for name, vehicle in world.VEHICLES.items():
+        ids_before[name] = vehicle.id
+    state = build_tvt_mp_candidate_local_state(world, sequence)
+    for real_name in state.local_vehicle_by_real_vehicle_name:
+        assert state.real_vehicle_id(real_name) == world.VEHICLES[real_name].id
+        assert state.real_vehicle_id(real_name) == ids_before[real_name]
+    local_vehicle = state.local_vehicle_by_real_vehicle_name["in_front"]
+    real_id = world.VEHICLES["in_front"].id
+    local_vehicle.id = real_id + 99
+    assert state.real_vehicle_id("in_front") == real_id
+    assert state.real_vehicle_id("in_front") != local_vehicle.id
+    assert world.VEHICLES["in_front"].id == real_id
+    try:
+        state.real_vehicle_id("missing_vehicle")
+        raise AssertionError("expected missing real vehicle name to fail")
+    except RuntimeError as error:
+        assert "missing_vehicle" in str(error)
+    try:
+        state.real_vehicle_id("")
+        raise AssertionError("expected empty name to fail")
+    except ValueError:
+        pass
+    try:
+        state.real_vehicle_id(None)  # type: ignore[arg-type]
+        raise AssertionError("expected non-str name to fail")
+    except ValueError:
+        pass
+    try:
+        state._real_vehicle_id_by_real_vehicle_name["in_front"] = 0  # type: ignore[index]
+        raise AssertionError("expected read-only real vehicle id mapping")
+    except TypeError:
+        pass
+    ids_after = {}
+    for name, vehicle in world.VEHICLES.items():
+        ids_after[name] = vehicle.id
+    assert ids_after == ids_before
+    assert _real_snapshot(world) == before
+
+
+def test_two_local_states_keep_the_same_real_vehicle_ids():
+    world, sequence = _ready_case()
+    first = build_tvt_mp_candidate_local_state(world, sequence)
+    second = build_tvt_mp_candidate_local_state(world, sequence)
+    for real_name in first.local_vehicle_by_real_vehicle_name:
+        assert first.real_vehicle_id(real_name) == second.real_vehicle_id(real_name)
+        assert first.real_vehicle_id(real_name) == world.VEHICLES[real_name].id
+        assert (
+            first.local_vehicle_by_real_vehicle_name[real_name]
+            is not second.local_vehicle_by_real_vehicle_name[real_name]
+        )
+
+
+def test_bool_real_vehicle_id_is_runtime_error_without_keeping_the_bool():
+    world, sequence = _ready_case()
+    vehicle = world.VEHICLES["out_veh"]
+    original_id = vehicle.id
+    vehicle.id = True
+    try:
+        build_tvt_mp_candidate_local_state(world, sequence)
+        raise AssertionError("expected bool real vehicle id to fail")
+    except RuntimeError as error:
+        assert "Python int" in str(error)
+    finally:
+        vehicle.id = original_id
+    assert world.VEHICLES["out_veh"].id == original_id
+
+
 def test_past_visit_id_is_not_used_for_the_same_vehicle():
     world, sequence = _ready_case(revisit_in_front=True)
     assert world.VEHICLES["in_front"].order_control_current_visit["visit_id"] == 2
@@ -599,6 +670,9 @@ TESTS = (
     test_public_types_are_frozen_and_local_world_stays_mutable,
     test_copy_extracts_local_targets_and_keeps_initial_traffic_state,
     test_two_local_states_do_not_share_copied_objects,
+    test_real_vehicle_ids_are_stored_from_the_real_world,
+    test_two_local_states_keep_the_same_real_vehicle_ids,
+    test_bool_real_vehicle_id_is_runtime_error_without_keeping_the_bool,
     test_past_visit_id_is_not_used_for_the_same_vehicle,
     test_missing_binding_vehicle_is_value_error,
     test_visit_id_mismatch_is_runtime_error,
