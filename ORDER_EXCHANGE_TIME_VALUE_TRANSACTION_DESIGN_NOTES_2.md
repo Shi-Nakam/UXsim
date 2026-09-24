@@ -10700,6 +10700,8 @@ buyerとsellerの必要通過timestepが揃ったかどうかの記録は、そ�
 
 **2026-09-24注記：** 保存済みの拘束順位走査では、Node流量容量不足は走査終了ではない。未到着、物理先頭でないこと、容量不足、入口空間不足と同じ一時スキップであり、同じ走査で後続Visitを試す。走査を途中で終えるのはclearance未充足だけである。`binding_sequence_completed` は、Node流量が残っているという意味ではない。最新契約は「TVT-MP候補別局所仮想計算の実装進捗・確定実装契約・下流境界追加設計記録」を参照する。
 
+**2026-09-24追加注記：** 上記手順3の「拘束順位外Vehicleの処理へ進まない」は、Vehicleを抽出せず動かないことである。統括loopがunbound FCFS API自体を呼ばない意味ではない。独立検証と利用者判断により、各仮想timestepでbinding transfer直後にunbound FCFS APIを必ず1回呼ぶことを採用した。開始不能時は既存unbound部品が空完了し、当該時刻を処理済みとして記録する。最終結果はliveな統括state、candidate local state、local Worldを保持せず、終了時状態は独立frozen記録とする。最新詳細は「TVT-MP候補別局所仮想計算の統括loop結果保持・unbound呼出契約の途中確定記録」を参照すること。
+
 5. 対象Node通過成功Vehicleの通過timestepを記録する。
 6. buyerとsellerの必要な対象Node通過timestepが揃った場合は、「この仮想timestep末でresolvedとして終了する」ことを記録する。ここでは候補計算全体は終了しない。
 7. inlink上の局所対象Vehicleを前進させる。
@@ -10752,6 +10754,8 @@ buyerとsellerが揃った後も時刻末処理は完了するが、次は同じ
 clearance未充足またはNode容量不足により対象Node通過処理が終了した場合も、その仮想timestep全体を直ちに打ち切る意味にはしない。
 
 **2026-09-24注記：** 前進と境界処理を続ける、という後半は維持する。ただし保存済みの拘束順位走査は、Node流量容量不足では走査を終えず、一時スキップとして後続を試す。走査終了はclearance未充足だけである。詳細は「TVT-MP候補別局所仮想計算の実装進捗・確定実装契約・下流境界追加設計記録」を参照する。
+
+**2026-09-24追加注記：** clearance未充足または開始前Node流量不足でも、統括loopはunbound FCFS APIを省略しない。開始不能時は既存unbound部品が抽出せず空完了する。最新は「TVT-MP候補別局所仮想計算の統括loop結果保持・unbound呼出契約の途中確定記録」を参照すること。
 
 その仮想timestep内で引き続き、inlink上の局所対象Vehicleの前進、新たな対象Node端到着Vehicleの登録、outlink上の局所対象Vehicleの前進、outlink終端境界処理、容量および状態の更新、診断の完成、resolvedまたはunresolvedの判定を行う。ただし、対象Node通過処理へは戻らない。
 
@@ -10878,6 +10882,8 @@ resolvedとなる候補結果には、その最終仮想timestepについて、�
 診断情報を一つの巨大な無名dictへ押し込まない。意味の分かるfrozen dataclass等の読取専用型を使う。時刻ごとの通過、clearance待ち、通常の通過不能、残高推移は、それぞれ項目が読める小さな読取専用の列にする。それ以上に、1フィールドごとに別モジュールへ分けることはしない。
 
 これらの診断は、順位台帳、baseline collector、downstream boundary結果、実World、他候補へ書き込まない。
+
+**2026-09-24追加注記：** 最終frozen結果は、liveな統括state、candidate local state、local World、Node、Link、Vehicleへの参照を保持しない。終了時に必要な交通状態は、名前と数値を中心とする独立したfrozen記録として候補結果へ保存する。World全体の複製やsnapshotは作らない。既存per-timestep結果は可変交通objectを持たないが、終了時Vehicle位置 `x` を含む終了状態全体は再構成できない。終了時frozen記録の全fieldは今回確定していない。最新は「TVT-MP候補別局所仮想計算の統括loop結果保持・unbound呼出契約の途中確定記録」を参照すること。
 
 ## 正常なunresolvedと重大不整合
 
@@ -11507,6 +11513,8 @@ downstream boundary結果なしは、上の3状態に含めない。空baseline�
 
 > 2026-09-24実装完了注記: 上記「コードは無い」は、この節を書いた時点の記録である。独立部品としての順位外FCFSは commit `7926d43` で実装済みである。統括loop接続前の細部としての未確定へは戻さない。残る未確定は、統括loopの入力、出力、停止理由、結果型である。最新は「TVT-MP候補別局所仮想計算の拘束順位外一時的FCFS走査実装完了記録」の第19節と第21節を参照する。
 
+> 2026-09-24追加注記: 独立検証と利用者判断により、最終結果のlive state非保持・終了時frozen記録、およびunbound FCFSの毎仮想timestep 1回呼出しを採用した。残る未確定は、passage record、終了時frozen記録の全field、resolved、unresolved、horizon終了、統括state、統括結果型全体である。最新詳細は同日の途中確定記録を参照すること。
+
 - buyerとsellerの通過時刻を持つ、正式な結果型とフィールド。
 - resolved判定を、未実装の統括loopのどこで行うか。完全な実装前仕様は、時刻末処理の完了後とする。統括が無いので、コード上の位置はまだ無い。
 - unresolved理由を複数保持する実装。
@@ -11533,6 +11541,8 @@ downstream boundary結果なしは、上の3状態に含めない。空baseline�
 - Node流量不足のあと、未実装の拘束順位外FCFSへ進むかを、統括loopがどう判定するか。走査完了は、流量が残っているという意味ではない。
 
 > 2026-09-24実装完了注記: 上記「未実装の拘束順位外FCFS」は、この節を書いた時点の表現である。独立部品は commit `7926d43` で実装済みである。統括loopがNode流量不足後に順位外走査へ進むかの判定は、統括loop側の未確定として残る。最新は「TVT-MP候補別局所仮想計算の拘束順位外一時的FCFS走査実装完了記録」の第21節を参照する。
+
+> 2026-09-24追加注記: 独立検証と利用者判断により、最終結果のlive state非保持・終了時frozen記録、およびunbound FCFSの毎仮想timestep 1回呼出しを採用した。binding clearance停止時も、開始前Node流量不足時も、unbound APIを呼ぶ。開始不能時は既存部品が空完了する。上記「統括判定は未確定」は、この途中確定後の最新指示としては読まない。最新詳細は同日の途中確定記録を参照すること。
 
 - 境界処理モジュール内部の共通helperの関数分割。第19節は共通helper候補の責務だけを書き、関数名は実装時命名とする。
 
@@ -12541,6 +12551,8 @@ commit `42bfb62` 作成時のCursor報告では、次が成功している。
 
 > 2026-09-24実装完了注記: 上記「コードは無い」は、outlink終端境界処理完了時点の記録である。独立部品としての順位外FCFSは commit `7926d43` で実装済みである。現在の未確定としては読まない。Node流量不足のあと順位外走査へ進むかの統括判定は、統括loop側の未確定として残る。最新は「TVT-MP候補別局所仮想計算の拘束順位外一時的FCFS走査実装完了記録」の第19節と第21節を参照する。
 
+> 2026-09-24追加注記: 独立検証と利用者判断により、最終結果のlive state非保持・終了時frozen記録、およびunbound FCFSの毎仮想timestep 1回呼出しを採用した。上記「統括判定は未確定」は、この途中確定後の最新指示としては読まない。最新詳細は同日の途中確定記録を参照すること。
+
 - buyerとsellerの通過時刻を持つ、正式な結果型とフィールド。
 - resolved判定を、未実装の統括loopのどこで行うか。完全な実装前仕様は、時刻末処理の完了後とする。統括が無いので、コード上の位置はまだ無い。
 - unresolved理由を複数保持する実装。
@@ -12548,6 +12560,8 @@ commit `42bfb62` 作成時のCursor報告では、次が成功している。
 - Node流量不足のあと、未実装の拘束順位外FCFSへ進むかを、統括loopがどう判定するか。走査完了は、流量が残っているという意味ではない。
 
 > 2026-09-24実装完了注記: 上記「未実装の拘束順位外FCFS」は、outlink終端境界処理完了時点の表現である。独立部品は commit `7926d43` で実装済みである。統括loopがNode流量不足後に順位外走査へ進むかの判定は、統括loop側の未確定として残る。最新は「TVT-MP候補別局所仮想計算の拘束順位外一時的FCFS走査実装完了記録」の第21節を参照する。
+
+> 2026-09-24追加注記: 独立検証と利用者判断により、最終結果のlive state非保持・終了時frozen記録、およびunbound FCFSの毎仮想timestep 1回呼出しを採用した。binding clearance停止時も、開始前Node流量不足時も、unbound APIを呼ぶ。開始不能時は既存部品が空完了する。上記「統括判定は未確定」は、この途中確定後の最新指示としては読まない。最新詳細は同日の途中確定記録を参照すること。
 
 ## 20. 次の実装再開地点
 
@@ -13255,6 +13269,8 @@ commit `7926d43` 作成時のCursor報告上、次が成功している。
 - 時刻末の結果保存
 - Node流量不足のあと順位外走査へ進むかの統括判定。独立部品では、binding側がclearance未充足なら順位外を開始しない。走査完了は流量が残っているという意味ではない。統括loopがこの結果をどう使うかは未確定である。
 
+> 2026-09-24追加注記: 独立検証と利用者判断により、最終結果のlive state非保持・終了時frozen記録、およびunbound FCFSの毎仮想timestep 1回呼出しを採用した。binding clearance停止時も、開始前Node流量不足時も、unbound APIを呼ぶ。開始不能時は既存部品が交通を動かさず空完了し、当該時刻を処理済みとして記録する。上記「統括判定は未確定」は、この途中確定後の最新指示としては読まない。残る未確定は、passage record、終了時frozen記録の全field、resolved、unresolved、horizon終了、統括state、統括結果型全体である。最新詳細は直後の途中確定記録を参照すること。
+
 これらの入力、出力、停止理由、結果型は、正本から一意に決まらない。したがって、統括loop本体のPython実装は直ちに開始しない。独自に仮の結果型を置いて実装順を決めない。
 
 **次の直接作業**
@@ -13275,7 +13291,399 @@ commit `7926d43` 作成時のCursor報告上、次が成功している。
 
 同じ仮想timestepのbinding transferへ戻らない。入口空間が回復しても戻らない。順位外FCFSのあと、同じ時刻のbinding走査をやり直さない。
 
+> 2026-09-24追加注記: 上記処理順の3は、binding transferの結果にかかわらず、各仮想timestepでunbound FCFS APIを必ず1回呼ぶ契約である。同じ仮想timestepのunboundへは戻らない。binding transferも統括loop側で各時刻1回に制限する。最終結果はliveな統括state、candidate local state、local Worldを保持しない。最新詳細は直後の途中確定記録を参照すること。
+
 offset 0の最初の時刻では、virtual time one-stepを呼ばない。既存の仮想時計初期化を使う。
+
+# TVT-MP候補別局所仮想計算の統括loop結果保持・unbound呼出契約の途中確定記録
+
+**記録日：2026-09-24**
+
+本記録は、独立検証と利用者判断を経て採用した統括loopの途中確定事項である。最新の候補別局所仮想計算設計記録、「TVT-MP候補別局所仮想計算の完全な実装前仕様」、「TVT-MP候補別局所仮想計算の拘束順位外一時的FCFS走査実装完了記録」に接続する。統括loop全体の完全な実装前仕様ではない。今回確定したのは次の2件だけである。
+
+1. 最終結果にliveなコピー交通状態を参照保持せず、必要な終了時状態を独立frozen記録として残す
+2. unbound FCFS APIを各仮想timestepで必ず1回呼ぶ
+
+passage recordの全field、終了時frozen記録の全field、resolved、unresolved理由、horizon終了、統括state、統括結果型全体は、まだ完全確定していない。今回、未確定部分を独自に補完しない。
+
+独立検証の根拠は、保存済みcommit `7926d43` の公開APIと専用テストである。確認対象は次である。
+
+- `uxsim/order_control_tvt_mp_candidate_binding_transfer.py`
+- `tests_order_control_tvt_mp_candidate_binding_transfer.py`
+- `uxsim/order_control_tvt_mp_candidate_unbound_fcfs_transfer.py`
+- `tests_order_control_tvt_mp_candidate_unbound_fcfs_transfer.py`
+- `uxsim/order_control_tvt_mp_candidate_local_state.py`
+- `tests_order_control_tvt_mp_candidate_local_state.py`
+- `uxsim/order_control_tvt_mp_candidate_local_vehicle_advance.py`
+- `uxsim/order_control_tvt_mp_candidate_outlink_boundary.py`
+
+確認済みの根拠:
+
+- binding transferのstop reasonは `BINDING_SEQUENCE_COMPLETED` と `CLEARANCE_NOT_SATISFIED` の2種類である
+- bindingのNode流量不足はstop reasonではなく、一時スキップ理由 `NODE_FLOW_CAPACITY_UNAVAILABLE` である
+- bindingではNode流量不足のVisitをスキップし、後続Visitを確認する
+- bindingには同一仮想timestepの二重実行防止がない
+- unbound FCFSはbinding clearance停止時にも、抽出せず空完了する
+- unbound FCFSは開始前Node流量不足時にも、抽出せず空完了する
+- いずれの空完了でも `completed_virtual_timesteps` へ当該時刻を追加する
+- unbound FCFSは完了済み時刻の2回目を `RuntimeError` にする
+- unbound候補0台でも `CANDIDATES_COMPLETED` として完了する
+- binding、unbound、advance、boundaryの既存frozen結果は、World、Node、Link、Vehicle、可変stateを保持しない
+- 既存結果は名前、VisitKey、数値、Enum、frozen recordのtupleを保持する
+- 既存時刻別結果だけでは、終了時Vehicle位置 `x` を含む全終了診断を再構成できない
+- candidate local stateはfrozen dataclassだが、内部に可変local Worldを保持する作業用stateである
+- frozen dataclassであることは、内部WorldやVehicleが凍結されることを意味しない
+
+今回のMarkdown更新では、Pythonとテストを変更していない。テストも再実行していない。
+
+## 1. 今回確定した範囲
+
+確定したのは次の2件だけである。
+
+- 最終結果におけるliveなlocal state参照の扱い
+- 各仮想timestepにおけるunbound FCFS APIの呼出契約
+
+次は今回の確定範囲外である。
+
+- 終了時frozen記録の全field
+- passage recordの全field
+- 統括stateの全field
+- 統括結果型の全field
+- resolved判定の完全実装仕様
+- unresolved理由の付与規則
+- horizon終了結果
+- one-timestep結果型
+- 全候補集合入口
+- 経済性評価への接続
+
+## 2. 採用事項1の非技術的な意味
+
+計算に使用したコピー交通網そのものを最終結果へ入れると、計算終了後にコピー交通網が変更された場合、過去の計算結果まで変わって見えるおそれがある。
+
+そのため、最終結果にはコピー交通網そのものを入れない。
+
+代わりに、計算終了時に必要な情報を、後から変わらない文字と数値として保存する。
+
+これにより、次を両立する。
+
+- 計算終了時の状態を後から確認できる
+- 未解決理由を診断できる
+- 結果構築後に作業用コピーが変更されても、保存済み結果は変わらない
+- コピー交通網全体を結果へ保持するより軽い
+- 後続経済性評価に必要な通過時刻を独立して保持できる
+
+## 3. 採用事項1の技術契約
+
+最終frozen結果は、次への参照を保持しない。
+
+- `OrderControlTvtMpCandidateLocalVirtualCalculationState`
+- `OrderControlTvtMpCandidateLocalState`
+- local World
+- Node object
+- Link object
+- Vehicle object
+- その他の可変交通object
+
+最終結果には、終了時に確定した情報だけを保存する。
+
+保存方法:
+
+- frozen dataclass
+- str
+- int
+- float
+- bool
+- Enum
+- VisitKey
+- これらで構成されたtuple
+- frozen recordのtuple
+
+保存しないもの:
+
+- World全体
+- `World.copy()`
+- pickleによるWorld複製
+- 可変list
+- 可変dict
+- liveなNode、Link、Vehicle
+- liveな統括stateへの参照
+
+## 4. 終了時frozen記録の役割
+
+終了時frozen記録は、経済性評価の正本ではなく、終了状態の保存と未解決診断のための記録である。
+
+経済性評価へ渡す主要情報:
+
+- baseline passage timestep
+- candidate passage timestep
+- VisitKey
+- trade role
+
+終了時frozen記録へ保存する対象候補:
+
+- 終了時に局所対象vehicleが存在するLink名
+- 終了時位置 `x`
+- 対象inlinkおよびoutlinkの残存Vehicle名列
+- inlinkの `capacity_out_remain`
+- outlinkの `capacity_in_remain`
+- target Nodeの `flow_capacity_remain`
+- target Nodeのclearance履歴
+- outlink境界処理の最終状態
+- 境界流出許可残高
+- 境界待機Vehicle名
+- 境界流出Vehicle名
+
+ただし、これは必要情報の候補一覧であり、今回すべてのfieldを正式確定しない。
+
+特に次は、次回設計で必要性を確認する。
+
+- `Vehicle.v`
+- `Vehicle.lane`
+- leader名
+- follower名
+- `move_remain`
+- `link_arrival_time`
+- current Visitの終了時状態
+- `x_old`
+- `x_next`
+
+World全体の再現を目的とする巨大snapshotへ拡張しない。局所対象に限定する。正本が要求する終了時のLink名、Vehicle位置、容量、境界状態等を、その範囲で残す。
+
+## 5. per-timestep結果との関係
+
+既存の次のfrozen結果は、可変交通objectを保持しないため、将来のper-timestep結果へそのまま保持可能である。
+
+- `OrderControlTvtMpBindingTransferScanResult`
+- `OrderControlTvtMpUnboundFcfsTransferResult`
+- `OrderControlTvtMpLocalVehicleAdvanceResult`
+- `OrderControlTvtMpOutlinkBoundaryProcessResult`
+
+これらは主に次を保持する。
+
+- Node名
+- virtual timestep
+- VisitKey
+- Vehicle名
+- Enum
+- 容量その他の数値
+- frozen recordのtuple
+
+ただし、既存結果だけでは終了時Vehicle位置 `x` を含む終了状態全体は保持できない。
+
+したがって、per-timestep結果と終了時frozen記録は役割が異なる。
+
+- per-timestep結果: その時刻に各部品が何を行ったか
+- 終了時frozen記録: 候補計算終了時に交通状態がどうなっていたか
+
+## 6. 採用事項2の非技術的な意味
+
+統括loopが毎時刻、「今回は順位外FCFS処理を呼ぶべきか」を重ねて判断すると、同じ開始条件が統括loopと順位外FCFS部品の2か所に実装される。
+
+将来、片方だけ修正されると動作が食い違う可能性がある。
+
+そのため、統括loopは毎時刻必ず順位外FCFS部品を1回呼ぶ。
+
+順位外FCFS部品自身が次を判断する。
+
+- 実際に順位外Vehicleを走査・通過させる
+- 今回は開始不能なので、何も動かさず処理済みとする
+- 候補が0台なので、0台処理済みとする
+
+## 7. 採用事項2の技術契約
+
+各仮想timestepの処理順で、binding transferの直後にunbound FCFS APIを必ず1回呼ぶ。
+
+対象API:
+
+```text
+scan_and_transfer_tvt_mp_unbound_fcfs_vehicles_at_current_timestep(
+    unbound_fcfs_transfer_state,
+    binding_transfer_scan_result,
+)
+```
+
+呼出しを省略しない状況:
+
+- bindingが `BINDING_SEQUENCE_COMPLETED`
+- bindingが `CLEARANCE_NOT_SATISFIED`
+- binding順位列が空
+- binding Visitが全件一時スキップ
+- bindingで1台以上通過
+- binding後にNode流量容量が残る
+- binding後にNode流量容量が `DELTAN` 未満
+- 順位外候補が0台
+
+統括loopは、次を理由に呼出しを省略しない。
+
+- binding clearance停止
+- Node流量不足
+- binding対象0件
+- 順位外候補がいるか不明
+- 全binding Visitがスキップされたこと
+
+統括loopはunboundの開始条件を重複実装しない。同一仮想timestepでは2回呼ばない。
+
+完全な実装前仕様の「拘束順位の走査中にclearanceが未充足なら、拘束順位外Vehicleの処理へ進まない」は、Vehicleを抽出せず動かないことである。API自体を呼ばない意味ではない。開始不能時の空完了判断は、既存unbound部品へ委ねる。
+
+## 8. 空完了
+
+bindingが `CLEARANCE_NOT_SATISFIED` の場合:
+
+- unbound APIを呼ぶ
+- 順位外候補を抽出しない
+- Vehicleを動かさない
+- 交通状態を変更しない
+- stop reasonは `BINDING_CLEARANCE_STOPPED_NOT_STARTED`
+- `completed_virtual_timesteps` へ当該時刻を追加する
+
+unbound開始前にNode流量が `DELTAN` 未満の場合:
+
+- unbound APIを呼ぶ
+- 順位外候補を抽出しない
+- Vehicleを動かさない
+- 交通状態を変更しない
+- stop reasonは `NODE_FLOW_CAPACITY_UNAVAILABLE_BEFORE_START`
+- `completed_virtual_timesteps` へ当該時刻を追加する
+
+順位外候補が0台の場合:
+
+- unbound APIを呼ぶ
+- stop reasonは `CANDIDATES_COMPLETED`
+- `completed_virtual_timesteps` へ当該時刻を追加する
+
+空完了は、処理未実行ではない。
+
+その仮想timestepについて、unbound FCFS部品が正式に処理を完了したことを意味する。
+
+## 9. 同一時刻二重実行防止
+
+unbound FCFSは、`completed_virtual_timesteps` に存在する仮想timestepで2回目に呼ばれた場合、`RuntimeError` とする既存契約を維持する。
+
+統括loopは次を保証する。
+
+- 各仮想timestepでunbound FCFSを1回だけ呼ぶ
+- 同じ仮想timestepのunbound FCFSへ戻らない
+- advanceまたはboundary後に入口空間が回復しても、同時刻のunbound FCFSを再実行しない
+- 次の仮想timestepへ進んだ後に、その新しい時刻について1回呼ぶ
+
+binding transferには同一時刻二重実行防止がないため、統括loop側がbinding transferも各時刻1回に制限する必要がある。これは関連する注意事項である。今回はbinding stateや統括stateの全fieldを確定しない。
+
+## 10. binding側Node流量不足との関係
+
+binding transferでは、Node流量不足はstop reasonではない。
+
+一時スキップ理由:
+
+- `NODE_FLOW_CAPACITY_UNAVAILABLE`
+
+binding走査は、Node流量不足のVisitを一時スキップし、後続Visitを確認する。
+
+clearance未充足だけが、binding走査をその時刻内で終了させる。
+
+そのため、`BINDING_SEQUENCE_COMPLETED` だけでは、unboundを実走査できるNode流量が残っているか判断できない。
+
+統括loopはbinding stop reasonからNode流量残を推測しない。
+
+unbound部品自身が開始時の `flow_capacity_remain` を確認する。
+
+## 11. 統括loopの処理順への反映
+
+最新処理順の該当部分を次で固定する。ここでの番号は、1つの仮想timestep内部の処理順である。作業管理のためのStep体系ではない。
+
+1. `offset > 0` の場合だけ virtual time one-step
+2. binding transferを1回
+3. unbound FCFS transferを必ず1回
+4. buyer・seller通過時刻記録
+5. local vehicle advanceと新着incoming登録
+6. outlink終端境界処理
+7. 時刻末のresolved、最終時刻unresolved、または次時刻
+
+次を維持する。
+
+- 同じ時刻のbindingへ戻らない
+- 同じ時刻のunboundへ戻らない
+- unbound後に入口空間が回復しても戻らない
+- 新着incomingを同じ時刻に通さない
+- clearanceまたは容量不足を候補全体の即時unresolvedにしない
+- 実World、collector、順位台帳を変更しない
+
+offset 0の最初の時刻では、virtual time one-stepを呼ばない。既存の仮想時計初期化を使う。
+
+## 12. 不採用案
+
+次を不採用として記録する。
+
+不採用案1:
+
+- 最終結果へ統括stateまたはlocal Worldを参照保持する
+
+不採用理由:
+
+- frozen結果内にliveな可変交通状態が入る
+- 結果構築後の変更で、過去の終了状態が変わって見える
+- 作業用stateと終了記録の責務が混ざる
+- 結果の寿命に合わせてcopy World全体を保持する
+- 経済性評価には不要
+
+不採用案2:
+
+- 終了時状態を何も保存せず、既存per-timestep結果だけにする
+
+不採用理由:
+
+- 終了時Vehicle位置 `x` を含む正本指定の診断が欠落する
+- stateを破棄すると終了状態を確認できない
+
+不採用案3:
+
+- binding clearanceまたはNode流量不足時に、統括loopがunbound呼出しを省略する
+
+不採用理由:
+
+- unbound既存APIの空完了契約を使わない
+- `completed_virtual_timesteps` へ当該時刻が残らない
+- 同一時刻に後から誤呼出できる
+- 統括loopがunbound開始条件を重複実装する
+- per-timestep結果でunbound結果を `None` または合成結果にする必要が生じる
+- 交通結果は既存空完了と同じであり、省略する利点がない
+
+## 13. 今回まだ未確定の事項
+
+次は今回確定しない。
+
+- 終了時frozen Vehicle記録の正式型名
+- 終了時frozen Link記録の正式型名
+- 終了時frozen Node記録の正式型名
+- 各記録の全field
+- passage recordの正式型名と全field
+- 統括stateの正式field
+- 一時刻結果型の正式field
+- 最終結果型の全field
+- resolved判定の完全実装仕様
+- unresolved理由の付与規則
+- horizon終了結果
+- stop reasonの最終Enum
+- 全候補集合型
+- 経済性評価との具体的API接続
+
+これらは次の設計作業で確定する。
+
+## 14. 次の直接作業
+
+次の直接作業を次とする。
+
+- 終了時frozen記録の必要最小限の型とfield
+- passage recordの型とfield
+- resolved判定位置
+- unresolved理由の保持と付与規則
+- horizon終了契約
+- 一候補統括state、one-timestep結果、最終結果の完全なfield
+- 初期化API、one-timestep API、run-to-completion API
+- 専用テスト契約
+
+これらを確定し、統括loop全体の完全な実装前仕様として正本へ記録する。
+
+Python実装は、その完全仕様の確定と文書保存後に開始する。今回の2件以外の未確定設計を、この記録で独自に確定しない。
 
 # 次の作業開始点
 
@@ -13327,6 +13735,8 @@ offset 0の最初の時刻では、virtual time one-stepを呼ばない。既存
 **2026-09-24注記：** 上記「未着手」と「最初の実装区分は正式進路付き順位台帳」は、2026-09-23時点の再開情報である。現在の実装済み範囲は「TVT-MP候補別局所仮想計算の実装進捗・確定実装契約・下流境界追加設計記録」と「TVT-MP候補別局所仮想計算のoutlink終端境界処理実装完了記録」を参照する。次の直接作業と実装順は、outlink終端境界処理実装完了記録の第20節を最新とする。拘束順位外走査と仮想timestep統括loopのどちらを先行するかは未決定である。
 
 **2026-09-24追記（拘束順位外FCFS実装完了）：** 上記「どちらを先行するかは未決定」および「第20節を最新とする」は、依存関係確認待ち当時の再開情報である。拘束順位外Vehicle一時的FCFS走査はcommit `7926d43`で実装、テスト、push済みである。最新の未実装範囲および次の再開地点は、同日の「TVT-MP候補別局所仮想計算の拘束順位外一時的FCFS走査実装完了記録」を参照すること。
+
+**2026-09-24追記（統括loop結果保持・unbound呼出契約の途中確定）：** 独立検証と利用者判断により、最終結果のlive state非保持・終了時frozen記録、およびunbound FCFSの毎仮想timestep 1回呼出しを採用した。次の直接作業は、終了時frozen記録とpassage recordの必要最小限の型とfield、resolved、unresolved、horizon終了、一候補統括stateと結果型の完全なfieldを確定し、統括loop全体の完全な実装前仕様として正本へ記録することである。Python実装はその完全仕様の確定と文書保存後に開始する。最新詳細は、本ファイルの「TVT-MP候補別局所仮想計算の統括loop結果保持・unbound呼出契約の途中確定記録」を参照すること。
 
 # 新しいチャットでの再開方法
 

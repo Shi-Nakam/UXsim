@@ -6672,7 +6672,11 @@ Vehicle除去記録の正式fieldは6つである。`vehicle_name`、`outlink_na
 
 `42bfb62` の境界処理契約は未確定へ戻さない。helper関数分割も実装済みであり、現在の未確定から外す。残る未確定は、拘束順位外FCFSの具体的実装契約（統括loop接続前の独立部品としての細部）、buyerとsellerの通過時刻を持つ正式結果型とfield、resolved判定の統括loop内位置、unresolved理由の複数保持、最終確定接続への評価済み列の受渡し、Node流量不足後に拘束順位外走査へ進むかの統括判定である。進路4分類の制度と分類4の適用範囲は、正本監査により2026-09-24補修で明示した。
 
+> 2026-09-24追加注記: 各仮想timestepでunbound FCFS APIを必ず1回呼ぶ方針を採用したため、Node流量不足時にAPIを呼ぶかどうかは確定済みである。開始前Node流量不足時は既存unbound部品が空完了する。未確定なのは、Node流量不足をhorizon終了時のunresolved理由へ反映する条件と診断規則である。
+
 > 2026-09-24実装完了注記: 上記「拘束順位外FCFSの具体的実装契約」は、outlink終端境界処理完了時点の未確定である。独立部品としての順位外FCFSは commit `7926d43` で実装済みであり、統括loop接続前の細部としての未確定へは戻さない。残る未確定は、統括loopの入力、出力、停止理由、結果型である。最新は同日の実装完了追記を参照する。
+
+> 2026-09-24追加注記: 独立検証と利用者判断により、最終結果のlive state非保持・終了時frozen記録、およびunbound FCFSの毎仮想timestep 1回呼出しを採用した。最新詳細は同日の途中確定記録を参照すること。
 
 **分類4の適用範囲と進路制度（2026-09-24補修要約）**
 
@@ -6828,7 +6832,9 @@ candidate local state専用テストは17件、順位外FCFS専用テストは18
 
 **現在残る未確定事項**
 
-独立部品としての順位外FCFS契約は未確定へ戻さない。残る未確定は、buyer・seller通過時刻を持つ正式結果型とfield、resolved判定の統括loop内位置、unresolved理由の複数保持、horizon終了結果、候補別局所計算結果型、時刻末の結果保存、Node流量不足後に順位外走査へ進むかの統括判定である。これらは正本から一意に決まらない。
+独立部品としての順位外FCFS契約は未確定へ戻さない。残る未確定は、buyer・seller通過時刻を持つ正式結果型とfield、resolved判定の統括loop内位置、unresolved理由の複数保持と付与規則、horizon終了結果、候補別局所計算結果型、時刻末の結果保存である。Node流量不足時もunbound FCFS APIを毎時刻1回呼ぶことは確定済みである。一方、Node流量不足をhorizon終了時のunresolved理由へ反映する条件と診断規則（`clearance_or_capacity_blocked_through_horizon` 等の正式な付与規則を含む）は未確定である。上記の未確定項目は、正本から一意に決まらない。
+
+> 2026-09-24追加注記: 独立検証と利用者判断により、最終結果のlive state非保持・終了時frozen記録、およびunbound FCFSの毎仮想timestep 1回呼出しを採用した。最新詳細は同日の途中確定記録を参照すること。
 
 **次の直接作業**
 
@@ -6845,6 +6851,48 @@ candidate local state専用テストは17件、順位外FCFS専用テストは18
 7. resolved、最終時刻unresolved、または次時刻
 
 同じ仮想timestepのbinding transferへ戻らない。入口空間が回復しても戻らない。
+
+> 2026-09-24追加注記: 上記処理順の3は、binding transferの結果にかかわらず、各仮想timestepでunbound FCFS APIを必ず1回呼ぶ契約である。同じ仮想timestepのunboundへは戻らない。最終結果はliveな統括state、candidate local state、local Worldを保持しない。最新詳細は直後の途中確定記録を参照すること。
+
+**TVT-MP候補別局所仮想計算の結果保持・unbound呼出契約を途中確定（2026-09-24）**
+
+独立検証後、利用者が次の2件を正式採用した。詳細正本は設計メモ本文の「TVT-MP候補別局所仮想計算の統括loop結果保持・unbound呼出契約の途中確定記録」である。本小節はその要約である。統括loop全体の完全な実装前仕様ではない。
+
+**採用事項1**
+
+最終frozen結果は、liveな統括state、candidate local state、local World、Node、Link、Vehicleへの参照を保持しない。終了時に必要な交通状態は、名前と数値を中心とする独立したfrozen記録として候補結果へ保存する。World全体の複製やsnapshotは作らない。正本が要求する終了時のLink名、Vehicle位置、容量、境界状態等を、局所対象に限定して残す。
+
+既存のbinding、unbound、advance、boundaryのfrozen結果は、可変交通objectを保持しない。名前、VisitKey、数値、Enum、frozen recordのtupleを保持する。ただし、既存per-timestep結果だけでは終了時Vehicle位置 `x` を含む終了状態全体を再構成できない。per-timestep結果は「その時刻に各部品が何を行ったか」、終了時frozen記録は「候補計算終了時に交通状態がどうなっていたか」である。candidate local stateはfrozen dataclassだが、内部に可変local Worldを保持する作業用stateである。frozen dataclassであることは、内部WorldやVehicleが凍結されることを意味しない。
+
+**採用事項2**
+
+各仮想timestepで、binding transfer直後にunbound FCFS APIを必ず1回呼ぶ。bindingがclearance停止した時も呼ぶ。unbound開始前にNode流量が不足している時も呼ぶ。順位外候補が0台の時も呼ぶ。開始不能時は既存unbound部品が交通を動かさず空完了し、当該時刻を処理済みとして記録する。統括loopはunboundの開始条件を重複実装しない。同一仮想timestepでは2回呼ばない。
+
+binding側のNode流量不足はstop reasonではなく、一時スキップ理由 `NODE_FLOW_CAPACITY_UNAVAILABLE` である。bindingは流量不足のVisitをスキップし、後続Visitを確認する。`BINDING_SEQUENCE_COMPLETED` だけではNode流量残を判断できない。clearance停止時の空完了は `BINDING_CLEARANCE_STOPPED_NOT_STARTED`、開始前Node流量不足時の空完了は `NODE_FLOW_CAPACITY_UNAVAILABLE_BEFORE_START` である。いずれの空完了でも `completed_virtual_timesteps` へ当該時刻を追加する。候補0台は `CANDIDATES_COMPLETED` として完了する。完了済み時刻の2回目は `RuntimeError` である。bindingには同一時刻二重実行防止がないため、統括loop側がbinding transferも各時刻1回に制限する必要がある。
+
+**処理順の該当部分**
+
+1. `offset > 0` の場合だけ virtual time one-step
+2. binding transferを1回
+3. unbound FCFS transferを必ず1回
+4. buyer・seller通過時刻記録
+5. local vehicle advanceと新着incoming登録
+6. outlink終端境界処理
+7. 時刻末のresolved、最終時刻unresolved、または次時刻
+
+**不採用案**
+
+最終結果へ統括stateまたはlocal Worldを参照保持する案、終了時状態を何も保存せず既存per-timestep結果だけにする案、binding clearanceまたはNode流量不足時に統括loopがunbound呼出しを省略する案は、採用しない。
+
+**今回まだ未確定の事項**
+
+終了時frozen記録の正式型名と全field、passage recordの正式型名と全field、統括stateの正式field、一時刻結果型と最終結果型の全field、resolved判定の完全実装仕様、unresolved理由の付与規則、horizon終了結果、stop reasonの最終Enum、全候補集合型、経済性評価との具体的API接続は、今回確定しない。Node流量不足時もunbound FCFS APIを毎時刻1回呼ぶことは確定済みである。一方、Node流量不足をhorizon終了時のunresolved理由へ反映する条件と診断規則は未確定である。
+
+**次の直接作業**
+
+終了時frozen記録の必要最小限の型とfield、passage recordの型とfield、resolved判定位置、unresolved理由の保持と付与規則、horizon終了契約、一候補統括state、one-timestep結果、最終結果の完全なfield、初期化API、one-timestep API、run-to-completion API、専用テスト契約を確定し、統括loop全体の完全な実装前仕様として正本へ記録する。Python実装は、その完全仕様の確定と文書保存後に開始する。
+
+今回のMarkdown更新では、Pythonとテストを変更していない。テストも再実行していない。Git操作は行っていない。`diagnostics/order_control.zip` は既存未追跡のまま対象外である。
 
 #### 2026-08-29：TVT権利保有車両選定前の先頭非参加Vehicle先行確定の記録補修
 
