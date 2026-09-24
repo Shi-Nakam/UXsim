@@ -10691,6 +10691,8 @@ snapshotでも今回baselineでも対象Node向け進路が判明していない
 
 buyerとsellerの必要通過timestepが揃ったかどうかの記録は、その時刻の対象Node通過走査が終わり、通過できたbuyerとsellerの対象Node通過timestepを記録した直後に行う。通過走査の前には行わない。候補計算全体の終了と `resolved` フラグの設定は、その仮想timestepの時刻末処理がすべて完了した後に行う。最終許容時刻 `T + configured_horizon_steps` の試行で揃った場合も、同じtimestepの時刻末処理の後にresolvedとする。その試行の時刻末処理の後も不足している場合だけunresolvedとする。
 
+> 2026-09-25更新注記: 本記録は、BATCH Level 2のvirtual_horizon端点と候補別局所仮想計算の端点をそろえる案を採用した当時の途中設計である。その後、旧正本のWorld baseline正式driver契約と実コードを再確認した。World baselineはconfigured horizon Hに対してtimestep TからT+H-1までH回の交通処理を行い、処理後のWorld.TがT+Hとなる。T+Hの交通処理は行わない。利用者判断により、一候補局所仮想計算もWorld baselineと同じH回処理へ統一した。最新の実装前仕様は、2026-09-25の「TVT-MP候補別局所仮想計算の一候補統括loop完全実装前仕様」を参照すること。offset 0でvirtual time one-stepを行わず、offset 1以降の各処理時刻冒頭でone-stepを行う容量補充契約自体は維持する。
+
 各仮想timestepの全体順序は次である。ここでの番号は、1つの仮想timestep内部の処理順である。作業管理のためのStep体系ではない。
 
 1. `offset > 0` の場合だけ、仮想時刻を進め、対象Linkおよび対象Nodeの容量を補充する。最初のtimestep（`offset == 0`）は、snapshotの残容量をそのまま使う。2つ目以降は、UXsimの `Link.in_out_flow_constraint()` と `Node.flow_capacity_update()` と同じ補充を行う。
@@ -10828,6 +10830,8 @@ buyerとsellerは別の集合として識別する。buyerだから短縮する�
 
 `configured_horizon_steps` は、snapshotの時刻Tから進めてよい最大回数である。通過試行する最後の時刻は `T + configured_horizon_steps` であり、その時刻も試行に含める。この端点、計数、判定位置は、直前の「仮想timestep loop」の2026-09-23補修に従う。最終許容時刻の仮想timestepについても、時刻末処理を完了した後にresolvedまたはunresolvedを判定する。その最後の試行の時刻末処理の後も、必要なbuyerまたはsellerの対象Node通過時刻が揃わなければ、正常なunresolvedとする。理由を結果へ記録する。
 
+> 2026-09-25更新注記: 本記録は、BATCH Level 2のvirtual_horizon端点と候補別局所仮想計算の端点をそろえる案を採用した当時の途中設計である。その後、旧正本のWorld baseline正式driver契約と実コードを再確認した。World baselineはconfigured horizon Hに対してtimestep TからT+H-1までH回の交通処理を行い、処理後のWorld.TがT+Hとなる。T+Hの交通処理は行わない。利用者判断により、一候補局所仮想計算もWorld baselineと同じH回処理へ統一した。最新の実装前仕様は、2026-09-25の「TVT-MP候補別局所仮想計算の一候補統括loop完全実装前仕様」を参照すること。offset 0でvirtual time one-stepを行わず、offset 1以降の各処理時刻冒頭でone-stepを行う容量補充契約自体は維持する。
+
 経済性評価、成立候補の選択、実WorldへのTVT反映は、このモジュールの責務に含めない。
 
 ## 結果型と診断型
@@ -10885,6 +10889,8 @@ resolvedとなる候補結果には、その最終仮想timestepについて、�
 
 **2026-09-24追加注記：** 最終frozen結果は、liveな統括state、candidate local state、local World、Node、Link、Vehicleへの参照を保持しない。終了時に必要な交通状態は、名前と数値を中心とする独立したfrozen記録として候補結果へ保存する。World全体の複製やsnapshotは作らない。既存per-timestep結果は可変交通objectを持たないが、終了時Vehicle位置 `x` を含む終了状態全体は再構成できない。終了時frozen記録の全fieldは今回確定していない。最新は「TVT-MP候補別局所仮想計算の統括loop結果保持・unbound呼出契約の途中確定記録」を参照すること。
 
+> 2026-09-25追加注記: 一候補結果型、passage record、終了時Vehicle / Link / Node / boundary記録、stop reason、per-timestep結果の正式fieldは、「TVT-MP候補別局所仮想計算の一候補統括loop完全実装前仕様」で確定した。終了時Vehicle記録はVehicle名、Link名、位置x、state、current VisitKey、current Visit Node名に限定する。上記「全fieldは今回確定していない」は、2026-09-24途中確定時点の記録である。本2026-09-22節の「最低限含めるもの」は歴史的記録として残す。一候補統括の最新fieldは同日の完全実装前仕様を参照すること。全候補集合型と経済性評価接続は、引き続き後続構想である。
+
 ## 正常なunresolvedと重大不整合
 
 正常なunresolved理由の名前は次とする。複数が該当するときは、優先順位で1件に潰さない。読取専用の理由列として全部保持する。
@@ -10895,6 +10901,8 @@ resolvedとなる候補結果には、その最終仮想timestepについて、�
 - `clearance_or_capacity_blocked_through_horizon`
 - `no_acceptable_outlink_for_route_undetermined_vehicle_within_horizon`
 - `downstream_boundary_prevented_required_passage_information`
+
+> 2026-09-25追加注記: 上記6名称は維持する。利用者判断により、unresolved理由は観測可能な事実だけから付与し、因果関係を推測しない方針を採用した。6番目 `downstream_boundary_prevented_required_passage_information` はEnum memberとして残すが、現段階では機械的に自動付与しない。正式な付与規則は「TVT-MP候補別局所仮想計算の一候補統括loop完全実装前仕様」第17節を参照すること。
 
 重大不整合は推測で修復しない。削除、片側採用、進路の再選択、容量の切り上げで継続しない。
 
@@ -10928,6 +10936,8 @@ resolvedとなる候補結果には、その最終仮想timestepについて、�
 局所状態では、コピー後も対象外のNode、Link、Vehicleが残っていること、それらを更新しないこと、`exec_simulation()` とWorld全体の `Node.update()`、`Link.update()`、`Vehicle.update()` を呼ばないことを固定する。
 
 horizonでは、`configured_horizon_steps` が2のとき試行時刻がT、T+1、T+2であること、Tで揃えば計数が0でそのtimestepの時刻末処理後にresolvedであること、T+2で揃えば計数が2で同様にresolvedであること、T+2の時刻末処理の後も不足なら計数が2でunresolvedであること、0のときはTだけを試すことを固定する。
+
+> 2026-09-25更新注記: 本記録は、BATCH Level 2のvirtual_horizon端点と候補別局所仮想計算の端点をそろえる案を採用した当時の途中設計である。その後、旧正本のWorld baseline正式driver契約と実コードを再確認した。World baselineはconfigured horizon Hに対してtimestep TからT+H-1までH回の交通処理を行い、処理後のWorld.TがT+Hとなる。T+Hの交通処理は行わない。利用者判断により、一候補局所仮想計算もWorld baselineと同じH回処理へ統一した。最新の実装前仕様は、2026-09-25の「TVT-MP候補別局所仮想計算の一候補統括loop完全実装前仕様」を参照すること。offset 0でvirtual time one-stepを行わず、offset 1以降の各処理時刻冒頭でone-stepを行う容量補充契約自体は維持する。
 
 拘束順位列では、4区分の連結順、区分3が `trade_order` の先頭 `last_buyer_rank` 件という取引後順であること、区分4がbaseline順であること、N+1位以降の意思決定窓内Visitが区分4に入ること、P-1対象外だが意思決定窓内のVisitが区分4に入り得ること、VisitKey重複と進路欠落で停止すること、`trade_order` 全体を完成列にしないことを固定する。1始まり順位と0始まりindexの対応も、`k_last_buyer` が2のときに区分4がindex 2から始まる例で固定する。
 
@@ -11515,6 +11525,8 @@ downstream boundary結果なしは、上の3状態に含めない。空baseline�
 
 > 2026-09-24追加注記: 独立検証と利用者判断により、最終結果のlive state非保持・終了時frozen記録、およびunbound FCFSの毎仮想timestep 1回呼出しを採用した。残る未確定は、passage record、終了時frozen記録の全field、resolved、unresolved、horizon終了、統括state、統括結果型全体である。最新詳細は同日の途中確定記録を参照すること。
 
+> 2026-09-25追加注記: 利用者判断により、unresolved理由は観測可能な事実だけから付与し、因果関係を推測しない方針を採用した。終了時Vehicle記録はVehicle名、Link名、位置x、state、current VisitKey、current Visit Node名に限定する。最新の完全仕様は同日の一候補統括loop完全実装前仕様を参照すること。上記「残る未確定」は、2026-09-24途中確定時点の記録である。
+
 - buyerとsellerの通過時刻を持つ、正式な結果型とフィールド。
 - resolved判定を、未実装の統括loopのどこで行うか。完全な実装前仕様は、時刻末処理の完了後とする。統括が無いので、コード上の位置はまだ無い。
 - unresolved理由を複数保持する実装。
@@ -11543,6 +11555,8 @@ downstream boundary結果なしは、上の3状態に含めない。空baseline�
 > 2026-09-24実装完了注記: 上記「未実装の拘束順位外FCFS」は、この節を書いた時点の表現である。独立部品は commit `7926d43` で実装済みである。統括loopがNode流量不足後に順位外走査へ進むかの判定は、統括loop側の未確定として残る。最新は「TVT-MP候補別局所仮想計算の拘束順位外一時的FCFS走査実装完了記録」の第21節を参照する。
 
 > 2026-09-24追加注記: 独立検証と利用者判断により、最終結果のlive state非保持・終了時frozen記録、およびunbound FCFSの毎仮想timestep 1回呼出しを採用した。binding clearance停止時も、開始前Node流量不足時も、unbound APIを呼ぶ。開始不能時は既存部品が空完了する。上記「統括判定は未確定」は、この途中確定後の最新指示としては読まない。最新詳細は同日の途中確定記録を参照すること。
+
+> 2026-09-25追加注記: 利用者判断により、unresolved理由は観測可能な事実だけから付与し、因果関係を推測しない方針を採用した。終了時Vehicle記録はVehicle名、Link名、位置x、state、current VisitKey、current Visit Node名に限定する。passage record、resolved位置、unresolved付与規則、horizon、stop reason、統括結果型は、同日の一候補統括loop完全実装前仕様で確定した。最終確定接続は引き続き対象外である。上記「正式な結果型とフィールド」「付与規則未確定」相当の一覧は、2026-09-24時点の記録である。
 
 - 境界処理モジュール内部の共通helperの関数分割。第19節は共通helper候補の責務だけを書き、関数名は実装時命名とする。
 
@@ -12563,6 +12577,8 @@ commit `42bfb62` 作成時のCursor報告では、次が成功している。
 
 > 2026-09-24追加注記: 独立検証と利用者判断により、最終結果のlive state非保持・終了時frozen記録、およびunbound FCFSの毎仮想timestep 1回呼出しを採用した。binding clearance停止時も、開始前Node流量不足時も、unbound APIを呼ぶ。開始不能時は既存部品が空完了する。上記「統括判定は未確定」は、この途中確定後の最新指示としては読まない。最新詳細は同日の途中確定記録を参照すること。
 
+> 2026-09-25追加注記: 利用者判断により、unresolved理由は観測可能な事実だけから付与し、因果関係を推測しない方針を採用した。終了時Vehicle記録はVehicle名、Link名、位置x、state、current VisitKey、current Visit Node名に限定する。passage record、resolved位置、unresolved付与規則、horizon、stop reason、統括結果型は、同日の一候補統括loop完全実装前仕様で確定した。最終確定接続は引き続き対象外である。上記「正式な結果型とフィールド」「付与規則未確定」相当の一覧は、2026-09-24時点の記録である。
+
 ## 20. 次の実装再開地点
 
 outlink終端境界処理は `42bfb62` で実装済みである。まだ単独部品であり、仮想timestep統括loopへは接続していない。
@@ -13271,6 +13287,8 @@ commit `7926d43` 作成時のCursor報告上、次が成功している。
 
 > 2026-09-24追加注記: 独立検証と利用者判断により、最終結果のlive state非保持・終了時frozen記録、およびunbound FCFSの毎仮想timestep 1回呼出しを採用した。binding clearance停止時も、開始前Node流量不足時も、unbound APIを呼ぶ。開始不能時は既存部品が交通を動かさず空完了し、当該時刻を処理済みとして記録する。上記「統括判定は未確定」は、この途中確定後の最新指示としては読まない。残る未確定は、passage record、終了時frozen記録の全field、resolved、unresolved、horizon終了、統括state、統括結果型全体である。最新詳細は直後の途中確定記録を参照すること。
 
+> 2026-09-25追加注記: 利用者判断により、unresolved理由は観測可能な事実だけから付与し、因果関係を推測しない方針を採用した。終了時Vehicle記録はVehicle名、Link名、位置x、state、current VisitKey、current Visit Node名に限定する。最新の完全仕様は同日の一候補統括loop完全実装前仕様を参照すること。上記「残る未確定」および「統括loop本体のPython実装は直ちに開始しない」は、2026-09-24途中確定時点の記録である。現在の次の直接作業は、文書保存と独立確認の後、新規一候補統括モジュールと専用テストを実装することである。
+
 これらの入力、出力、停止理由、結果型は、正本から一意に決まらない。したがって、統括loop本体のPython実装は直ちに開始しない。独自に仮の結果型を置いて実装順を決めない。
 
 **次の直接作業**
@@ -13305,6 +13323,8 @@ offset 0の最初の時刻では、virtual time one-stepを呼ばない。既存
 2. unbound FCFS APIを各仮想timestepで必ず1回呼ぶ
 
 passage recordの全field、終了時frozen記録の全field、resolved、unresolved理由、horizon終了、統括state、統括結果型全体は、まだ完全確定していない。今回、未確定部分を独自に補完しない。
+
+> 2026-09-25追加注記: 利用者判断により、unresolved理由は観測可能な事実だけから付与し、因果関係を推測しない方針を採用した。終了時Vehicle記録はVehicle名、Link名、位置x、state、current VisitKey、current Visit Node名に限定する。最新の完全仕様は同日の一候補統括loop完全実装前仕様を参照すること。上記「まだ完全確定していない」は、この途中確定記録を書いた時点の状態である。
 
 独立検証の根拠は、保存済みcommit `7926d43` の公開APIと専用テストである。確認対象は次である。
 
@@ -13668,6 +13688,8 @@ offset 0の最初の時刻では、virtual time one-stepを呼ばない。既存
 
 これらは次の設計作業で確定する。
 
+> 2026-09-25追加注記: 利用者判断により、unresolved理由は観測可能な事実だけから付与し、因果関係を推測しない方針を採用した。終了時Vehicle記録はVehicle名、Link名、位置x、state、current VisitKey、current Visit Node名に限定する。一候補統括loopの型、field、付与規則、horizon、stop reasonは、直後の完全実装前仕様で確定した。全候補集合型と経済性評価との具体的API接続は、引き続き後続構想であり、一候補統括の実装範囲に含めない。上記一覧を現在の未確定としては読まない。
+
 ## 14. 次の直接作業
 
 次の直接作業を次とする。
@@ -13684,6 +13706,1007 @@ offset 0の最初の時刻では、virtual time one-stepを呼ばない。既存
 これらを確定し、統括loop全体の完全な実装前仕様として正本へ記録する。
 
 Python実装は、その完全仕様の確定と文書保存後に開始する。今回の2件以外の未確定設計を、この記録で独自に確定しない。
+
+> 2026-09-25追加注記: 上記「次の直接作業」は、この途中確定記録を書いた時点の再開情報である。一候補統括loopの完全な実装前仕様は、直後の「TVT-MP候補別局所仮想計算の一候補統括loop完全実装前仕様」として確定した。利用者判断により、unresolved理由は観測可能な事実だけから付与し、因果関係を推測しない。終了時Vehicle記録はVehicle名、Link名、位置x、state、current VisitKey、current Visit Node名に限定する。現在の次の直接作業としては読まない。
+
+# TVT-MP候補別局所仮想計算の一候補統括loop完全実装前仕様
+
+**記録日：2026-09-25**
+
+本節は、TVT-MP候補別局所仮想計算の**一候補統括loop**の完全な実装前仕様である。commit `86ac06f` までの途中確定契約（最終結果のlive state非保持、終了時独立frozen記録、各仮想timestepでunbound FCFS APIを必ず1回呼ぶこと）を包含する。
+
+World baselineの確定済みhorizon契約と一致させる。horizon Hに対する交通処理はH回である。処理時刻はTからT+H-1である。T+Hでは新しい交通処理を行わない。baseline passage timestepとcandidate passage timestepの最大値は、どちらもT+H-1である。horizon 0は拒否する。
+
+Python実装はまだ行っていない。本仕様のhorizon端点補修後の独立確認と文書保存のあと、Python実装へ進む。実装前に新しい設計判断を追加しない。
+
+全候補集合入口、経済性評価、最終確定接続、上位driver統合は今回の対象外である。集合入口 `evaluate_tvt_mp_candidate_local_virtual_calculations` と集合結果型 `OrderControlTvtMpLocalVirtualCalculationSetResult` は、2026-09-22の完全な実装前仕様における後続構想として維持する。本節の実装範囲には含めない。
+
+接続する既存正本は次である。削除しない。
+
+- 「TVT-MP候補別局所仮想計算の完全な実装前仕様」
+- 「TVT-MP候補別局所仮想計算の拘束順位外一時的FCFS走査実装完了記録」
+- 「TVT-MP候補別局所仮想計算の統括loop結果保持・unbound呼出契約の途中確定記録」
+- 「TVT-MP候補別局所仮想計算のoutlink終端境界処理実装完了記録」
+
+## 1. 対象と責務
+
+一候補について、実装済みの局所仮想計算部品を正しい順序で実行し、次を行う。
+
+- offset管理
+- 仮想時刻進行
+- binding transfer
+- unbound FCFS
+- required buyer / seller passage記録
+- local vehicle advance
+- 新着incoming登録
+- outlink終端境界
+- 時刻末resolved判定
+- horizon終了判定
+- unresolved診断
+- 終了時frozen記録
+- 最終frozen結果構築
+
+責務外:
+
+- FIFO検査
+- general trade rank構築
+- concrete buyer candidate構築
+- 全候補列挙
+- 経済性評価
+- `G`
+- `R`
+- surplus
+- payment
+- compensation
+- 候補採用または却下
+- 最終順位確定
+- formal routeの実World保存
+- 順位台帳更新
+- 上位driver統合
+- 実Worldへの交通反映
+
+## 2. 新規モジュール
+
+本番:
+
+- `uxsim/order_control_tvt_mp_candidate_local_virtual_calculation.py`
+
+専用テスト:
+
+- `tests_order_control_tvt_mp_candidate_local_virtual_calculation.py`
+
+一候補統括のみを実装する。既存本番Pythonの公開APIは変更しない。既存テストも変更しない。実装時に既存ファイル変更が必要と判明した場合は、独自に変更せず停止する。
+
+集合入口と集合結果型は後続構想として維持し、今回実装しない。
+
+## 3. 公開Enum
+
+```text
+OrderControlTvtMpCandidateLocalVirtualCalculationStopReason
+```
+
+- `RESOLVED = "resolved"`
+- `HORIZON_EXHAUSTED_UNRESOLVED = "horizon_exhausted_unresolved"`
+
+`HORIZON_EXHAUSTED_UNRESOLVED` は、最後の許可処理offset `H-1` の時刻末でrequired passageが不足したことである。`T+H` を処理してからの未解決ではない。
+
+```text
+OrderControlTvtMpCandidateUnresolvedReason
+```
+
+正本の6名称を維持する。valueはsnake_caseである。
+
+- `REQUIRED_BUYER_OR_SELLER_DID_NOT_PASS_WITHIN_HORIZON = "required_buyer_or_seller_did_not_pass_within_horizon"`
+- `DOWNSTREAM_BOUNDARY_REMAINED_BLOCKED_WITHIN_HORIZON = "downstream_boundary_remained_blocked_within_horizon"`
+- `DOWNSTREAM_BOUNDARY_HAD_WAITING_VEHICLES_BUT_NO_TRANSFER = "downstream_boundary_had_waiting_vehicles_but_no_transfer"`
+- `CLEARANCE_OR_CAPACITY_BLOCKED_THROUGH_HORIZON = "clearance_or_capacity_blocked_through_horizon"`
+- `NO_ACCEPTABLE_OUTLINK_FOR_ROUTE_UNDETERMINED_VEHICLE_WITHIN_HORIZON = "no_acceptable_outlink_for_route_undetermined_vehicle_within_horizon"`
+- `DOWNSTREAM_BOUNDARY_PREVENTED_REQUIRED_PASSAGE_INFORMATION = "downstream_boundary_prevented_required_passage_information"`
+
+6番目は今回の機械的自動付与対象から外す。Enum member自体は正本との互換性と将来拡張のため残す。
+
+```text
+OrderControlTvtMpCandidateFinalLinkRole
+```
+
+- `TARGET_INLINK = "target_inlink"`
+- `TARGET_OUTLINK = "target_outlink"`
+
+clearance、Node流量不足、inlink流出不足、outlink流入不足、入口空間不足、acceptable outlink空、boundary閉塞は、統括stop reasonにしない。部品結果またはunresolved診断へ残す。
+
+## 4. 公開frozen型
+
+新規予定はすべて `@dataclass(frozen=True)` である。
+
+- `OrderControlTvtMpCandidatePassageRecord`
+- `OrderControlTvtMpCandidateVirtualTimestepResult`
+- `OrderControlTvtMpCandidateFinalVehicleRecord`
+- `OrderControlTvtMpCandidateFinalLinkRecord`
+- `OrderControlTvtMpCandidateFinalNodeRecord`
+- `OrderControlTvtMpCandidateFinalOutlinkBoundaryRecord`
+- `OrderControlTvtMpCandidateLocalVirtualCalculationResult`
+
+公開の順序付き列はtupleとする。可変list、可変dict、World、Node、Link、Vehicle、可変stateを内部に保持しない。
+
+既存のfrozen部品結果はそのまま保持可能である。
+
+- `OrderControlTvtMpBindingTransferScanResult`
+- `OrderControlTvtMpUnboundFcfsTransferResult`
+- `OrderControlTvtMpLocalVehicleAdvanceResult`
+- `OrderControlTvtMpOutlinkBoundaryProcessResult`
+
+`OrderControlTvtMpConcreteBuyerCandidateSet` と `OrderControlTvtMpLocalBindingRankSequence` も既存frozen型である。保持する情報はVisitKey、数値、Enum、str、これらで構成されたtupleである。可変交通objectを持たない。最終結果へidentity参照してよい。
+
+## 5. 可変統括state
+
+型:
+
+```text
+OrderControlTvtMpCandidateLocalVirtualCalculationState
+```
+
+保持するもの:
+
+- `candidate_local_state: OrderControlTvtMpCandidateLocalState`
+- `virtual_time_state: OrderControlTvtMpCandidateVirtualTimeState`
+- `binding_transfer_state: OrderControlTvtMpCandidateBindingTransferState`
+- `unbound_fcfs_transfer_state: OrderControlTvtMpCandidateUnboundFcfsTransferState`
+- `local_vehicle_advance_state: OrderControlTvtMpCandidateLocalVehicleAdvanceState`
+- `outlink_boundary_state: OrderControlTvtMpCandidateOutlinkBoundaryState`
+- `configured_horizon_steps: int`
+- `required_buyer_visit_keys: tuple[OrderControlTvtVisitKey, ...]`
+- `required_seller_visit_keys: tuple[OrderControlTvtVisitKey, ...]`
+- passage recordの内部可変列
+- `completed_virtual_timesteps` の内部可変列
+- timestep resultsの内部可変列
+- `finished: bool`
+- `final_result: OrderControlTvtMpCandidateLocalVirtualCalculationResult | None`
+
+公開読取では順序付き列をtupleとして返す。可変dictを公開しない。
+
+baseline passage timestepの別公開dictは持たない。各passage recordへ保存する。
+
+collector、順位台帳、`OrderControlBaselineForkResult` 全体、経済値は持たない。
+
+統括 `completed_virtual_timesteps` の意味:
+
+- bindingだけではない
+- unboundだけではない
+- advanceだけではない
+- boundaryだけではない
+- その仮想timestepの全7手順が正常完了したことを表す
+
+全手順完了後だけ追加する。例外時は追加しない。
+
+## 6. 初期化API
+
+```text
+initialize_tvt_mp_candidate_local_virtual_calculation_state(
+    candidate_local_state,
+    baseline_collector,
+    downstream_boundary_node_result,
+    configured_horizon_steps,
+)
+```
+
+入力型:
+
+- `OrderControlTvtMpCandidateLocalState`
+- `OrderControlBaselineCollector`
+- `OrderControlBaselineDownstreamBoundaryNodeResult`
+- Python `int`
+
+horizon:
+
+- `type(value) is int`
+- `bool` 拒否
+- `value < 1` 拒否
+- 0は拒否
+- 負値拒否
+- 拒否時は `ValueError`
+- 通常呼出しでは対応する `OrderControlBaselineForkResult.configured_horizon_steps` をそのまま渡す
+- fork result全体は渡さない
+- 別の自由horizonを追加しない
+- 局所horizonは対応する全World baselineの `configured_horizon_steps` と同じ整数である
+- 本番経路では1以上である
+
+horizon 0専用動作は設けない。Tを1回処理する契約、交通処理0回の契約、初期状態だけからのresolved判定、horizon 0専用stop reason、horizon 0専用結果型は作らない。
+
+baseline driverは `baseline_horizon_steps < 1` を拒否する。snapshot固定Visitが全対象Node合計0件のときのforward 0 step特殊終了は、`configured_horizon_steps` 自体を0へ変更しない。局所計算のhorizon入力と混同しない。
+
+初期化順（交通無変更）:
+
+1. virtual time state
+2. binding transfer state
+3. unbound FCFS state
+4. local vehicle advance state
+5. outlink boundary state
+
+既存初期化APIをこの順で呼ぶ。
+
+```text
+initialize_tvt_mp_candidate_virtual_time_state(candidate_local_state)
+initialize_tvt_mp_candidate_binding_transfer_state(virtual_time_state)
+initialize_tvt_mp_candidate_unbound_fcfs_transfer_state(binding_transfer_state, baseline_collector)
+initialize_tvt_mp_candidate_local_vehicle_advance_state(binding_transfer_state)
+initialize_tvt_mp_candidate_outlink_boundary_state(local_vehicle_advance_state, downstream_boundary_node_result)
+```
+
+確認:
+
+- 各入力の型
+- Node名: local state、binding sequence、collector対象、downstream boundary node が一致
+- `local_world.T`、`real_world_timestep_T`、`sequence.baseline_timestep_T` が一致
+- downstream boundary の outlink件数と登録順が candidate local state の outlinks と一致
+- required VisitKey
+- required trade role
+- collector snapshotの存在
+- required重複
+- buyerとseller重複
+- 全required VisitKeyが `visits_in_binding_order` に含まれる
+- BUYER集合が `concrete_buyer_candidate_set.buyers_sorted` と一致
+
+`downstream_boundary_node_result is None` は既存境界初期化契約どおり `RuntimeError`。観測済みactive 0とは区別する。
+
+buyers空は `ValueError`。sellers空は許可する。
+
+`baseline_passage_timestep` が `None` であること自体は入力不正にしない。required Visitのcollector snapshot欠落は `RuntimeError`。
+
+初期化途中の例外では、呼び出し側が渡した実World、collector、境界結果を変更しない。作ったcopy Worldは戻り値に出さず破棄される。
+
+## 7. required buyer / seller
+
+required buyer:
+
+- `binding_rank_sequence.concrete_buyer_candidate_set.buyers_sorted`
+- 空不可
+- 順序を維持
+
+required seller:
+
+- `trade_scope_of_this_candidate_visits` のうち `trade_role` が `SELLER` のVisitKey
+- 空可
+- その区分内のbinding順序を維持
+
+requiredではないもの:
+
+- `NONPARTICIPATING`
+- `OUTSIDE_TRADE_SCOPE`
+- `confirmed_before`
+- `preconfirmed`
+- trade scope外
+- K_fixed外だけを理由に含めるVisit
+
+BUYER / SELLER は binding sequence の `trade_scope_of_this_candidate` 区分にだけ付く。他区分へBUYERまたはSELLERが現れたら `RuntimeError`。
+
+全required VisitKeyはbinding sequence内でなければならない。列外は `RuntimeError`。
+
+追跡単位は `OrderControlTvtVisitKey`（`tuple[str, int]`）である。Vehicle名だけで追跡しない。同一Vehicleの再訪を混同しない。
+
+required Visitは初期化時点でbinding列内である。unbound部品はbinding VisitKeyを対象外にする。実行時、unbound通過vehicle名が未通過required Visitの `vehicle_name` と一致したら `RuntimeError`。これはrequired Visitをunboundとして処理した構築不整合である。
+
+## 8. passage record
+
+型:
+
+```text
+OrderControlTvtMpCandidatePassageRecord
+```
+
+field順と型:
+
+1. `visit_key: OrderControlTvtVisitKey`
+2. `vehicle_name: str`
+3. `trade_role: OrderControlTvtMpLocalBindingTradeRole`
+4. `binding_partition: OrderControlTvtMpLocalBindingPartition`
+5. `binding_rank: int`
+6. `baseline_passage_timestep: int | None`
+7. `candidate_passage_timestep: int | None`
+8. `route_next_link_name: str`
+9. `route_origin: OrderControlTvtMpLocalBindingRouteOrigin`
+10. `inlink_name: str`
+
+初期化時に全required Visit分を作る。初期値は `candidate_passage_timestep = None`。
+
+resolved時: 全recordの `candidate_passage_timestep` がPython `int`。
+
+unresolved時: 未通過recordは `None`。
+
+時刻単位はtimestepである。秒へ変換しない。
+
+`baseline_passage_timestep` と `candidate_passage_timestep` が取り得る最大値は、どちらも `T+H-1` である。candidate passageに `T+H` を許可しない。required Visitが `T+H` で初めて通過可能になる場合は、baselineでもcandidateでもhorizon外であり、当該horizon内では未通過のまま正常unresolvedとする。推測補完しない。horizonを自動延長しない。`baseline_passage_timestep` が `None` でcandidateだけ `T+H` を取得する非対称を作らない。
+
+`vehicle_name` と VisitKey第1要素の不一致は `RuntimeError`。
+
+trade_roleはBUYERまたはSELLERのみ。それ以外は `RuntimeError`。
+
+持たない:
+
+- `passage_source`
+- expected saving
+- waiting increase
+- `G`
+- `R`
+- surplus
+- utility
+
+公開列の順は、required buyer列のあとrequired seller列である。
+
+## 9. candidate passage取得
+
+使用するもの:
+
+- 当該時刻の `binding_transfer_result.transferred_binding_visit_keys`
+
+使用しないもの:
+
+- binding stateの累積列だけ
+- incoming除去
+- current Visit消滅
+- outlink進入ログ
+- unbound結果のVehicle名
+
+その時刻の通過VisitKeyとrequired集合の積を取る。該当recordの `candidate_passage_timestep` を `current_virtual_timestep` にする。
+
+同じrequired Visitが、すでに `int` の通過時刻を持つのに再度通過結果へ現れた場合は `RuntimeError`。
+
+passage記録は処理順4で確定する。時刻末処理で書き換えない。advanceとboundaryはrequired通過を増やさない。
+
+## 10. 正式処理順
+
+各仮想timestepの内部番号である。作業管理Stepではない。
+
+1. `offset > 0` の場合だけ virtual time one-step
+2. binding transferを1回
+3. unbound FCFS transferを必ず1回
+4. required buyer / seller passageを記録
+5. local vehicle advanceと新着incoming登録
+6. outlink終端境界処理
+7. 時刻末にresolved、最後の許可処理offset `H-1` の unresolved、または次時刻を判断
+
+offset `H` は処理しない。そのoffsetでは virtual time one-step、binding、unbound、passage記録、advance、boundaryを呼ばない。最後の処理後にone-stepを呼ばない。
+
+対象API:
+
+```text
+advance_tvt_mp_candidate_virtual_time_one_step(virtual_time_state)
+scan_and_transfer_tvt_mp_binding_visits_at_current_timestep(binding_transfer_state)
+scan_and_transfer_tvt_mp_unbound_fcfs_vehicles_at_current_timestep(
+    unbound_fcfs_transfer_state,
+    binding_transfer_scan_result,
+)
+advance_tvt_mp_candidate_local_vehicles_and_register_new_arrivals(
+    local_vehicle_advance_state,
+    binding_transfer_scan_result,
+)
+process_tvt_mp_candidate_outlink_boundaries_at_current_timestep(
+    outlink_boundary_state,
+    local_vehicle_advance_result,
+)
+```
+
+advanceは当該時刻のbinding scan resultを要求する。unbound resultは要求しない。boundaryは当該時刻のadvance resultを要求する。この順は既存公開APIと衝突しない。
+
+unboundを呼ぶ状況（省略しない）:
+
+- bindingが `BINDING_SEQUENCE_COMPLETED`
+- bindingが `CLEARANCE_NOT_SATISFIED`
+- binding順位列が空
+- binding Visitが全件一時スキップ
+- bindingで1台以上通過
+- binding後にNode流量容量が残る
+- binding後にNode流量容量が `DELTAN` 未満
+- 順位外候補が0台
+
+開始不能時は既存unbound部品が空完了する。
+
+- clearance: `BINDING_CLEARANCE_STOPPED_NOT_STARTED`
+- 開始前Node流量不足: `NODE_FLOW_CAPACITY_UNAVAILABLE_BEFORE_START`
+- 候補0台: `CANDIDATES_COMPLETED`
+
+いずれも当該時刻をunboundの `completed_virtual_timesteps` へ追加する。統括loopはunbound開始条件を重複実装しない。
+
+維持する契約:
+
+- offset 0では時計を進めない
+- offset 0では容量を再補充しない
+- 同じ時刻のbindingへ戻らない
+- 同じ時刻のunboundへ戻らない
+- advance後に同じ時刻のtransferへ戻らない
+- 新着incomingを同じ時刻に通さない
+- boundaryをadvanceより前にしない
+- passageが揃った瞬間に時刻途中で終了しない
+- clearanceまたは容量不足を候補全体の即時unresolvedにしない
+- signalを使用しない
+- 実World不変
+- collector不変
+- 順位台帳不変
+
+## 11. one-timestep API
+
+```text
+run_tvt_mp_candidate_local_virtual_calculation_one_timestep(
+    calculation_state,
+) -> OrderControlTvtMpCandidateVirtualTimestepResult
+```
+
+契約:
+
+- `finished` なら `RuntimeError`
+- 現在時刻が未完了なら、その時刻を処理する
+- 処理可能offsetは0以上 `H-1` 以下
+- offset 0ではone-stepしない
+- 直前時刻が統括完了済みなら virtual time one-step を1回実行し、新時刻を処理する
+- 処理対象offsetが `H` 以上となる経路は `RuntimeError`
+- offset `H` へ進むone-stepを呼ばない
+- `H-1` を処理した後は、resolvedでなくても `HORIZON_EXHAUSTED_UNRESOLVED` として `finished` にする
+- 完了後の追加呼出しは `RuntimeError`
+- bindingを1回
+- unboundを1回
+- passage記録
+- advanceを1回
+- boundaryを1回
+- 時刻末判定
+- 全手順正常終了後だけ統括 `completed_virtual_timesteps` へ追加
+- 同じ時刻の2回目は禁止
+- partial timestep resultを正常返却しない
+- 部品の先行成功はrollbackしない
+
+例外後は同じlocal copyを再利用しない。unbound、advance、boundaryは自前の完了時刻を持ち、統括完了時刻が無いdirty状態では再呼出が失敗する。呼出し側が当該候補local stateを破棄する。
+
+## 12. run-to-completion API
+
+```text
+run_tvt_mp_candidate_local_virtual_calculation(
+    calculation_state,
+) -> OrderControlTvtMpCandidateLocalVirtualCalculationResult
+```
+
+契約:
+
+- one-timestep APIだけを繰り返す
+- 本処理を重複実装しない
+- resolvedまたは最後の許可処理offset `H-1` の時刻末まで実行
+- one-timestep結果件数は最大 `H`
+- 一部one-timestep実行済みstateから継続可能
+- `H-1` 完了後にone-stepを呼ばない
+- `T+H` では交通処理を行わない
+- 既存virtual time one-stepを、交通処理なしの終端時計送りには使用しない
+- liveなlocal Worldの時計を `T+H` へ合わせる新規APIは作らない
+- 終了時に最終結果を1回だけ構築
+- `state.final_result` へ保存
+- 終了後に時計を進めない
+- 2回目のrunは `RuntimeError`
+- 2回目では状態を変更しない
+
+## 13. resolved
+
+resolvedの意味: 全required buyerおよび全required sellerについて、`candidate_passage_timestep` を取得済みであること。
+
+契約:
+
+- sellers空は充足
+- buyers空は初期化不正
+- `H` は1以上
+- offset 0は最初の許可処理時刻 T
+- offset 0でも成立可能
+- offset 0でrequired passageがそろっても、その時刻の全7手順後にresolved
+- binding後に揃ってもunboundを呼ぶ
+- unbound後に揃ってもadvanceを行う
+- advance後にboundaryを行う
+- boundary後の時刻末にresolvedを確定する
+- resolved後に次offsetへ進まない
+- unrelated Vehicle残存はresolvedを妨げない
+- unbound Vehicle残存はresolvedを妨げない
+- boundary待機Vehicle残存はresolvedを妨げない
+- required passageが全部そろっていればboundary閉塞残存もresolvedを妨げない
+- 終了時frozen記録は、最後の交通処理時刻末のadvanceとboundary後状態から構築する
+- liveな局所時計は最後の処理時刻のままとする。既存one-stepで `T+H` へ送らない
+
+one-timestep結果で、通過情報が揃った時点と候補計算の正式終了を区別する。
+
+- `required_passages_complete_after_node_passage`: 処理順4直後
+- `calculation_finished_after_timestep_end`: 時刻末に候補計算が終わる
+- `resolved_after_timestep_end`: 時刻末にresolvedとして終わる
+
+最終horizon unresolvedは、最後の許可処理offset `H-1` の時刻末で、`calculation_finished_after_timestep_end is True` かつ `resolved_after_timestep_end is False`。`T+H` を処理してからの未解決ではない。offset `H` へ進まない。
+
+## 14. horizon
+
+処理offset範囲は0以上 `H-1` 以下である。`H = configured_horizon_steps` はPython `int` かつ1以上である。交通処理回数は H 回である。
+
+各処理offset `k` の交通処理時刻は `T + k` である。
+
+- offset 0: virtual time one-stepを呼ばない。timestep T を処理する
+- offset 1以上: 当該処理時刻の冒頭でvirtual time one-stepを1回呼ぶ。timestep `T+offset` を処理する
+- 最大処理offset: `H-1`
+- 最大処理時刻: `T+H-1`
+
+offset `H` は処理しない。virtual time one-step、binding、unbound、passage記録、advance、boundaryを呼ばない。既存one-stepを交通処理なしの終端時計送りに使わない。liveなlocal Worldの時計を `T+H` へ合わせる新規APIは作らない。
+
+例:
+
+- horizon 1: Tのみ。timestep resultは1件。`final_virtual_timestep = T`。`final_offset = 0`。`simulated_timestep_count = 0`。T+1は処理しない
+- horizon 2: T、T+1。timestep resultは2件。`final_virtual_timestep = T+1`。`final_offset = 1`。`simulated_timestep_count = 1`。T+2は処理しない
+- horizon 3: T、T+1、T+2。timestep resultは3件。`final_virtual_timestep = T+2`。`final_offset = 2`。`simulated_timestep_count = 2`。T+3は処理しない
+
+`T+H-1` でも全7手順を最後まで実行する。その時刻末にrequired passageが不足していれば正常unresolved。early resolvedなら、その最後の処理時刻の全7手順後に次offsetへ進まない。
+
+horizon 0は拒否する。0でTを1回処理する契約は置かない。
+
+`simulated_timestep_count`:
+
+- 初期時刻 T から virtual time one-step で時計を進めた回数
+- `current_offset` と一致する
+- 実行した交通timestep数ではない
+- offset 0だけ処理してresolvedなら0
+- horizon完走時は `H-1`
+
+実行した交通timestep数は `len(timestep_results)` である。horizon完走時は H。early resolved時は `final_offset + 1`。
+
+horizon完走時の最終field:
+
+- `final_virtual_timestep = T+H-1`
+- `final_offset = H-1`
+- `simulated_timestep_count = H-1`
+- `len(timestep_results) = H`
+
+`T+H` という終端ラベルが必要なら、`baseline_timestep_T + configured_horizon_steps` から派生計算する。結果型へ重複fieldとして保存しない。`terminal_virtual_timestep`、`final_observation_timestep`、`executed_traffic_timestep_count`、`processed_timestep_count` は追加しない。
+
+World baselineとの関係: baseline driverの交通forwardも T から `T+H-1` まで H 回であり、処理後の `fork_W.T` は `T+H` である。`T+H` の交通処理はbaselineでも局所でも行わない。candidate passageの最大も `T+H-1` である。baselineとcandidateは同一処理区間である。候補側だけ余分な1 timestepを使って通過時刻を取る非対称を作らない。
+
+## 15. stop reason
+
+統括stop reasonは2種類。
+
+- `RESOLVED`
+- `HORIZON_EXHAUSTED_UNRESOLVED`
+
+`HORIZON_EXHAUSTED_UNRESOLVED` は、最後の許可処理offset `H-1` の時刻末でrequired passageが不足したことである。`T+H` を処理してからの未解決ではない。offset `H` へ進まない。
+
+- clearance
+- Node流量不足
+- inlink流出不足
+- outlink流入不足
+- 入口空間不足
+- acceptable outlink空
+- boundary閉塞
+
+次は正常unresolvedにしない。`ValueError` または `RuntimeError` である。
+
+- required Visit欠落
+- collector snapshot欠落
+- Node不一致
+- timestep不一致
+- snapshot固定集合不整合
+- boundary result欠落
+- binding sequence不整合
+- 同一時刻二重実行
+- 最終結果二重構築
+- required Visitのunbound通過
+- 同一required Visitの二重通過記録
+
+入力の形の誤りは `ValueError`。実行中の状態不整合は `RuntimeError`。
+
+## 16. unresolved理由の保持
+
+型:
+
+```text
+tuple[OrderControlTvtMpCandidateUnresolvedReason, ...]
+```
+
+契約:
+
+- resolved時は空tuple
+- unresolved時は少なくとも1件
+- 重複なし
+- 正本の6理由順に並べる
+- 1件へ潰さない
+- Visit別未通過情報はpassage recordを見る
+- first observed timestepを別fieldにしない
+- last observed timestepを別fieldにしない
+- occurrence countを別fieldにしない
+- 必要ならper-timestep結果から再確認する
+
+## 17. unresolved理由の正式な機械的付与規則
+
+利用者採用方針（2026-09-25）:
+
+- 観測できた事実だけを記録する
+- 因果関係を推定しない
+- 同時に起きた事象を直接原因と断定しない
+- 「下流境界が必要通過情報を妨げた」を自動推定しない
+- 分類4のacceptable outlink空がbuyer・seller未通過の直接原因だったと推定しない
+- clearance、容量不足、境界閉塞等は、コードで確認できた発生事実または継続事実として記録する
+- 診断reasonは交通挙動や経済性評価を変えない
+- 後からの詳細分析はper-timestep結果を使う
+
+付与は unresolved のときだけ行う。resolved なら空tupleである。
+
+### 17.1 REQUIRED_BUYER_OR_SELLER_DID_NOT_PASS_WITHIN_HORIZON
+
+付与条件:
+
+- 最後の許可処理offset `H-1`、すなわち最後の交通処理時刻 `T+H-1` の時刻末
+- required passage recordのうち、`candidate_passage_timestep` が `None` のものが1件以上ある
+
+正常unresolvedでは必ず付与する。1件の未通過で足りる。連続は不要。`T+H` は観測対象に含めない。
+
+### 17.2 DOWNSTREAM_BOUNDARY_HAD_WAITING_VEHICLES_BUT_NO_TRANSFER
+
+付与条件:
+
+- 対象outlinkのいずれかについて、outlink境界stateの `boundary_mode` が `OBSERVED_WAIT_WITHOUT_OUTFLOW` である
+
+これはbaseline downstream boundary観測から初期化時に固定される分岐Bである。局所計算でrequired passageを妨げた直接原因とは断定しない。
+
+### 17.3 DOWNSTREAM_BOUNDARY_REMAINED_BLOCKED_WITHIN_HORIZON
+
+付与条件:
+
+- 最後の交通処理時刻 `T+H-1` のboundary結果で、該当outlinkの `boundary_mode` が `OBSERVED_WAIT_WITHOUT_OUTFLOW`
+- かつ、そのoutlinkの `waiting_vehicle_names_after` が非空
+
+これは最後の交通処理時刻末に閉塞状態が残った事実を表す。required passage未取得の直接原因とは断定しない。`T+H` は観測対象に含めない。
+
+### 17.4 CLEARANCE_OR_CAPACITY_BLOCKED_THROUGH_HORIZON
+
+付与対象: 最後の交通処理時刻 `T+H-1` の時刻末に未通過のrequired Visit。
+
+観測期間: 当該Visitが対象Node端へ到着し、binding走査対象として評価可能になった時刻から、最後の許可処理offset `H-1` まで。未到着時刻（binding一時スキップ `NOT_ARRIVED_AT_TARGET_NODE`）は判定期間へ含めない。`T+H` は観測対象に含めない。per-timestep結果が存在しない時刻を理由判定へ使わない。
+
+付与条件:
+
+- 判定期間の仮想timestep数が2以上である
+- 判定期間の各仮想timestepで、そのrequired Visitが通過できず
+- 各時刻の非通過が、次の観測可能な理由のいずれかで説明される
+  - clearance未充足（binding stop `CLEARANCE_NOT_SATISFIED` で当該Visitが `stopped_binding_visit_key`、またはそれより後の列位置のため未確認のまま停止）
+  - inlink物理先頭でない（`NOT_INLINK_PHYSICAL_HEAD`）
+  - inlink流出不足（`INLINK_OUTFLOW_CAPACITY_UNAVAILABLE`）
+  - outlink流入不足（`OUTLINK_INFLOW_CAPACITY_UNAVAILABLE`）
+  - Node流量不足（`NODE_FLOW_CAPACITY_UNAVAILABLE`）
+  - outlink入口空間不足（`OUTLINK_ENTRY_SPACE_UNAVAILABLE`）
+- 判定期間中に、理由情報が存在しない時刻がない
+- そのVisitは最後の交通処理時刻 `T+H-1` の時刻末まで未通過
+
+1回だけのclearanceまたは容量不足では付与しない。判定期間全体で継続した事実を要求する。判定期間が1仮想timestepしかない場合は付与しない。
+
+複数required Visitのうち1件以上が条件を満たせば、Enumを1回付与する。各Visitの詳細はpassage recordとper-timestep結果から確認する。
+
+clearance停止により、その時刻の後続required Visitがscan結果のskip列に現れない場合、その時刻の非通過理由は「当該時刻のbindingがclearance未充足で、そのVisitは未通過のまま確認されていない」として継続事実に含める。理由情報が無い時刻とはしない。
+
+### 17.5 NO_ACCEPTABLE_OUTLINK_FOR_ROUTE_UNDETERMINED_VEHICLE_WITHIN_HORIZON
+
+付与条件:
+
+- 実行したいずれかの仮想timestepで、unbound FCFS `temporary_skips` に `ACCEPTABLE_OUTLINKS_EMPTY` が1件以上ある
+
+これは、進路未確定の順位外Vehicleについて、受入可能outlinkが空だった事実を表す。required buyerまたはseller未通過の直接原因とは断定しない。1回以上の発生で付与する。
+
+### 17.6 DOWNSTREAM_BOUNDARY_PREVENTED_REQUIRED_PASSAGE_INFORMATION
+
+現段階では自動付与しない。
+
+理由:
+
+- existing resultだけでは、downstream boundaryがrequired passage情報の不足を直接引き起こしたという因果関係を機械的に証明できない
+- 同じ計算中に境界閉塞とrequired未通過が併存しただけでは不十分
+- 推測による原因付与を禁止する利用者採用方針に反する
+
+Enum memberは正本互換のため維持する。将来、直接因果を証明できる状態追跡または依存関係が設計された場合に付与規則を追加する。実装時に独自付与しない。
+
+## 18. per-timestep結果
+
+型:
+
+```text
+OrderControlTvtMpCandidateVirtualTimestepResult
+```
+
+field順:
+
+1. `node_name: str`
+2. `virtual_timestep: int`
+3. `offset: int`
+4. `binding_transfer_result: OrderControlTvtMpBindingTransferScanResult`
+5. `unbound_fcfs_result: OrderControlTvtMpUnboundFcfsTransferResult`
+6. `newly_recorded_required_passage_visit_keys: tuple[OrderControlTvtVisitKey, ...]`
+7. `local_vehicle_advance_result: OrderControlTvtMpLocalVehicleAdvanceResult`
+8. `outlink_boundary_result: OrderControlTvtMpOutlinkBoundaryProcessResult`
+9. `required_passages_complete_after_node_passage: bool`
+10. `calculation_finished_after_timestep_end: bool`
+11. `resolved_after_timestep_end: bool`
+
+unbound resultは常に存在する。`None` にしない。clearanceまたは開始前Node流量不足でも、空完了結果を保存する。
+
+`one_step_performed` は持たない。`offset` で分かる。`offset == 0` なら未補充、`offset > 0` なら当該呼出でone-step済みである。
+
+capacity refillの独立結果は持たない。World参照は入らない。
+
+最後のper-timestep結果のoffsetは最大 `H-1` である。`virtual_timestep` は最大 `T+H-1` である。最終horizon unresolvedは、offset `H-1` の結果で `calculation_finished_after_timestep_end is True` かつ `resolved_after_timestep_end is False` である。horizon完走時の結果件数は H である。early resolved時は H 回未満で終了し、最後の処理時刻の全7手順を完了する。`T+H` の結果は作らない。
+
+## 19. 終了時Vehicle記録
+
+型:
+
+```text
+OrderControlTvtMpCandidateFinalVehicleRecord
+```
+
+対象集合: 終了時の対象inlink上Vehicle、対象outlink上Vehicle、target Node incoming Vehicleの和集合。構築時 `local_vehicles` の凍結tupleそのものではない。World全体のVehicleは含めない。
+
+同一Vehicle objectは1件へ統合する。同じ `vehicle_name` が異なるVehicle objectを指す場合は `RuntimeError`。
+
+field順と型:
+
+1. `vehicle_name: str`
+2. `current_link_name: str | None`
+3. `position_x: int | float | None`
+4. `state: str`
+5. `current_visit_key: OrderControlTvtVisitKey | None`
+6. `current_visit_node_name: str | None`
+
+Link上なら `current_link_name` と `position_x`（Vehicle.x）を保存する。incomingにのみ存在しLinkが取得できない場合は両方 `None` を許す。
+
+current Visitが無ければ VisitKey と Node名は `None`。Visit dictの `node` objectは持たず、名前だけ保存する。`visit_id` は VisitKey第2要素である。
+
+保存しない:
+
+- `v`
+- `lane`
+- leader
+- follower
+- `move_remain`
+- `link_arrival_time`
+- `x_old`
+- `x_next`
+- current Visit dict本体
+- Vehicle object
+
+境界退出済みVehicleはfinal Vehicle recordへ残さない。境界記録へ名前を残す。
+
+## 20. 終了時Link記録
+
+型:
+
+```text
+OrderControlTvtMpCandidateFinalLinkRecord
+```
+
+対象: candidate local stateのinlinksとoutlinks。最終結果内では `final_inlink_records` と `final_outlink_records` の別tupleにする。登録順を維持する。
+
+field:
+
+- `link_name: str`
+- `start_node_name: str`
+- `end_node_name: str`
+- `link_role: OrderControlTvtMpCandidateFinalLinkRole`
+- `vehicle_names_in_physical_order: tuple[str, ...]`
+- `capacity_out_remain: int | float`
+- `capacity_in_remain: int | float`
+
+持たない: Link object、vehicles deque、cum配列全体、`vehicles_enter_log` 全体、Vehicle object。Vehicle位置はVehicle record側。境界残高は境界record側。
+
+## 21. 終了時Node記録
+
+型:
+
+```text
+OrderControlTvtMpCandidateFinalNodeRecord
+```
+
+target Nodeだけを保存する。
+
+field:
+
+- `node_name: str`
+- `incoming_vehicle_names: tuple[str, ...]`
+- `flow_capacity_remain: int | float`
+- `last_order_control_inlink_name: str | None`
+- `last_order_control_entry_timestep: int | None`
+- `order_control_clearance_timesteps: int`
+
+incoming順を維持する。incoming内の同一Vehicle object重複は `RuntimeError`。
+
+`flow_capacity_remain` はUXsimの未設定sentinelも数値のまま保存する。Node objectへ変換しない。`last_order_control_inlink` は名前だけ保存する。
+
+Node object、Link object、Vehicle objectを持たない。
+
+## 22. 終了時boundary記録
+
+型:
+
+```text
+OrderControlTvtMpCandidateFinalOutlinkBoundaryRecord
+```
+
+outlink登録順のtupleとする。
+
+field:
+
+- `outlink_name: str`
+- `terminal_node_name: str`
+- `boundary_mode: OrderControlTvtMpOutlinkBoundaryMode`
+- `observed_average_outflow_rate: int | float | None`
+- `flow_allowance_after: int | float`
+- `waiting_vehicle_names_after: tuple[str, ...]`
+- `capacity_out_remain_after: int | float`
+- `terminal_node_flow_capacity_remain_after: int | float`
+- `cumulative_observed_outflow_exit_vehicle_names: tuple[str, ...]`
+- `cumulative_constrained_sink_end_trip_vehicle_names: tuple[str, ...]`
+
+最終timestepのboundary処理結果と、`OrderControlTvtMpCandidateOutlinkBoundaryLinkState` の累積公開情報から構築する。
+
+baseline `OrderControlBaselineDownstreamBoundaryNodeResult` 自体を最終結果へ参照保持しない。
+
+## 23. 最終結果型
+
+型:
+
+```text
+OrderControlTvtMpCandidateLocalVirtualCalculationResult
+```
+
+frozen dataclass。
+
+field:
+
+- `node_name: str`
+- `concrete_buyer_candidate_set: OrderControlTvtMpConcreteBuyerCandidateSet`
+- `binding_rank_sequence: OrderControlTvtMpLocalBindingRankSequence`
+- `baseline_timestep_T: int`
+- `configured_horizon_steps: int`
+- `final_virtual_timestep: int`
+- `final_offset: int`
+- `simulated_timestep_count: int`
+- `stop_reason: OrderControlTvtMpCandidateLocalVirtualCalculationStopReason`
+- `resolved: bool`
+- `required_passage_records: tuple[OrderControlTvtMpCandidatePassageRecord, ...]`
+- `unresolved_reasons: tuple[OrderControlTvtMpCandidateUnresolvedReason, ...]`
+- `timestep_results: tuple[OrderControlTvtMpCandidateVirtualTimestepResult, ...]`
+- `final_vehicle_records: tuple[OrderControlTvtMpCandidateFinalVehicleRecord, ...]`
+- `final_inlink_records: tuple[OrderControlTvtMpCandidateFinalLinkRecord, ...]`
+- `final_outlink_records: tuple[OrderControlTvtMpCandidateFinalLinkRecord, ...]`
+- `final_node_record: OrderControlTvtMpCandidateFinalNodeRecord`
+- `final_boundary_records: tuple[OrderControlTvtMpCandidateFinalOutlinkBoundaryRecord, ...]`
+
+時刻fieldの意味:
+
+- `final_virtual_timestep`: 実際に最後の交通処理を行った仮想timestep。horizon完走時は `T+H-1`。early resolved時はresolvedとなった最後の処理時刻
+- `final_offset`: 実際に最後の交通処理を行ったoffset。horizon完走時は `H-1`。early resolved時はその最後の処理時刻のoffset
+- `simulated_timestep_count`: 初期時刻 T から virtual time one-step で時計を進めた回数。`current_offset` と一致する。horizon完走時は `H-1`。offset 0だけ処理してresolvedなら0。実行した交通timestep数ではない
+- 実行した交通timestep数は `len(timestep_results)`。horizon完走時は H。early resolved時は `final_offset + 1`
+
+追加しない:
+
+- `terminal_virtual_timestep`
+- `final_observation_timestep`
+- `executed_traffic_timestep_count`
+- `processed_timestep_count`
+
+`T+H` という終端ラベルが必要なら、`baseline_timestep_T + configured_horizon_steps` から派生計算する。結果型へ重複保存しない。
+
+候補identityは `node_name` と `concrete_buyer_candidate_set`（`buyers_sorted`）である。
+
+持たない:
+
+- 統括state
+- candidate local state
+- local World
+- Node
+- Link
+- Vehicle
+- collector
+- rank ledger
+- real World
+- 経済価値
+- `G`
+- `R`
+- surplus
+- utility
+- payment
+- compensation
+- 候補採用結果
+- 最終順位確定結果
+
+結果構築後に作業用copyを変更しても、保存済みfrozen結果は変わらない。
+
+## 24. 同一時刻二重実行防止
+
+統括 `completed_virtual_timesteps` で、その時刻の全処理を1回に制限する。
+
+bindingには既存の二重実行防止がないため、統括側で防ぐ。virtual time one-stepにも独立二重実行防止がないため、統括側のoffset遷移で防ぐ。unbound、advance、boundaryの既存二重実行防止は維持する。
+
+同じ時刻に戻る分岐を作らない。advanceまたはboundary後に入口空間が回復しても、同時刻のbindingおよびunboundへ戻らない。
+
+## 25. 原子性と例外
+
+統括全体の一括rollbackは行わない。既存部品の原子性を維持する。
+
+重大不整合では `RuntimeError`。入力不正では `ValueError`。正常unresolvedと例外を混同しない。
+
+例外時:
+
+- partial timestep resultを返さない
+- final resultを返さない
+- 統括 `completed_virtual_timesteps` を追加しない
+- `finished` にしない
+- `final_result` を保存しない
+- 先行部品がlocal copyへ反映した交通状態は戻さない
+- 呼び出し側が当該候補local stateを破棄する
+
+失敗位置ごとの状態:
+
+- binding後にunbound例外: binding通過はcopyへ残る。統括完了時刻なし。unbound完了時刻なし。
+- unbound後にpassage記録例外: unbound通過とunbound完了時刻は残る。統括完了時刻なし。
+- passage後にadvance例外: passage内部更新は未公開のまま残り得る。advance完了時刻なし。統括完了時刻なし。
+- advance後にboundary例外: 前進済み。advance完了時刻は付く。統括完了時刻なし。
+- boundary後に終了記録構築例外: 境界済み。boundary完了時刻は付き得る。統括完了時刻なし。最終結果未保存。
+
+実World、collector、順位台帳、baseline結果、別候補、RNGは不変。formal routeは保存しない。
+
+## 26. 専用テスト契約
+
+公開型: 全Enum member、frozen、公開列がtuple、World / Node / Link / Vehicle / 可変state非保持。
+
+初期化: 型、Node一致、timestep一致、horizon 0を `ValueError`、正horizon、bool拒否、負値拒否、buyers空拒否、sellers空許可、required重複、collector欠落、boundary欠落、初期化無副作用。
+
+処理順: offset 0でone-stepなし、offset > 0でone-step 1回、binding 1回、unbound必ず1回、passage、advance、boundary、時刻末判定、同時刻へ戻らない。offset `H` ではone-stepも交通処理もしない。
+
+空完了: binding clearance、開始前Node流量不足、候補0、unbound完了時刻追加、2回目拒否。
+
+passage: buyer、seller、同一時刻複数、VisitKey単位、再訪誤対応なし、baselineとcandidate分離、未通過None、二重記録拒否、unbound結果をrequired記録へ使わない、candidate passage最大は `T+H-1`、`T+H` のcandidate passageなし。
+
+resolved: offset 0、中間offset、最後の許可処理offset `H-1`、binding直後に揃っても時刻末まで完了、unrelated残存、unbound残存、boundary待機残存、次offsetなし、early resolved時はH回未満で終了しても最後の処理時刻の全7手順を完了。
+
+unresolved理由: required未通過を必ず付与、baseline分岐B観測、最後の交通処理時刻 `T+H-1` のboundary待機残存、到着後に実際に処理した時刻全体を通じたclearanceまたは容量阻害、1回だけの阻害ではthrough reasonを付けない、判定期間1時刻ではthrough reasonを付けない、acceptable outlink空の発生事実、6番目reasonを自動付与しない、複数reason、重複排除、正本順、resolved時は空tuple、`T+H` を観測対象にしない。
+
+終了記録: Vehicle名、Link名、x、state、VisitKey、Visit Node、`v` 等を持たない、Link物理順、容量、incoming、clearance履歴、boundary累積、stateを後から変更しても結果不変、World非保持、境界退出VehicleはVehicle recordに残らず境界記録へ残る。最後の処理時刻末の整合した状態から構築する。
+
+二重実行: binding、virtual time、unbound、advance、boundary、one-timestep、run-to-completion。
+
+horizon: 1、2、3。horizon 1はTだけ。horizon 2はTとT+1。horizon 3はT、T+1、T+2。結果件数はH。`final_virtual_timestep` は `T+H-1`。`final_offset` は `H-1`。`simulated_timestep_count` は `H-1`。`T+H` のbindingなし、unboundなし、advanceなし、boundaryなし。最後の処理後にone-stepを呼ばない。baselineとcandidateの処理時刻範囲一致。horizon 0正常処理なし。
+
+不変性: 実World、collector、順位台帳、trade rank、candidate set、binding sequence、downstream baseline、別候補、RNG、formal route未保存、経済性評価未呼出。
+
+例外: Node不一致、timestep不一致、required欠落、passage二重、snapshot不整合、requiredのunbound通過、partial result非返却、finished後の追加one-timestep、最終結果二重構築、horizon 0、bool horizon、負horizon、offset `H` 以上へ進む経路。
+
+## 27. 実装時の変更範囲
+
+新規作成:
+
+- `uxsim/order_control_tvt_mp_candidate_local_virtual_calculation.py`
+- `tests_order_control_tvt_mp_candidate_local_virtual_calculation.py`
+
+既存本番Pythonの公開API変更は不要。既存Pythonを変更しないことを第一候補とする。既存テストの変更も不要を第一候補とする。実装時に既存ファイル変更が必要と判明した場合は、独自に変更せず停止する。
+
+## 28. 今回も実装しない範囲
+
+- 全候補集合入口 `evaluate_tvt_mp_candidate_local_virtual_calculations`
+- Node結果列 `OrderControlTvtNodeMpLocalVirtualCalculationResult`
+- 集合結果型 `OrderControlTvtMpLocalVirtualCalculationSetResult` の本番接続
+- 経済性評価
+- expected time saving計算
+- waiting increase計算
+- `G`
+- `R`
+- surplus
+- utility
+- payment
+- compensation
+- 候補採用
+- 候補却下
+- 最終順位確定
+- formal routeの実World保存
+- 順位台帳更新
+- 上位driver
+- 実World交通反映
+- strategy-proofness検証
+
+## 29. 次の直接作業
+
+horizon端点をWorld baselineの H 回処理へ揃えた本仕様を、独立確認する。文書保存後、新規一候補統括モジュールと新規専用テストを実装する。実装前に新しい設計判断を追加しない。
 
 # 次の作業開始点
 
@@ -13732,11 +14755,15 @@ Python実装は、その完全仕様の確定と文書保存後に開始する�
 
 **2026-09-23更新（最新の再開情報）：** 上記の実装前仕様へ、コード確認後の3点を補った。区分2の既到着確定と先頭連続非参加確定は、新しい本番経路で原子的確定APIへ接続する。その接続は、台帳実装の次の実装区分「既到着Visitと先頭連続非参加Visitの原子的先行確定接続」である。台帳区分の完了だけでは、本番経路が `confirm_visits_in_order()` を使わないことの確認を終えたことにはしない。局所状態はWorld全体のコピーを残し、対象外は更新しない。局所通過試行の最後の時刻は `T + configured_horizon_steps` である。Python実装と専用テストは未着手である。直ちに実装へ進まない。最新の作業順は、本ファイルの完全な実装前仕様にある「次の再開地点」に従う。
 
+> 2026-09-25更新注記: 本記録は、BATCH Level 2のvirtual_horizon端点と候補別局所仮想計算の端点をそろえる案を採用した当時の途中設計である。その後、旧正本のWorld baseline正式driver契約と実コードを再確認した。World baselineはconfigured horizon Hに対してtimestep TからT+H-1までH回の交通処理を行い、処理後のWorld.TがT+Hとなる。T+Hの交通処理は行わない。利用者判断により、一候補局所仮想計算もWorld baselineと同じH回処理へ統一した。最新の実装前仕様は、2026-09-25の「TVT-MP候補別局所仮想計算の一候補統括loop完全実装前仕様」を参照すること。offset 0でvirtual time one-stepを行わず、offset 1以降の各処理時刻冒頭でone-stepを行う容量補充契約自体は維持する。
+
 **2026-09-24注記：** 上記「未着手」と「最初の実装区分は正式進路付き順位台帳」は、2026-09-23時点の再開情報である。現在の実装済み範囲は「TVT-MP候補別局所仮想計算の実装進捗・確定実装契約・下流境界追加設計記録」と「TVT-MP候補別局所仮想計算のoutlink終端境界処理実装完了記録」を参照する。次の直接作業と実装順は、outlink終端境界処理実装完了記録の第20節を最新とする。拘束順位外走査と仮想timestep統括loopのどちらを先行するかは未決定である。
 
 **2026-09-24追記（拘束順位外FCFS実装完了）：** 上記「どちらを先行するかは未決定」および「第20節を最新とする」は、依存関係確認待ち当時の再開情報である。拘束順位外Vehicle一時的FCFS走査はcommit `7926d43`で実装、テスト、push済みである。最新の未実装範囲および次の再開地点は、同日の「TVT-MP候補別局所仮想計算の拘束順位外一時的FCFS走査実装完了記録」を参照すること。
 
 **2026-09-24追記（統括loop結果保持・unbound呼出契約の途中確定）：** 独立検証と利用者判断により、最終結果のlive state非保持・終了時frozen記録、およびunbound FCFSの毎仮想timestep 1回呼出しを採用した。次の直接作業は、終了時frozen記録とpassage recordの必要最小限の型とfield、resolved、unresolved、horizon終了、一候補統括stateと結果型の完全なfieldを確定し、統括loop全体の完全な実装前仕様として正本へ記録することである。Python実装はその完全仕様の確定と文書保存後に開始する。最新詳細は、本ファイルの「TVT-MP候補別局所仮想計算の統括loop結果保持・unbound呼出契約の途中確定記録」を参照すること。
+
+**2026-09-25追記（一候補統括loop完全実装前仕様）：** 一候補統括loopの完全な実装前仕様を確定した。commit `86ac06f` までの途中確定契約を包含する。horizon契約はWorld baselineと一致させ、H回の交通処理、処理時刻TからT+H-1、horizon 0拒否とする。Python実装はまだ行っていない。利用者判断により、unresolved理由は観測可能な事実だけから付与し、因果関係を推測しない。6番目 `DOWNSTREAM_BOUNDARY_PREVENTED_REQUIRED_PASSAGE_INFORMATION` は現段階で自動付与しない。終了時Vehicle記録はVehicle名、Link名、位置x、state、current VisitKey、current Visit Node名に限定する。次の直接作業は、horizon端点補修後の独立確認と文書保存のあと、`uxsim/order_control_tvt_mp_candidate_local_virtual_calculation.py` と `tests_order_control_tvt_mp_candidate_local_virtual_calculation.py` を実装することである。実装前に新しい設計判断を追加しない。全候補集合入口、経済性評価、最終確定接続は対象外である。最新詳細は、本ファイルの「TVT-MP候補別局所仮想計算の一候補統括loop完全実装前仕様」を参照すること。上記2026-09-24追記の「次の直接作業は完全仕様の記録」は、当時の再開情報である。
 
 # 新しいチャットでの再開方法
 

@@ -6414,6 +6414,8 @@ Worldの写しは、`World.copy()` がpickleによる全体複製であること
 
 horizonは、BATCH Level 2の `for offset in range(virtual_horizon + 1)` に合わせる。`configured_horizon_steps` が2のとき、通過試行する時刻はT、T+1、T+2である。`simulated_timestep_count` はTから時計を進めた回数なので、Tで揃えば0、T+2まで進めると2である。必要通過timestepが揃ったかの記録は各時刻の対象Node通過走査の後である。候補計算の終了と `resolved` の設定は、その仮想timestepの時刻末処理完了後である。T+2の試行で揃えば、そのtimestep末処理の後にresolvedとする。T+2の時刻末処理の後も不足ならunresolvedである。baselineの `final_fork_timestep` は `T + configured_horizon_steps` だが、baselineがその時刻の交通を実行したという意味ではない。baselineが実行するのはTから `T + configured_horizon_steps - 1` までである。局所loopはBATCHの端点に合わせ、`T + configured_horizon_steps` も試行する。
 
+> 2026-09-25更新注記: 本記録は、BATCH Level 2のvirtual_horizon端点と候補別局所仮想計算の端点をそろえる案を採用した当時の途中設計である。その後、旧正本のWorld baseline正式driver契約と実コードを再確認した。World baselineはconfigured horizon Hに対してtimestep TからT+H-1までH回の交通処理を行い、処理後のWorld.TがT+Hとなる。T+Hの交通処理は行わない。利用者判断により、一候補局所仮想計算もWorld baselineと同じH回処理へ統一した。最新の実装前仕様は、2026-09-25の「TVT-MP候補別局所仮想計算の一候補統括loop完全実装前仕様」を参照すること。offset 0でvirtual time one-stepを行わず、offset 1以降の各処理時刻冒頭でone-stepを行う容量補充契約自体は維持する。
+
 **2026-09-23補修（resolved終了契約・仮想timestep内の処理順）**
 
 各仮想timestepの全体順序（1仮想timestep内部の番号であり、作業管理Stepではない）は次である。
@@ -6674,6 +6676,8 @@ Vehicle除去記録の正式fieldは6つである。`vehicle_name`、`outlink_na
 
 > 2026-09-24追加注記: 各仮想timestepでunbound FCFS APIを必ず1回呼ぶ方針を採用したため、Node流量不足時にAPIを呼ぶかどうかは確定済みである。開始前Node流量不足時は既存unbound部品が空完了する。未確定なのは、Node流量不足をhorizon終了時のunresolved理由へ反映する条件と診断規則である。
 
+> 2026-09-25追加注記: 利用者判断により、unresolved理由は観測可能な事実だけから付与し、因果関係を推測しない方針を採用した。Node流量不足は、到着後の判定期間全体で継続した容量阻害として `CLEARANCE_OR_CAPACITY_BLOCKED_THROUGH_HORIZON` に含まれ得る。1回だけの阻害では付けない。6番目reasonは現段階で自動付与しない。最新の完全仕様は同日の一候補統括loop完全実装前仕様を参照すること。
+
 > 2026-09-24実装完了注記: 上記「拘束順位外FCFSの具体的実装契約」は、outlink終端境界処理完了時点の未確定である。独立部品としての順位外FCFSは commit `7926d43` で実装済みであり、統括loop接続前の細部としての未確定へは戻さない。残る未確定は、統括loopの入力、出力、停止理由、結果型である。最新は同日の実装完了追記を参照する。
 
 > 2026-09-24追加注記: 独立検証と利用者判断により、最終結果のlive state非保持・終了時frozen記録、およびunbound FCFSの毎仮想timestep 1回呼出しを採用した。最新詳細は同日の途中確定記録を参照すること。
@@ -6836,6 +6840,8 @@ candidate local state専用テストは17件、順位外FCFS専用テストは18
 
 > 2026-09-24追加注記: 独立検証と利用者判断により、最終結果のlive state非保持・終了時frozen記録、およびunbound FCFSの毎仮想timestep 1回呼出しを採用した。最新詳細は同日の途中確定記録を参照すること。
 
+> 2026-09-25追加注記: 利用者判断により、unresolved理由は観測可能な事実だけから付与し、因果関係を推測しない方針を採用した。終了時Vehicle記録はVehicle名、Link名、位置x、state、current VisitKey、current Visit Node名に限定する。最新の完全仕様は同日の一候補統括loop完全実装前仕様を参照すること。上記「付与規則未確定」「Vehicle追加field未確定」相当の記録は、2026-09-24時点の状態である。
+
 **次の直接作業**
 
 仮想timestep統括loopの入力、出力、停止理由、結果型の設計確定である。統括loop本体のPython実装は、その設計確定の前に開始しない。独自に仮の結果型を置かない。
@@ -6888,9 +6894,119 @@ binding側のNode流量不足はstop reasonではなく、一時スキップ理�
 
 終了時frozen記録の正式型名と全field、passage recordの正式型名と全field、統括stateの正式field、一時刻結果型と最終結果型の全field、resolved判定の完全実装仕様、unresolved理由の付与規則、horizon終了結果、stop reasonの最終Enum、全候補集合型、経済性評価との具体的API接続は、今回確定しない。Node流量不足時もunbound FCFS APIを毎時刻1回呼ぶことは確定済みである。一方、Node流量不足をhorizon終了時のunresolved理由へ反映する条件と診断規則は未確定である。
 
+> 2026-09-25追加注記: 利用者判断により、unresolved理由は観測可能な事実だけから付与し、因果関係を推測しない方針を採用した。終了時Vehicle記録はVehicle名、Link名、位置x、state、current VisitKey、current Visit Node名に限定する。一候補統括loopの型、API、処理順、resolved、horizon、stop reason、unresolved付与規則は、直後の完全実装前仕様で確定した。全候補集合型と経済性評価接続は、引き続き後続構想である。上記「今回まだ未確定」は、2026-09-24途中確定時点の記録である。
+
 **次の直接作業**
 
 終了時frozen記録の必要最小限の型とfield、passage recordの型とfield、resolved判定位置、unresolved理由の保持と付与規則、horizon終了契約、一候補統括state、one-timestep結果、最終結果の完全なfield、初期化API、one-timestep API、run-to-completion API、専用テスト契約を確定し、統括loop全体の完全な実装前仕様として正本へ記録する。Python実装は、その完全仕様の確定と文書保存後に開始する。
+
+> 2026-09-25追加注記: 上記「次の直接作業」は、2026-09-24途中確定時点の再開情報である。完全仕様の記録は完了した。現在の次の直接作業としては読まない。直後の2026-09-25追記を参照すること。
+
+今回のMarkdown更新では、Pythonとテストを変更していない。テストも再実行していない。Git操作は行っていない。`diagnostics/order_control.zip` は既存未追跡のまま対象外である。
+
+**TVT-MP候補別局所仮想計算の一候補統括loop完全実装前仕様を確定（2026-09-25）**
+
+一候補統括loopの完全な実装前仕様を正本へ記録した。詳細は設計メモ本文の「TVT-MP候補別局所仮想計算の一候補統括loop完全実装前仕様」である。本小節はその要約である。commit `86ac06f` までの途中確定契約を包含する。horizon契約はWorld baselineと一致させ、H回の交通処理、処理時刻TからT+H-1とする。Python実装はまだ行っていない。全候補集合入口、経済性評価、最終確定接続は対象外である。
+
+**新規予定2ファイル**
+
+- `uxsim/order_control_tvt_mp_candidate_local_virtual_calculation.py`
+- `tests_order_control_tvt_mp_candidate_local_virtual_calculation.py`
+
+**責務**
+
+一候補について、実装済み部品を正しい順序で実行する。offset管理、仮想時刻進行、binding transfer、unbound FCFS、required buyer / seller passage記録、local vehicle advance、新着incoming登録、outlink終端境界、時刻末resolved判定、horizon終了判定、unresolved診断、終了時frozen記録、最終frozen結果構築である。FIFO検査、general trade rank、concrete buyer candidate、全候補列挙、経済性評価、`G`、`R`、surplus、payment、compensation、候補採用または却下、最終順位確定、formal route保存、順位台帳更新、上位driver、実World交通反映は責務外である。
+
+**3つの公開API**
+
+- `initialize_tvt_mp_candidate_local_virtual_calculation_state(candidate_local_state, baseline_collector, downstream_boundary_node_result, configured_horizon_steps)`
+- `run_tvt_mp_candidate_local_virtual_calculation_one_timestep(calculation_state)`
+- `run_tvt_mp_candidate_local_virtual_calculation(calculation_state)`
+
+`configured_horizon_steps` はPython `int` かつ1以上である。bool、0、負値は `ValueError`。対応するbaseline `ForkResult.configured_horizon_steps` をそのまま渡す。horizon 0は拒否する。horizon 0でTを1回処理する契約、交通処理0回、初期状態だけのresolved判定は設けない。buyers空は拒否する。sellers空は許可する。可変統括stateは `OrderControlTvtMpCandidateLocalVirtualCalculationState` である。公開読取の順序付き列はtupleである。
+
+**required buyer / seller**
+
+required buyerは `concrete_buyer_candidate_set.buyers_sorted`。空不可。required sellerは `trade_scope_of_this_candidate_visits` のうち `SELLER`。空可。追跡単位はVisitKeyである。Vehicle名だけでは追跡しない。NONPARTICIPATING、OUTSIDE_TRADE_SCOPE、confirmed_before、preconfirmedはrequiredではない。
+
+**passage record**
+
+型は `OrderControlTvtMpCandidatePassageRecord`。fieldは visit_key、vehicle_name、trade_role、binding_partition、binding_rank、baseline_passage_timestep、candidate_passage_timestep、route_next_link_name、route_origin、inlink_name である。初期化時に全required Visit分を作り、`candidate_passage_timestep = None` とする。取得源は当該時刻の `binding_transfer_result.transferred_binding_visit_keys` とrequired集合の積である。unbound結果のVehicle名は使わない。処理順4で確定し、時刻末で書き換えない。baselineとcandidateのpassage最大はどちらもT+H-1である。T+Hのcandidate passageは許可しない。
+
+**処理順**
+
+1. offset > 0の場合だけ virtual time one-step
+2. binding transferを1回
+3. unbound FCFS transferを必ず1回
+4. required buyer / seller passageを記録
+5. local vehicle advanceと新着incoming登録
+6. outlink終端境界処理
+7. 時刻末にresolved、最後の許可処理offset H-1のunresolved、または次時刻を判断
+
+binding clearance停止時も、開始前Node流量不足時も、順位外候補0台時もunbound APIを必ず1回呼ぶ。開始不能時は既存部品が空完了する。空完了も `completed_virtual_timesteps` へ当該時刻を追加する。統括completed_virtual_timestepsは、その仮想timestepの全7手順が正常完了したことだけを表す。
+
+**resolved**
+
+全required buyerおよび全required sellerについて `candidate_passage_timestep` を取得済みであること。sellers空は充足。Hは1以上。offset 0は最初の許可処理時刻Tであり、そこで成立可能である。binding直後に揃っても、unbound、advance、boundaryを行い、時刻末に確定する。unrelated、unbound、boundary待機の残存はresolvedを妨げない。required通過が揃っていればboundary閉塞残存も妨げない。
+
+**horizon**
+
+horizon HはH回の交通処理である。処理offsetは0以上H-1以下。処理時刻はTからT+H-1。horizon 1はTのみ。horizon 2はT、T+1。horizon 3はT、T+1、T+2。T+Hでは交通処理しない。T+H-1でも全7手順を最後まで実行する。candidate passageの最大はT+H-1。baselineとcandidateは同じ処理範囲である。horizon 0は拒否する。最後の処理後にone-stepを呼ばない。既存one-stepを終端時計送りに使わない。
+
+horizon完走時:
+
+- `final_virtual_timestep = T+H-1`
+- `final_offset = H-1`
+- `simulated_timestep_count = H-1`
+- `len(timestep_results) = H`
+
+`simulated_timestep_count` は時計進行回数であり、交通処理回数ではない。`terminal_virtual_timestep` は追加しない。T+Hという終端ラベルが必要なら `baseline_timestep_T + configured_horizon_steps` から派生する。
+
+**stop reason**
+
+2値だけである。
+
+- `RESOLVED`
+- `HORIZON_EXHAUSTED_UNRESOLVED`
+
+`HORIZON_EXHAUSTED_UNRESOLVED` は、最後の許可処理offset H-1の時刻末でrequired passageが不足したことである。T+Hを処理してからの未解決ではない。
+
+**unresolved理由**
+
+正本の6名称を維持する。resolved時は空tuple。unresolved時は少なくとも1件。重複なし。正本順。1件へ潰さない。
+
+利用者採用方針: 観測できた事実だけを記録する。因果関係を推定しない。同時に起きた事象を直接原因と断定しない。分類4のacceptable outlink空がbuyer・seller未通過の直接原因だったとは推定しない。診断reasonは交通挙動や経済性評価を変えない。
+
+- `REQUIRED_BUYER_OR_SELLER_DID_NOT_PASS_WITHIN_HORIZON`: 最後の交通処理時刻 T+H-1 の時刻末に未通過requiredが1件以上。正常unresolvedでは必ず付与する。
+- `DOWNSTREAM_BOUNDARY_HAD_WAITING_VEHICLES_BUT_NO_TRANSFER`: baseline分岐B観測。直接原因とは断定しない。
+- `DOWNSTREAM_BOUNDARY_REMAINED_BLOCKED_WITHIN_HORIZON`: 最後の交通処理時刻 T+H-1 のboundaryで閉塞と待機残存。直接原因とは断定しない。
+- `CLEARANCE_OR_CAPACITY_BLOCKED_THROUGH_HORIZON`: 未通過requiredが、到着後に実際に処理した時刻全体でclearanceまたは容量阻害により通過できなかった継続事実。1回だけでは付けない。判定期間が1仮想timestepなら付けない。T+Hは観測対象にしない。
+- `NO_ACCEPTABLE_OUTLINK_FOR_ROUTE_UNDETERMINED_VEHICLE_WITHIN_HORIZON`: いずれかの時刻でunbound `ACCEPTABLE_OUTLINKS_EMPTY` が1件以上。直接原因とは断定しない。
+- `DOWNSTREAM_BOUNDARY_PREVENTED_REQUIRED_PASSAGE_INFORMATION`: Enum memberは残す。現段階では自動付与しない。境界閉塞とrequired未通過の併存だけでは因果を証明できないためである。
+
+**最終結果**
+
+型は `OrderControlTvtMpCandidateLocalVirtualCalculationResult`。liveな統括state、candidate local state、local World、Node、Link、Vehicleを持たない。終了時交通状態は独立frozen記録である。World全体の複製は作らない。per-timestep結果の型は `OrderControlTvtMpCandidateVirtualTimestepResult` である。unbound resultは常に存在し、`None` にしない。`final_virtual_timestep` は最後の処理時刻、`final_offset` は最後の処理offset、`simulated_timestep_count` は時計進行回数である。処理件数は `len(timestep_results)`。`terminal_virtual_timestep` は追加しない。
+
+終了時Vehicle記録の型は `OrderControlTvtMpCandidateFinalVehicleRecord`。fieldは `vehicle_name`、`current_link_name`、`position_x`、`state`、`current_visit_key`、`current_visit_node_name` である。`v`、lane、leader、follower、`move_remain`、`link_arrival_time`、`x_old`、`x_next`、current Visit dictは保存しない。対象は終了時の対象inlink、対象outlink、target Node incomingの和集合である。
+
+Link記録の型は `OrderControlTvtMpCandidateFinalLinkRecord`。inlinkとoutlinkを別tupleにし、登録順、物理順Vehicle名、容量残を持つ。Node記録の型は `OrderControlTvtMpCandidateFinalNodeRecord`。target Nodeのincoming、流量残、clearance履歴を持つ。boundary記録の型は `OrderControlTvtMpCandidateFinalOutlinkBoundaryRecord`。最終timestep結果と累積公開情報から構築し、baseline result自体は参照保持しない。詳細fieldは設計メモ第19節から第22節を参照する。
+
+**二重実行防止と原子性**
+
+統括 `completed_virtual_timesteps` で同時刻を1回に制限する。bindingとvirtual time one-stepの既存二重実行防止がないため、統括側で防ぐ。統括全体の一括rollbackは行わない。例外時はpartial timestep resultもfinal resultも返さない。先行部品の交通反映は戻さない。呼び出し側が当該候補local stateを破棄する。
+
+**専用テスト契約**
+
+公開型、初期化、horizon 0をValueError、horizon 1はTだけ、horizon 2はTとT+1、horizon 3はTとT+1とT+2、結果件数はH、passage最大はT+H-1、final_virtual_timestepはT+H-1、final_offsetはH-1、simulated_timestep_countはH-1、T+Hのbinding/unbound/advance/boundaryなし、最後の処理後にone-stepしない、baselineとcandidateの処理時刻範囲一致、early resolvedでも最後の処理時刻の全7手順完了、処理順、毎時刻unbound 1回、空完了、passage、resolved、unresolved付与、6番目reason非自動付与、終了記録の最小field、二重実行、不変性、例外を専用テストで固定する。詳細は設計メモ第26節である。
+
+**実装対象外**
+
+全候補集合入口、集合結果型の本番接続、経済性評価、expected time saving、waiting increase、`G`、`R`、surplus、utility、payment、compensation、候補採用・却下、最終順位確定、formal route保存、順位台帳更新、上位driver、実World交通反映、strategy-proofness検証。
+
+**次の直接作業**
+
+horizon端点補修後の独立確認と文書保存のあと、新規一候補統括モジュールと新規専用テストを実装する。実装前に新しい設計判断を追加しない。2026-09-23のBATCH端点記録は削除せず、更新注記を付けた。
 
 今回のMarkdown更新では、Pythonとテストを変更していない。テストも再実行していない。Git操作は行っていない。`diagnostics/order_control.zip` は既存未追跡のまま対象外である。
 
