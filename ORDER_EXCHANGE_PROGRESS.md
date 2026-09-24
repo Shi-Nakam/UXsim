@@ -6458,6 +6458,8 @@ resolvedとなる仮想timestepでも、対象Node通過および境界処理に
 本追記と2026-09-23補修（独立レビュー3点およびresolvedとなる仮想timestepの完了契約）を独立確認する。Markdownのcommitとpushは利用者がTerminalで行う。その後、最初の実装区分「正式進路付き順位台帳と原子的確定」の目的と範囲を利用者へ提示し、合意後にその区分だけへ着手する。その完了では、本番経路が旧確定APIを使わないことまでは確認しない。直ちにPython実装へ進まない。全区分を一度に実装しない。
 
 > 2026-09-24注記: これは当時の再開情報である。最新の実装済み範囲、未実装事項、および次の直接作業は、2026-09-24追記「TVT-MP候補別局所仮想計算の実装進捗・メモ未更新分の統合記録」を参照すること。
+>
+> 2026-09-24追加注記: outlink終端境界処理はcommit `42bfb62`で実装、テスト、push済みである。最新の未実装範囲および次の再開地点は、同日の実装完了追記「outlink終端境界処理本体の実装完了（commit 42bfb62）」を参照すること。統合記録本文の「次の直接作業はoutlink終端境界処理」は、その時点の再開情報として残す。
 
 - 今回のMarkdown追記は未commitである。
 - Git操作は利用者がTerminalで行う。
@@ -6497,6 +6499,8 @@ resolvedとなる仮想timestepでも、対象Node通過および境界処理に
 
 outlink終端境界処理以降は未実装である。outlink終端へ着いた車は、境界処理の前まで、そのoutlinkの上に残る。
 
+> 2026-09-24実装完了注記: 上記「outlink終端境界処理以降は未実装」は、`d23a385` までの記録である。outlink終端境界処理は commit `42bfb62` で実装済みである。統括loopはまだ無い。現在の呼出順と未接続の制約は、同日の「outlink終端境界処理本体の実装完了（commit 42bfb62）」を参照すること。
+
 **4. 重要な最新契約**
 
 - 一時スキップは6理由である。未到着、inlink物理先頭でない、inlink流出容量不足、outlink流入容量不足、Node流量容量不足、outlink入口空間不足。
@@ -6525,6 +6529,8 @@ outlink終端境界処理以降は未実装である。outlink終端へ着いた
 
 3状態の主表記は意味名である。歴史的本文の「分岐A・B・C」は残すが、この追記の主表記にはしない。境界処理本体は未実装である。
 
+> 2026-09-24実装完了注記: この節を書いた時点では境界処理本体は未実装である。commit `42bfb62` で3状態、専用境界退出、制約付きsink、outlink単位rollback、outlink別完了と同一時刻再開を実装済みである。現在の未実装としては読まない。
+
 - 下流待ちあり・実流出あり：`active_timestep_count > 0` かつ `transferred_vehicle_count > 0`。率は局所側で割って求める。残高は毎仮想時刻その率を足し、小数と未使用の整数を繰り越す。専用境界退出は、2026-09-24に採用した新しい確定判断であり、まだ未実装である。`end_trip()` は使わない。outlinkから除き、有限な終端Node容量と流出容量を `DELTAN` 消費し、`VEHICLES_RUNNING` と `VEHICLES_LIVING` から除き、`vehicle.link = None`、`vehicle.state = "end"` とする。`arrival_time` を実旅行完了としては記録しない。`record_log()` を旅行終了としては呼ばない。
 - 下流待ちあり・実流出なし：待ちは観測されたが、実流出は0である。local horizonの間は出さない。率も残高も使わない。車はoutlinkに残し、容量を消費しない。永久閉塞ではない。
 - 下流待ち観測なしの制約付きsink：`active_timestep_count == 0`。これは観測済みの0であり、`None` ではない。率と残高は使わない。容量を確認して消費したあと、コピーWorld上で `end_trip()` する。実Worldの旅行終了ではない。BATCHの単純sinkは使わない。
@@ -6538,6 +6544,8 @@ downstream boundary結果なしは、この3状態ではない。候補評価で
 **専用outlink境界退出の残存契約確定（2026-09-24）**
 
 専用境界退出は、まだ未実装である。詳細式とfield一覧は、設計メモ本文の「19. 専用outlink境界退出のフィールド単位確定契約」を正本とする。進捗上の確定事項は、次である。
+
+> 2026-09-24実装完了注記: 上記「まだ未実装」は、この残存契約を書いた時点の記録である。専用境界退出を含むoutlink終端境界処理は commit `42bfb62` で実装済みである。field契約は未確定へ戻さない。
 
 - 累積流出台数は、退出成功1台ごとに `outlink.cum_departure[-1] += local_world.DELTAN` である。反映前に `len(outlink.cum_departure) == local_world.T + 1` を要求する。不一致は `RuntimeError` であり、別indexへ補正しない。
 - outlink旅行時間は、Vehicle前進後の時刻末退出として、`traveltime_actual[start_timestep:]` へ `(local_world.T + 1) * local_world.DELTAT - vehicle.link_arrival_time` を書く。`start_timestep` は `int(vehicle.link_arrival_time / local_world.DELTAT)` である。UXsim本体の `(T + 1)` にTODOがあることは注意として残し、TVT-MPだけ `T` へ変えない。
@@ -6555,11 +6563,15 @@ downstream boundary結果なしは、この3状態ではない。候補評価で
 - 候補コピーWorldへ、通常Analyzerの旅行完了統計を適用しない。`state == "end"` だけでは通常旅行完了と読まない。
 - 実装時命名として残すのは、共通helperの関数分割だけである。上のfield契約は未確定に戻さない。
 
+> 2026-09-24実装完了注記: 共通helperの関数分割は、commit `42bfb62` の本番モジュール内private関数として実装済みである。現在の未確定としては読まない。関数名は実装時命名であり、制度は変えていない。
+
 **7. 未実装**
 
 outlink終端境界処理、拘束順位外の一時的FCFS、仮想timestepの統括loop、buyerとsellerの通過時刻、resolved、時刻末完了、horizon終了、unresolved診断、候補結果型、経済性評価、採用と却下、最終確定接続、上位driver統合。
 
 仮想時計、拘束順位通過、局所前進は、未実装に含めない。
+
+> 2026-09-24実装完了注記: 上記一覧の先頭「outlink終端境界処理」は、この節を書いた時点の未実装である。commit `42bfb62` で実装済みであり、現在の未実装一覧からは外す。現在の未実装は、拘束順位外の一時的FCFS、仮想timestepの統括loop、buyerとsellerの通過時刻、resolved、時刻末完了、horizon終了、unresolved診断、候補結果型、経済性評価、採用と却下、最終確定接続、上位driver統合である。仮想時計、拘束順位通過、局所前進、outlink終端境界処理は、現在の未実装に含めない。
 
 **8. 次の直接作業**
 
@@ -6573,6 +6585,8 @@ outlink終端境界処理、拘束順位外の一時的FCFS、仮想timestepの�
 
 境界処理のあとにも、仮想timestepの統括loop、拘束順位外走査、resolved、unresolved、最終確定接続は残る。
 
+> 2026-09-24追加注記: outlink終端境界処理はcommit 42bfb62で実装、テスト、push済みである。最新の未実装範囲および次の再開地点は、同日の実装完了追記を参照すること。
+
 **9. テスト記録**
 
 - 各実装commitの作成時に、その区分の専用テストと関連する回帰テストを確認した。
@@ -6585,6 +6599,89 @@ outlink終端境界処理、拘束順位外の一時的FCFS、仮想timestepの�
 このMarkdown更新を始める前のHEADは `d23a385` である。
 
 既存の未追跡ファイル `diagnostics/order_control.zip` は対象外である。内容には触れない。
+
+**outlink終端境界処理本体の実装完了（commit 42bfb62）**
+
+**記録日：2026-09-24**
+
+commit `42bfb62`（`Complete resumed implementation of three-mode TVT-MP outlink terminal boundary processing with per-outlink atomic rollback`）で、outlink終端境界処理本体を実装し、テストし、commitし、originへpushした。直前の設計記録commitは `4578239` と `016593d` である。詳細な型、field、式、例外、rollback範囲の正本は、設計メモ本文の「TVT-MP候補別局所仮想計算のoutlink終端境界処理実装完了記録」である。本小節は、その要約である。実装状況、重要契約、未実装、再開地点は省略しない。
+
+本番は `uxsim/order_control_tvt_mp_candidate_outlink_boundary.py` である。専用テストは `tests_order_control_tvt_mp_candidate_outlink_boundary.py` である。現行の専用テスト関数数は21件である。これは `def test_` の棚卸し件数であり、この文書更新で再実行した成功件数ではない。
+
+commit作成時のCursor報告では、専用境界21件、局所前進14件、binding transfer 15件、仮想時刻12件、局所状態14件、拘束順位列46件、Node順位台帳71件、BATCH Level 2参照20件、downstream boundary本体52件、UXsim hook 16件、driver 15件、`py_compile`、`git diff --check` が成功している。今回のMarkdown更新では、これらを再実行していない。
+
+公開Enumは、次である。
+
+- `OrderControlTvtMpOutlinkBoundaryMode`: `OBSERVED_WAIT_WITH_OUTFLOW`、`OBSERVED_WAIT_WITHOUT_OUTFLOW`、`NO_OBSERVED_WAIT_CONSTRAINED_SINK`。
+- `OrderControlTvtMpOutlinkBoundaryRemovalKind`: `OBSERVED_OUTFLOW_BOUNDARY_EXIT`、`CONSTRAINED_SINK_END_TRIP`。
+
+意味名との対応は、次である。
+
+- 下流待ちあり・実流出あり: `active_timestep_count > 0` かつ `transferred_vehicle_count > 0`。
+- 下流待ちあり・実流出なし: `active_timestep_count > 0` かつ `transferred_vehicle_count == 0`。
+- 下流待ち観測なしの制約付きsink: `active_timestep_count == 0` かつ `transferred_vehicle_count == 0`。
+- `active_timestep_count == 0` かつ `transferred_vehicle_count > 0` は `RuntimeError` である。
+- `downstream_boundary_node_result is None` は、3状態ではない。`active == 0` へ変換しない。候補評価では `RuntimeError` である。正常なunresolvedではない。
+
+可変状態は `OrderControlTvtMpCandidateOutlinkBoundaryState` と `OrderControlTvtMpCandidateOutlinkBoundaryLinkState` である。frozen結果は `OrderControlTvtMpOutlinkBoundaryProcessResult` と `OrderControlTvtMpOutlinkBoundaryLinkProcessResult` である。frozen除去記録は `OrderControlTvtMpOutlinkBoundaryVehicleRemovalRecord` である。順序を持つ公開列はtupleである。baseline結果は読取専用で保持し、変更しない。
+
+Vehicle除去記録の正式fieldは6つである。`vehicle_name`、`outlink_name`、`terminal_node_name`、`virtual_timestep`、`boundary_exit_time_seconds`、`removal_kind`。`visit_key` と `current_visit_key_at_removal` は実装していない。必須識別子は `vehicle_name` である。`order_control_current_visit is None` は、終端Nodeがorder-control対象外のときの正常状態であり、境界処理を止めない。`order_control_visit_id`、拘束順位列、通過済みVisit列からVisitKeyを推測しない。
+
+公開APIは、次である。
+
+- `initialize_tvt_mp_candidate_outlink_boundary_state(local_vehicle_advance_state, downstream_boundary_node_result)`
+- `process_tvt_mp_candidate_outlink_boundaries_at_current_timestep(outlink_boundary_state, local_vehicle_advance_result)`
+
+初期化は、対象Nodeの `OrderControlBaselineDownstreamBoundaryNodeResult` を明示的に受ける。新しい正規化profile型は作っていない。fork結果全体は渡さない。Node名、outlink数、登録順、`outlink_name`、`terminal_node_name` とコピーWorldの `outlink.end_node.name` を照合する。不一致は `RuntimeError` である。並べ替えない。欠落を0で補わない。交通状態は変えない。countはboolではない0以上のintである。
+
+処理APIの前段条件は、advance resultのNodeと仮想時刻が対象と一致し、local vehicle advanceがその時刻を完了済みであり、`local_world.T` と `current_virtual_timestep` が一致し、候補全体がその時刻をまだ完了していないことである。処理順は `candidate_local_state.outlinks` の登録順である。完了済みoutlinkは保存済み結果を返し、再処理しない。全outlink完了後だけ、候補全体をその時刻で完了にする。binding transfer、local vehicle advance、仮想時刻進行、容量補充、下流 `incoming_vehicles`、下流 `capacity_in_remain`、拘束順位外のNode通過、resolved、unresolvedは行わない。
+
+候補別・outlink別の `flow_allowance` は初期値0である。下流待ちあり・実流出ありだけ、未完了のその時刻に `transferred_vehicle_count / active_timestep_count` を1回加算する。小数部と未使用整数部を繰り越す。人工上限はない。専用退出1台ごとに1を消費する。`DELTAN` はallowanceから引かない。
+
+専用境界退出は、下流待ちあり・実流出ありだけである。`end_trip()` も `record_log()` も呼ばない。`cum_departure[-1] += local_world.DELTAN` は、`len(outlink.cum_departure) == local_world.T + 1` のときだけである。不一致は `RuntimeError` であり、別indexへ補正しない。`traveltime_actual[start_timestep:]` は `(local_world.T + 1) * local_world.DELTAT - vehicle.link_arrival_time` である。`start_timestep` は `int(vehicle.link_arrival_time / local_world.DELTAT)` である。`boundary_exit_time_seconds` は `(local_world.T + 1) * local_world.DELTAT` である。退出後は `state == "end"`、`link is None`、`leader is None`、`follower is None` である。`World.VEHICLES` には残す。`VEHICLES_RUNNING` と `VEHICLES_LIVING` からは除く。`arrival_time`、`travel_time`、`link_arrival_time`、`x`、`x_old`、`x_next`、`v`、`move_remain`、`route_next_link`、`flag_waiting_for_trip_end`、`order_control_current_visit`、`order_control_visit_id`、Visit履歴は変更しない。有限な終端Node容量（`flow_capacity is not None`）だけ `DELTAN` 消費する。無制限（`flow_capacity is None`、remain `10e10`）は減算しない。下流Linkの `capacity_in_remain` は使わない。候補コピーWorldを通常Analyzerの旅行完了統計へ使わない。
+
+下流待ちあり・実流出なしは、local horizon内で退出させない。率は `None` である。allowanceを加算しない。容量、`cum_departure`、`traveltime_actual`、Vehicle登録を変えない。永久閉塞ではない。終端待ちVehicleは結果へ記録する。
+
+制約付きsinkは、率もallowanceも使わない。物理FIFO、outlink流出容量、有限終端Node容量を確認する。成功順は、6 fieldを控える、流出容量を `DELTAN` 消費する、有限終端Node容量を `DELTAN` 消費する、コピーWorldで `end_trip()` を1回呼ぶ、`CONSTRAINED_SINK_END_TRIP` を追加する、累積Vehicle名列へ追加する、である。`end_trip()` が更新する `cum_departure`、`traveltime_actual`、旅行完了field、Vehicle登録、`Link.vehicles`、`record_log` は境界側で二重更新しない。容量不足と先頭未到着は正常待ちである。
+
+物理先頭は `outlink.vehicles[0]` である。除去は `popleft()` である。条件を満たす限り、同じ仮想時刻に複数台を処理する。人工的な最大1台制限はない。先頭未到着または通常待ちでは、後続を飛ばさない。それ以前の正常退出は維持する。物理先頭の `leader` は `None` である。followerがあれば `follower.leader` を外してから `popleft` する。
+
+原子性はoutlink単位である。最初の書込み前の登録不一致、物理順不一致、`cum_departure` 長不一致、負の容量、負のallowanceは `RuntimeError` で、当該outlinkは無変更である。数でない容量、allowance、`link_arrival_time`、`DELTAT` は `ValueError` である。`DELTAT <= 0` は `RuntimeError` である。反映中の予期しない例外は、当該outlinkの開始時snapshotへ戻し、元例外を再送出する。rollback失敗時は、元例外を原因に持つ `RuntimeError` である。別outlinkの正常完了は戻さない。全outlinkの一括transactionにはしない。rollback対象には、vehicles、容量、`cum_departure`、`traveltime_actual`、終端Node容量、allowance、累積Vehicle名、除去記録、Vehicle field、RUNNING、LIVING、leader、follower、`end_trip()` が変えるログfield、`analyzer.average_speed`、`analyzer.average_speed_count`、そのoutlinkの完了時刻と保存済み結果を含む。
+
+`OrderControlTvtMpCandidateOutlinkBoundaryLinkState` は、内部に `_completed_virtual_timesteps` と `_completed_process_results_by_virtual_timestep` を持つ。外部はtupleの `completed_virtual_timesteps` と `completed_process_result(virtual_timestep)` である。退出0台でも正常完了である。後続outlinkが失敗しても、先行outlinkは完了済みのままである。失敗outlinkは未完了である。候補全体は未完了である。同じ仮想時刻の再実行は、完了済みoutlinkをスキップし、保存済み結果をそのまま返す。allowanceの再加算、容量の再消費、累積と旅行時間の再更新、追加除去、除去記録の重複はない。交通状態から結果を再構成しない。全outlink完了後だけ候補全体を完了にする。その後の同じ時刻の再実行は `RuntimeError` であり、状態は無変更である。
+
+テストが固定した重要事項は、VisitKeyなしの6 field、3 mode、`None` と `active == 0` の区別、outlink順序、allowanceの小数と整数の繰越、専用境界退出、制約付きsink、FIFO、同一outlink複数Vehicle、有限と無限の終端Node容量、`cum_departure` 長不一致、outlink単位rollback、`end_trip()` 失敗のrollback、後続outlink失敗後の同一時刻再開、完了済みoutlinkの二重処理防止、退出0台の完了、完了記録失敗のrollback、実Worldとbaseline結果の不変である。
+
+現在の未実装は、次である。outlink終端境界処理は含めない。
+
+- 仮想timestep全体の統括loop
+- 拘束順位外Vehicleの一時的FCFS走査
+- buyerとsellerの通過時刻の収集
+- resolved判定と、resolvedとなる時刻末の完了処理
+- horizon終了
+- unresolved理由と診断
+- 候補別局所計算結果型の完成
+- 経済性評価
+- 候補の採用と却下
+- 最終順位と正式進路の確定接続
+- 上位driver統合
+
+`42bfb62` の境界処理契約は未確定へ戻さない。helper関数分割も実装済みであり、現在の未確定から外す。残る未確定は、拘束順位外FCFSの具体的実装契約、buyerとsellerの通過時刻を持つ正式結果型とfield、resolved判定の統括loop内位置、unresolved理由の複数保持、最終確定接続への評価済み列の受渡し、Node流量不足後に拘束順位外走査へ進むかの統括判定である。
+
+次の正式実装区分は未確定である。次の実装候補は、拘束順位外Vehicleの一時的FCFS走査と、仮想timestep全体の統括loopの2つである。どちらを正式に先行するかは、まだ決めていない。
+
+拘束順位外Vehicleの一時的FCFS走査には、具体的な実装契約の未確定事項が残る。仮想timestep全体の統括loopは、処理順に未実装の拘束順位外走査を含む予定である。そのため、統括loopを先に実装すると、拘束順位外走査の未確定部分を仮定で埋める危険がある。一方で、拘束順位外走査を独立部品として先に実装するかどうかは、まだ正式な設計判断を行っていない。「拘束順位外走査を先に実装する」とも、「統括loopを先に実装する」とも、本追記では確定しない。
+
+現時点の次の直接作業は、両候補の依存関係、入力、出力、責務分離を確認し、実装順を決定することである。実装順を決定するまでは、どちらのPython実装も開始しない。完全な実装前仕様の「実装区分」は、番号付き作業順を確定していない。
+
+再開時に守る制約は、次である。
+
+- outlink終端境界処理は `42bfb62` で実装済みである。
+- まだ単独部品であり、仮想timestep統括loopへ未接続である。
+- binding transfer、local vehicle advance、outlink boundaryを正しい順で呼ぶ統括処理は未実装である。
+- outlink boundaryは local vehicle advance result を入力に取る。初期化には対象Nodeの downstream boundary Node結果を明示的に渡す。
+- 後続統括処理は、同じ仮想時刻の binding transfer へ戻ってはならない。
+- 次時刻へ進む場合は、`advance_tvt_mp_candidate_virtual_time_one_step` を明示的に呼ぶ必要がある。境界処理自身は時計を進めず、容量を補充しない。
 
 #### 2026-08-29：TVT権利保有車両選定前の先頭非参加Vehicle先行確定の記録補修
 
