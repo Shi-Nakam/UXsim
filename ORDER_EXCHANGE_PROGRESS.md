@@ -6573,6 +6573,8 @@ outlink終端境界処理、拘束順位外の一時的FCFS、仮想timestepの�
 
 > 2026-09-24実装完了注記: 上記一覧の先頭「outlink終端境界処理」は、この節を書いた時点の未実装である。commit `42bfb62` で実装済みであり、現在の未実装一覧からは外す。現在の未実装は、拘束順位外の一時的FCFS、仮想timestepの統括loop、buyerとsellerの通過時刻、resolved、時刻末完了、horizon終了、unresolved診断、候補結果型、経済性評価、採用と却下、最終確定接続、上位driver統合である。仮想時計、拘束順位通過、局所前進、outlink終端境界処理は、現在の未実装に含めない。
 
+> 2026-09-24実装完了注記: 上記「現在の未実装は、拘束順位外の一時的FCFS」は、outlink終端境界処理完了時点の一覧である。拘束順位外Vehicle一時的FCFS走査はcommit `7926d43`で実装済みであり、現在の未実装としては読まない。最新の未実装範囲は、同日の実装完了追記「拘束順位外Vehicle一時的FCFS走査の実装完了（commit 7926d43）」を参照すること。
+
 **8. 次の直接作業**
 
 境界処理を実装する前に、専用境界退出の未確定細部を文章で確定する。その後、outlink終端境界処理を、新規モジュールと専用テストで実装する。
@@ -6666,7 +6668,11 @@ Vehicle除去記録の正式fieldは6つである。`vehicle_name`、`outlink_na
 - 最終順位と正式進路の確定接続
 - 上位driver統合
 
+> 2026-09-24実装完了注記: 上記一覧の「拘束順位外Vehicleの一時的FCFS走査」は、outlink終端境界処理完了時点の未実装である。commit `7926d43` で実装済みであり、現在の未実装としては読まない。現在の未実装一覧は、同日の実装完了追記「拘束順位外Vehicle一時的FCFS走査の実装完了（commit 7926d43）」を参照すること。
+
 `42bfb62` の境界処理契約は未確定へ戻さない。helper関数分割も実装済みであり、現在の未確定から外す。残る未確定は、拘束順位外FCFSの具体的実装契約（統括loop接続前の独立部品としての細部）、buyerとsellerの通過時刻を持つ正式結果型とfield、resolved判定の統括loop内位置、unresolved理由の複数保持、最終確定接続への評価済み列の受渡し、Node流量不足後に拘束順位外走査へ進むかの統括判定である。進路4分類の制度と分類4の適用範囲は、正本監査により2026-09-24補修で明示した。
+
+> 2026-09-24実装完了注記: 上記「拘束順位外FCFSの具体的実装契約」は、outlink終端境界処理完了時点の未確定である。独立部品としての順位外FCFSは commit `7926d43` で実装済みであり、統括loop接続前の細部としての未確定へは戻さない。残る未確定は、統括loopの入力、出力、停止理由、結果型である。最新は同日の実装完了追記を参照する。
 
 **分類4の適用範囲と進路制度（2026-09-24補修要約）**
 
@@ -6678,6 +6684,8 @@ Vehicle除去記録の正式fieldは6つである。`vehicle_name`、`outlink_na
 - collector記録そのものが無い（`get_baseline_visit_snapshot` が `None`）: 分類4ではない。重大不整合として `RuntimeError` で停止する。コピーWorldの `route_next_link`、Vehicle ID方式、別Visitの流用、Vehicle名だけの探索は行わない。
 - collector記録はあるが `route_next_link_name` が無い（未到着または到着時進路未記録）: 分類4の条件になり得る。両者を混同しない。
 - 分類4のVehicle ID方式（2026-09-22確定を維持）: 受入可能なoutlinkだけを抽出し、`outlink.id` 昇順、`selection_index = real_vehicle.id % len(acceptable_outlinks)` で選び、同じ通過試行で直ちに通過する。`acceptable_outlinks` が空は通常の通過不能。乱数、`route_next_link_choice()`、`merge_priority`、全物理outlinkの循環探索は使わない。分類1・分類3の保存済み進路が受入不能でもVehicle ID方式へ変更しない。
+
+> 2026-09-24実装完了注記: 分類4の `real_vehicle.id` は、candidate local state構築時に `real_W.VEHICLES[name].id` から保存した実Vehicle IDである。コピーVehicle IDではない。実装の読取APIは `candidate_local_state.real_vehicle_id(vehicle_name)` である。commit `7926d43`。詳細は設計メモの「TVT-MP候補別局所仮想計算の拘束順位外一時的FCFS走査実装完了記録」を参照する。
 
 正本の詳細は、設計メモ「拘束順位外処理・下流境界・統合仕様の確定記録」の第2.5節（2026-09-24補修）である。
 
@@ -6698,6 +6706,8 @@ Vehicle除去記録の正式fieldは6つである。`vehicle_name`、`outlink_na
 
 拘束順位外Vehicleの一時的FCFS走査を、新規独立モジュールと専用テストとして実装する。順位外FCFSの実装には、local vehicle advance、outlink終端境界、virtual time進行、buyer・seller通過時刻の最終収集、resolved、unresolved、horizon終了、経済性評価、最終順位確定、上位driver統合を含めない。完了後の次の直接作業は、仮想timestep統括loopへの接続である。
 
+> 2026-09-24追加注記: 拘束順位外Vehicle一時的FCFS走査はcommit 7926d43で実装、テスト、push済みである。最新の未実装範囲および次の再開地点は、同日の実装完了追記を参照すること。
+
 再開時に守る制約は、次である。
 
 - outlink終端境界処理は `42bfb62` で実装済みである。
@@ -6706,6 +6716,135 @@ Vehicle除去記録の正式fieldは6つである。`vehicle_name`、`outlink_na
 - outlink boundaryは local vehicle advance result を入力に取る。初期化には対象Nodeの downstream boundary Node結果を明示的に渡す。
 - 後続統括処理は、同じ仮想時刻の binding transfer へ戻ってはならない。
 - 次時刻へ進む場合は、`advance_tvt_mp_candidate_virtual_time_one_step` を明示的に呼ぶ必要がある。境界処理自身は時計を進めず、容量を補充しない。
+
+**拘束順位外Vehicle一時的FCFS走査の実装完了（commit 7926d43）**
+
+**記録日：2026-09-24**
+
+commit `7926d43`（`Implement TVT-MP unbound FCFS transfer with persisted real vehicle IDs`）で、拘束順位外Vehicleの一時的FCFS走査を実装し、テストし、commitし、originへpushした。直前の文書commitは `308256e` である。詳細な型、API、field、対象集合、例外、補修履歴の正本は、設計メモ本文の「TVT-MP候補別局所仮想計算の拘束順位外一時的FCFS走査実装完了記録」である。本小節は、その要約である。実装状況、重要契約、未実装、再開地点は省略しない。
+
+変更4ファイル:
+
+- 新規本番 `uxsim/order_control_tvt_mp_candidate_unbound_fcfs_transfer.py`
+- 新規専用テスト `tests_order_control_tvt_mp_candidate_unbound_fcfs_transfer.py`
+- 既存本番 `uxsim/order_control_tvt_mp_candidate_local_state.py`
+- 既存テスト `tests_order_control_tvt_mp_candidate_local_state.py`
+
+`diagnostics/order_control.zip` は既存未追跡のまま対象外である。
+
+**candidate local stateへの実Vehicle ID保存**
+
+`OrderControlTvtMpCandidateLocalState` へ、内部field `_real_vehicle_id_by_real_vehicle_name` と公開読取API `real_vehicle_id(real_vehicle_name)` を追加した。保存値の取得元は `real_W.VEHICLES[real_vehicle_name].id` である。コピーVehicle IDから作らない。実World全体も実Vehicle objectも状態へ保持しない。`MappingProxyType` で保護する。候補構築後にlocal Vehicle IDが変わっても、保存済み実IDは変わらない。実Worldを再参照しない。候補間で同じ実Vehicle IDを保持する。local Vehicle objectは候補ごとに独立である。空でないstrを要求する。未登録名は `RuntimeError`、空文字または非strは `ValueError`、`bool` はVehicle IDとして許可しない。Python `int` だけを返す。可変dictを外部へ返さない。保存対象は順位外Vehicleだけに限定せず、対象inlink、対象outlink、incomingの和として構成された `local_vehicles` の正式対応範囲である。
+
+**順位外FCFSの独立モジュール**
+
+公開Enumは `OrderControlTvtMpUnboundRouteClassification`、`OrderControlTvtMpUnboundTemporarySkipReason`、`OrderControlTvtMpUnboundFcfsStopReason` である。進路分類は `SNAPSHOT_FIXED_ROUTE`（分類1）、`BASELINE_ARRIVAL_ROUTE`（分類3）、`DETERMINISTIC_VIRTUAL_ROUTE`（分類4）である。分類2は完全な拘束順位列内のため対象外である。frozen結果型は `OrderControlTvtMpUnboundVehicleTransferRecord`、`OrderControlTvtMpUnboundTemporarySkip`、`OrderControlTvtMpUnboundFcfsTransferResult` である。可変状態型は `OrderControlTvtMpCandidateUnboundFcfsTransferState` である。順序を持つ公開列はtupleである。
+
+初期化APIは2引数である。
+
+```text
+initialize_tvt_mp_candidate_unbound_fcfs_transfer_state(
+    binding_transfer_state,
+    baseline_collector,
+)
+```
+
+`real_W` は渡さない。真正な実Vehicle IDはcandidate local state構築時に保存済みだからである。順位外FCFS側で別Worldを受け取り、コピー元かどうかを後から推測しない。初期化時は交通状態、collector、順位台帳を変更しない。snapshot固定VisitKeyを状態へ保存する。
+
+処理APIは次である。
+
+```text
+scan_and_transfer_tvt_mp_unbound_fcfs_vehicles_at_current_timestep(
+    unbound_fcfs_transfer_state,
+    binding_transfer_scan_result,
+)
+```
+
+1回の呼出しは、現在の仮想timestepについて順位外Vehicleを一時的FCFS順で走査する。virtual time進行、容量補充、local vehicle advance、新着incoming登録、outlink終端境界、buyer・seller通過時刻の最終収集、resolved、unresolved、horizon終了、正式順位保存、順位台帳更新、経済性評価、最終確定接続は行わない。
+
+**snapshot固定集合内だけが対象**
+
+対象Vehicleは、その仮想timestepに `target_node.incoming_vehicles` に存在し、対象Nodeへ到着済み、未通過、現在Visitが対象Node、VisitKeyがsnapshot固定集合内、完全な拘束順位列に含まれない、transferred binding Visitではない、trip-endでも研究対象外でもない。研究対象外の正常除外は、`state` が `end` または `abort`、`flag_waiting_for_trip_end`、taxi、`specified_route`、対象Nodeが目的地となるVehicleである。binding走査で一時スキップされた拘束Visitは順位外へ移さない。通過済みbinding Visitも再処理しない。incoming内の同一Vehicle object重複、および既に順位外通過済みのVehicleがincomingへ残っている場合は `RuntimeError` である。
+
+**snapshot固定集合外とcollector欠落は重大不整合**
+
+通常の研究対象Vehicleがincomingに存在し、現在Visitが対象Node向けで拘束順位外であるにもかかわらず、VisitKeyがsnapshot固定集合外なら `RuntimeError` である。分類4へ回さない。Vehicleを移動しない。容量、incoming、完了時刻、通過済み名を変更しない。コピーVehicleの現在進路で補完しない。Vehicle名だけで別Visitを探さない。別 `visit_id` を使わない。collector記録欠落も同様に重大不整合である。collector記録なしと、collector記録ありで `route_next_link_name` なしとを混同しない。後者は分類4の条件になり得る。
+
+**FCFS順**
+
+候補集合を、現在Visitの対象Node到着時刻、固定 `arrival_tiebreaker`、candidate local stateに保存された実Vehicle IDの昇順で並べる。第3条件にlocal Vehicle IDを使わない。毎仮想timestep、その時点の対象集合から作り直す。前時刻の順を持ち越さない。正式順位、TVT順位、`merge_priority`、乱数、`World.rng`、`order_control_rng`、`route_next_link_choice()` は使わない。
+
+**分類1、分類3、分類4**
+
+分類1は、collector記録あり、`was_arrived_at_snapshot is True`、`route_next_link_name` ありである。snapshot時進路を固定使用する。受入不能でも別outlinkへ変更しない。分類4へ切り替えない。formal routeを新規保存しない。snapshot時点で既到着なのに進路が無い場合は `RuntimeError` である。
+
+分類3は、collector記録あり、`was_arrived_at_snapshot is False`、`route_next_link_name` が空でない文字列である。collectorに保存されたbaseline対象Node到着時進路を一時使用する。コピーVehicleの現在 `route_next_link` を採用しない。local Vehicleの `route_next_link` を書き換えない。formal routeとは呼ばない。受入不能でも分類4へ切り替えない。既存の1台通過helperへ選択したoutlinkを明示的に渡すため、`route_next_link` 書換えは不要だった。
+
+分類4は、collector記録あり、未到着、`route_next_link_name` が `None` または空、snapshot固定集合内、拘束順位外である。通過試行時に、target Nodeのoutlinkのうち `capacity_in_remain` が `DELTAN` 以上かつ入口空間があるものだけを `outlink.id` 昇順で並べ、`selection_index = candidate_local_state.real_vehicle_id(vehicle_name) % len(acceptable_outlinks)` で選び、同じ通過試行で直ちに通過させる。`acceptable_outlinks` が空は正常な一時待ち `ACCEPTABLE_OUTLINKS_EMPTY` である。循環探索、乱数、`merge_priority`、`route_next_link_choice()` は使わない。
+
+**clearanceとNode流量停止**
+
+binding走査がclearance未充足で停止していた場合、順位外候補を抽出せず、交通状態を変更せず、`BINDING_CLEARANCE_STOPPED_NOT_STARTED` で完了時刻を追加する。順位外走査開始前にNode流量容量が `DELTAN` 未満なら、同様に抽出せず `NODE_FLOW_CAPACITY_UNAVAILABLE_BEFORE_START` で完了する。0台でも正式な処理完了である。走査中のclearance未充足は `CLEARANCE_NOT_SATISFIED`、走査中のNode流量不足は `NODE_FLOW_CAPACITY_UNAVAILABLE` である。そのVehicle以降を確認せず、先行成功は維持し、`stopped_vehicle_name` を記録する。signalは使用しない。
+
+**一時スキップ**
+
+通常の一時スキップは、inlink物理先頭でない、inlink流出容量不足、分類1または分類3の固定outlink流入容量不足、同固定outlink入口空間不足、分類4で `acceptable_outlinks` が空である。そのVehicleを通さず、temporary skip記録を残し、後続候補を確認する。同じinlinkの後続Vehicleは物理先頭条件で通さない。別inlinkの候補は確認可能である。
+
+**通過更新**
+
+既存binding transferの1台通過helper `_transfer_one_vehicle_like_uxsim` を使う。成功時は `cum_departure`、`cum_arrival`、`traveltime_actual`、inlink流出容量、outlink流入容量、finite Node流量、inlinkとoutlinkの `vehicles`、incoming、`vehicles_enter_log`、Vehicleのlink、到着時刻、位置、速度、lane、leader、follower、`move_remain`、`begin_order_control_visit_on_link_entry()`、clearance履歴を更新する。順位台帳、collector、binding sequence、binding通過済みVisit列は変更しない。
+
+**1台単位処理と二重実行防止**
+
+1台ずつ通過条件を確認し、既存helperで反映する。通常待ち、後続clearance停止、Node容量不足では先行成功を戻さない。全順位外Vehicleを一括transactionにはしない。通過成功したVehicle名は `transferred_unbound_vehicle_names` へ追加する。同じ仮想timestepの正常な2回目呼出しは `RuntimeError` で状態無変更である。処理完了後だけ `completed_virtual_timesteps` へ現在時刻を追加する。重大不整合で例外になった場合は完了時刻を追加しない。公開結果の必須識別子は `vehicle_name` である。VisitKeyは内部のsnapshot固定集合照合に使うが、公開結果の必須識別子にはしない。
+
+**実装中に見つかった誤りと最終補修**
+
+初期実装の誤りは、snapshot固定集合外の通常Vehicleを黙って除外していたこと、分類4でコピーVehicle IDを使っていたこと、snapshot固定集合外を正常無視する誤ったテストがあったこと、`or True` 等の常に成功するassertがあったこと、順位外FCFS初期化へ `real_W` を追加したが真正なコピー元Worldであることを証明できなかったことである。最終補修は、snapshot固定集合外とcollector記録欠落を `RuntimeError` とし、候補別局所状態の構築時に実Vehicle IDを保存し、順位外FCFSへ `real_W` を渡さず、FCFS順と分類4で保存済み実IDを使い、無効assertを削除し、コピーIDと実IDを意図的に異ならせる反証テストを追加し、最新4ファイルを独立レビュー後にcommitしたことである。これらは最終契約であり、同種の誤りを再導入してはならない。
+
+**テスト記録**
+
+candidate local state専用テストは17件、順位外FCFS専用テストは18件である。commit `7926d43` 作成時のCursor報告上、candidate local state 17件、unbound FCFS 18件、binding transfer 15件、local vehicle advance 14件、outlink boundary 21件、virtual time 12件、binding rank sequence 46件、node rank state 71件、BATCH Level 2 reference 20件、baseline collector、baseline snapshot、`py_compile`、`git diff --check` が成功している。今回のMarkdown更新時には、これらを再実行していない。
+
+テストが固定した重要事項は、実World由来のVehicle ID保存、`MappingProxyType`、local ID変更後も実ID不変、FCFS第3条件が実ID、分類4の剰余が実ID、snapshot固定集合外は `RuntimeError`、collector記録欠落は `RuntimeError`、分類1、分類3、分類4、binding Visitを順位外へ移さないこと、clearance停止、Node容量停止、same-inlink FIFO、同一仮想timestepの複数通過、通過更新、実World不変、collector不変、順位台帳不変、binding状態不変、二重実行拒否、乱数不変である。
+
+**未実装一覧**
+
+拘束順位外FCFS走査はこの一覧に含めない。
+
+- 仮想timestep全体の統括loop
+- buyerとsellerの通過時刻の最終収集
+- resolved判定
+- resolvedとなる仮想時刻の時刻末完了処理
+- horizon終了
+- unresolved理由と診断
+- 候補別局所計算結果型の完成。仕様上の名前はある。クラスは無い。
+- 経済性評価
+- 候補の採用と却下
+- 最終順位と正式進路の確定接続
+- 上位driver統合
+
+仮想時計、拘束順位の対象Node通過、局所Vehicle前進と新着incoming登録、outlink終端境界処理、拘束順位外Vehicleの一時的FCFS走査は、未実装に含めない。順位外FCFSはまだ単独部品であり、統括loopへ未接続である。
+
+**現在残る未確定事項**
+
+独立部品としての順位外FCFS契約は未確定へ戻さない。残る未確定は、buyer・seller通過時刻を持つ正式結果型とfield、resolved判定の統括loop内位置、unresolved理由の複数保持、horizon終了結果、候補別局所計算結果型、時刻末の結果保存、Node流量不足後に順位外走査へ進むかの統括判定である。これらは正本から一意に決まらない。
+
+**次の直接作業**
+
+仮想timestep統括loopの入力、出力、停止理由、結果型の設計確定である。統括loop本体のPython実装は、その設計確定の前に開始しない。独自に仮の結果型を置かない。
+
+少なくとも次の処理順を再開情報として残す。結果型が決まるまでPythonには落とさない。
+
+1. `offset > 0` の場合だけ virtual time one-step
+2. binding transfer
+3. unbound FCFS transfer
+4. buyer・seller通過時刻記録
+5. local vehicle advanceと新着incoming登録
+6. outlink終端境界処理
+7. resolved、最終時刻unresolved、または次時刻
+
+同じ仮想timestepのbinding transferへ戻らない。入口空間が回復しても戻らない。
 
 #### 2026-08-29：TVT権利保有車両選定前の先頭非参加Vehicle先行確定の記録補修
 
