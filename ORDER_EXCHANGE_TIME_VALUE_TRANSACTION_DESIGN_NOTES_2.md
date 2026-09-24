@@ -9746,6 +9746,57 @@ Python実装と専用テストは未着手である。
 
 いずれの分類でも、候補ごとに`route_next_link_choice()`を呼び直さない。局所仮想計算から実Worldの進路を書き換えない。
 
+## 2.5 進路4分類の適用範囲とsnapshot固定集合（2026-09-24補修）
+
+本小節は、既存の進路4分類制度を変更しない。snapshot固定集合と分類4の境界を明示し、誤読を防ぐ補修である。
+
+**snapshot固定集合とcollector**
+
+- snapshot固定集合は、時点Tの対象Nodeについて追跡対象となるVisitの集合である。要素はVisitKey `(vehicle_name, visit_id)` である。
+- baseline collector登録集合は、対象Nodeごとにsnapshot固定集合と同一である。
+- baseline中にcollectorへ新しいVisitKeyを追加しない。
+- snapshot固定集合外のVehicleまたはVisitを、分類4として扱わない。
+- collectorに未登録のVisitを、記録の無い分類4として扱わない。
+
+**分類1**
+
+- snapshot固定集合内に限る。
+- snapshot時点で対象Node向け進路が決定済みである。
+- snapshot進路を固定使用する。
+
+**分類3**
+
+- snapshot固定集合内に限る。
+- snapshot時点では未到着である。
+- baseline中に対象Nodeへ到着し、同一VisitKeyのcollector記録に `route_next_link_name` が保存済みである。
+- そのbaseline対象Node到着時進路を一時使用する。取得は `get_baseline_visit_snapshot(vehicle_name, visit_id)` の `route_next_link_name` である。baseline終了時の `Vehicle.route_next_link` や、コピーWorldの現在 `route_next_link` では補わない。
+- formal routeとは呼ばない。順位台帳へ保存しない。
+- 受入不能でも分類4へ変更しない。
+
+**分類4の正式範囲**
+
+分類4の対象は、snapshot固定集合に登録済みのVisitに限る。次をすべて満たすこと。
+
+- snapshot固定集合に含まれる。
+- 対象Nodeをまだ通過していない。
+- 完全な拘束順位列に含まれない。
+- trip-end Vehicleではない。
+- snapshot時点では対象Node向け進路が決定していない。
+- baseline終了まで、collectorの同一VisitKeyに対象Node到着時進路（`route_next_link_name`）が記録されていない。
+
+**collector記録なしと `route_next_link_name` なしの区別**
+
+- collector記録そのものが存在しない（`get_baseline_visit_snapshot` が `None`）: 分類4ではない。snapshot固定集合とcollector登録集合の対応が壊れた重大不整合である。`RuntimeError` で停止する。コピーWorldの `route_next_link` で補完しない。Vehicle ID方式へfallbackしない。別Visitの記録を流用しない。Vehicle名だけで別Visitを探索しない。
+- collector記録はあるが、未到着登録時点の `route_next_link_name` がまだ空で、baseline終了まで到着時進路が記録されなかった: 分類4の条件になり得る。
+
+**採用しない誤判断**
+
+次は採用しない。コードにも、本節以前の正本にも、確定制度として反映していない。
+
+- snapshot固定集合外のVehicleが、通常の拘束順位外Vehicleとして存在する。
+- collector記録が無いVehicleを分類4とする。
+- snapshot固定集合外のVehicleへVehicle ID方式を適用する。
+
 ## 3. 分類4のBATCH Level 2型仮想進路
 
 分類4のVehicleは、仮想通過を実際に試す時点で、次の順に処理する。
@@ -9772,11 +9823,17 @@ selection_index = real_vehicle.id % len(acceptable_outlinks)
 
 `acceptable_outlinks`が空の場合:
 
-- そのtimestepでは仮想進路を割り当てない
-- Vehicleを通過させない
+- 通常の通過不能である
+- そのVehicleを通過させない
+- 別inlinkに属する後続候補の通過可否は確認できる
+- 同じinlinkの後続は物理先頭条件により追い越せない
+- 新しい乱数を使わない
+- `route_next_link_choice()` を呼ばない
+- `merge_priority` を使わない
+- 全物理outlinkへの循環探索を行わない
 - 次の仮想timestepで再評価し得る
 
-この空集合は、通常の物理条件・容量条件による通過不能である。clearance未充足とは区別する。当該Vehicleを止め、別inlinkに属する後続の拘束順位外候補の通過可否は確認できる。
+この空集合は、通常の物理条件・容量条件による通過不能である。clearance未充足とは区別する。
 
 位置付け:
 
@@ -11507,7 +11564,9 @@ downstream boundary結果なしは、上の3状態に含めない。空baseline�
 
 > 2026-09-24追加注記: outlink終端境界処理はcommit `42bfb62`で実装、テスト、push済みである。最新の未実装範囲および次の再開地点は、同日の「TVT-MP候補別局所仮想計算のoutlink終端境界処理実装完了記録」を参照すること。
 >
-> 2026-09-24実装順注記: 上記「拘束順位外の走査、仮想時刻の統括loop」の列挙は、残作業の例示であり、正式な実装順の確定ではない。次の正式実装区分は未確定である。候補は拘束順位外Vehicleの一時的FCFS走査と仮想timestep全体の統括loopである。統括loopは処理順に拘束順位外走査を含む予定である。拘束順位外走査を独立部品として先行実装するかは、まだ正式採用していない。次の直接作業は、両候補の依存関係、入力、出力、責務分離を確認し実装順を決定することである。実装順を決めるまで、どちらのPython実装も開始しない。
+> 2026-09-24実装順注記: 上記「拘束順位外の走査、仮想時刻の統括loop」の列挙は、残作業の例示であり、当時は正式な実装順の確定ではなかった。候補は拘束順位外Vehicleの一時的FCFS走査と仮想timestep全体の統括loopであった。
+>
+> 2026-09-24実装順確定注記: 後続の正本監査、コード準拠監査、独立確認により、実装順を正式採用した。最新は「TVT-MP候補別局所仮想計算のoutlink終端境界処理実装完了記録」の第20節、および本節「2.5 進路4分類の適用範囲とsnapshot固定集合（2026-09-24補修）」を参照する。拘束順位外Vehicleの一時的FCFS走査を先行し、その後仮想timestep統括loopへ接続する。
 
 ## 19. 専用outlink境界退出のフィールド単位確定契約
 
@@ -12478,12 +12537,12 @@ outlink終端境界処理は `42bfb62` で実装済みである。まだ単独�
 
 後続の統括処理は、同じ仮想時刻の binding transfer へ戻ってはならない。入口空間が回復しても戻らない。次の仮想時刻へ進む場合は、既存の `advance_tvt_mp_candidate_virtual_time_one_step` を明示的に呼ぶ必要がある。境界処理自身は時計を進めない。容量も補充しない。
 
-次の正式実装区分は未確定である。outlink終端境界処理は `42bfb62` で実装、テスト、commit、push済みである。次の実装候補は、次の2つだけである。
+outlink終端境界処理は `42bfb62` で実装、テスト、commit、push済みである。次の実装候補は、次の2つだけである。
 
 - 拘束順位外Vehicleの一時的FCFS走査
 - 仮想timestep全体の統括loop
 
-どちらを正式に先行するかは、まだ決めていない。完全な実装前仕様の「実装区分」は、番号付きの作業順を確定していない。正本は、どちらを先に実装するかを一意に指定していない。
+次の正式実装区分は未確定である。どちらを正式に先行するかは、まだ決めていない。完全な実装前仕様の「実装区分」は、番号付きの作業順を確定していない。正本は、どちらを先に実装するかを一意に指定していない。
 
 拘束順位外Vehicleの一時的FCFS走査には、具体的な実装契約の未確定事項が残る。制度の進路4分類は、2026-09-22の統合仕様にある。第19節の未確定一覧も維持する。コードは無い。
 
@@ -12499,7 +12558,43 @@ outlink終端境界処理は `42bfb62` で実装済みである。まだ単独�
 
 実装順を決定するまでは、拘束順位外Vehicleの一時的FCFS走査と仮想timestep全体の統括loopの、どちらのPython実装も開始しない。
 
-resolved、unresolved、経済性評価、最終確定接続は、その後である。
+> 2026-09-24実装順確定注記: 上記「未確定」「実装順を決定する」は、依存関係確認待ちの当時の再開情報として残す。後続の正本監査、コード準拠監査、独立確認により、拘束順位外Vehicleの一時的FCFS走査を先行実装し、その後仮想timestep統括loopへ接続する実装順を正式採用した。現在の正式採用は下記である。
+
+**実装順（2026-09-24正式採用）**
+
+1. 拘束順位外Vehicleの一時的FCFS走査を、独立部品として実装する。
+2. その後、仮想timestep全体の統括loopへ接続する。
+
+採用理由は、次である。
+
+- 統括loopは、同一仮想timestep内で拘束順位外FCFS走査を内部処理として必要とする。
+- 順位外FCFSが未実装のまま統括loopを先に作ると、空処理または仮処理が必要になる。
+- 空処理は、Node容量、clearance、後続時刻の通過結果を変え、研究結果を誤らせる。
+- 順位外FCFSは、既存の `OrderControlTvtMpCandidateBindingTransferState` と、同じ時刻の `OrderControlTvtMpBindingTransferScanResult` を入力に、単独テストできる。
+- resolved、unresolved、buyer・seller通過時刻の最終収集を、順位外部品へ混入させずに済む。
+
+進路4分類の制度と、分類4のsnapshot固定集合内限定は、「拘束順位外処理・下流境界・統合仕様の確定記録」の第2.5節（2026-09-24補修）を参照する。
+
+**次の直接作業**
+
+拘束順位外Vehicleの一時的FCFS走査を、新規独立モジュールと専用テストとして実装する。
+
+その実装には、次を含めない。
+
+- local vehicle advance
+- outlink終端境界
+- virtual time進行
+- buyer・seller通過時刻の最終収集
+- resolved
+- unresolved
+- horizon終了
+- 経済性評価
+- 最終順位確定
+- 上位driver統合
+
+順位外FCFSの実装完了後の次の直接作業は、仮想timestep全体の統括loopへ接続することである。
+
+resolved、unresolved、経済性評価、最終確定接続は、統括loop以降である。
 
 # 次の作業開始点
 
