@@ -7010,6 +7010,52 @@ horizon端点補修後の独立確認と文書保存のあと、新規一候補�
 
 今回のMarkdown更新では、Pythonとテストを変更していない。テストも再実行していない。Git操作は行っていない。`diagnostics/order_control.zip` は既存未追跡のまま対象外である。
 
+#### 2026-09-25：文献ポジショニング第一段階の調査・試行採点・最終案提示
+
+本節は、市場・取引型交差点管理の文献ポジショニング第一段階についての作業記録である。TVT-MP実装作業の再開地点を上書きしない。文献調査の再開地点と、TVT-MP実装作業の再開地点を混同しない。文献メモ作成によって実装フェーズ名や実装区分を新設しない。TVT-MP実装作業の最新再開地点は、直前の2026-09-25「TVT-MP候補別局所仮想計算の一候補統括loop完全実装前仕様」記録を維持する。
+
+- 市場・取引型交差点管理の文献ポジショニング第一段階を進めた。
+- 主要7研究系列を試行採点した。
+- Collection AuctionsとKarma系列を境界研究として追加採点した。
+- 同じ0・1・2・Uコードブックを横断適用した。
+- 横断整合性確認により採点またはラベルの修正を行った。
+- 修正対象：
+  - Schepperle・Böhm X5（0から1。系列内Initial Time-Slot Auctionの静的second-price truthfulness。系列全体のstrategy-proofnessとはしない）
+  - Lin・Jabari Y2（2から1。局所交通状態は扱うが、downstream capacityやspillbackを配分可能性へ直接反映することを確認できない。arterial評価だけを理由にY2=2としない）
+  - Rey・Levin・Dixit Y2（2から1。将来到着確率を扱うが、単一交差点内の局所queue modelでありnetwork・下流状態ではない。将来到着確率だけを理由にY2=2としない）
+  - Carlino・Boyles・Stoneの制度ラベル（制度HighからMedium-High。X合計8。直接補償、価値循環、制度全体のstrategy-proofnessがない。制度Highとしない）
+  - Collection Auctions X3の名称依存評価禁止（social creditという名称だけでは加点せず0。実装は静的bid coefficient。循環creditとして記載しない）
+- 第一段階の最新案は、制度的深度6項目（X1からX6）、network結合6項目（Y1からY6）、計12項目である。
+- 9研究系列の正式候補配置を作成した。修正後の最新値は次である。PEXIC 制度High・network Low（X合計10、Y合計2）。Schepperle・Böhm 制度Medium-High・network Low（X合計8、Y合計3）。Sayinら 制度High・network Low（X合計11、Y合計3）。Lin・Jabari 制度High・network Medium（X合計10、Y合計6）。Rey・Levin・Dixit 制度Medium-High・network Low（X合計8、Y合計2）。Vasirani・Ossowski 制度Medium・network High（X合計5、Y合計12）。Carlino・Boyles・Stone 制度Medium-High・network High（X合計8、Y合計10）。Collection Auctions 制度Medium・network Low（X合計5、Y合計3）。Karma 制度High・network Low（X合計11、Y合計0）。
+- KarmaのNash equilibriumをstrategy-proofnessとして記載しない。SayinらのVCG型再配分を個別損失Vehicleへの直接補償として記載しない。
+- 第二段階候補を、直接競合、制度的反証、network反証、境界比較へ役割分けした。
+  - 直接競合候補：Lin・Jabari系列、PEXIC系列、Schepperle・Böhm系列
+  - 制度的反証候補：Sayinら、Rey・Levin・Dixit
+  - network反証候補：Vasirani・Ossowski、Carlino・Boyles・Stone
+  - 境界比較として保持：Karma系列、Collection Auctions
+- 第一段階の最終案は提示済みである。
+- 利用者は十分検討してから正式採用を判断する予定である。
+- 現在は正式採用前である。本節への記録は正式採用を意味しない。調査・試行採点の完了と、制度としての正式採用を混同しない。正式採用済み、または第一段階が制度として完了済みである、とは書かない。
+- 第二段階は未開始である。正式採用前に第二段階へ進まない。
+- TVT-MPは第一段階の最終配置対象にしない。未実装予定機能をTVT-MPへ加点しない。TVT-MPのstrategy-proofnessは未証明のままである。TVT-MP基本実験は正しいVOT申告を仮定し、それは支配戦略の証明ではない。Case IIIをTVT-MPの最新モデル名として使用しない。
+- 詳細メモを新規作成した。
+- 詳細参照先：
+  - `ORDER_EXCHANGE_LITERATURE_FIRST_STAGE_SCORING_AND_POSITIONING.md`（第一段階の調査経緯、コードブック、採点台帳、修正履歴、判断理由、第二段階候補抽出の詳細正本候補）
+  - `ORDER_EXCHANGE_LITERATURE_POSITIONING_FRAMEWORK.md`（三段階方式の歴史的記録。§3の旧暫定案は確定仕様として使わない。§3Aに第一段階最終案の要約）
+- 文献メモ作成は、Python実装状態やTVT-MP局所仮想計算の現在の再開地点を変更しない。
+- コードとテストは変更していない。
+- 今回の文書更新に伴うテストは実行していない。コード変更がないため、テストを実行したとは記載しない。
+- Git操作は行っていない。
+
+**文献ポジショニング作業の再開地点（実装再開地点とは別）：**
+
+- 文献ポジショニング作業は、利用者による第一段階最終案の採否判断待ちである。
+- 正式採用された場合のみ第二段階へ移る。
+- 第二段階の最初の詳細比較候補はLin・Jabari、PEXIC、Schepperle・Böhmである。
+- 文献調査の再開地点と、TVT-MP実装作業の再開地点を混同しない。
+- TVT-MP実装作業の最新再開地点は、既存の2026-09-25記録を維持する。
+- 文献メモ作成によって実装フェーズ名や実装区分を新設しない。
+
 #### 2026-08-29：TVT権利保有車両選定前の先頭非参加Vehicle先行確定の記録補修
 
 - 過去に確定済みだった、意思決定窓内 baseline 到着順位の先頭に連続する非参加 Vehicle の先行確定が、設計メモに明文化されていなかった
