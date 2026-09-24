@@ -14765,6 +14765,263 @@ horizon端点をWorld baselineの H 回処理へ揃えた本仕様を、独立�
 
 **2026-09-25追記（一候補統括loop完全実装前仕様）：** 一候補統括loopの完全な実装前仕様を確定した。commit `86ac06f` までの途中確定契約を包含する。horizon契約はWorld baselineと一致させ、H回の交通処理、処理時刻TからT+H-1、horizon 0拒否とする。Python実装はまだ行っていない。利用者判断により、unresolved理由は観測可能な事実だけから付与し、因果関係を推測しない。6番目 `DOWNSTREAM_BOUNDARY_PREVENTED_REQUIRED_PASSAGE_INFORMATION` は現段階で自動付与しない。終了時Vehicle記録はVehicle名、Link名、位置x、state、current VisitKey、current Visit Node名に限定する。次の直接作業は、horizon端点補修後の独立確認と文書保存のあと、`uxsim/order_control_tvt_mp_candidate_local_virtual_calculation.py` と `tests_order_control_tvt_mp_candidate_local_virtual_calculation.py` を実装することである。実装前に新しい設計判断を追加しない。全候補集合入口、経済性評価、最終確定接続は対象外である。最新詳細は、本ファイルの「TVT-MP候補別局所仮想計算の一候補統括loop完全実装前仕様」を参照すること。上記2026-09-24追記の「次の直接作業は完全仕様の記録」は、当時の再開情報である。
 
+> 2026-09-25更新注記: 上記「Python実装はまだ行っていない」および「次の直接作業は…実装すること」は、完全実装前仕様確定当時の状態である歴史的記録として残す。保存済み実装前仕様はcommit `da4559f`（document pre-implementation specification for TVT-MP single-candidate local virtual calculation orchestration）および上記「完全実装前仕様」節を正本とする。その後、同仕様の範囲で新規本番モジュールと新規専用テストを実装し、独立確認と限定修正を経て、専用テスト32件および関係回帰525件に成功した。実装結果の詳細正本は、直下の「TVT-MP候補別局所仮想計算の一候補統括loop実装結果」を参照する。実装前仕様本文は削除・上書きしない。
+
+# TVT-MP候補別局所仮想計算の一候補統括loop実装結果
+
+**記録日：2026-09-25**
+
+本節は、保存済み「TVT-MP候補別局所仮想計算の一候補統括loop完全実装前仕様」（commit `da4559f` および上記完全実装前仕様節）に基づく**実装結果**の正本である。新しい制度設計を追加しない。実装前仕様との対応、公開API、処理契約、独立確認で発見した問題と限定修正、テスト結果、完了範囲、未実装範囲、次の再開地点を記録する。
+
+文献ポジショニング第一段階の調査・試行採点記録とは混同しない。本節はTVT-MP候補別局所仮想計算の一候補統括loopの実装・検証記録のみを扱う。
+
+## 1. 実装ファイル
+
+| 区分 | パス |
+| --- | --- |
+| 本番 | `uxsim/order_control_tvt_mp_candidate_local_virtual_calculation.py` |
+| 専用テスト | `tests_order_control_tvt_mp_candidate_local_virtual_calculation.py` |
+
+上記2ファイルは、文献コミット `5a357e6` には含まれない。記録時点では未追跡である。既存本番Pythonと既存テストは変更していない。
+
+## 2. 実装した公開Enum
+
+### 2.1 `OrderControlTvtMpCandidateLocalVirtualCalculationStopReason`
+
+- `RESOLVED`
+- `HORIZON_EXHAUSTED_UNRESOLVED`
+
+### 2.2 `OrderControlTvtMpCandidateUnresolvedReason`
+
+実装前仕様第17節および正本の6名称を維持する。`value` は snake_case。
+
+1. `REQUIRED_BUYER_OR_SELLER_DID_NOT_PASS_WITHIN_HORIZON`
+2. `DOWNSTREAM_BOUNDARY_REMAINED_BLOCKED_WITHIN_HORIZON`
+3. `DOWNSTREAM_BOUNDARY_HAD_WAITING_VEHICLES_BUT_NO_TRANSFER`
+4. `CLEARANCE_OR_CAPACITY_BLOCKED_THROUGH_HORIZON`
+5. `NO_ACCEPTABLE_OUTLINK_FOR_ROUTE_UNDETERMINED_VEHICLE_WITHIN_HORIZON`
+6. `DOWNSTREAM_BOUNDARY_PREVENTED_REQUIRED_PASSAGE_INFORMATION` — Enum memberは実装するが、**自動付与しない**
+
+### 2.3 `OrderControlTvtMpCandidateFinalLinkRole`
+
+- `TARGET_INLINK`
+- `TARGET_OUTLINK`
+
+## 3. 実装した公開frozen型
+
+すべて `dataclass(frozen=True)`。公開の順序付き列は `tuple`。
+
+- `OrderControlTvtMpCandidatePassageRecord`
+- `OrderControlTvtMpCandidateVirtualTimestepResult`
+- `OrderControlTvtMpCandidateFinalVehicleRecord`
+- `OrderControlTvtMpCandidateFinalLinkRecord`
+- `OrderControlTvtMpCandidateFinalNodeRecord`
+- `OrderControlTvtMpCandidateFinalOutlinkBoundaryRecord`
+- `OrderControlTvtMpCandidateLocalVirtualCalculationResult`
+
+`OrderControlTvtMpCandidateLocalVirtualCalculationResult` は、live `World`、`Node`、`Link`、`Vehicle`、live統括state、candidate local state、collector、順位台帳、可変list、可変dict、経済価値、`G`、`R`、`surplus`、`payment`、`compensation` を保持しない。`terminal_virtual_timestep` fieldは追加しない。
+
+## 4. 統括stateと公開API
+
+### 4.1 可変統括state
+
+- `OrderControlTvtMpCandidateLocalVirtualCalculationState`（公開型。内部でper-timestep結果とpassage記録を保持）
+
+### 4.2 公開API
+
+- `initialize_tvt_mp_candidate_local_virtual_calculation_state(...)`
+- `run_tvt_mp_candidate_local_virtual_calculation_one_timestep(...)`
+- `run_tvt_mp_candidate_local_virtual_calculation(...)`
+
+`run_tvt_mp_candidate_local_virtual_calculation` は `run_tvt_mp_candidate_local_virtual_calculation_one_timestep` のみを繰り返す。処理本体を二重実装していない。
+
+終了条件に到達したone-timestep処理の**時刻末**で、最終結果を1回だけ構築し `state.final_result` に保存する。`finished` 後のone-timestep再実行およびrun-to-completion再実行は `RuntimeError`。
+
+## 5. 正式処理順（各処理時刻の7手順）
+
+各許可offsetで次を実行する。
+
+1. **offset > 0 の場合のみ** virtual time one-step（次の処理時刻へ進む。offset 0の開始時にはone-stepしない。最後の処理時刻 `T+H-1` の7手順完了後にもone-stepしない）
+2. binding transferを1回
+3. unbound FCFS transferを**必ず1回**（binding clearance停止、開始前Node流量不足、候補0件、空完了でも呼ぶ）
+4. required passage記録（binding結果の `transferred_binding_visit_keys` から。unbound通過Vehicle名は使用しない）
+5. local vehicle advanceと新着incoming登録
+6. outlink終端境界処理
+7. 時刻末のresolvedまたはhorizon終了判定
+
+required passageがbinding直後に揃っても、同じ時刻のadvanceとboundaryまで実行する。
+
+## 6. required passage
+
+- **required buyer:** concrete buyer candidate setの `buyers_sorted`（空不可）
+- **required seller:** trade scopeの `SELLER`（空可）
+- **追跡単位:** `VisitKey`
+- **candidate passageの取得元:** 当該時刻のbinding transfer結果の `transferred_binding_visit_keys`
+- unbound通過Vehicle名をrequired passage時刻へ使用しない
+- 二重記録および未通過required Vehicleのunbound通過は `RuntimeError`
+
+## 7. horizon
+
+- `configured_horizon_steps` を `H`、開始時刻を `T` とする
+- `H` はPython `int` かつ1以上。`bool`、0、負値、非intは `ValueError`（horizon 0拒否）
+- 処理offsetは `0` から `H-1`
+- 処理時刻は `T` から `T+H-1`
+- 交通処理回数は `H`
+- **`T+H` では交通処理しない**
+- 最後の処理後にvirtual time one-stepを呼ばない
+
+horizon完走時:
+
+- `final_virtual_timestep = T+H-1`
+- `final_offset = H-1`
+- `simulated_timestep_count = H-1`
+- `len(timestep_results) = H`
+
+World baselineとcandidateの通過時刻範囲を一致させている。
+
+## 8. resolvedとunresolved
+
+### 8.1 resolved
+
+- required buyerおよびsellerのcandidate passage timestepがすべて `int`
+- seller空は充足
+- **時刻末**（7手順完了後）に正式確定
+- unrelated Vehicle、unbound Vehicle、boundary待機または閉塞残存は妨げない
+- `stop_reason` は `RESOLVED`
+- `unresolved_reasons` は空tuple
+
+### 8.2 horizon exhausted unresolved
+
+- 最後の許可offset `H-1` の**時刻末**
+- `stop_reason` は `HORIZON_EXHAUSTED_UNRESOLVED`
+- `T+H` へ進まない
+- `REQUIRED_BUYER_OR_SELLER_DID_NOT_PASS_WITHIN_HORIZON` を**必ず**付与（他の観測事実reasonと併存可）
+
+## 9. 未解決理由（reason付与）
+
+- 観測できた交通事実だけを記録する。因果関係を推測しない
+- 複数reasonを正本順の `tuple` で保持する。重複なし
+- resolved時は空tuple
+- `T+H` は観測対象にしない
+- 6番目 `DOWNSTREAM_BOUNDARY_PREVENTED_REQUIRED_PASSAGE_INFORMATION` はEnum memberとして存在するが、**自動付与しない**
+
+`CLEARANCE_OR_CAPACITY_BLOCKED_THROUGH_HORIZON` は、未通過required Visitについて、当該Visit**自身**に対する直接観測のみを用いる（§10）。
+
+## 10. 独立確認後の限定修正
+
+### 10.1 発見した問題
+
+初回実装後の独立確認で、次の誤判定可能性を発見した。
+
+拘束順位の前方Visitでclearance未充足となり、binding走査が終了した場合、後方required Visitまで走査が到達しないことがある。後方required Visitに `NOT_ARRIVED` 記録がないことや、停止Visitより後方順位であることだけを根拠に、後方required Visitもclearanceに妨げられたと**推定**する可能性があった。これは「観測可能な事実だけから付与し、因果関係を推測しない」方針に反する。
+
+### 10.2 修正内容（交通処理は変更しない）
+
+未解決理由の診断ロジックのみを限定修正した。
+
+- 前方Visitのclearance停止を、後方required Visitの阻害理由へ**転用しない**
+- required Visit自身について直接観測できた記録だけを使用する
+- 当該Visit自身のcapacityまたはphysical temporary skipを認める
+- 当該Visit自身が `stopped_binding_visit_key` であるclearance停止を認める
+- binding走査未到達の時刻は**観測不能**とする
+- skipまたはstop記録がない時刻は継続阻害期間へ含めない
+- `NOT_ARRIVED` がないことだけで到着済みと推定しない
+- 前方Visitの停止だけで後方Visitが妨げられたと推定しない
+- 当該Visit自身について、最初の直接観測時刻から最終処理時刻まで**2時刻以上すべて**直接阻害記録がある場合だけ `CLEARANCE_OR_CAPACITY_BLOCKED_THROUGH_HORIZON` を付与する
+
+### 10.3 修正の非変更範囲
+
+公開API、公開型、field、horizon契約、resolved判定、その他のreason付与規則、binding／unbound／advance／boundaryの交通処理は変更していない。
+
+### 10.4 反証テスト
+
+専用テストに次を追加した。
+
+- **反証:** 前方Visitのclearance停止を、未走査の後方required Visitへ転用しない（`test_through_horizon_not_inferred_from_forward_visit_clearance_stop`）
+- **正例:** required Visit自身が2時刻連続で直接clearance停止対象になった場合にthrough reasonを付与する（`test_through_horizon_positive_when_required_visit_has_two_direct_clearance_stops`）
+
+## 11. 原子性
+
+統括全体の一括rollbackは行わない。
+
+例外時:
+
+- partial timestep resultを返さない
+- partial final resultを返さない
+- 統括completed時刻を追加しない
+- `finished` を付けない
+- `final_result` を保存しない
+- 先行部品の交通反映は戻さない
+- 呼び出し側が当該candidate local stateを破棄する
+
+実World、collector、順位台帳、別候補、RNGは変更しない。
+
+## 12. 終了時frozen記録
+
+### 12.1 Vehicle
+
+- 対象inlink、対象outlink、target incomingの和集合
+- 6 fieldのみ: `vehicle_name`、`current_link_name`、`position_x`、`state`、`current_visit_key`、`current_visit_node_name`
+- 境界退出済みVehicleは含めない
+
+### 12.2 Link
+
+- inlinkとoutlinkを別tuple
+- 登録順、物理順Vehicle名、容量残
+
+### 12.3 Node
+
+- target Nodeのみ
+- incoming順、Node流量残、clearance履歴
+
+### 12.4 boundary
+
+- outlink登録順
+- 最終timestep結果と累積公開情報から構築
+- baseline downstream result自体は保持しない
+
+## 13. 専用テスト結果
+
+| 段階 | 結果 |
+| --- | --- |
+| 初回実装 | 30 tests passed |
+| 限定修正後・専用テスト | 32件。直接実行: 32 tests passed。pytest: 32 passed（収集32、定義済みtest関数32、`TESTS` 登録32） |
+| 関係回帰（12ファイル） | 525 passed |
+| py_compile | 新規本番と専用テストの両方で成功 |
+
+全pytestは実行していない。GUI、デモ、長時間性能テストは実行していない。
+
+## 14. 実装完了判断
+
+- 一候補統括loopは、保存済み実装前仕様の範囲で**実装完了**
+- 専用テストと直接関係する回帰テストに成功
+- 独立確認で見つかった未解決理由の誤判定可能性は修正済み
+- 修正後の最新版を再度独立確認し、**追加修正不要**と判断
+- 既存公開APIの変更は不要だった
+- 既存本番Pythonと既存テストの変更は不要だった
+
+## 15. 未実装範囲
+
+次は本統括loopの範囲外として未実装のままである。
+
+- 全候補集合入口
+- 経済性評価（expected time saving、waiting increase、`G`、`R`、`surplus`、`utility`、`payment`、`compensation` 等）
+- 候補採用・却下
+- 最終順位確定接続
+- 実World交通反映
+- formal routeの実World保存
+- 順位台帳更新
+- 上位driver接続
+- strategy-proofness検証
+
+## 16. 次の再開地点
+
+- 本節および `ORDER_EXCHANGE_PROGRESS.md` の同日実装完了記録を、利用者が次の保存単位としてcommitする予定である（本番2ファイル＋本設計メモ＋進捗メモ。文献Markdown2ファイルは含めない）
+- commitとpushは本Markdown作業では行わない
+- 「直ちに全候補集合入口を実装する」とは確定記録しない
+- 次の研究・実装工程は、保存後に正本と全体進捗を確認して別途判断する
+- 文献ポジショニング第一段階の再開地点（利用者判断待ち）と、TVT-MP実装作業の再開地点を混同しない
+
 # 新しいチャットでの再開方法
 
 新しいチャットでは、次の順で確認する。

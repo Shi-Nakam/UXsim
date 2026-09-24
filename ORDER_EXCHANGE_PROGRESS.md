@@ -7056,6 +7056,25 @@ horizon端点補修後の独立確認と文書保存のあと、新規一候補�
 - TVT-MP実装作業の最新再開地点は、既存の2026-09-25記録を維持する。
 - 文献メモ作成によって実装フェーズ名や実装区分を新設しない。
 
+**TVT-MP候補別局所仮想計算の一候補統括loopを実装・検証（2026-09-25）**
+
+本節は、一候補統括loopの実装・専用テスト・独立確認の完了記録である。直上の「2026-09-25：文献ポジショニング第一段階の調査・試行採点・最終案提示」とは独立する。文献調査側の結論を実装判断へ取り込まない。実装結果を文献位置づけへ追記しない。詳細正本は `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_2.md` の「TVT-MP候補別局所仮想計算の一候補統括loop実装結果」である。実装前仕様正本は同日の「完全実装前仕様」（commit `da4559f`）を参照する。
+
+- 新規本番 `uxsim/order_control_tvt_mp_candidate_local_virtual_calculation.py` と新規専用テスト `tests_order_control_tvt_mp_candidate_local_virtual_calculation.py` を、保存済み完全実装前仕様の範囲で実装した（記録時点では未追跡。文献コミット `5a357e6` には含まれない）。
+- 公開API: `initialize_tvt_mp_candidate_local_virtual_calculation_state`、`run_tvt_mp_candidate_local_virtual_calculation_one_timestep`、`run_tvt_mp_candidate_local_virtual_calculation`（run-to-completionはone-timestepのみを繰り返す）。
+- horizon: `H` はintかつ1以上。horizon 0拒否。処理時刻 `T` から `T+H-1` の `H` 回。`T+H` は処理しない。最後の処理後にvirtual time one-stepしない。
+- 毎処理時刻7手順: offset>0のみone-step、binding、unbound（毎時刻必ず1回）、required passage、advance＋incoming、outlink boundary、時刻末resolved／horizon終了判定。
+- required passage: buyerはconcrete set（空不可）、sellerはtrade scope（空可）、VisitKey単位、bindingの `transferred_binding_visit_keys` から記録。
+- resolved: required passageがすべてintで時刻末確定。unresolved: 最終offset `H-1` 時刻末で `HORIZON_EXHAUSTED_UNRESOLVED`、`REQUIRED_BUYER_OR_SELLER_DID_NOT_PASS_WITHIN_HORIZON` を必ず付与。
+- reasonは観測事実のみ。因果推測しない。6番目 `DOWNSTREAM_BOUNDARY_PREVENTED_REQUIRED_PASSAGE_INFORMATION` は自動付与しない。
+- 独立確認後の限定修正: 前方Visitのclearance停止を未走査の後方required Visitへ転用しない。当該Visit自身の直接観測のみで `CLEARANCE_OR_CAPACITY_BLOCKED_THROUGH_HORIZON` を判定。交通処理は変更していない。
+- 終了時frozen記録のみ（live World／Vehicle等は最終結果に保持しない）。統括全体のrollbackなし。例外時はpartial結果を返さない。
+- テスト: 初回30件。限定修正後専用32件（pytest 32 passed）。関係12ファイル回帰525 passed。py_compile成功。全pytest・GUI・長時間性能テストは未実行。
+- 実装完了範囲: 保存済み実装前仕様どおりの一候補統括loop。既存本番・既存テスト変更なし。
+- 未実装: 全候補集合入口、経済性評価、候補採用・却下、最終順位確定接続、実World反映、strategy-proofness検証等。
+- 次の再開地点: 本節・設計メモ実装結果節と新規2ファイルを同一保存単位でcommit予定（文献Markdown2ファイルは含めない）。直ちに全候補集合入口実装とは確定しない。保存後に正本と進捗を確認して次工程を判断する。文献ポジショニング再開地点と混同しない。
+- 今回のMarkdown更新ではPythonとテストを変更していない。Git操作は行っていない。`diagnostics/order_control.zip` には触れていない。
+
 #### 2026-08-29：TVT権利保有車両選定前の先頭非参加Vehicle先行確定の記録補修
 
 - 過去に確定済みだった、意思決定窓内 baseline 到着順位の先頭に連続する非参加 Vehicle の先行確定が、設計メモに明文化されていなかった
