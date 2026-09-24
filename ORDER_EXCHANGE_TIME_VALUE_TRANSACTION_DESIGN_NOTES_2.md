@@ -10958,7 +10958,7 @@ resolvedとなる仮想timestepの完了契約では、次を固定する。
 
 本節のうち「実装済み」は、保存済みcommit `d23a385` までのコードに対応する。outlink終端の専用境界退出は、設計として確定したが、コードへは未実装である。未確定欄にある事項は、境界処理本体の実装を始める前に決める必要がある。
 
-**2026-09-24追加確定：** 専用境界退出の累積index、旅行時間の式、`arrival_time`、`World.VEHICLES`、leader・follower解除順、退出理由名、境界状態型と結果型の名称、一台単位とoutlink単位の原子性は、「19. 専用outlink境界退出のフィールド単位確定契約」で確定した。境界処理本体は未実装である。第17節の専用退出項目は、当時の未確定一覧として残し、現在の未確定としては読まない。
+**2026-09-24追加確定：** 専用境界退出の累積index、旅行時間の式、`arrival_time`、`World.VEHICLES`、leader・follower解除順、退出理由名、境界状態型と結果型の名称、一台単位とoutlink単位の原子性は、「19. 専用outlink境界退出のフィールド単位確定契約」で確定した。`OrderControlTvtMpOutlinkBoundaryVehicleRemovalRecord` は `vehicle_name` を必須識別子とし、VisitKey fieldは設けない。境界処理本体は未実装である。第17節の専用退出項目は、当時の未確定一覧として残し、現在の未確定としては読まない。
 
 ## 1. 記録の位置付けと参照関係
 
@@ -11630,7 +11630,6 @@ outlink.traveltime_actual[start_timestep:] = (
 - `outlink_name`
 - `terminal_node_name`
 - `vehicle_name`
-- VisitKey
 - `removal_kind`
 
 `boundary_exit_time_seconds` は次である。
@@ -11650,13 +11649,13 @@ outlink.traveltime_actual[start_timestep:] = (
 - `World.VEHICLES_LIVING` から除く。
 - 新しいWorld共通Vehicle登録列は追加しない。
 - candidate local stateの既存Vehicle mappingは変更しない。
-- 専用境界状態または結果の退出記録に、Vehicle名およびVisitKeyを保持する。
+- 専用境界状態または結果の `OrderControlTvtMpOutlinkBoundaryVehicleRemovalRecord` に、`vehicle_name` を必須識別子として保持する。
 
 理由は、次である。
 
 - `World.VEHICLES` は、全生成Vehicleを名前で保持する参照辞書として機能する。
 - 通常の `end_trip()` も、`World.VEHICLES` からVehicleを削除しない。
-- `World.VEHICLES` から削除すると、Vehicle名による診断、VisitKey対応、候補結果参照を壊す。
+- `World.VEHICLES` から削除すると、Vehicle名による診断および候補結果参照を壊す。
 - `VEHICLES_RUNNING` と `VEHICLES_LIVING` から除けば、後続のcar-following、位置更新、局所前進の対象にならない。
 
 コピーWorldの用途制限は、次である。
@@ -11864,13 +11863,28 @@ Vehicle除去記録のfield:
 
 ```text
 vehicle_name
-visit_key
 outlink_name
 terminal_node_name
 virtual_timestep
 boundary_exit_time_seconds
 removal_kind
 ```
+
+専用境界退出と制約付きsinkの `end_trip()` の双方で、上記6 fieldだけを使う。`visit_key` fieldは設けない。`current_visit_key_at_removal` などの別名fieldも設けない。
+
+> 歴史的記録: 境界処理実装着手前の検討では、除去記録へ `visit_key` または `current_visit_key_at_removal` を載せる案があった。後続検討で撤回済みである。最新契約は上記6 fieldのみである。
+
+Vehicle除去記録にVisitKey fieldを設けない理由は、次である。
+
+- 対象Node通過後にoutlinkへ進入したVehicleでは、outlink終端Nodeがorder-control対象外であることが正常にある。
+- その場合、既存の `begin_order_control_visit_on_link_entry()` により `order_control_current_visit` は `None` になる。
+- 境界退出時点の現在VisitからVisitKeyを取得できるとは限らない。
+- 取得できるVehicleだけVisitKeyを記録しても、境界除去記録の識別契約として一貫しない。
+- 境界除去Vehicleの必須識別子には `vehicle_name` を使う。
+- `order_control_visit_id` の残存値からVisitKeyを推測しない。
+- 拘束順位列や通過済みVisit列から過去VisitKeyを逆算しない。
+- 境界退出記録へ過去の対象Node Visitを曖昧に混在させない。
+- 将来、対象Node通過Visitとの正式な対応が必要になった場合は、別の明示的な対応情報として設計する。
 
 候補全体状態の最低限field:
 
@@ -11964,6 +11978,7 @@ terminal_node_flow_capacity_remain_after
 - `removal_kind` は `CONSTRAINED_SINK_END_TRIP` である。
 - `end_trip()` の通常副作用を、コピーWorld内で受ける。
 - 実Worldの旅行終了を意味しない。
+- 除去記録へ書く識別子は、専用境界退出と同じく `vehicle_name` だけである。`end_trip()` の前にVisitKeyを保存しない。
 
 実装時の共通helper候補:
 

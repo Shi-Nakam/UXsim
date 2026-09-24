@@ -6550,6 +6550,7 @@ downstream boundary結果なしは、この3状態ではない。候補評価で
 - 境界状態Enumは `OrderControlTvtMpOutlinkBoundaryMode` である。memberは `OBSERVED_WAIT_WITH_OUTFLOW`、`OBSERVED_WAIT_WITHOUT_OUTFLOW`、`NO_OBSERVED_WAIT_CONSTRAINED_SINK` である。
 - 除去理由Enumは `OrderControlTvtMpOutlinkBoundaryRemovalKind` である。memberは `OBSERVED_OUTFLOW_BOUNDARY_EXIT` と `CONSTRAINED_SINK_END_TRIP` である。
 - 状態型は `OrderControlTvtMpCandidateOutlinkBoundaryState` と `OrderControlTvtMpCandidateOutlinkBoundaryLinkState` である。結果型は `OrderControlTvtMpOutlinkBoundaryProcessResult` と `OrderControlTvtMpOutlinkBoundaryLinkProcessResult` である。除去記録型は `OrderControlTvtMpOutlinkBoundaryVehicleRemovalRecord` である。
+- Vehicle除去記録は `vehicle_name` を必須識別子とする。正式fieldは `vehicle_name`、`outlink_name`、`terminal_node_name`、`virtual_timestep`、`boundary_exit_time_seconds`、`removal_kind` の6つである。VisitKey fieldは設けない。境界退出時に `order_control_current_visit` が `None` である正常状態へ対応するためである。`order_control_visit_id` の残存値や拘束順位列からVisitKeyを推測しない。除去記録へ `visit_key` を載せる案は後続検討で撤回済みである。
 - 下流待ちあり・実流出ありだけが専用境界退出である。`end_trip()` は呼ばない。下流待ち観測なしの制約付きsinkは、容量確認と消費のあとコピーWorld上で `end_trip()` を使い、`removal_kind` は `CONSTRAINED_SINK_END_TRIP` である。
 - 候補コピーWorldへ、通常Analyzerの旅行完了統計を適用しない。`state == "end"` だけでは通常旅行完了と読まない。
 - 実装時命名として残すのは、共通helperの関数分割だけである。上のfield契約は未確定に戻さない。
