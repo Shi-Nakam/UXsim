@@ -1,0 +1,93 @@
+# UXsim Order Exchange 改変作業メモ 2
+
+## 本メモの位置づけ
+
+- 本ファイルは `ORDER_EXCHANGE_PROGRESS.md` の継続版である。進捗メモ第2巻とする。
+- 第1巻は削除、移動、置換しない。第1巻の既存内容は歴史的記録として維持する。
+- 2026-09-26以降の新規進捗は、原則として本ファイルへ追記する。最新現在地は第2巻を先に確認する。
+- 過去経緯が必要な場合だけ第1巻を参照する。第1巻の内容を本ファイルへ大量複写しない。
+- 2026-09-26以降の最新の詳細設計と実装結果は `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_3.md` を正本とする。切替前の仕様と履歴は、第1巻および第2巻を必要に応じて参照する。
+- 本ファイルは完了範囲、検証結果、未実装境界、次の再開地点を中心に記録する。
+
+## 文書保守方針
+
+- 過去の記録は原則として削除しない。古い記述と最新状態が異なる場合は、更新注記と最新参照先で整理する。
+- 歴史的記録を推測で書き換えない。実装前仕様と実装完了記録を区別する。
+- Cursorの報告だけで実装完了と確定しない。実コード、テスト、差分、Git状態、独立確認を根拠にする。
+- 詳細設計メモと最新進捗メモの双方への反映要否を、各節目で確認する。
+- Git操作は利用者がTerminalで行う。commitとpushを分ける。メモを含むコミット名には `document` を含める。
+- `diagnostics/order_control.zip` は対象外とする。文献調査側の記録とコーディング進捗を混同しない。
+
+## 第1巻との関係
+
+- 第1巻: `ORDER_EXCHANGE_PROGRESS.md` — 第2巻開始前までの詳細な歴史的進捗記録。
+- 第2巻: `ORDER_EXCHANGE_PROGRESS_2.md` — 2026-09-26以降の最新進捗本流。
+- 第1巻の既存見出しや本文は変更または移動しない。過去の詳細が必要な場合は必要な箇所だけ第1巻を参照する。
+- 第1巻の末尾には、2026-09-26付で第2巻への短い移行注記を追加済みである。
+
+## 第2巻開始時のGit状態
+
+- 作成日: 2026-09-26
+- 作業ブランチ: `feature/intersection-order-control`
+- 最新保存済み・push済みコミット: `5cde1aa` — document pre-implementation specification for TVT-MP candidate selection
+- HEADと `origin/feature/intersection-order-control` は一致
+- 未追跡の新規実装: `uxsim/order_control_tvt_mp_candidate_selection.py`、`tests_order_control_tvt_mp_candidate_selection.py`
+- `diagnostics/order_control.zip` は既存未追跡
+- 第2巻作成時点では git add、commit、push を行っていない
+
+## 第2巻開始時の研究・実装現在地
+
+**主対象:** TVT-MP、複数ネットワーク、複数OD需要、右左折あり、単車線条件、時間価値取引型交差点管理。
+
+**重要原則:** Case IIIは使用しない。strategy-proofnessは未証明。基本実験は正しいVOT申告を前提。不参加は `participates_in_order_exchange=False`。VOT=0は合法入力で不参加の代理にしない。TVT-MP一般形を直接実装。非参加Visitあり・なしを一般形で扱う。候補選択は surplus 最大 → surplus同値なら buyer 数最大 → 最終同値時だけ選択専用局所RNG。traffic RNGと order-control再訪RNGを候補選択で消費しない。
+
+**実装済みの主なTVT-MP処理:** candidate Visit整理、inlink別snapshot物理順、具体的買い手候補集合、一般形順位再構成、FIFO検査接続、局所拘束順位列、候補別局所仮想計算、全候補局所仮想計算集合、経済性評価、成立候補選択。成立候補選択の最新実装結果は `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_3.md` を参照する。それ以前の各処理の詳細は `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_2.md` を必要に応じて参照する。
+
+## TVT-MP成立候補選択部品を実装・検証（2026-09-26）
+
+**前段仕様:** commit `5cde1aa`（document pre-implementation specification for TVT-MP candidate selection）。
+
+**新規ファイル:** 本番 `uxsim/order_control_tvt_mp_candidate_selection.py`、専用テスト `tests_order_control_tvt_mp_candidate_selection.py`。
+
+**公開:** Enum `OrderControlTvtMpCandidateSelectionStatus`（`SELECTED`、`NO_ECONOMICALLY_FEASIBLE_CANDIDATE`）。frozen型 `OrderControlTvtNodeMpCandidateSelectionResult`、`OrderControlTvtMpCandidateSelectionSetResult`。API `select_tvt_mp_candidates(economic_evaluation_set_result, real_W)`。
+
+**実装要点:** Nodeごとに最大1候補。`economically_feasible` のみ対象。保存済み surplus 最大、同値なら `len(buyer_economic_records)` 最大（seller数・当事者総数は使わない）。最終同値2件以上のみ局所RNG。identityは `(node_name, buyers_sorted)`。identityで決定論的整列。seed材料は `random_seed`、T、Node名、整列済み同値identity（UTF-8長さ付きbytes符号化）。`hash()`・object id・`real_W.rng`・`order_control_rng` 非使用。RNG state保存復元なし。列挙順・Node処理順独立。feasible 0件は正常（`NO_ECONOMICALLY_FEASIBLE_CANDIDATE`、selected `None`、`rng_was_used=False`）。selectedは入力同一object。入力経済結果と実World不変。重大不整合で全体停止、部分overall resultなし。
+
+**今回未実装:** payment、compensation、final rank、baseline fallback、formal route、順位台帳更新、実World反映、actual比較。
+
+## 検証結果
+
+- 専用テスト35件: 直接35 passed、pytest 35 passed・35 collected、定義35・TESTS登録35（重複・漏れ・未定義参照なし）。
+- py_compile: 新規本番・専用テストとも成功。
+- 関係回帰: 指定7ファイル **366 passed**；`tests_order_control_baseline_driver.py` と `tests_order_control_baseline_downstream_boundary.py` **121 passed**（合計値だけへまとめない）。
+- 静的確認: 経済評価・局所仮想計算・FIFO再実行なし、`hash()`・`id()`・World RNG参照・RNG state保存復元なし、payment・compensation・final rank・actual・実World書込みなし。
+- 独立確認: 保存済み完全実装前仕様と整合、追加修正不要。
+- 全pytest、GUI、デモ、長時間性能テストは実行していない。
+
+## 現在の実装完了範囲
+
+候補選択部品: selection status、Node/全体frozen結果、一括公開API、feasible抽出、surplus・buyer数最大抽出、candidate identity・重複検出、deterministic整列、seed材料、局所RNG、最終同値選択、RNG非使用、候補なし正常、World RNG不変性、列挙順・Node順独立、重大不整合・部分結果なし、専用テスト、関係回帰、独立確認。
+
+## 現在の未実装範囲
+
+payment、compensation、P_b比例配分、seller実補償配分、`payment_paid` / `payment_received` / `order_exchange_log` 更新、成立時最終順位列、不成立時baseline fallback、情報未解決時最終確定、formal route保存、順位台帳更新、確定順位ブロック接続、実World交通反映、actual記録・expected/actual比較、realized utility、ex-post welfare、上位TVT driver、strategy-proofness検証、文献制度の移植。API・型・配分規則・処理順は本メモ作成だけでは確定しない。
+
+## 次の再開地点
+
+1. 候補選択コード、専用テスト、進捗第1巻の移行注記、進捗第2巻、詳細設計第2巻の移行注記、詳細設計第3巻を同一保存単位でcommitする。
+2. commit結果、最新コミット、残存変更を確認する。
+3. 別の指示でpushし、push後の状態を確認する。
+4. 保存後に最新進捗と最新設計を再確認する。
+5. 未実装領域から次の設計対象を選ぶ。
+
+payment、compensation、最終順位確定は未実装として残る。今回の文書更新だけで、次の設計対象は確定しない。
+
+## 新しいチャットでの再開方法
+
+1. `ORDER_EXCHANGE_PROGRESS_2.md`
+2. `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_3.md`
+3. 必要な場合だけ `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_2.md`
+4. 必要な場合だけ `ORDER_EXCHANGE_PROGRESS.md`
+5. 必要な場合だけ `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES.md`
+
+最新現在地は進捗第2巻から確認する。最新の詳細設計と実装結果は詳細設計第3巻を参照する。過去の詳細は必要な場合だけ旧進捗メモまたは旧設計メモの該当箇所を検索する。旧巻の全文を毎回同時に読み込ませない。

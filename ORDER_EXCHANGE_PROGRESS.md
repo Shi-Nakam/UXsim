@@ -7708,3 +7708,11 @@ Nodeへの追加メソッド（Phase 4-6関連）：
 - ORDER_EXCHANGE_PHASE4_DESIGN_NOTES.md、ORDER_EXCHANGE_RESEARCH_CONTEXT.md、ORDER_EXCHANGE_FCFS_TRANSFER_DESIGN_NOTES.md も必要に応じて参照してください
 - git log --oneline -20 と git status の結果を貼ります
 - GitHub運用は現在 HTTPS + PAT。将来的にSSH移行を検討する余地があります
+
+---
+
+### 進捗メモ第2巻への移行（2026-09-26）
+
+2026-09-26以降の新規進捗は、原則として `ORDER_EXCHANGE_PROGRESS_2.md` に記録する。本ファイルは第1巻として既存の歴史的記録を維持し、本文を削除、移動、置換しない。
+
+作業再開時は第2巻で最新状況を確認し、過去の経緯が必要な場合だけ本ファイルの該当箇所を参照する。詳細な制度仕様と技術契約は関連する設計メモを正本とする。
