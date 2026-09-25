@@ -5728,6 +5728,8 @@ helper の実装、専用テスト、設計メモの整合を最終確認した�
 - TVT-MP一般形を直接実装し、TVT-SB、TVT-MH、TVT-SPは当面実装しない。
 - `surplus`が同値の場合は取引当事者総数ではなく買い手数が多い候補を優先し、買い手数も同じ場合はランダムに選ぶ。
 - ランダム選択に使用する具体的RNGは未確定である。
+
+> 2026-09-26更新注記: 買い手数を第二基準とする原則は維持する。具体的RNG設計の最新正本は `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_2.md` の「TVT-MP成立候補選択部品・完全実装前仕様」である。上記「RNG未確定」は当時の記録として残す。
 - `UNRESOLVED_CANDIDATE_PASSAGES`ではinlink別snapshot物理順を保持するが、prefixおよび具体的買い手候補集合を生成しない。
 
 **実装状態**
@@ -7157,6 +7159,25 @@ horizon端点補修後の独立確認と文書保存のあと、新規一候補�
 - 未実装: 候補選択、payment、compensation、RNG、actual比較、最終順位、実World反映、上位driver、strategy-proofness検証等。
 - 次の再開地点: 本節・設計メモ実装結果節と新規2 Pythonを同一保存単位でcommit予定（文献Markdownは含めない）。commit/pushは本Markdown作業では行わない。保存後に正本と進捗を再確認。候補選択は未実装の一つだが、具体API・型・処理順は本記録で新たに確定しない。文献ポジショニングと混同しない。
 - 今回のMarkdown更新ではPythonとテストを変更していない。Git操作は行っていない。`diagnostics/order_control.zip` には触れていない。
+
+> 2026-09-26更新注記: 上記「候補選択の具体API・型・処理順は本記録で新たに確定しない」は、経済性評価実装結果を文書化した当時の再開情報である。経済性評価部品はcommit `03f79bb` で保存済みである。その後、成立候補選択部品の完全実装前仕様を確定した。現在の次の直接作業としては読まない。直後の2026-09-26追記を参照すること。
+
+**TVT-MP成立候補選択部品・完全実装前仕様を確定（2026-09-26）**
+
+本節は、economically feasible候補から対象Nodeごとに最大1候補を選ぶ部品の完全実装前仕様の要約である。詳細正本は `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_2.md` の「TVT-MP成立候補選択部品・完全実装前仕様」である。Python実装と専用テストは未着手である。前段の経済性評価部品はcommit `03f79bb` で実装・検証・push済みである。文献調査側の記録は変更していない。
+
+- 選択単位は対象Nodeごとである。全Node横断で1候補だけを選ぶ設計ではない。
+- 対象は `economically_feasible is True` の候補だけである。unresolved、FIFO False、経済不成立は選ばない。economic evaluationは再実行しない。
+- 第一基準は保存済みsurplusの最大（完全比較、再計算なし、丸めなし、toleranceなし）。同値ならbuyer数（`len(buyer_economic_records)`）が最大。seller数・当事者総数は使わない。
+- surplusとbuyer数が同じ最終同値候補が1件ならその候補を選ぶ。2件以上なら選択専用の局所一時RNGで1件を選ぶ。それ以外ではRNGを使わない。
+- 局所一時RNGは `numpy.random.SeedSequence` と `default_rng` で関数内に構築する。`real_W.rng` と `real_W.order_control_rng` は使用せず、状態も変えない。Worldへ第三RNGを追加しない。RNG stateの保存・復元はしない。
+- candidate identityは `node_name` と `buyers_sorted`。列挙index、object id、Python `hash()` は使わない。候補列挙順およびNode処理順を変えても、各Nodeの当選identityは変えない。
+- selectedなしは正常（`NO_ECONOMICALLY_FEASIBLE_CANDIDATE`、selectedは `None`、`rng_was_used=False`）。採用時は `SELECTED`。上流の詳細原因は入力参照連鎖から読む。最小status以外の上流詳細は複製しない。
+- 公開APIは `select_tvt_mp_candidates(economic_evaluation_set_result, real_W)` のみ。公開型は frozen の Node結果と全体結果。入力経済結果およびselectedは同一object参照。
+- payment、compensation、最終順位、実World反映、actual比較は未実装である。
+- 新規予定は本番 `uxsim/order_control_tvt_mp_candidate_selection.py` と専用テスト `tests_order_control_tvt_mp_candidate_selection.py` の2ファイルだけである。既存Python変更不要を第一候補とする。
+- Pythonは未実装である。次の直接作業は、本仕様の独立確認とMarkdown 2ファイルの保存のあと、新規2ファイルだけを実装することである。実装前にpayment、compensation、最終順位、actual比較の新しい設計判断を混入させない。文献ポジショニング再開地点と混同しない。
+- 今回のMarkdown更新ではPythonとテストを変更していない。コード変更がないため、テストを実行していない。Git操作は行っていない。`diagnostics/order_control.zip` には触れていない。
 
 #### 2026-08-29：TVT権利保有車両選定前の先頭非参加Vehicle先行確定の記録補修
 

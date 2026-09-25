@@ -1249,6 +1249,8 @@ surplusが最大
 
 prefix列挙順や具体的候補生成順を、ランダム選択の代用にしない。
 
+> 2026-09-26更新注記: 第二基準は買い手数（buyer数）のまま維持する。具体的RNG設計、候補列挙順からの独立性、Node処理順からの独立性、交通RNGとの分離は、本ファイル末尾付近の「TVT-MP成立候補選択部品・完全実装前仕様」を最新正本とする。本節の「RNG未確定」は当時の記録として残し、現在の作業指示としては読まない。旧「取引当事者総数」は最新の第二基準ではない。
+
 ---
 
 ## 26. TVT成立時の最終確定
@@ -16969,6 +16971,387 @@ resolved候補の抽出、required passage検証、VOT取得と検証、VOT=0処
 保存後は正本と全体進捗を再確認して次工程を決める。候補選択は次の未実装領域の一つであるが、候補選択・同値RNG・payment・compensationの具体的API・型・処理順を本実装結果記録で新たに確定しない。文献ポジショニング作業と混同しない。
 
 今回のMarkdown更新ではPythonとテストを変更していない。Git操作は行っていない。`diagnostics/order_control.zip` には触れていない。
+
+> 2026-09-26更新注記: 上記「候補選択の具体的API・型・処理順を本記録で新たに確定しない」は、経済性評価実装結果を文書化した当時の再開情報である。経済性評価部品はcommit `03f79bb` で実装・検証・push済みである。その後、成立候補選択部品の完全実装前仕様を確定した。最新正本は直下の「TVT-MP成立候補選択部品・完全実装前仕様」である。上記を現在の作業指示として読まない。
+
+# TVT-MP成立候補選択部品・完全実装前仕様
+
+**記録日：2026-09-26**
+
+本節は、economically feasibleな候補から、対象Nodeごとに採用候補を最大1件選ぶ**成立候補選択部品**の完全実装前仕様である。Python実装と専用テストは未着手である。本節の記録は実装完了を意味しない。
+
+位置づけ:
+
+- 経済性評価部品はcommit `03f79bb`（Implement, test and document TVT-MP economic evaluation）で実装・検証・push済みである。詳細正本は直上の「TVT-MP経済性評価部品・実装結果」である。
+- 今回は、その経済結果のうち `economically_feasible is True` の候補だけを対象に、Nodeごとに最大1候補を選ぶ仕様である。経済評価の再実行、一候補統括、FIFO選別は再設計しない。
+- 選択基準は surplus 最大、同値なら buyer 数最大、それも同じなら選択専用の局所一時RNGである。
+- RNGは交通用 `real_W.rng` および再訪用 `real_W.order_control_rng` から分離する。両既存RNGの状態を変更しない。Worldへ第三の永続RNGを追加しない。
+- Python組込み `hash()`、object id、候補列挙indexを candidate identity および seed に使わない。
+- 候補列挙順および Node 処理順を変えても、各 Node で選ばれる candidate identity は変えない。
+- 候補選択、payment、compensation、最終順位確定、実World反映、actual比較、上位TVT driver、strategy-proofness検証のうち、今回の対象は候補選択だけである。
+- 予定する新規ファイルは本番1、専用テスト1の計2ファイルだけである。既存公開Pythonの変更は不要を第一候補とする。
+- 文献制度をTVT-MPへ移植しない。
+
+## 1. 非技術的な目的
+
+経済的に成立した候補が複数あるとき、対象交差点（Node）ごとに採用する1候補を決める。
+
+- 成立していない候補は選ばない
+- 余剰（surplus）が最も大きい候補を優先する
+- 余剰が同じなら、時間短縮を受ける買い手の人数が多い候補を優先する
+- それも同じ候補が複数なら、交通の偶然とは別の制度上のくじで1件に絞る
+- 同点があったことだけで、その後の車の動きを変えない
+
+この部品は採用候補を識別する。実際の支払額・補償額は決めない。順位を実Worldへ書き込まない。
+
+## 2. 新規予定ファイル
+
+| 区分 | パス |
+| --- | --- |
+| 本番 | `uxsim/order_control_tvt_mp_candidate_selection.py` |
+| 専用テスト | `tests_order_control_tvt_mp_candidate_selection.py` |
+
+既存経済評価モジュールへ選択入口を追加しない。選択用の可変公開state型は作らない。
+
+## 3. 選択単位
+
+選択単位は対象Nodeごとである。
+
+- 各Nodeで最大1候補を選ぶ
+- 全Node横断で1候補だけを選ぶ設計ではない
+- 各Nodeのsurplus比較およびbuyer数比較は、他Nodeの候補へ依存しない
+- Node結果は経済性評価結果のNode順を維持する
+- 各Nodeの候補走査は経済性評価結果の候補順を維持する
+- 比較途中で公開結果の候補列を再ソートしない
+- RNG母集団を固定する段階だけ、安定したcandidate identity keyで決定論的に整列する
+
+## 4. 選択原則（4段階）
+
+第一段階: `economically_feasible is True` の候補だけを対象とする。
+
+第二段階: 保存済み `surplus` が最大の候補だけを残す。
+
+第三段階: surplus最大が複数なら、`len(buyer_economic_records)` が最大の候補だけを残す。
+
+第四段階:
+
+- 残り1件ならその候補を選択する（RNGなし）
+- 残り2件以上なら、選択専用局所一時RNGで1件を選ぶ
+
+比較規則:
+
+- surplusは保存済み経済結果の値を使う。再計算しない。丸めない。toleranceなし。Decimalなし。完全比較。
+- 同値判定は保存済みfloatの厳密な `==`
+- buyer数の正本は `len(buyer_economic_records)`
+- seller数、取引当事者総数、`trade_scope` 件数、required passage総数、nonparticipating件数は比較に使わない
+
+旧「当事者総数」は最新の第二基準ではない。
+
+## 5. 選択対象
+
+選択対象となる条件（すべて）:
+
+- 入力経済性評価結果に candidate economic result が存在する
+- `economically_feasible is True`
+- `infeasibility_reasons == ()`
+- 全buyer recordで `gross_time_value_G_b > 0`
+- `total_buyer_value_G >= total_required_compensation_R`
+- `surplus` が有限
+- `surplus == total_buyer_value_G - total_required_compensation_R`
+- `buyer_economic_records` が1件以上
+
+選択対象外: economically infeasible、理由tuple付き、正常unresolved、FIFO False、上流非生成Node、経済結果を持たない候補。
+
+選択部品内で対象外候補を再評価しない。economic evaluationを再実行しない。G、R、surplusを再計算して上書きしない。整合確認として保存済みsurplusと `G - R` の一致は完全比較で確認する。
+
+## 6. candidate identity
+
+最終同値候補の決定論的整列およびseed材料には、既存結果から到達可能な安定identityを使う。
+
+正式構成:
+
+- `node_name`
+- `concrete_buyer_candidate_set.buyers_sorted`
+
+`buyers_sorted` は既存の VisitKey 列（各要素は `(vehicle_name, visit_id)` のtuple）であり、正式順序を維持する。
+
+使用しない: Python object id、`id(...)`、economic/local resultのobject identity値、候補列挙index、prefix index、生成順、Python組込み `hash()`、表示用文字列の曖昧な連結。
+
+同一Node内でcandidate identityが重複していれば `RuntimeError`。`buyers_sorted` はtuple。buyer VisitKey列は `buyer_economic_records` と一致する。selected candidateは入力経済結果内の同一object参照。新しい `candidate_id` fieldは追加しない。同じ `buyers_sorted` でも別Nodeは別identityである。
+
+## 7. 選択専用局所RNG
+
+最終同値候補が2件以上ある場合だけ、**そのNodeについて**選択専用の局所一時RNGを構築する。
+
+使用するもの:
+
+- `numpy.random.SeedSequence`
+- `numpy.random.default_rng`
+
+使用しないもの:
+
+- `real_W.rng`
+- `real_W.order_control_rng`
+- Worldへ追加する第三の永続RNG
+- RNG stateの保存と復元
+- Python組込み `hash()`
+- 外部暗号hashライブラリ
+- 新しい依存package
+
+非技術的な理由: 制度上の同点くじと交通の偶然を分離する。同点があったことだけで後続交通を変えない。Node処理順や候補列挙順で当選identityが変わらない。同一条件・同一seedで再現できる。既存Worldおよび既存RNG契約を変更しない。
+
+## 8. seed材料
+
+seed材料には少なくとも次を含める。
+
+- `real_W.random_seed`
+- 評価時の `real_W.T`
+- 対象Node名
+- 最終同値候補集合の安定したcandidate identity列
+
+構築規則:
+
+1. 最終同値候補をcandidate identity keyで決定論的に整列する
+2. Node名をUTF-8 bytesへ変換する
+3. `vehicle_name` をUTF-8 bytesへ変換する
+4. `visit_id` はPython `int` として使う
+5. 候補境界・文字列境界・VisitKey境界が曖昧にならないよう、各bytes列の長さを整数として先に含める
+6. 候補ごとの `buyers_sorted` 件数を含める
+7. 最終同値候補件数を含める
+8. `real_W.random_seed` を含める
+9. `real_W.T` を含める
+10. これらの整数列を `SeedSequence` の entropy または `spawn_key` へ明示的に渡す
+11. 負整数や許容範囲外値は暗黙変換しない
+12. 文字列の単純連結1本でseedを作らない
+
+既存World契約（実装時に再確認する）:
+
+- `random_seed` は Python `int`（bool除外）または `None`
+- 再現性契約（同一seed・同一T・同一Node・同一同値集合で同一identity）は `random_seed` がPython `int` のときに適用する
+- `None` は既存Worldと同様に合法入力とするが、実行間のidentity再現は要求しない
+- `real_W.T` はPython `int`（bool除外）。不正は `ValueError`
+
+実装時に numpy `SeedSequence` の入力契約と既存型の範囲を再確認し、正本を変えない範囲で明示的helperへ実装する。
+
+## 9. RNG選択手順
+
+最終同値2件以上:
+
+1. identity keyで決定論的に整列する
+2. 選択専用局所RNGを構築する
+3. 0以上、件数未満のindexを1個生成する
+4. そのindexの候補を選ぶ
+5. selectedは入力経済結果内の同一object
+6. `rng_was_used=True`
+
+最終同値1件: RNGを構築しない。その候補を選ぶ。`rng_was_used=False`。
+
+feasible 0件: RNGなし。selectedは `None`。`rng_was_used=False`。
+
+RNG index範囲外、最終同値集合内のidentity重複: `RuntimeError`。
+
+局所一時RNGは関数外へ返さない。結果型へ保存しない。
+
+## 10. RNG状態の不変性
+
+候補選択の前後で変更しない:
+
+- `real_W.rng` およびその bit generator state
+- `real_W.order_control_rng` およびその bit generator state
+- `real_W.random_seed`
+- `real_W.T`
+- 実World交通状態、Vehicle状態
+- 経済評価結果、局所仮想計算結果、FIFO結果、collector、rank state
+
+既存RNGを一度も使用しないことで不変性を保証する。state保存・復元は使わない。
+
+## 11. RNGを使用しないケース
+
+feasible 0件、feasible 1件、surplus最大が1件、buyer数最大が1件、Node結果が空、全候補がeconomically infeasible、resolved経済候補が0件。
+
+RNGを使うのは、surplusとbuyer数の両方が同じ最終同値候補が2件以上の場合だけである。
+
+## 12. 公開Enum
+
+```text
+OrderControlTvtMpCandidateSelectionStatus
+```
+
+| member | value |
+| --- | --- |
+| `SELECTED` | `"selected"` |
+| `NO_ECONOMICALLY_FEASIBLE_CANDIDATE` | `"no_economically_feasible_candidate"` |
+
+このstatusは選択部品自身の結果だけを表す。上流非生成、具体的買い手0件、全FIFO False、全局所unresolved、resolvedだが全経済不成立の詳細は複製しない。詳細は入力経済評価結果の参照連鎖から確認する。
+
+`SELECTED`: selectedは `None` ではない。`rng_was_used` は True または False。
+
+`NO_ECONOMICALLY_FEASIBLE_CANDIDATE`: selectedは `None`。`rng_was_used=False`。
+
+statusとselectedの矛盾は `RuntimeError`。
+
+## 13. 公開frozen結果型
+
+すべて `dataclass(frozen=True)`。公開の順序付き列は `tuple`。
+
+### 13.1 Node単位
+
+`OrderControlTvtNodeMpCandidateSelectionResult`
+
+field順:
+
+1. `node_name`
+2. `selection_status`
+3. `selected_candidate_economic_result`（`OrderControlTvtMpCandidateEconomicEvaluationResult | None`。入力内同一object、または `None`）
+4. `rng_was_used`（厳密なPython bool）
+
+追加しない: 件数field、絞込み途中tuple、random index、seed、RNG object、payment、compensation、final rank。診断用の候補集合は入力経済結果から再確認する。candidate resultへselected flagを書き込まない。
+
+### 13.2 全体
+
+`OrderControlTvtMpCandidateSelectionSetResult`
+
+field順:
+
+1. `economic_evaluation_set_result`（入力と同一object。全候補経済結果および上流への正本）
+2. `node_candidate_selection_results`（入力経済Node結果と同じ順のtuple）
+
+追加しない: 全Node横断selected tuple、selected count、RNG state、payment/compensation/final rank/actual、live World/Vehicle/Node/Link、可変list/dict。
+
+## 14. 公開API
+
+```python
+def select_tvt_mp_candidates(
+    economic_evaluation_set_result,
+    real_W,
+) -> OrderControlTvtMpCandidateSelectionSetResult:
+```
+
+位置引数2つのみ。全対象Nodeを一括処理する。公開APIはこの一括関数1つ。
+
+追加しない: Node単位API、一候補API、mutable selection state、外部rng引数、external random_seed引数、candidate identity Mapping、surplus tolerance、payment/compensation rule。
+
+RNGの正本に使う値は `real_W.random_seed`、`real_W.T`、Node名、最終同値identity集合である。`real_W` の既存RNG objectは使用しない。
+
+## 15. 入力と整合確認
+
+外部入力不正は `ValueError`: 経済結果不正型、`real_W` 不正型、`random_seed` 不正（bool、文字列、非intかつ非None等）、`World.T` 不正。
+
+保存済み結果間の重大不整合は `RuntimeError`。候補ごとに少なくとも次を確認する。
+
+- `economically_feasible` は厳密なPython bool
+- `infeasibility_reasons` はtuple
+- feasibleならreasons空、infeasibleなら1件以上
+- feasibleならbuyer record 1件以上、全 `G_b > 0`、`G >= R`
+- `surplus` は有限かつ `G - R` と完全一致
+- buyer countは `len(buyer_economic_records)` かつ `buyers_sorted` 件数と一致
+- candidate identityが取得可能で、Node内重複なし
+- candidate resultは入力内の既存object
+
+## 16. 正式処理順
+
+明示的なforループと中間listを使う。多段max keyのone-linerへ圧縮しない。
+
+1. 公開入力型を確認する
+2. `real_W` の型、`random_seed`、`T` を確認する
+3. 経済評価Node結果を保存順に走査する
+4. Node名対応を確認する
+5. Node内のcandidate economic resultを保存順に走査する
+6. candidate resultの内部整合を確認する
+7. `economically_feasible is True` の候補だけを明示的listへ追加する
+8. 0件なら `NO_ECONOMICALLY_FEASIBLE_CANDIDATE` のNode結果を作る
+9. 1件以上なら最大surplusを明示的ループで求める
+10. 最大surplusと完全一致する候補を明示的listへ追加する
+11. 1件ならその候補を選択する
+12. 複数なら最大buyer数を明示的ループで求める
+13. 最大buyer数と一致する候補を明示的listへ追加する
+14. 1件ならその候補を選択する
+15. 2件以上ならcandidate identityを検証する
+16. identity keyにより決定論的に整列する
+17. 選択専用局所RNGを構築する
+18. 局所RNGで1件を選択する
+19. `SELECTED` のNode結果を作る
+20. 後続Nodeを処理する
+21. 全Node完了後に全体結果を構築する
+
+## 17. 候補が選択されない場合
+
+economically feasibleが0件の場合は正常結果であり、例外ではない。
+
+- `selection_status` は `NO_ECONOMICALLY_FEASIBLE_CANDIDATE`
+- `selected_candidate_economic_result=None`
+- `rng_was_used=False`
+
+上流非生成、具体的買い手0件、全FIFO False、全局所unresolved、resolvedだが全経済不成立、経済候補tuple空も、選択部品では同じ最小statusを使う。詳細原因は入力参照連鎖から確認する。候補なしを重大不整合にしない。
+
+## 18. 重大不整合と部分結果
+
+`ValueError`: 公開入力不正。
+
+`RuntimeError`: Node順/名不一致、candidate型不正、feasibleとreasonsの矛盾、feasibleなのに `G_b<=0` または `G<R`、surplus非有限または `G-R` 不一致、buyer件数不一致、identity取得不能またはNode内重複、selectedが入力に存在しない、statusとselectedの矛盾、`rng_was_used` がboolでない、RNG index範囲外、比較途中集合が内部矛盾で空。
+
+1 Nodeの重大不整合で全体停止。後続Nodeを処理しない。部分的全体結果を返さない。rollbackしない。入力経済結果・実World・RNG状態を変更しない。
+
+## 19. payment・compensation・最終順位との境界
+
+selected candidateから到達できる: `G_b`、`R_s`、`G`、`R`、surplus、buyer/seller VisitKey、一候補局所結果、concrete buyer candidate set、binding rank sequence、既存参照連鎖上の trade order。
+
+今回実装しない: `P_b`、payment/compensation配分、`payment_paid` / `payment_received` / `order_exchange_log` 更新、最終順位列、baseline fallback確定、台帳、formal route、実World反映、actual比較。
+
+selection resultへpaymentまたはcompensation fieldを追加しない。economic resultへselected flagを後書きしない。
+
+## 20. 可読性
+
+正しさを最優先する。明示的forループ、意味のある中間変数、小さなhelper。責務を少なくとも次へ分ける。公開入力検証、World seed情報検証、Node対応確認、candidate整合確認、feasible抽出、maximum surplus抽出、maximum buyer count抽出、identity構築、identity重複確認、deterministic整列、seed材料構築、局所RNG構築、RNG index選択、Node結果構築、overall結果構築。
+
+避ける: 長い内包表記、複雑なgenerator、多段max key、sort keyへの制度全体の圧縮、`hash()`、object id、並列、キャッシュ、入力変更、World RNG利用、RNG state保存復元、payment/最終順位の混入。
+
+## 21. 専用テスト契約
+
+新規専用テストは `tests_order_control_tvt_mp_candidate_selection.py`。最低限次を固定する。
+
+公開型: Enum memberとvalue、Node/overall frozen、公開列tuple、入力経済結果と同一object、selectedと入力candidateの同一object、live object/RNG object/seed非保持、payment/compensation/final rank/actual/件数fieldなし。
+
+公開API: 正式関数名、位置引数2つ、external RNG/seed引数なし、Node単位・一候補公開APIなし、mutable stateなし。
+
+入力: 正常、経済結果不正型、`real_W` 不正型、`random_seed` 不正、`World.T` 不正、Node順、Node名対応、candidate列tuple、candidate result型。
+
+選択: feasible 0/1/複数、surplus単独最大、surplus同値、近いが非同値、丸めなし、toleranceなし、surplus 0、`G=R`、buyer数第二基準、seller数・当事者総数・trade scope件数を使わない。
+
+RNG非使用: feasible 0、feasible 1、surplus最大1件、buyer数最大1件。
+
+RNG使用: surplusとbuyer数が同じ2件および3件以上、`rng_was_used=True`、同値以外を選ばない、index範囲内。
+
+再現性: 同じseed・T・Node・候補集合で同じidentity。候補列挙順を変えても同じidentity。Node列挙順を変えても各Nodeで同じidentity。同じ入力で再実行しても同じidentity。異なるseedで複数候補が選ばれ得る。`hash()` 非使用、object id非使用。
+
+RNG不変性: `real_W.rng`、`order_control_rng`、`random_seed`、`T`、交通状態。
+
+candidate identity: Node名と `buyers_sorted` を含む、VisitKey再訪を区別、identity重複拒否、別Nodeは別identity、selectedは入力同一object。
+
+status: selected時candidate非None、no candidate時Noneかつrng false、status矛盾拒否。
+
+重大不整合: feasible flagとreasons矛盾、feasibleなのに `G_b<=0` または `G<R`、surplus非有限、surplus不一致、buyer count不一致、identity不一致、duplicate identity、RNG index範囲外、1Node不整合で全体停止、partialなし、後続Node未処理。
+
+不変性: 経済結果、局所結果、FIFO、collector、rank state、Vehicle、実World。
+
+責務外: payment、compensation、selected flag後書き、final rank、formal route、台帳、実World反映、actual、strategy-proofness主張なし。
+
+## 22. 実装範囲と実装対象外
+
+実装範囲: feasible抽出、surplus最大抽出、buyer数最大抽出、最終同値identity検証、deterministic整列、選択専用局所RNG、Node/overall frozen結果、専用テスト（RNG不変性、列挙順およびNode順独立性を含む）。
+
+実装対象外: payment、compensation、`P_b` 比例配分、seller実補償配分、payment台帳更新、final rank、baseline fallback確定、formal route、順位台帳、実World交通反映、actual記録・比較、realized utility、ex-post welfare、上位TVT driver、strategy-proofness検証、文献制度の移植。
+
+## 23. 次の直接作業
+
+本節を独立確認する。問題がなければ、Markdown 2ファイルを先にcommitし、pushする。その保存後に、保存済み完全実装前仕様へ従い、次の新規2ファイルだけを実装する。
+
+- `uxsim/order_control_tvt_mp_candidate_selection.py`
+- `tests_order_control_tvt_mp_candidate_selection.py`
+
+Python実装前に、payment、compensation、最終順位、actual比較の新しい設計判断を混入させない。既存経済評価・集合入口・FIFO検査・拘束順位列の契約を再考しない。文献ポジショニングの再開地点と混同しない。
+
+今回のMarkdown更新では、Pythonとテストを変更していない。コード変更がないため、テストを実行したとは記載しない。Git操作は行っていない。`diagnostics/order_control.zip` には触れていない。
 
 # 新しいチャットでの再開方法
 
