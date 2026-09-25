@@ -7095,6 +7095,28 @@ horizon端点補修後の独立確認と文書保存のあと、新規一候補�
 - Pythonは未実装である。次の直接作業は、本仕様の独立確認と文書保存のあと、新規2ファイルだけを実装することである。実装前に新しい制度判断を追加しない。一候補統括の契約を再考しない。文献ポジショニング再開地点と混同しない。
 - 今回のMarkdown更新ではPythonとテストを変更していない。コード変更がないため、テストを実行していない。Git操作は行っていない。`diagnostics/order_control.zip` には触れていない。
 
+> 2026-09-25更新注記: 上記「Pythonは未実装」および「次の直接作業は…新規2ファイルだけを実装」は、完全実装前仕様確定当時の状態である歴史的記録として残す。保存済み実装前仕様はcommit `fa1eb10` を正本とする。その後、同仕様の範囲で新規本番・新規専用テストを実装し、専用テスト41件・関係回帰548件・py_compile・静的確認および独立確認を完了した。実装結果の詳細正本は `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_2.md` の「TVT-MP候補別局所仮想計算の全候補集合入口・実装結果」および直下の同日実装完了要約を参照する。実装前仕様要約は削除・上書きしない。
+
+**TVT-MP候補別局所仮想計算の全候補集合入口を実装・検証（2026-09-25）**
+
+本節は、FIFO検査済み全候補集合入口の実装・専用テスト・関係回帰・独立確認の完了記録である。直上の「全候補集合入口・完全実装前仕様を確定」要約および文献調査側の2026-09-25記録とは独立する。文献結論を実装判断へ取り込まない。実装結果を文献位置づけへ追記しない。詳細正本は `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_2.md` の「TVT-MP候補別局所仮想計算の全候補集合入口・実装結果」である。実装前仕様正本はcommit `fa1eb10`（直上の完全実装前仕様節）を参照する。
+
+- 新規本番 `uxsim/order_control_tvt_mp_local_virtual_calculation_set.py` と新規専用テスト `tests_order_control_tvt_mp_local_virtual_calculation_set.py` を、保存済み完全実装前仕様の範囲で実装した（記録時点では未追跡）。
+- 公開API: `evaluate_tvt_mp_candidate_local_virtual_calculations(real_W, fifo_inspection_set_result, *, rank_states_by_node_name)` の一括関数のみ。集合用state API・Node単位公開APIは追加していない。
+- 公開型: `OrderControlTvtNodeMpLocalVirtualCalculationResult`、`OrderControlTvtMpLocalVirtualCalculationSetResult`（いずれもfrozen）。候補単位は既存 `OrderControlTvtMpCandidateLocalVirtualCalculationResult` をそのまま使用。入力FIFO結果は同一object参照。件数field・経済値・live stateは置かない。
+- FIFO Trueだけ局所計算。FIFO Falseは拘束順位列・`World.copy()`・一候補統括を呼ばず、Node局所結果へ入れない。Falseは上流FIFO結果に残る。後続Trueは処理する。
+- resolvedと正常unresolved（`HORIZON_EXHAUSTED_UNRESOLVED`）の両方をNode結果へ保持。unresolvedは削除せず例外にしない。次段の経済性評価対象は `result.resolved is True` で判別する。
+- 正常非生成status4種、COMPLETEの候補0件・全FIFO Falseは局所計算0回の正常空Node結果。想定外statusは `RuntimeError` で全体停止。
+- FIFO True候補ごとに拘束順位列 → 局所状態（`real_W.copy()` 1回）→ 一候補統括初期化 → run-to-completion。local Worldは共有しない。実World、collector、FIFO、baseline、rank state、RNGは不変。
+- 重大不整合時は全集合停止。部分全体結果なし。一候補API例外は型を変えず再送出。正常unresolvedへ隠さない。
+- baseline、FIFO検査、一般形順位、具体的買い手候補の再実行なし。経済性評価・候補採否・実World反映は未実装。
+- テスト: 専用41件（直接実行41 passed、pytest 41 passed・41 collected、TESTS登録41）。関係回帰9ファイル548 passed。py_compile成功。全pytest・GUI・長時間性能テストは未実行。
+- 独立確認: 保存済み仕様に沿う。追加修正不要と判断した。既存公開API変更は不要だった。
+- 実装完了範囲: 全候補集合入口、Node別・全体frozen結果、FIFO選別、boundary index照合、候補間独立World、重大不整合時全体停止。
+- 未実装: 経済性評価、`G`/`R`/surplus、候補採用・却下、支払い・補償、最終順位確定、実World反映、上位TVT driver、strategy-proofness検証等。
+- 次の再開地点: 本節・設計メモ実装結果節と新規2ファイルを同一保存単位でcommit予定（文献Markdownは含めない）。commitとpushは本Markdown作業では行わない。保存後に正本と進捗を確認して次工程を判断する。次の未実装領域は経済性評価であるが、具体的API・型・計算式・実装順は本記録で新たに確定しない。文献ポジショニング再開地点と混同しない。
+- 今回のMarkdown更新ではPythonとテストを変更していない。Git操作は行っていない。`diagnostics/order_control.zip` には触れていない。
+
 #### 2026-08-29：TVT権利保有車両選定前の先頭非参加Vehicle先行確定の記録補修
 
 - 過去に確定済みだった、意思決定窓内 baseline 到着順位の先頭に連続する非参加 Vehicle の先行確定が、設計メモに明文化されていなかった

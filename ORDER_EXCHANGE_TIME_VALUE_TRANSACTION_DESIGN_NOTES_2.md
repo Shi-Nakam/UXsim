@@ -15022,7 +15022,7 @@ World baselineとcandidateの通過時刻範囲を一致させている。
 - 次の研究・実装工程は、保存後に正本と全体進捗を確認して別途判断する
 - 文献ポジショニング第一段階の再開地点（利用者判断待ち）と、TVT-MP実装作業の再開地点を混同しない
 
-> 2026-09-25更新注記: 上記「commit予定」「直ちに全候補集合入口を実装するとは確定しない」は、一候補統括loop実装結果を文書化した当時の再開情報である。一候補統括loopはcommit `d68e038` で実装・検証・push済みである。その後、FIFO検査済み全候補への集合接続について完全実装前仕様を確定した。最新の次の直接作業は、直下の「TVT-MP候補別局所仮想計算の全候補集合入口・完全実装前仕様」を独立確認し、利用者がMarkdownを保存したあと、新規2ファイルだけを実装することである。実装前に新しい制度判断を追加しない。経済性評価には進まない。上記を現在の作業指示として読まない。
+> 2026-09-25更新注記: 上記「commit予定」「直ちに全候補集合入口を実装するとは確定しない」は、一候補統括loop実装結果を文書化した当時の再開情報である。一候補統括loopはcommit `d68e038` で実装・検証・push済みである。その後、FIFO検査済み全候補への集合接続について完全実装前仕様を確定した（commit `fa1eb10`）。その仕様に従い全候補集合入口を実装・検証済みである。実装結果の詳細正本は、本ファイル末尾付近の「TVT-MP候補別局所仮想計算の全候補集合入口・実装結果」を参照する。上記を現在の作業指示として読まない。
 
 # TVT-MP候補別局所仮想計算の全候補集合入口・完全実装前仕様
 
@@ -15645,6 +15645,306 @@ sellers空は一候補結果として合法である。集合入口はsellers空
 本節を独立確認する。利用者がMarkdownをcommitおよびpushしたあと、新規2ファイルだけを実装する。実装前に新しい制度判断を追加しない。既存一候補統括、FIFO検査、拘束順位列、局所状態の契約を再考しない。経済性評価、候補採否、最終確定には進まない。文献ポジショニングの再開地点と混同しない。
 
 今回のMarkdown更新では、Pythonとテストを変更していない。コード変更がないため、テストを実行したとは記載しない。Git操作は行っていない。`diagnostics/order_control.zip` には触れていない。
+
+> 2026-09-25更新注記: 上記「新規2ファイルだけを実装する」は、完全実装前仕様確定当時の直接作業である。保存済み仕様（commit `fa1eb10`、document pre-implementation specification for TVT-MP all-candidate local virtual calculation entry）に従い、新規本番モジュールと新規専用テストを実装し、専用テスト・関係回帰・py_compile・静的確認および独立確認を完了した。実装結果の詳細正本は、直下の「TVT-MP候補別局所仮想計算の全候補集合入口・実装結果」を参照する。実装前仕様本文は削除・上書きしない。上記を現在の作業指示として読まない。
+
+# TVT-MP候補別局所仮想計算の全候補集合入口・実装結果
+
+**記録日：2026-09-25**
+
+本節は、保存済み「TVT-MP候補別局所仮想計算の全候補集合入口・完全実装前仕様」（commit `fa1eb10` および直上の完全実装前仕様節）に基づく**実装結果**の正本である。新しい制度設計を追加しない。実装前仕様との対応、公開型・公開API、処理契約、テスト結果、独立確認、完了範囲、未実装範囲、次の再開地点を記録する。
+
+文献ポジショニング第一段階の調査・試行採点記録とは混同しない。本節はTVT-MP全候補集合入口の実装・検証記録のみを扱う。一候補統括loopの実装結果は直上の「TVT-MP候補別局所仮想計算の一候補統括loop実装結果」を参照する。
+
+## 1. 位置づけ
+
+- 実装前仕様はcommit `fa1eb10` で保存済み・push済みである。詳細は直上の「完全実装前仕様」節である。
+- 本実装は、FIFO検査済みの全対象Node・全候補について、FIFO True候補だけを既存一候補統括loopへ接続し、frozen結果をNode別・全体にまとめる集合入口である。
+- 既存一候補統括（commit `d68e038`）、FIFO検査、拘束順位列、局所状態、一候補統括loopの契約は再設計していない。既存公開APIの変更は不要だった。
+- 経済性評価、候補採否、最終順位確定、実World交通反映、上位TVT driverは対象外である。
+
+## 2. 新規実装ファイル
+
+| 区分 | パス |
+| --- | --- |
+| 本番 | `uxsim/order_control_tvt_mp_local_virtual_calculation_set.py` |
+| 専用テスト | `tests_order_control_tvt_mp_local_virtual_calculation_set.py` |
+
+記録時点では上記2ファイルは未追跡である。既存本番Pythonと既存テストは変更していない。
+
+## 3. 実装した公開型
+
+いずれも `dataclass(frozen=True)` である。
+
+### 3.1 Node単位
+
+`OrderControlTvtNodeMpLocalVirtualCalculationResult`
+
+field（この順）:
+
+1. `node_name`
+2. `build_status`（`OrderControlTvtCandidateVisitSetStatus`）
+3. `candidate_local_virtual_calculation_results`（`tuple[OrderControlTvtMpCandidateLocalVirtualCalculationResult, ...]`）
+
+### 3.2 全体
+
+`OrderControlTvtMpLocalVirtualCalculationSetResult`
+
+field（この順）:
+
+1. `fifo_inspection_set_result`（入力と同一object参照）
+2. `node_local_virtual_calculation_results`（FIFO Node結果と同じNode順のtuple）
+
+### 3.3 候補単位
+
+新しいEntry型は作らない。既存の `OrderControlTvtMpCandidateLocalVirtualCalculationResult` をそのまま使用する。
+
+### 3.4 追加していないfield
+
+候補ID、件数field、resolved専用列、unresolved専用列、経済性評価対象専用列、経済値、採否結果、live World、Node、Link、Vehicle、candidate local state、一候補統括state。
+
+## 4. 実装した公開API
+
+正式名称:
+
+```python
+def evaluate_tvt_mp_candidate_local_virtual_calculations(
+    real_W,
+    fifo_inspection_set_result,
+    *,
+    rank_states_by_node_name,
+) -> OrderControlTvtMpLocalVirtualCalculationSetResult:
+```
+
+- 先頭2引数は位置引数。`rank_states_by_node_name` はkeyword-only必須。
+- 公開APIはこの一括関数のみ。集合用initialize API、one-candidate API、run-all state、Node単位公開APIは追加していない。
+
+## 5. 入力と上流参照
+
+直接受け取るもの:
+
+- `real_W`（時点Tの実World）
+- `fifo_inspection_set_result`（`OrderControlTvtMpFifoInspectionSetResult`）
+- `rank_states_by_node_name`（Node名から `OrderControlTvtNodeRankState` へのMapping）
+
+FIFO結果の既存参照連鎖からfork resultを1回だけ取得する（拘束順位列構築APIと同じ経路）:
+
+```text
+fifo_inspection_set_result
+  .general_trade_rank_set_result
+    .concrete_buyer_candidate_set_result
+      .inlink_candidate_physical_order_result
+        .candidate_visit_set_result
+          .right_of_entry_selection_result
+            .leading_confirmation_result
+              .arrived_confirmation_result
+                .alignment_fork_result.fork_result
+```
+
+そこから読むもの: `collector`、`target_node_names`、`baseline_timestep_T`、`configured_horizon_steps`、`downstream_boundary_result`。
+
+- `real_W.T` はPython `int`（bool拒否）かつ `fork_result.baseline_timestep_T` と一致すること。不一致は `ValueError`。
+- baseline、FIFO検査、一般形順位、具体的買い手候補の再実行は行わない。
+
+## 6. 処理順（実装）
+
+実装前仕様第9節の正式処理順に沿っている。
+
+1. 公開入力型を確認する
+2. FIFO結果の参照連鎖からfork resultを1回取得する
+3. `real_W.T` と `baseline_timestep_T` を確認する
+4. FIFO Node結果件数・順序と `target_node_names` を照合する
+5. FIFO Node結果を保存順に走査する
+6. `build_status` を確認する
+7. 正常非生成statusなら空Node結果を作る
+8. `BASELINE_INFORMATION_COMPLETE` なら候補列を保存順に走査する
+9. FIFO False候補はスキップする
+10. 最初のFIFO True候補の前に、当該Nodeのrank stateとboundary結果を取得・確認する
+11. `build_tvt_mp_local_binding_rank_sequence` を呼ぶ
+12. `build_tvt_mp_candidate_local_state` を呼ぶ（候補ごとに `real_W.copy()` 1回）
+13. `initialize_tvt_mp_candidate_local_virtual_calculation_state` を呼ぶ
+14. `run_tvt_mp_candidate_local_virtual_calculation` を1回呼ぶ（run-to-completionのみ。one-timestep APIを集合入口から直接反復しない）
+15. resolvedまたは正常unresolved結果をNode結果列へ追加する
+16. 後続候補・後続Nodeを処理する
+17. 全Node完了後に全体結果を構築して返す
+
+## 7. status別動作
+
+### 7.1 正常非生成status（4種）
+
+- `NOT_BUILT_NO_RIGHT_OF_ENTRY`
+- `NOT_BUILT_UNRESOLVED_ARRIVALS`
+- `UNRESOLVED_RIGHT_OF_ENTRY_PASSAGE`
+- `UNRESOLVED_CANDIDATE_PASSAGES`
+
+動作: 局所計算0回、`candidate_local_virtual_calculation_results=()`、rank state不使用、boundary不使用、`World.copy()` なし。
+
+### 7.2 `BASELINE_INFORMATION_COMPLETE`
+
+- 候補0件は正常空結果
+- 全FIFO Falseも正常空結果
+- FIFO Trueだけ局所計算
+
+### 7.3 想定外status
+
+`RuntimeError`。後続候補・後続Nodeを処理しない。部分的な全体結果を返さない。
+
+## 8. FIFO False
+
+正常な候補棄却である。例外ではない。
+
+- 拘束順位列を構築しない
+- candidate local stateを構築しない
+- `World.copy()` を行わない
+- 一候補統括を呼ばない
+- Node局所結果tupleへ含めない
+- 上流 `fifo_inspection_set_result` に元の順序で残る
+- 後続候補を処理する
+
+## 9. resolvedと正常unresolved
+
+### 9.1 resolved
+
+- 一候補結果の `resolved is True`、`stop_reason is RESOLVED`
+- Node局所結果tupleへ保持する
+- 次段で経済性評価対象になり得る。本節では経済性評価しない
+
+### 9.2 正常unresolved
+
+- `stop_reason is HORIZON_EXHAUSTED_UNRESOLVED`、`resolved is False`
+- Node局所結果tupleへ保持する。削除しない。例外にしない
+- 後続候補を処理する
+- 次段では `result.resolved is False` により経済性評価対象外とする
+
+FIFO Falseと正常unresolvedは混同しない。
+
+## 10. Node別downstream boundary取得
+
+局所計算を行うNode（FIFO Trueが1件以上）でのみ必須である。
+
+- 同一 `node_index` で FIFO Node名、`fork_result.target_node_names[node_index]`、`downstream_boundary_result.node_results[node_index].node_name` を照合する
+- 評価対象0件のNodeでは `downstream_boundary_result is None` を例外にしない
+- 評価対象があるのに全体が `None` なら `RuntimeError`
+- outlink順不一致は既存一候補初期化APIが検出する。集合入口は推測修復しない
+
+## 11. 候補間独立性
+
+FIFO True候補ごとに個別に行う:
+
+- 拘束順位列構築
+- candidate local state構築（`real_W.copy()` 1回）
+- 一候補統括state初期化
+- run-to-completion
+
+共有しない: local World、local Node、local Link、local Vehicle、candidate local state、calculation state、boundary state、completed timestep列。
+
+読取専用で共通: `real_W`、collector、downstream boundary baseline結果、FIFO結果、rank state、fork result。
+
+公開出力順はFIFO True候補の上流相対順を維持する。
+
+## 12. 重大不整合と例外
+
+| 区分 | 例外 |
+| --- | --- |
+| 外部入力不正（型、Mapping、`real_W.T` 不一致、評価対象Nodeのrank state欠落・型不正・node_name不一致） | `ValueError` |
+| 保存済み結果間の重大不整合（件数、順序、Node名、連鎖欠落、評価対象があるのにboundary `None`、fork `baseline_timestep_T` がPython intでない） | `RuntimeError` |
+| 一候補APIからの `ValueError` または `RuntimeError` | 型を変えず再送出 |
+
+正常unresolvedへ変換しない。部分全体結果を返さない。先行候補のlocal Worldをrollbackしない。実World、collector、FIFO結果、baseline結果、rank state、RNGは不変である。
+
+## 13. 経済性評価との境界
+
+本実装は、全候補の局所交通予測結果をまとめ、次段が `result.resolved is True` で経済性評価対象候補を識別できるところまでである。
+
+実装していない:
+
+- baselineとcandidateの時間差、expected time saving、waiting increase
+- `G_b`、`R_s`、`G`、`R`、surplus、utility
+- payment、compensation
+- 候補採否、同値候補比較、RNG選択
+- 最終順位確定、formal route保存、順位台帳更新、実World交通反映、上位TVT driver
+- strategy-proofness検証
+
+## 14. テスト結果
+
+専用テスト `tests_order_control_tvt_mp_local_virtual_calculation_set.py`:
+
+| 項目 | 結果 |
+| --- | --- |
+| 定義済みtest関数 | 41 |
+| TESTS登録 | 41（重複なし、登録漏れなし、未定義参照なし） |
+| 直接実行 | 41 tests passed |
+| pytest | 41 passed |
+| pytest収集 | 41 collected |
+
+関係回帰（pytest、9ファイル）:
+
+- `tests_order_control_tvt_mp_fifo_inspection.py`
+- `tests_order_control_tvt_mp_local_binding_rank_sequence.py`
+- `tests_order_control_tvt_mp_candidate_local_state.py`
+- `tests_order_control_tvt_mp_candidate_local_virtual_calculation.py`
+- `tests_order_control_tvt_mp_general_trade_rank.py`
+- `tests_order_control_tvt_mp_concrete_buyer_candidate_set.py`
+- `tests_order_control_baseline_driver.py`
+- `tests_order_control_baseline_downstream_boundary.py`
+- `tests_order_control_tvt_node_rank_state.py`
+
+**548 passed**
+
+`py_compile`: 新規本番・新規専用テストの両方で成功。
+
+全pytest、GUI、デモ、長時間性能テストは実行していない。
+
+## 15. 独立確認結果
+
+独立確認の結論:
+
+- 保存済み完全実装前仕様（commit `fa1eb10`）に沿っている
+- FIFO True候補だけを局所計算する
+- 候補ごとの交通コピー（`World.copy()`）は独立している
+- 正常unresolvedを失わない
+- 重大不整合を正常unresolvedへ隠さない
+- 経済性評価や候補選択を先取りしていない
+- 既存一候補処理を作り直していない
+- 既存公開APIの変更は不要だった
+- **追加修正不要**と判断した
+
+## 16. 実装完了範囲
+
+- FIFO検査済み全候補集合入口 `evaluate_tvt_mp_candidate_local_virtual_calculations`
+- FIFO True候補の既存一候補統括への接続（拘束順位列 → 局所状態 → 初期化 → run-to-completion）
+- Node別・全体frozen結果型
+- resolvedと正常unresolvedの両方の保持
+- FIFO Falseのスキップと上流FIFO結果への残置
+- 候補間独立World
+- 重大不整合時の全体停止（部分結果なし）
+
+## 17. 未実装範囲
+
+- 経済性評価（時間差、`G`/`R`/surplus等）
+- 候補採用・却下、同値候補選択
+- 支払い・補償
+- 最終順位確定、formal routeの実World保存、順位台帳更新
+- 実World交通反映
+- 上位TVT driver全体
+- strategy-proofness検証
+
+## 18. 次の再開地点
+
+利用者が次の4ファイルを同一保存単位としてcommitする予定である。
+
+- `uxsim/order_control_tvt_mp_local_virtual_calculation_set.py`
+- `tests_order_control_tvt_mp_local_virtual_calculation_set.py`
+- `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_2.md`（本実装結果節を含む）
+- `ORDER_EXCHANGE_PROGRESS.md`（同日要約を含む）
+
+commitとpushは本Markdown作業では行わない。
+
+保存後の次工程は、正本と全体進捗を確認して決める。次の未実装領域は**経済性評価**である。ただし、具体的な経済性評価API、型、計算式、実装順を本節で新たに確定しない。
+
+文献ポジショニング作業の再開地点と混同しない。
+
+今回のMarkdown更新では、Pythonとテストは変更していない（記録時点で未追跡の新規2ファイルはそのまま）。Git操作は行っていない。`diagnostics/order_control.zip` には触れていない。
 
 # 新しいチャットでの再開方法
 
