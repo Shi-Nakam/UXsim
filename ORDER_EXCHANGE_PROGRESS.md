@@ -7138,6 +7138,26 @@ horizon端点補修後の独立確認と文書保存のあと、新規一候補�
 - Pythonは未実装である。次の直接作業は、本仕様の独立確認とMarkdown 2ファイルの保存のあと、新規2ファイルだけを実装することである。実装前に候補選択、payment、compensation、RNG、actual比較の新しい設計判断を混入させない。文献ポジショニング再開地点と混同しない。
 - 今回のMarkdown更新ではPythonとテストを変更していない。コード変更がないため、テストを実行していない。Git操作は行っていない。`diagnostics/order_control.zip` には触れていない。
 
+> 2026-09-26更新注記: 上記「Pythonは未実装」および「次の直接作業は…新規2ファイルだけを実装」は、完全実装前仕様確定（commit `32f8cce`）当時の再開情報である。保存済み仕様に従い経済性評価部品を実装・検証した。最新正本は `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_2.md` の「TVT-MP経済性評価部品・実装結果」。直下の2026-09-26追記を参照する。実装前仕様要約は削除・上書きしない。
+
+**TVT-MP経済性評価部品を実装・検証（2026-09-26）**
+
+本節は、resolved候補の経済性評価部品の実装・検証結果の要約である。詳細正本は `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_2.md` の「TVT-MP経済性評価部品・実装結果」である。実装前仕様はcommit `32f8cce` で保存済み。前段の全候補集合入口はcommit `5b40723` で実装済み。文献調査側の記録は変更していない。
+
+- 新規2ファイル: 本番 `uxsim/order_control_tvt_mp_economic_evaluation.py`、専用テスト `tests_order_control_tvt_mp_economic_evaluation.py`（記録時点未追跡）。既存公開API変更なし。
+- 公開API: `evaluate_tvt_mp_candidate_economics(local_virtual_calculation_set_result, real_W)` の一括関数のみ。VOT Mapping・DELTAT引数・集合用state・Node/一候補公開APIなし。
+- 評価対象: FIFO Trueかつ `resolved is True` かつ `stop_reason` が `RESOLVED` の候補のみ。正常unresolvedは経済結果を作らず入力側に残す。FIFO Falseは評価しない。
+- VOT: `real_W.VEHICLES` の `vot_declared` のみ使用。単位は抽象的貨幣単位/秒。`vot_true` は読まず結果へ複写しない。`VOT=0` は合法。不参加は `participates_in_order_exchange=False`。VOT=0を不参加の代理にしない。
+- 計算: buyer時間差 `baseline - candidate`（符号付き）、seller raw差 `candidate - baseline`、待ち `max(raw,0)`、秒換算は `DELTAT` 乗算後。`G_b`、`R_s`、`G`、`R`、`surplus`。成立は全buyer `G_b>0` かつ `G>=R`。Enum理由は `BUYER_NONPOSITIVE_VALUE` と `TOTAL_BUYER_VALUE_BELOW_REQUIRED_COMPENSATION`（正本順tuple）。
+- VOT=0 buyer: 正常な経済的不成立（`BUYER_NONPOSITIVE_VALUE`）。VOT=0 seller: 待ち正でも `R_s=0`。例外・非参加変換なし。
+- payment・compensation・候補選択・actual比較・最終順位・実World反映は未実装。`G_b`≠payment、`R_s`≠compensation。`G>=R` をstrategy-proofnessの証明としない。
+- テスト: 専用32件（直接32 passed、pytest 32 passed・32 collected、TESTS 32）。関係回帰: 指定7ファイル **380 passed**、baseline driver/downstream boundary **121 passed**。py_compile成功。
+- 独立確認: 仕様との対応・境界・不変性を確認し、追加修正不要と判断。
+- 実装完了: resolved経済評価、frozen結果型、VOT=0処理、重大不整合時全体停止、専用テスト・関係回帰。
+- 未実装: 候補選択、payment、compensation、RNG、actual比較、最終順位、実World反映、上位driver、strategy-proofness検証等。
+- 次の再開地点: 本節・設計メモ実装結果節と新規2 Pythonを同一保存単位でcommit予定（文献Markdownは含めない）。commit/pushは本Markdown作業では行わない。保存後に正本と進捗を再確認。候補選択は未実装の一つだが、具体API・型・処理順は本記録で新たに確定しない。文献ポジショニングと混同しない。
+- 今回のMarkdown更新ではPythonとテストを変更していない。Git操作は行っていない。`diagnostics/order_control.zip` には触れていない。
+
 #### 2026-08-29：TVT権利保有車両選定前の先頭非参加Vehicle先行確定の記録補修
 
 - 過去に確定済みだった、意思決定窓内 baseline 到着順位の先頭に連続する非参加 Vehicle の先行確定が、設計メモに明文化されていなかった
