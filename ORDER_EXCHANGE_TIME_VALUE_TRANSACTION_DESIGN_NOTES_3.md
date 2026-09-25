@@ -166,3 +166,404 @@ payment、compensation、配分・台帳更新、最終確定各種、formal rou
 5. 未実装領域から次の設計対象を選ぶ。
 
 payment、compensation、最終順位確定は未実装として残る。今回の文書更新だけで、次の設計対象は確定しない。
+
+# TVT-MP payment・compensation計算部品・完全実装前仕様
+
+**記録日: 2026-09-26**
+
+本節は完全実装前仕様である。Python実装と専用テストは未着手である。Cursorの報告だけで実装完了としない。実装後は実コード、専用テスト、差分、Git状態、独立確認を根拠にする。
+
+成立候補選択部品はcommit `2e67ae0` で実装・検証・保存済みである。本部品は、Nodeごとに選択された最大1件の候補について、buyer支払額とseller補償額を計算する純計算部品である。Vehicle金銭台帳、final rank、実World反映は対象外である。
+
+新しい制度判断は追加しない。次の制度原則は再検討または未確定へ戻さない。
+
+## 1. 位置づけと予定ファイル
+
+本部品は candidate selection の直後に置く。入力は選択結果だけである。出力は新しいfrozen結果だけである。
+
+| 区分 | パス |
+| --- | --- |
+| 新規本番予定 | `uxsim/order_control_tvt_mp_payment_and_compensation.py` |
+| 新規専用テスト予定 | `tests_order_control_tvt_mp_payment_and_compensation.py` |
+
+既存の経済性評価モジュール、候補選択モジュール、それらの専用テスト、既存結果型は変更しない。
+
+## 2. 制度原則
+
+- buyer支払総額は、seller側必要補償総額 `R` である。
+- 各buyer `b` の支払額は `P_b = R * G_b / G` である。
+- 各seller `s` の補償額は、上流経済性評価で計算済みの `R_s` である。
+- seller補償総額は `R` である。制度上、buyer支払総額とseller補償総額はともに `R` である。
+- sellerへ追加的な金銭surplusを配らない。
+- `surplus = G - R` は制度主体が保持する金銭残高ではない。
+- paymentとcompensationは予測値に基づいて事前確定する。
+- actual passage結果に基づく事後精算は行わない。
+- strategy-proofnessは未証明である。
+
+sellerの予想通過時刻がbaselineと同じ、または早い場合:
+
+- `compensation_amount` は 0 である。
+- seller自身の支払額も 0 である。
+- sellerのroleを維持する。
+- buyerへ変更しない。
+- sellerの時間短縮価値を `G` へ加えない。
+- 早期通過sellerは、支払いなしで時間短縮の交通上の便益を得る。
+
+これらの帰結は、上流経済性評価が `expected_waiting_increase = max(raw_diff, 0)` により `R_s = 0` を保存済みであることに依る。本部品は `compensation_amount = R_s` とするだけで、seller roleを変更しない。
+
+## 3. 数値契約
+
+- 各 `payment_P_b` は `P_b = R * G_b / G` で個別計算する。
+- floatを使用する。
+- 内部で丸めない。
+- toleranceを使わない。
+- Decimalを使わない。
+- 最後のbuyerへ残差を割り当てない。
+- buyer順を金額補正へ利用しない。
+- `sum(P_b)` と `R` のbit単位一致を重大不整合条件にしない。
+- `payment_P_b` と `G_b` のごく小さなfloat差を直ちに重大不整合にしない。
+- 数値表現上の実問題が確認された場合だけ、Tolerance、Decimal、または別の残差方式を再検討する。
+- 経済的成立判定 `G >= R` は上流の既存契約である。本部品はそれを再定義しない。
+
+上流から受け取った保存値については、本部品が直接利用する材料として次を確認する。
+
+- 保存済み `G` と、buyerの `G_b` を明示的forループで加算した値が完全一致する。
+- 保存済み `R` と、sellerの `R_s` を明示的forループで加算した値が完全一致する。
+
+経済性評価や候補選択を再実行しない。
+
+成立候補では全 `G_b > 0` のため `G > 0` である。したがって `P_b` のゼロ除算は発生しない。`R = 0` なら全 `payment_P_b = 0` となる。`G = R` なら式上 `P_b = G_b` である。`G > R` なら式上 `P_b < G_b` である。これらをbit単位の公開不変条件にはしない。
+
+## 4. 実装境界と入力
+
+入力は次だけである。
+
+- `OrderControlTvtMpCandidateSelectionSetResult`
+
+`real_W` は受け取らない。Vehicle検索は行わない。選択結果から次へ到達できる。
+
+- `G_b`
+- `R_s`
+- `G`
+- `R`
+- buyerとsellerのVisitKey
+- `vehicle_name`
+- selected candidate
+- Node名
+- economic evaluation set result
+
+VisitKeyは `(vehicle_name, visit_id)` である。identity保持に `real_W` は不要である。
+
+本部品は純計算だけを行い、新しいfrozen結果を返す。
+
+変更しない:
+
+- selection result
+- economic evaluation result
+- local result
+- FIFO result
+- collector
+- rank state
+- Vehicle
+- `Vehicle.payment_paid`
+- `Vehicle.payment_received`
+- `Vehicle.order_exchange_log`
+- real World
+- RNG
+
+既存の `OrderControlTvtMpBuyerEconomicRecord`、`OrderControlTvtMpSellerEconomicRecord`、`OrderControlTvtMpCandidateEconomicEvaluationResult`、候補選択結果型へ payment / compensation field を追加しない。economic resultへselected flagを後書きしない。
+
+## 5. 公開Enum
+
+`OrderControlTvtMpPaymentAndCompensationStatus`
+
+- `CALCULATED = "calculated"`
+- `NO_SELECTED_CANDIDATE = "no_selected_candidate"`
+
+`SETTLED` / `NO_SETTLEMENT` は使わない。実Worldへの金銭反映と誤読されるためである。selection statusを本部品のNode結果へ複写しない。候補なしの詳細原因は、入力selection resultの参照連鎖から確認する。
+
+## 6. 公開frozen型
+
+すべて `dataclass(frozen=True)`。公開の順序付き列は `tuple`。入力resultとselected candidateは同一object参照を維持する。live World、Vehicle、Node、Link、RNG、mutable list、mutable dict を保持しない。件数fieldを置かない。
+
+### 6.1 buyer record
+
+`OrderControlTvtMpBuyerPaymentRecord` — field順:
+
+1. `visit_key`
+2. `vehicle_name`
+3. `payment_P_b`
+
+`payment_P_b` は本部品の計算結果である。`G_b` は入力経済recordから取得し、本recordへ複写しない。
+
+### 6.2 seller record
+
+`OrderControlTvtMpSellerCompensationRecord` — field順:
+
+1. `visit_key`
+2. `vehicle_name`
+3. `compensation_amount`
+
+`compensation_amount` は、選択された経済結果に保存された `required_compensation_R_s` と同額とする。これは本部品が確定する実補償額であり、経済評価の留保額 `required_compensation_R_s` とはfield名を分ける。`actual_compensation` というfield名は使わない。actual passageに基づく事後値と誤読されるためである。`R_s` 自体は本recordへ複写しない。
+
+### 6.3 Node結果
+
+`OrderControlTvtNodeMpPaymentAndCompensationResult` — field順:
+
+1. `node_name`
+2. `payment_and_compensation_status`
+3. `selected_candidate_economic_result`
+4. `buyer_payment_records`
+5. `seller_compensation_records`
+
+Nodeごとにselected candidateは最大1件である。`selected_candidate_economic_result` は、入力Node選択結果のselectedと同一objectとする。候補なしでは `None` とする。
+
+### 6.4 全体結果
+
+`OrderControlTvtMpPaymentAndCompensationSetResult` — field順:
+
+1. `candidate_selection_set_result`
+2. `node_payment_and_compensation_results`
+
+`candidate_selection_set_result` は入力と同一object参照である。`node_payment_and_compensation_results` は入力selectionのNode順を維持するtupleである。
+
+## 7. 公開API
+
+```python
+def calculate_tvt_mp_payments_and_compensations(
+    candidate_selection_set_result,
+) -> OrderControlTvtMpPaymentAndCompensationSetResult:
+```
+
+- 位置引数1つ
+- `real_W` なし
+- 全Node一括
+- Node単位公開APIなし
+- buyer、seller単位公開APIなし
+- tolerance、Decimal、rounding、外部rule引数なし
+- mutable stateなし
+- 部分的overall resultを返さない
+
+関数名に `settle` を使わない。純計算であり、実Worldへ金銭を反映する処理ではない。
+
+## 8. 候補なしNode
+
+selected candidateがない場合は正常結果であり、例外ではない。
+
+- `payment_and_compensation_status` は `NO_SELECTED_CANDIDATE`
+- `selected_candidate_economic_result` は `None`
+- `buyer_payment_records` は空tuple
+- `seller_compensation_records` は空tuple
+- 0額recordを作らない
+- Node結果は省略しない。全体結果から当該Nodeを落とさない
+
+入力の `selection_status` が `NO_ECONOMICALLY_FEASIBLE_CANDIDATE` であることと、selectedが `None` であることを対応確認する。候補なしを重大不整合へ変換しない。
+
+## 9. 保存する値
+
+- buyerの `visit_key`
+- buyerの `vehicle_name`
+- `payment_P_b`
+- sellerの `visit_key`
+- sellerの `vehicle_name`
+- `compensation_amount`
+- Node status
+- selected economic resultの同一参照
+- input selection setの同一参照
+
+## 10. 保存しない値
+
+- `G_b` の複写
+- `R_s` の複写
+- `payment_share`
+- `expected_net_benefit`
+- buyerまたはsellerのutility
+- 早期通過flag
+- `total_buyer_payment`
+- `total_seller_compensation`
+- `institutional_balance`
+- `sum(P_b)` の診断値
+- rounding情報
+- tolerance
+- Decimal
+- final rank
+- actual passage
+- Vehicle台帳
+- live World
+- RNG
+- mutable listまたはdict
+
+`sum(P_b)` と制度上の総額 `R` の関係、`G = R` 近傍の `P_b` と `G_b` の関係は、公開結果へ診断fieldを増やさず専用テストで確認する。
+
+## 11. 処理順
+
+明示的なNode、buyer、sellerのforループを使う。iterator、generator、並列実行は使わない。候補列、buyer列、seller列を不要に再ソートしない。buyerまたはsellerの順序を金額補正に使わない。
+
+1. selection setの型を確認する
+2. selection Node結果列とeconomic Node結果列の対応を確認する
+3. Node順とNode名を確認する
+4. selection statusとselected candidateの対応を確認する
+5. selected candidateが当該Nodeの経済候補tuple内の同一objectであることを確認する
+6. 候補なしなら `NO_SELECTED_CANDIDATE` 結果を作る
+7. selected candidateがある場合は `G`、`R`、buyer records、seller recordsを確認する
+8. buyer recordsを保存順に明示的forループで走査する
+9. `payment_P_b = R * G_b / G` を個別計算する
+10. seller recordsを保存順に明示的forループで走査する
+11. `compensation_amount = R_s` とする
+12. `CALCULATED` のNode結果を作る
+13. 全Node完了後に全体結果を作る
+
+seller空は合法である。seller record tupleが空、保存済み `R = 0`、全 `payment_P_b = 0`、seller compensation recordsは空tupleとする。
+
+## 12. 重大不整合
+
+外部入力型不正は `ValueError`。例: 公開入力が `OrderControlTvtMpCandidateSelectionSetResult` でない。
+
+保存済み結果間または内部の重大不整合は `RuntimeError`。
+
+主な確認対象:
+
+- Node結果列の型
+- Node件数、Node順、Node名
+- statusとselected candidateの矛盾
+- selected candidateの同一object契約
+- selected candidateが `economically_feasible is True` であること
+- `G` が正かつ有限
+- `R` が非負かつ有限
+- `G >= R`
+- buyer recordsがtupleで1件以上
+- seller recordsがtuple（空は合法）
+- 各 `G_b` が正かつ有限
+- 各 `R_s` が非負かつ有限
+- 保存済み `G` と明示加算した `G_b` 合計の完全一致
+- 保存済み `R` と明示加算した `R_s` 合計の完全一致
+- 新しく計算した `payment_P_b` が有限かつ非負
+- `compensation_amount` が有限かつ非負
+- statusとrecord列の矛盾（`CALCULATED` なのにrecords空かつselectedなし、`NO_SELECTED_CANDIDATE` なのにrecords非空 など）
+
+確認しない:
+
+- `sum(P_b)` と `R` のbit単位一致
+- `payment_P_b <= G_b` のbit単位完全比較
+- toleranceによる補正
+- Decimalによる再計算
+- 残差配分
+- 経済性評価の再実行
+- 候補選択の再実行
+- Vehicle欠落検査
+- actual passageとの照合
+
+1 Nodeの重大不整合で全体停止する。後続Nodeを処理しない。部分的overall resultを返さない。rollbackしない。入力selection result、経済結果、実Worldを変更しない。正常なcandidateなしを `RuntimeError` にしない。
+
+## 13. 過剰検証を避ける方針
+
+候補選択が比較材料として確認済みの事項を、同じ深さで全部やり直さない。本部品が直接利用する材料だけを確認する。
+
+直接利用する材料: selection set型、Node対応、statusとselectedの対応、selectedの同一object、成立候補であること、`G`、`R`、各 `G_b`、各 `R_s`、保存済み合計と明示加算合計の一致、計算した `payment_P_b` と `compensation_amount` の有限かつ非負。
+
+やり直さない例: surplus最大の再選択、buyer数比較、局所RNG、経済価値の再計算、VOT再読取、通過timestepの再計算。
+
+## 14. final rankと実適用の境界
+
+推奨処理順:
+
+1. candidate selection
+2. pure payment/compensation calculation
+3. final rank construction
+4. final consistency validation
+5. rank stateとVehicle金銭台帳へのatomic application
+
+金額計算はfinal rank前に行ってよい。計算結果はfrozenであり、後続のfinal rankが重大不整合で停止しても破棄できる。
+
+`Vehicle.payment_paid`、`Vehicle.payment_received`、`Vehicle.order_exchange_log` の更新は、final rankと全体整合確認の成功後まで行わない。final rank確定前に不可逆な金銭反映を行わない。
+
+`payment_paid` と `payment_received` は累積属性である。`order_exchange_log` は `list` である。これらの更新方法は後続のapply部品で定める。本部品は読取も書込もしない。
+
+## 15. 責務外
+
+今回の計算部品では実装しない。
+
+- Vehicle金銭台帳更新
+- `order_exchange_log` 更新
+- final rank
+- baseline fallback
+- information unresolved時の最終確定
+- formal route
+- 順位台帳
+- atomic apply
+- 実World反映
+- actual passage
+- expectedとactualの比較
+- prediction error
+- realized utility
+- ex-post welfare
+- 上位TVT driver
+- strategy-proofness検証
+- 文献制度の移植
+
+## 16. 可読性
+
+正しさを最優先する。明示的forループ、意味のある中間変数、小さなprivate helper。責務を少なくとも次へ分ける。公開入力検証、Node対応確認、statusとselected確認、候補なし結果構築、成立候補の材料確認、`G_b`/`R_s` 明示加算、buyer payment計算、seller compensation転写、Node結果構築、overall結果構築。
+
+避ける: 長い内包表記、複雑なgenerator、残差を最後のbuyerへ付けるone-liner、tolerance、Decimal、`hash()`、object id、並列、キャッシュ、入力変更、World参照、Vehicle台帳更新、final rankの混入。
+
+## 17. 専用テスト契約
+
+新規専用テストは `tests_order_control_tvt_mp_payment_and_compensation.py`。最低限次を固定する。
+
+公開型: Enum memberとvalue、buyer/seller/Node/overall frozen、field順、公開列tuple、入力selection setと同一object、selectedと入力candidateの同一object、live object/RNG非保持、禁止fieldなし。
+
+公開API: 正式関数名、位置引数1つ、`real_W` なし、Node単位・一候補・一台公開APIなし、mutable stateなし。
+
+候補なし: status `NO_SELECTED_CANDIDATE`、selected `None`、両records空tuple、例外なし、0額recordなし。
+
+計算: `P_b = R * G_b / G`、`compensation_amount = R_s`、buyer/seller保存順維持、再ソートなし、順序を補正に使わない。
+
+数値: `R = 0` なら全 `P_b = 0`、seller空なら `R = 0`、内部丸めなし、toleranceなし、Decimalなし、最後のbuyerへ残差なし、`sum(P_b)` と `R` のbit一致を重大不整合にしない。
+
+seller: 遅延では `compensation_amount = R_s` とする。同時刻・早期では `compensation_amount = 0` とする。sellerのroleは変更せず、早期通過flagも追加しない。遅延sellerでも、申告VOTが0であるため保存済み `R_s` が0の場合、`compensation_amount` は0とし、人工的に正値へ補正しない。
+
+不変性: selection result、economic result、local result、FIFO、collector、rank state、Vehicle、`payment_paid`、`payment_received`、`order_exchange_log`、実World、RNG。
+
+重大不整合: 入力型不正は `ValueError`。status矛盾、同一object違反、infeasible selected、`G <= 0`、非有限、`G < R`、buyer空、`G_b`/`R_s` 不正、保存済み合計と明示加算の不一致、1Node不整合で全体停止、partialなし、後続Node未処理。正常な候補なしは `RuntimeError` にしない。
+
+責務外: Vehicle台帳更新なし、final rankなし、actualなし、strategy-proofness主張なし。
+
+## 18. 実装範囲と実装対象外
+
+実装範囲: 全Node一括の純計算API、Enum、buyer/seller/Node/overall frozen結果、候補なし正常結果、`P_b` 個別計算、`compensation_amount = R_s`、明示加算による `G`/`R` 材料確認、重大不整合時の全体停止、専用テスト。
+
+実装対象外: Vehicle台帳更新、final rank、baseline fallback、formal route、順位台帳、atomic apply、実World交通反映、actual記録・比較、realized utility、ex-post welfare、上位TVT driver、strategy-proofness検証、文献制度の移植。
+
+## 19. 反証して採用しない事項
+
+- buyerから `G` 全額を徴収する
+- buyerからsurplusを徴収する
+- buyer数で均等割りする
+- seller数で均等補償する
+- sellerへ追加surplusを配る
+- 早期通過sellerをbuyerへ変更する
+- 早期通過sellerの価値を `G` へ加える
+- 早期通過sellerへ支払義務を課す
+- 最後のbuyerへfloat残差を押し付ける
+- buyer順序でpaymentが変わる
+- toleranceで支払額を補正する
+- Decimalを導入する
+- `sum(P_b)` と `R` のbit一致を重大不整合にする
+- expected settlementをactual passageで事後精算する
+- 計算時にVehicle台帳を更新する
+- final rank確定前に不可逆な金銭反映を行う
+- payment、compensation、final rank、applyを巨大関数へ混入する
+- strategy-proofnessを証明済みとする
+- 既存経済評価型または選択型へpayment fieldを追加する
+- `real_W` を本APIへ追加する
+
+## 20. 次の再開地点
+
+1. 詳細設計第3巻と進捗第2巻を同一保存単位でcommitする。
+2. commit結果、最新コミット、残存変更を確認する。
+3. 別の指示でpushし、push後の状態を確認する。
+4. 保存後に、本節へ従い新規本番 `uxsim/order_control_tvt_mp_payment_and_compensation.py` と専用テスト `tests_order_control_tvt_mp_payment_and_compensation.py` だけを実装する。
+5. 実装後に独立確認する。
+
+本節は完全実装前仕様である。Pythonと専用テストは未着手である。Vehicle台帳更新とfinal rankは実装しない。

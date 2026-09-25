@@ -72,15 +72,45 @@
 
 payment、compensation、P_b比例配分、seller実補償配分、`payment_paid` / `payment_received` / `order_exchange_log` 更新、成立時最終順位列、不成立時baseline fallback、情報未解決時最終確定、formal route保存、順位台帳更新、確定順位ブロック接続、実World交通反映、actual記録・expected/actual比較、realized utility、ex-post welfare、上位TVT driver、strategy-proofness検証、文献制度の移植。API・型・配分規則・処理順は本メモ作成だけでは確定しない。
 
+## TVT-MP payment・compensation計算部品・完全実装前仕様を確定（2026-09-26）
+
+**詳細正本:** `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_3.md` の「TVT-MP payment・compensation計算部品・完全実装前仕様」。本節は要約である。Python実装と専用テストは未着手である。
+
+**対象:** candidate selection後の純計算部品。Nodeごとに選択された最大1候補について、buyer支払額とseller補償額を計算する。新しいfrozen結果だけを返す。
+
+**入力:** `OrderControlTvtMpCandidateSelectionSetResult` だけ。`real_W` なし。Vehicle検索なし。選択結果から `G_b`、`R_s`、`G`、`R`、VisitKey、`vehicle_name`、selected candidateへ到達する。
+
+**規則:** `P_b = R * G_b / G`。`compensation_amount = R_s`。sellerへ追加surplusを配らない。surplusは制度主体の金銭残高ではない。予測値で事前確定し、actual passageによる事後精算は行わない。strategy-proofnessは未証明。
+
+**早期通過seller:** `compensation_amount` は 0。seller自身の支払額も 0。role維持。buyerへ変更しない。時間短縮価値を `G` へ加えない。支払いなしで時間短縮の交通上の便益を得る。同時刻も同様に 0。
+
+遅延sellerでも、申告VOTが0であるため保存済み `R_s` が0の場合、`compensation_amount` は0とし、人工的に正値へ補正しない。
+
+**数値:** float。内部丸めなし。toleranceなし。Decimalなし。最後のbuyerへ残差なし。buyer順を補正に使わない。`sum(P_b)` と `R` のbit単位一致を重大不整合にしない。保存済み `G`/`R` と明示加算した `G_b`/`R_s` 合計は完全一致を確認する。経済性評価と候補選択は再実行しない。
+
+**公開:** Enum `OrderControlTvtMpPaymentAndCompensationStatus`（`CALCULATED`、`NO_SELECTED_CANDIDATE`）。frozen型 `OrderControlTvtMpBuyerPaymentRecord`、`OrderControlTvtMpSellerCompensationRecord`、`OrderControlTvtNodeMpPaymentAndCompensationResult`、`OrderControlTvtMpPaymentAndCompensationSetResult`。API `calculate_tvt_mp_payments_and_compensations(candidate_selection_set_result)`。入力とselectedは同一object参照。
+
+**候補なし:** 正常。status `NO_SELECTED_CANDIDATE`、selected `None`、両records空tuple。例外にしない。0額recordを作らない。
+
+**非保存:** `G_b`/`R_s` の複写、share、net benefit、utility、早期通過flag、総額field、`institutional_balance`、`sum(P_b)` 診断値、final rank、actual、Vehicle台帳、live World、RNG。field名 `actual_compensation` は使わない。
+
+**不変:** selection / economic / local / FIFO / collector / rank state / Vehicle / `payment_paid` / `payment_received` / `order_exchange_log` / 実World / RNG。
+
+**処理順:** 計算はfinal rank前に行ってよい。Vehicle台帳更新は final rank と全体整合確認の成功後のatomic applyまで遅延する。
+
+**予定ファイル:** `uxsim/order_control_tvt_mp_payment_and_compensation.py`、`tests_order_control_tvt_mp_payment_and_compensation.py`。既存経済評価・候補選択の本番とテストは変更しない。
+
+**次の直接作業:** 第3巻新規節と本節をTerminalで直接表示して独立確認する。問題がなければ2文書をcommitしてpushする。保存後に新規本番と専用テストだけを実装する。Vehicle台帳更新とfinal rankは実装しない。
+
 ## 次の再開地点
 
-1. 候補選択コード、専用テスト、進捗第1巻の移行注記、進捗第2巻、詳細設計第2巻の移行注記、詳細設計第3巻を同一保存単位でcommitする。
+1. 詳細設計第3巻と進捗第2巻を同一保存単位でcommitする。
 2. commit結果、最新コミット、残存変更を確認する。
 3. 別の指示でpushし、push後の状態を確認する。
-4. 保存後に最新進捗と最新設計を再確認する。
-5. 未実装領域から次の設計対象を選ぶ。
+4. 保存後に、新規本番 `uxsim/order_control_tvt_mp_payment_and_compensation.py` と専用テスト `tests_order_control_tvt_mp_payment_and_compensation.py` だけを実装する。
+5. 実装後に独立確認する。
 
-payment、compensation、最終順位確定は未実装として残る。今回の文書更新だけで、次の設計対象は確定しない。
+Python実装と専用テストは未着手である。Vehicle台帳更新、final rank、実World反映は対象外のまま残る。
 
 ## 新しいチャットでの再開方法
 
