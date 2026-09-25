@@ -7075,6 +7075,26 @@ horizon端点補修後の独立確認と文書保存のあと、新規一候補�
 - 次の再開地点: 本節・設計メモ実装結果節と新規2ファイルを同一保存単位でcommit予定（文献Markdown2ファイルは含めない）。直ちに全候補集合入口実装とは確定しない。保存後に正本と進捗を確認して次工程を判断する。文献ポジショニング再開地点と混同しない。
 - 今回のMarkdown更新ではPythonとテストを変更していない。Git操作は行っていない。`diagnostics/order_control.zip` には触れていない。
 
+> 2026-09-25更新注記: 上記「直ちに全候補集合入口実装とは確定しない」は、一候補統括loop実装結果を文書化した当時の再開情報である。一候補統括loopはcommit `d68e038` で保存済みである。その後、全候補集合入口の完全実装前仕様を確定した。現在の次の直接作業としては読まない。直後の2026-09-25追記を参照すること。
+
+**TVT-MP候補別局所仮想計算の全候補集合入口・完全実装前仕様を確定（2026-09-25）**
+
+本節は、FIFO検査済みの全対象Node・全候補を既存一候補統括loopへ接続する集合入口の完全実装前仕様の要約である。詳細正本は `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_2.md` の「TVT-MP候補別局所仮想計算の全候補集合入口・完全実装前仕様」である。Python実装と専用テストは未着手である。文献調査側の2026-09-25記録とは独立する。文献結論を実装判断へ取り込まない。実装仕様を文献位置づけへ追記しない。
+
+- 接続可能性を次の6ファイルで確認した。`uxsim/order_control_tvt_mp_fifo_inspection.py`、`uxsim/order_control_tvt_mp_local_binding_rank_sequence.py`、`uxsim/order_control_tvt_mp_candidate_local_state.py`、`uxsim/order_control_tvt_mp_candidate_local_virtual_calculation.py`、`uxsim/order_control_baseline_driver.py`、`uxsim/order_control_baseline_downstream_boundary.py`。既存公開APIの変更は不要である。
+- 新規予定は本番 `uxsim/order_control_tvt_mp_local_virtual_calculation_set.py` と専用テスト `tests_order_control_tvt_mp_local_virtual_calculation_set.py` の2ファイルだけである。既存一候補統括モジュールへ入口を追加しない。
+- 公開入口は `evaluate_tvt_mp_candidate_local_virtual_calculations(real_W, fifo_inspection_set_result, *, rank_states_by_node_name)`。戻りは `OrderControlTvtMpLocalVirtualCalculationSetResult`。入力はこの3つだけである。collector、boundary、horizon、fork、順位集合はFIFO結果の既存上流連鎖から取得する。同じ情報を重複引数にしない。
+- Node結果は `OrderControlTvtNodeMpLocalVirtualCalculationResult`（`node_name`、`build_status`、FIFO Trueの局所計算結果tuple）。全体結果は入力FIFO結果と同一object参照、およびFIFOと同じNode順のNode結果tupleである。件数field、resolved専用列、経済値、live stateは置かない。
+- FIFO Trueだけ局所計算する。FIFO Falseは拘束順位列も作らず、`World.copy()` も行わず、Node局所結果tupleへ入れない。Falseは上流FIFO結果に残る。
+- resolvedと正常unresolved（`HORIZON_EXHAUSTED_UNRESOLVED`）の両方をNode結果へ保持する。unresolvedは削除せず例外にしない。次段の経済性評価対象は `result.resolved is True` で判別する。
+- 正常非生成status4種とCOMPLETEの候補0件・全FIFO Falseは、局所計算0回の正常空Node結果である。想定外statusは `RuntimeError` で全体停止する。
+- Node別downstream boundaryは、局所計算を行うNodeでのみ、FIFO Node結果・`target_node_names`・`node_results` の同一indexとNode名照合で取得する。評価対象0件のNodeでは境界 `None` を例外にしない。評価対象があるのに全体が `None` なら `RuntimeError`。
+- 一候補の重大不整合（`ValueError` または `RuntimeError`）で全集合を停止する。後続候補・後続Nodeを処理しない。部分的全体結果を返さない。rollbackしない。実World、collector、台帳、FIFO結果、RNGは不変。
+- 候補ごとに `build_tvt_mp_candidate_local_state` を呼び、`real_W.copy()` を1回行う。local Worldを共有しない。
+- 経済性評価、候補採否、最終順位確定、実World反映は対象外である。
+- Pythonは未実装である。次の直接作業は、本仕様の独立確認と文書保存のあと、新規2ファイルだけを実装することである。実装前に新しい制度判断を追加しない。一候補統括の契約を再考しない。文献ポジショニング再開地点と混同しない。
+- 今回のMarkdown更新ではPythonとテストを変更していない。コード変更がないため、テストを実行していない。Git操作は行っていない。`diagnostics/order_control.zip` には触れていない。
+
 #### 2026-08-29：TVT権利保有車両選定前の先頭非参加Vehicle先行確定の記録補修
 
 - 過去に確定済みだった、意思決定窓内 baseline 到着順位の先頭に連続する非参加 Vehicle の先行確定が、設計メモに明文化されていなかった
