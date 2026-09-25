@@ -1203,6 +1203,8 @@ G >= R
 surplus = G - R
 ```
 
+> 2026-09-25更新注記: 本節の `G_b`、`R_s`、`G`、`R`、`surplus`、`G_b > 0`、`G >= R` は制度原則として維持する。時間差の符号、秒換算、VOT単位、VOT=0の合法入力、公開型、公開API、経済的不成立理由、payment/compensation/候補選択との責任分離は、本ファイル末尾付近の「TVT-MP経済性評価部品・完全実装前仕様」を最新正本とする。本節は記号と成立条件の歴史的記録として残し、削除しない。
+
 ---
 
 ## 25. 成立候補の選択規則
@@ -15945,6 +15947,788 @@ commitとpushは本Markdown作業では行わない。
 文献ポジショニング作業の再開地点と混同しない。
 
 今回のMarkdown更新では、Pythonとテストは変更していない（記録時点で未追跡の新規2ファイルはそのまま）。Git操作は行っていない。`diagnostics/order_control.zip` には触れていない。
+
+> 2026-09-25更新注記: 上記「具体的な経済性評価API、型、計算式、実装順を本節で新たに確定しない」は、全候補集合入口の実装結果を文書化した当時の再開情報である。全候補集合入口はcommit `5b40723` で実装・検証・push済みである。その後、resolved候補の経済性評価部品について完全実装前仕様を確定した。最新正本は直下の「TVT-MP経済性評価部品・完全実装前仕様」である。上記を現在の作業指示として読まない。
+
+# TVT-MP経済性評価部品・完全実装前仕様
+
+**記録日：2026-09-25**
+
+本節は、FIFO Trueかつresolvedな候補について、予想時間差と申告VOTから `G_b`、`R_s`、`G`、`R`、`surplus`、経済的成立可否を計算する**経済性評価部品**の完全実装前仕様である。Python実装と専用テストは未着手である。本節の記録は実装完了を意味しない。
+
+位置づけ:
+
+- 全候補集合入口はcommit `5b40723`（Implement, test and document TVT-MP all-candidate local virtual calculation entry）で実装・検証・push済みである。詳細正本は直上の「TVT-MP候補別局所仮想計算の全候補集合入口・実装結果」である。
+- 今回は、その集合結果のうち `resolved is True` の候補だけを経済評価する仕様である。一候補統括のhorizon、required passage、正常unresolved、集合入口のFIFO選別を再設計しない。
+- `vot_declared = 0` は合法入力である。VOT=0を制度不参加の代理表現として使用しない。不参加は `participates_in_order_exchange=False` で明示する。
+- 経済評価対象の `vot_declared` は0以上の有限実数である。内部単位は抽象的貨幣単位/秒である。
+- 経済的成立判定には `vot_declared` だけを使う。`vot_true` を混在させない。
+- 候補選択、payment、compensation、actual比較、最終順位確定、実World反映、上位TVT driver、strategy-proofness検証は対象外である。
+- 予定する新規ファイルは本番1、専用テスト1の計2ファイルだけである。既存公開Pythonの変更は不要を第一候補とする。
+- 文献制度をTVT-MPへ移植しない。TVT-MP自身の保存済み正本、実装済み局所結果、本節の利用者判断に基づく。
+
+## 1. 非技術的な目的
+
+resolved候補について、次を判断する。
+
+- buyerがbaselineより何秒早く通過できる見込みか
+- その短縮時間がbuyerにとってどれほどの粗価値を持つか
+- sellerがbaselineより何秒遅く通過する見込みか
+- sellerへ最低限どれほどの補償が必要か
+- buyer全体の粗価値がseller全体の最低必要補償を覆えるか
+- 候補にどれだけのsurplusがあるか
+- 候補が経済的に成立可能か
+- 経済的に不成立なら、どの条件を満たさなかったか
+
+この部品は、候補が経済的に成立可能かを識別する。複数の成立候補から最終候補を選ばない。実際のpaymentまたはcompensationを決めない。
+
+## 2. 新規予定ファイル
+
+| 区分 | パス |
+| --- | --- |
+| 本番 | `uxsim/order_control_tvt_mp_economic_evaluation.py` |
+| 専用テスト | `tests_order_control_tvt_mp_economic_evaluation.py` |
+
+既存一候補統括モジュールおよび全候補集合入口モジュールへ経済入口を追加しない。集合評価用の可変公開state型は作らない。
+
+## 3. VOTと参加意思の分離
+
+参加意思と時間価値は独立した情報である。
+
+| 情報 | 正本 |
+| --- | --- |
+| 参加意思 | `participates_in_order_exchange` |
+| 申告時間価値 | `vot_declared` |
+| 真の時間価値 | `vot_true` |
+
+不参加車両:
+
+- `participates_in_order_exchange=False`
+- buyerまたはsellerへ分類しない
+- 非参加Visitとして順位形成上の既存契約に従う
+- 本部品のbuyer/seller経済recordへ含めない
+
+VOT=0の参加車両:
+
+- `participates_in_order_exchange=True` かつ `vot_declared=0`
+- 通常の参加Visitとして候補形成、順位再構成、経済性評価へ進み得る
+- roleがBUYERならbuyer経済recordを作る
+- roleがSELLERならseller経済recordを作る
+- VOT=0を理由に非参加Visitへ変換しない
+- VOT=0を理由に経済性評価対象から除外しない
+- VOT=0を理由に参加状態を変更しない
+
+VOT=0の制度上の意味:
+
+- 時間変化へ貨幣価値を置かない選好を表す
+- 珍しい、または通常は合理的でないように見える選好でも、不正な入力とは限らない
+- 例えば、時間を失うことへ価値上の不利益を感じない参加者を表現し得る
+- 非合理的に見える選好と、不正な入力を混同しない
+- VOT=0を禁止するだけの十分な制度上の根拠は確認できない
+- したがって、VOT=0は境界値として許容する
+
+VOT=0を不参加の代理にしない理由:
+
+- VOT=0の参加buyerは正の時間短縮価値を持たないため、経済的に成立するbuyerにはなれない
+- VOT=0の参加sellerは遅延しても `R_s` が0になる
+- したがって、VOT=0による参加と、制度不参加では制度上の状態が大きく異なる
+- 参加意思と時間価値を混同しない
+
+他論文でVOT=0を不参加の代理として使用していることへの評価や批判は、本節に記載しない。記録するのはTVT-MP自身の制度契約だけである。
+
+## 4. 内部VOT単位と基本実験
+
+内部単位:
+
+- `vot_declared` の内部単位は、1秒当たりの抽象的貨幣価値
+- `vot_true` の内部単位も、1秒当たりの抽象的貨幣価値
+- 両者は同じ単位系を使う
+- 通貨名は現段階で円に固定しない
+- 単位は抽象的貨幣単位/秒とする
+- 外部実験設定で円/時間などを使う場合は、Vehicleへ設定する前に1秒当たりへ換算する
+- 経済性評価部品内では、円/時間から円/秒への変換を行わない
+- Vehicleへ設定済みの内部単位を正本として使う
+
+理由:
+
+- UXsimの交通時間は秒を基本単位として扱う
+- `DELTAT` が変わってもVOT自体の意味を変えない
+- 1 timestep当たり価値とすると、時間刻みを変えた際にVOTの意味まで変わる
+- 予想時間差と実績時間差を同じ秒単位で比較できる
+- timestep差と貨幣価値計算を分離できる
+
+基本実験:
+
+- 正しいVOT申告を前提とする
+- 基本実験では `vot_declared == vot_true` を設定する
+- 経済的成立判定では `vot_declared` を使う
+- `vot_true` を候補成立判定へ混在させない
+- 正しい申告前提と、正直申告が支配戦略であることを区別する
+- TVT-MPのstrategy-proofnessは未証明である
+- incentive compatibilityが証明済みとは記載しない
+- 将来の虚偽申告実験では `vot_declared` と `vot_true` を異ならせる
+- `vot_true` は事後の実現効用、虚偽申告の利得、研究分析に使う
+- 今回の経済性評価結果へ `vot_true` を複写しない
+
+## 5. 公開API
+
+正式名称は `evaluate_tvt_mp_candidate_economics` である。
+
+```python
+def evaluate_tvt_mp_candidate_economics(
+    local_virtual_calculation_set_result,
+    real_W,
+) -> OrderControlTvtMpEconomicEvaluationSetResult:
+```
+
+| 引数 | 区分 |
+| --- | --- |
+| `local_virtual_calculation_set_result` | 位置引数。`OrderControlTvtMpLocalVirtualCalculationSetResult` |
+| `real_W` | 位置引数。時点Tの実 `World` |
+
+両方を位置引数として受ける。keyword-only必須引数はない。
+
+公開APIはこの一括関数だけとする。集合用mutable state、Node単位公開API、一候補公開APIは初期実装に置かない。内部private helperへ責務を分ける。
+
+直接受け取らないもの:
+
+- VOT Mapping
+- collector
+- FIFO結果
+- baseline result
+- `DELTAT` の別引数
+- true VOT Mapping
+- payment rule
+- compensation rule
+- RNG
+
+VOTの正本は `real_W.VEHICLES` 内の `Vehicle.vot_declared` である。`DELTAT` の正本は `real_W.DELTAT` である。
+
+## 6. 公開Enum
+
+```text
+OrderControlTvtMpCandidateEconomicInfeasibilityReason
+```
+
+memberとvalue（既存Enum規則のsnake_case）:
+
+| member | value |
+| --- | --- |
+| `BUYER_NONPOSITIVE_VALUE` | `"buyer_nonpositive_value"` |
+| `TOTAL_BUYER_VALUE_BELOW_REQUIRED_COMPENSATION` | `"total_buyer_value_below_required_compensation"` |
+
+候補結果では複数理由を同時に保持する。正式順序は上表の順である。成立候補では空tupleである。
+
+入力不整合、VOT不正、passage不整合をこのEnumへ変換しない。VOT=0のbuyerは入力不正ではなく、`BUYER_NONPOSITIVE_VALUE` の正常経路である。VOT=0のsellerは、それ自体ではinfeasibility reasonを発生させない。
+
+## 7. 公開frozen結果型
+
+すべて `dataclass(frozen=True)`。公開の順序付き列は `tuple`。
+
+### 7.1 buyer単位
+
+```text
+OrderControlTvtMpBuyerEconomicRecord
+```
+
+field順:
+
+1. `visit_key`
+2. `vehicle_name`
+3. `declared_vot_per_second`
+4. `baseline_passage_timestep`
+5. `candidate_passage_timestep`
+6. `expected_time_saving_timesteps`
+7. `expected_time_saving_seconds`
+8. `gross_time_value_G_b`
+9. `passes_positive_buyer_value_condition`
+
+`G_b` は既存正本の記号を維持する。field名 `gross_time_value_G_b` と実装コメントでは、payment控除前の時間短縮粗価値であることを明記する。buyerの実際の最終効用、実際の支払額、true VOTによる事後効用ではない。
+
+### 7.2 seller単位
+
+```text
+OrderControlTvtMpSellerEconomicRecord
+```
+
+field順:
+
+1. `visit_key`
+2. `vehicle_name`
+3. `declared_vot_per_second`
+4. `baseline_passage_timestep`
+5. `candidate_passage_timestep`
+6. `raw_passage_difference_timesteps`
+7. `expected_waiting_increase_timesteps`
+8. `raw_passage_difference_seconds`
+9. `expected_waiting_increase_seconds`
+10. `required_compensation_R_s`
+
+`R_s` はsellerの予想時間損失に対する最低必要補償（留保額）である。実際に支払われるcompensationではない。
+
+### 7.3 候補単位
+
+```text
+OrderControlTvtMpCandidateEconomicEvaluationResult
+```
+
+field順:
+
+1. `candidate_local_virtual_calculation_result`（入力の一候補局所結果と同一object。candidate identityとpassage完全情報の正本）
+2. `buyer_economic_records`
+3. `seller_economic_records`
+4. `total_buyer_value_G`
+5. `total_required_compensation_R`
+6. `surplus`
+7. `economically_feasible`
+8. `infeasibility_reasons`
+
+### 7.4 Node単位
+
+```text
+OrderControlTvtNodeMpEconomicEvaluationResult
+```
+
+field順:
+
+1. `node_name`
+2. `candidate_economic_evaluation_results`
+
+`candidate_economic_evaluation_results` はresolved候補だけを含み、入力局所結果上の相対順を維持する。economically feasibleとinfeasibleの両方を保持する。
+
+### 7.5 全体
+
+```text
+OrderControlTvtMpEconomicEvaluationSetResult
+```
+
+field順:
+
+1. `local_virtual_calculation_set_result`（入力と同一object。unresolved候補、FIFO結果、上流identityの参照正本）
+2. `node_economic_evaluation_results`（入力局所Node結果と同じNode順のtuple）
+
+### 7.6 追加しないfield
+
+`true_vot`、`payment`、`compensation`、`selected`、`selected_candidate`、`candidate_id`、`actual_passage_timestep`、`actual_time_saving`、`actual_waiting_increase`、`prediction_error`、`realized_utility`、`ex_post_welfare`、`final_rank`、World、Vehicle、Node、Link、collector、rank state、可変list、可変dict、件数field、resolved専用重複列、feasible専用重複列。
+
+## 8. 評価対象
+
+入力の全候補局所仮想計算集合結果には、FIFO Trueかつresolved、およびFIFO Trueかつ正常unresolvedが存在し得る。
+
+経済性評価するのは `resolved is True` の候補だけである。
+
+正常unresolved:
+
+- 経済性評価しない
+- 0評価を付けない
+- 経済的不成立として扱わない
+- 経済結果tupleへ重複保存しない
+- 入力局所集合結果側に保持する
+- VOTを読まない
+- economic recordを作らない
+- passage recordの経済検証を行わない
+
+FIFO False:
+
+- 全候補局所計算結果へ入っていない
+- 経済性評価しない
+- 経済結果へ軽量recordを追加しない
+- 上流FIFO結果を正本とする
+- FIFO検査を再実行しない
+
+重大不整合:
+
+- 正常な経済的不成立へ変換しない
+- 例外で停止する
+- 部分結果を返さない
+
+nonparticipating Visitおよび `OUTSIDE_TRADE_SCOPE`:
+
+- buyer/seller経済recordへ含めない
+- `G` にも `R` にも含めない
+- VOTを経済性評価しない
+- VOT=0で非参加を表現しない
+
+## 9. resolved候補から利用する情報
+
+一候補局所結果から少なくとも次を使う。
+
+- `node_name`
+- `concrete_buyer_candidate_set`
+- `binding_rank_sequence`
+- `required_passage_records`
+- `baseline_timestep_T`
+- `configured_horizon_steps`
+- `resolved`
+- `stop_reason`
+
+required passage recordから使う。
+
+- `visit_key`
+- `vehicle_name`
+- `trade_role`
+- `binding_partition`
+- `binding_rank`
+- `baseline_passage_timestep`
+- `candidate_passage_timestep`
+- `route_next_link_name`
+- `route_origin`
+- `inlink_name`
+
+経済性評価対象となるrequired passage recordの `trade_role` は `BUYER` と `SELLER` だけである。
+
+resolved候補について:
+
+- `candidate_passage_timestep` は全required buyerおよびsellerでPython `int` でなければならない
+- seller空は許容
+- buyer空は不正（`RuntimeError`）
+- `baseline_passage_timestep` がPython `int` でない場合は重大不整合
+- `candidate_passage_timestep` がPython `int` でない場合は重大不整合
+- boolをtimestepとして受け入れない（`type(value) is int`）
+- 再訪はVisitKeyで区別する
+- Vehicle名だけでVisitを識別しない
+
+## 10. 時間差の正本
+
+時間差の第一の正本は、整数のtimestep差である。
+
+buyer `b`:
+
+```text
+expected_time_saving_timesteps_b
+=
+baseline_passage_timestep_b
+-
+candidate_passage_timestep_b
+```
+
+seller `s`:
+
+```text
+raw_seller_passage_difference_timesteps_s
+=
+candidate_passage_timestep_s
+-
+baseline_passage_timestep_s
+
+expected_waiting_increase_timesteps_s
+=
+max(
+    raw_seller_passage_difference_timesteps_s,
+    0,
+)
+```
+
+buyer:
+
+- 正の値は予想時間短縮
+- 0は予想短縮なし
+- 負値はcandidateの方が遅い
+- 負値を0へ切り上げない
+- `G_b` の非正条件を正しく検出するため、符号付き値を維持する
+
+seller:
+
+- candidateの方が遅い場合だけ正の待ち増加
+- 同時刻なら0
+- candidateの方が早い場合も0
+- sellerの早期通過をbuyer価値へ加えない
+- sellerをbuyerへ役割変更しない
+- sellerへ時間短縮を理由とする支払義務を課さない
+
+## 11. 秒への変換
+
+経済価値計算では、先に整数timestep差を計算してから `real_W.DELTAT` を掛ける。passage timestepを個別に秒へ変換してから差を取る方式は採用しない。
+
+```text
+expected_time_saving_seconds_b
+=
+expected_time_saving_timesteps_b
+*
+real_W.DELTAT
+
+raw_seller_passage_difference_seconds_s
+=
+raw_seller_passage_difference_timesteps_s
+*
+real_W.DELTAT
+
+expected_waiting_increase_seconds_s
+=
+expected_waiting_increase_timesteps_s
+*
+real_W.DELTAT
+```
+
+結果にはtimestep差と秒差の両方をfrozen値として保存する。timestep差はシミュレーション上の正本、秒差は経済価値計算と研究結果表示に使う。実装時に使用した `DELTAT` と換算結果を固定し、後日の設定変更で過去結果の解釈が変わらないようにする。後日のactual比較にも同じ定義を適用できる。
+
+## 12. buyer個別価値 G_b
+
+```text
+G_b
+=
+expected_time_saving_seconds_b
+*
+declared_vot_b
+```
+
+`declared_vot_b` は1秒当たりの抽象的貨幣価値であり、0以上の有限実数である。0および0.0を許容する。
+
+buyerごとの成立必要条件は `G_b > 0` である。`G_b <= 0` は正常な経済的不成立であり、例外ではない。後続候補を評価し、`BUYER_NONPOSITIVE_VALUE` を付与する。
+
+`G_b <= 0` が生じる正常経路:
+
+- `expected_time_saving_timesteps = 0`
+- `expected_time_saving_timesteps < 0`
+- `declared_vot = 0`
+
+### 12.1 VOT=0のbuyer
+
+- VOT入力として合法
+- buyer recordを通常どおり作る
+- `declared_vot_per_second=0` を保存する
+- expected time savingを通常どおり計算する
+- `gross_time_value_G_b=0` を保存する
+- `passes_positive_buyer_value_condition=False`
+- 当該buyerを含む候補は正常な経済的不成立
+- `BUYER_NONPOSITIVE_VALUE` を付与する
+- `ValueError` にも `RuntimeError` にもしない
+- 後続候補を評価する
+- buyerを非参加Visitへ変更しない
+- buyerを経済性評価対象から除外しない
+
+VOT=0の参加車両は具体的買い手候補へ形式上含まれ得る。ただし、当該候補は `G_b > 0` を満たさないため、経済的に成立しない。
+
+## 13. seller個別必要補償 R_s
+
+```text
+R_s
+=
+expected_waiting_increase_seconds_s
+*
+declared_vot_s
+```
+
+`declared_vot_s` はbuyerと同じ入力検証を使う。0以上の有限実数、0を許容する。
+
+sellerのcandidate passageがbaselineと同じ、または早い場合:
+
+- `expected_waiting_increase=0`
+- `R_s=0`
+- sellerをbuyerへ変更しない
+- sellerの時間短縮価値を `G` へ加えない
+- sellerへ支払義務を課さない
+
+seller空候補は合法である。seller record tupleは空、`R=0`。
+
+### 13.1 VOT=0のseller
+
+- VOT入力として合法
+- seller recordを通常どおり作る
+- `declared_vot_per_second=0` を保存する
+- raw passage differenceとexpected waiting increaseを通常どおり計算する
+- expected waiting increaseが正でも `required_compensation_R_s=0`
+- `ValueError` にも `RuntimeError` にもしない
+- 後続候補を評価する
+- sellerの役割を維持する
+- sellerを非参加Visitへ変更しない
+- sellerをbuyerへ変更しない
+- sellerの時間短縮を `G` へ加えない
+- sellerへ支払義務を課さない
+- 最低補償額を人工的に正値へ補正しない
+
+これはVOT=0という選好から生じる正常な経済結果である。制度上、VOT=0のsellerは補償なしで遅延を受け得る。この帰結を入力エラーとして隠さない。
+
+## 14. 候補全体 G、R、surplus
+
+```text
+G_c = sum(G_b for all buyer records)
+R_c = sum(R_s for all seller records)
+surplus_c = G_c - R_c
+```
+
+経済的成立条件は次の両方である。
+
+1. 全buyerについて `G_b > 0`
+2. `G_c >= R_c`
+
+両方を満たす場合だけ `economically_feasible is True` かつ `infeasibility_reasons = ()`。いずれかを満たさない場合は `economically_feasible is False` とし、成立しなかった理由をtupleで保持する。
+
+seller空では `R=0`。buyer全員が `G_b > 0` なら `G >= R` を満たす。
+
+内部計算:
+
+- floatを使う
+- Decimalは使わない
+- 内部丸めを行わない
+- toleranceを制度判定へ導入しない
+- 正本どおり完全比較する
+- `G=R` は成立
+- `G<R` は不成立
+
+`G_b`、`R_s`、`G`、`R`、`surplus` はすべて同じ抽象的貨幣単位である。表示上の通貨名は固定しない。
+
+`G >= R` の意味:
+
+- buyerの時間短縮粗価値合計がsellerの最低必要補償合計を覆う
+- 具体的なpaymentおよびcompensation配分が完了したことを意味しない
+- strategy-proofnessを意味しない
+- 予算均衡の形式的証明を意味しない
+
+## 15. real_W と DELTAT の入力検証
+
+`real_W`:
+
+- `World` であること
+- 交通状態を変更しない
+- VehicleのVOTを変更しない
+- `participates_in_order_exchange` を変更しない
+- RNGを使用しない
+
+`real_W.DELTAT`:
+
+- boolでない有限の正数であること
+- 0、負値、bool、NaN、正の無限大、負の無限大は `ValueError`
+
+## 16. VOT取得と入力検証
+
+評価対象buyerまたはsellerごとに次を行う。
+
+1. passage recordの `vehicle_name` を読む
+2. `real_W.VEHICLES` から同名Vehicleを取得する
+3. Vehicleが存在しなければ `ValueError`
+4. `Vehicle.vot_declared` を読む
+5. 0以上の有限実数であることを確認する
+6. 数値だけをfrozen economic recordへ `float` として保存する
+7. Vehicle objectは結果へ保持しない
+
+入力Vehicleの属性は変更しない。評価対象buyerおよびsellerについてだけVOTを検証する。正常unresolved候補、FIFO False候補、nonparticipating Visit、その他の評価対象外VehicleのVOTは検証しない。
+
+### 16.1 vot_declared の有効範囲
+
+合法:
+
+- 0以上の有限実数
+- 正のPython `int`（`bool` を除く）
+- 正のPython `float`
+- `0`
+- `0.0`
+
+既存order-controlの数値検証は、boolを先に拒否したうえで `isinstance(value, (int, float))` を使うことが多い。これによりPython `int`/`float` と `numpy.float64` は受理し、Python `bool` と `numpy.bool_` は拒否する。CSV読込経路はすでに `float(...)` でPython floatになる。経済性評価もこの既存契約に合わせる。
+
+- Python `bool` と `numpy.bool_` は数値として受け入れない
+- `numpy.integer`（`numpy.int64` 等）はPython `int` のsubclassではないため、既存検査では `ValueError` とする
+- 受理した値はPython `float` へ変換してfrozen recordへ保存してよい
+
+### 16.2 ValueError とするもの
+
+- 必要Vehicleの欠落
+- `vot_declared` 属性の欠落
+- `None`
+- `bool` および `numpy.bool_`
+- 文字列
+- 非数値
+- NaN
+- 正の無限大
+- 負の無限大
+- 負値
+
+### 16.3 ValueError にしないもの
+
+- `0`
+- `0.0`
+
+VOT=0は欠落、`None`、負値、bool、NaN、infinity、非数値と区別する。
+
+## 17. passage record検証
+
+経済評価対象候補は `resolved is True` でなければならない。
+
+resolved候補について確認する。
+
+- `required_passage_records` がtuple
+- buyerが1件以上
+- sellerは0件以上
+- nonparticipating recordは存在しない
+- `trade_role` は `BUYER` または `SELLER`
+- buyerとsellerのVisitKey重複なし
+- `baseline_passage_timestep` は `type(value) is int`
+- `candidate_passage_timestep` は `type(value) is int`
+- boolをtimestepとして受け入れない
+- buyer recordのVisitKey集合が `concrete_buyer_candidate_set.buyers_sorted` と一致
+- seller recordのVisitKey集合が `binding_rank_sequence` のrequired seller集合（trade-scopeの `SELLER`）と一致
+- `vehicle_name` が `visit_key` のvehicle_name部分と一致
+- 一候補局所結果の `node_name` とNode結果の `node_name` が一致
+- candidate identityが上流結果と一致
+
+保存済み結果間の重大不整合は `RuntimeError` である。
+
+## 18. 正式処理順
+
+明示的なNode、候補、buyer、sellerのforループを使う。iterator、generator、並列実行は使わない。
+
+1. 入力型を確認する
+2. `real_W` と `DELTAT` を確認する
+3. 入力局所全体結果のNode列を保存順に走査する
+4. Node名対応を確認する
+5. Node内の局所候補結果を保存順に走査する
+6. unresolved候補をスキップする
+7. resolved候補のpassage recordを検証する
+8. buyer recordとseller recordへ分類する
+9. buyer Visitごとにdeclared VOTを取得して検証する
+10. buyer timestep差を計算する
+11. buyer秒差を計算する
+12. `G_b` を計算する
+13. buyer個別条件を記録する
+14. seller Visitごとにdeclared VOTを取得して検証する
+15. seller raw timestep差を計算する
+16. seller waiting increaseを計算する
+17. seller秒差を計算する
+18. `R_s` を計算する
+19. `G` を集計する
+20. `R` を集計する
+21. surplusを計算する
+22. economic infeasibility reasonsを正本順で構築する
+23. `economically_feasible` を確定する
+24. 候補結果を構築する
+25. Node結果を構築する
+26. 全Node完了後に全体結果を構築する
+
+候補順を再ソートしない。buyerおよびsellerのpassage順を不要に再ソートしない。VOT=0だけの特殊な巧妙な分岐を置かない。VOT=0は通常の数値経路で計算し、`G_b` または `R_s` が0になる自然な結果として扱う。
+
+## 19. payment・compensationとの責任分離
+
+今回計算するもの: `G_b`、`R_s`、`G`、`R`、`surplus`、`economically_feasible`、`infeasibility_reasons`。
+
+今回計算しないもの: buyer payment `P_b`、sellerへの実際のcompensation、支払総額、補償総額、割当、精算、実Worldへの金銭反映、`Vehicle.payment_paid` 更新、`Vehicle.payment_received` 更新、`order_exchange_log` への金銭記録。
+
+正本にある将来の支払規則 `P_b = R * G_b / G` は、採用候補決定後の別部品で扱う。今回の結果型へ `P_b` を追加しない。`G_b` とpaymentを同一視しない。`R_s` と実際のcompensationを同一視しない。`G >= R` だけで具体的budget balanceまたはstrategy-proofnessを証明したと記載しない。
+
+## 20. 候補選択との責任分離
+
+今回行わないもの: surplus最大候補の選択、surplus同値比較、buyer数比較、RNG、selected flag、候補採用、候補却下の最終確定。
+
+今回の経済性結果は、後続の候補選択部品へ材料を渡す。次を区別できる構造を維持する。
+
+- 全FIFO False
+- 全局所unresolved
+- resolved候補はあるが全経済不成立
+- economically feasible候補が1件以上
+
+## 21. expectedとactualの分離
+
+今回の結果はex-ante予想だけを保持する。
+
+保持するもの: baseline passage timestep、candidate passage timestep、expected time saving、expected waiting increase、局所計算による予想価値、declared VOT。
+
+保持しないもの: actual passage timestep、actual time saving、actual waiting increase、prediction error、realized utility、ex-post welfare。
+
+expected結果へactual値を後から書き込まない。後続では、別のfrozen actual comparison結果を作る方向とする。今回のexpected結果は、将来の照合に必要な次を保持する。
+
+- VisitKey
+- `vehicle_name`
+- Node名への到達経路
+- trade roleへの到達経路
+- baseline passage timestep
+- candidate passage timestep
+- timestep差
+- 秒差
+- declared VOT
+
+実績記録部品は今回作らない。
+
+## 22. 原子性と例外
+
+外部入力不正は `ValueError` である。例: `real_W` 不正型、`DELTAT` 不正、必要Vehicle欠落、`vot_declared` 欠落、`None`、負値、bool、NaN、infinity、非数値。VOT=0は外部入力不正ではない。
+
+保存済み結果間の重大不整合は `RuntimeError` である。例: resolvedなのにbaselineまたはcandidate passageがintでない、buyer空、role不整合、buyer/seller VisitKey集合不一致、candidate identity不一致、Node名不一致、`vehicle_name` とVisitKeyの対応不一致。
+
+正常な経済的不成立は例外ではない。frozen resultとして保持し、後続候補を続ける。例: buyerの時間短縮が0、buyerのcandidate passageがbaselineより遅い、buyerのdeclared VOTが0、`G < R`。
+
+1件の例外で全集合処理を停止する。後続候補と後続Nodeを処理しない。部分的な全体結果を返さない。rollbackしない。実Worldと入力結果を変更しない。
+
+## 23. 可読性
+
+実装時は正しさを最優先し、高度なPythonによる短さ、巧妙さ、美しさより、初学者が後から追いやすい可読性を優先する。
+
+責務を少なくとも次へ分ける。公開入力検証、`DELTAT` 検証、VOT取得、VOT検証、resolved候補検証、passage record分類、buyer timestep差、buyer秒差、buyer `G_b`、seller raw差、seller waiting increase、seller秒差、seller `R_s`、`G` 集計、`R` 集計、surplus、infeasibility reason、candidate result、Node result、overall result。
+
+避けるもの: 長い内包表記、複雑なgenerator、多段処理のone-liner、多数条件の圧縮、並列処理、キャッシュ、Decimal、実測前の最適化、既存部品の再実装、VOT=0だけの特殊な巧妙な分岐。
+
+## 24. 専用テスト契約
+
+新規専用テストは `tests_order_control_tvt_mp_economic_evaluation.py` である。最低限、次を固定する。
+
+公開型: Enum memberとvalue、buyer/seller/candidate/Node/overall のfrozen、公開列tuple、入力局所集合結果と同一object、live object非保持、true VOT / payment / compensation / selected / actual / 件数fieldなし。
+
+公開API: 正式関数名、位置引数2つ、VOT Mappingなし、集合用stateなし、Node単位公開APIなし、一候補公開APIなし。
+
+入力: 正常、`real_W` 不正、local set result不正、`DELTAT` の0、負値、bool、NaN、正の無限大、負の無限大。
+
+VOT合法: 正のint、正のfloat、0、0.0。
+
+VOT不正: 負値、bool、None、文字列、NaN、正の無限大、負の無限大、Vehicle欠落、`vot_declared` 属性欠落。
+
+VOT=0 buyer: recordを作る、`declared_vot_per_second=0`、expected time savingを保存、`G_b=0`、`passes_positive_buyer_value_condition=False`、`economically_feasible=False`、`BUYER_NONPOSITIVE_VALUE`、例外なし、後続候補を評価、役割維持、非参加へ変更しない。
+
+VOT=0 seller: recordを作る、`declared_vot_per_second=0`、waiting increaseを保存、increaseが正でも `R_s=0`、例外なし、後続候補を評価、役割維持、buyer価値へ追加しない、非参加へ変更しない。
+
+不参加との区別: `participates_in_order_exchange=False` のVisitはbuyer/seller経済recordへ含めない。`True` かつ `vot_declared=0` のVisitはroleに応じて含める。VOT=0を理由に参加状態を変更しない。VOT=0を理由に評価対象から除外しない。
+
+時間差: buyer正の短縮、差0、負差。seller正の待ち増加、差0、早期通過。timestep差、`DELTAT` による秒差、`DELTAT` が1以外、horizon端点。
+
+経済条件: 全buyer `G_b>0`、1 buyer `G_b=0`、1 buyer `G_b<0`、`G>R`、`G=R`、`G<R`、seller空で `R=0`、複数buyer/seller合計、surplus、2理由同時付与、reason正本順、成立時reason空。
+
+順序: Node順、candidate順、buyer passage順、seller passage順を維持。再ソートなし。
+
+対象外: unresolvedを経済評価しない、unresolvedのVOTを読まない、FIFO Falseを経済評価しない、nonparticipatingを経済評価しない、nonparticipatingのVOTを検証しない。
+
+重大不整合: resolvedなのにbaseline/candidateがNone、passage timestepがbool、buyer空、buyer/seller集合不一致、role不正、Node不一致、`vehicle_name` とVisitKey不一致、一候補不整合で全体停止、部分結果なし、後続未処理。
+
+不変性: `real_W`、`T`、RNG、Vehicle VOT、`participates_in_order_exchange`、local set result、FIFO結果、collector、rank state。
+
+責務外: 候補選択なし、surplus最大選択なし、buyer数比較なし、RNGなし、paymentなし、compensationなし、final rankなし、actual passageなし、実World反映なし、strategy-proofnessを主張しない。
+
+## 25. 実装範囲と実装対象外
+
+実装範囲:
+
+- 新規本番 `uxsim/order_control_tvt_mp_economic_evaluation.py`
+- 新規専用テスト `tests_order_control_tvt_mp_economic_evaluation.py`
+- resolved候補の抽出
+- buyerおよびseller passage record検証
+- VOT取得と検証
+- VOT=0の合法入力処理
+- buyerおよびseller時間差
+- timestepから秒への換算
+- `G_b`、`R_s`、`G`、`R`、surplus
+- economic infeasibility reasons
+- economically feasible
+- Nodeおよびoverall frozen結果
+
+実装対象外:
+
+- 候補選択、surplus最大候補選択、buyer数同値比較、RNG
+- payment、compensation、`P_b` 比例配分
+- `Vehicle.payment_paid` / `payment_received` 更新、`order_exchange_log` 更新
+- final rank、formal route保存、順位台帳更新、実World交通反映
+- actual passage記録、expectedとactualの比較部品
+- realized utility、ex-post welfare
+- 上位TVT driver
+- strategy-proofness検証
+- 文献制度の移植
+- 既存一候補統括・集合入口・FIFO結果型の変更
+
+## 26. 次の直接作業
+
+本節を独立確認する。問題がなければ、Markdown 2ファイルを先にcommitし、pushする。その保存後に、保存済み完全実装前仕様へ従い、次の新規2ファイルだけを実装する。
+
+- `uxsim/order_control_tvt_mp_economic_evaluation.py`
+- `tests_order_control_tvt_mp_economic_evaluation.py`
+
+Python実装前に、候補選択、payment、compensation、RNG、actual比較の新しい設計判断を混入させない。既存一候補統括、集合入口、FIFO検査、拘束順位列の契約を再考しない。文献ポジショニングの再開地点と混同しない。
+
+今回のMarkdown更新では、Pythonとテストを変更していない。コード変更がないため、テストを実行したとは記載しない。Git操作は行っていない。`diagnostics/order_control.zip` には触れていない。
 
 # 新しいチャットでの再開方法
 

@@ -7117,6 +7117,27 @@ horizon端点補修後の独立確認と文書保存のあと、新規一候補�
 - 次の再開地点: 本節・設計メモ実装結果節と新規2ファイルを同一保存単位でcommit予定（文献Markdownは含めない）。commitとpushは本Markdown作業では行わない。保存後に正本と進捗を確認して次工程を判断する。次の未実装領域は経済性評価であるが、具体的API・型・計算式・実装順は本記録で新たに確定しない。文献ポジショニング再開地点と混同しない。
 - 今回のMarkdown更新ではPythonとテストを変更していない。Git操作は行っていない。`diagnostics/order_control.zip` には触れていない。
 
+> 2026-09-25更新注記: 上記「具体的API・型・計算式・実装順は本記録で新たに確定しない」は、全候補集合入口の実装結果を文書化した当時の再開情報である。全候補集合入口はcommit `5b40723` で保存済みである。その後、経済性評価部品の完全実装前仕様を確定した。現在の次の直接作業としては読まない。直後の2026-09-25追記を参照すること。
+
+**TVT-MP経済性評価部品・完全実装前仕様を確定（2026-09-25）**
+
+本節は、resolved候補の経済性評価部品の完全実装前仕様の要約である。詳細正本は `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_2.md` の「TVT-MP経済性評価部品・完全実装前仕様」である。Python実装と専用テストは未着手である。前段の全候補集合入口はcommit `5b40723` で実装・検証・push済みである。文献調査側の2026-09-25記録とは独立する。文献結論を実装判断へ取り込まない。実装仕様を文献位置づけへ追記しない。
+
+- 評価対象はFIFO Trueかつ `resolved is True` の候補だけである。正常unresolvedは経済評価せず、0評価も経済的不成立にもしない。FIFO Falseは経済結果へ入れない。
+- `vot_declared=0` は合法入力である。VOT=0を制度不参加の代理表現として使用しない。不参加は `participates_in_order_exchange=False` で明示する。VOT=0の参加車両はroleに応じてbuyerまたはseller経済recordへ進む。
+- 経済評価対象のdeclared VOTは0以上の有限実数である。内部単位は抽象的貨幣単位/秒である。基本実験は正しい申告を前提とし、成立判定には `vot_declared` だけを使う。`vot_true` を混在させない。strategy-proofnessは未証明である。
+- 時間差の正本は整数timestep差である。buyerは `baseline - candidate`（符号付き）。seller raw差は `candidate - baseline`、待ち増加は `max(raw, 0)`。秒差はtimestep差に `real_W.DELTAT` を掛けて得る。timestep差と秒差の両方をfrozen保存する。
+- `G_b = expected_time_saving_seconds * declared_vot`。payment控除前の粗価値である。必要条件は全buyer `G_b > 0`。
+- `R_s = expected_waiting_increase_seconds * declared_vot`。実際のcompensationではない。seller空は `R=0`。seller早期通過は待ち0、`R_s=0`。sellerをbuyerへ変更しない。
+- VOT=0のbuyerは `G_b=0` となり、正常な経済的不成立（`BUYER_NONPOSITIVE_VALUE`）。例外にしない。VOT=0のsellerは待ちが正でも `R_s=0` を許容する。欠落・負値・bool・NaN・infinityとは区別する。
+- `G = ΣG_b`、`R = ΣR_s`、`surplus = G - R`。成立は全buyer `G_b > 0` かつ `G >= R`。完全比較。`G=R` は成立。toleranceとDecimalは使わない。
+- 不成立理由Enumは `BUYER_NONPOSITIVE_VALUE` と `TOTAL_BUYER_VALUE_BELOW_REQUIRED_COMPENSATION`。複数理由を正本順のtupleで保持する。
+- 公開APIは `evaluate_tvt_mp_candidate_economics(local_virtual_calculation_set_result, real_W)` の一括関数のみ。VOT Mappingは受け取らない。集合用state、Node単位API、一候補公開APIは置かない。
+- payment、compensation、候補選択、RNG、actual比較、最終順位確定、実World反映は対象外である。`G_b` とpayment、`R_s` とcompensationを同一視しない。`G >= R` をstrategy-proofnessまたは予算均衡の証明としない。expectedとactualを同一結果へ入れない。
+- 新規予定は本番 `uxsim/order_control_tvt_mp_economic_evaluation.py` と専用テスト `tests_order_control_tvt_mp_economic_evaluation.py` の2ファイルだけである。既存Python変更不要を第一候補とする。
+- Pythonは未実装である。次の直接作業は、本仕様の独立確認とMarkdown 2ファイルの保存のあと、新規2ファイルだけを実装することである。実装前に候補選択、payment、compensation、RNG、actual比較の新しい設計判断を混入させない。文献ポジショニング再開地点と混同しない。
+- 今回のMarkdown更新ではPythonとテストを変更していない。コード変更がないため、テストを実行していない。Git操作は行っていない。`diagnostics/order_control.zip` には触れていない。
+
 #### 2026-08-29：TVT権利保有車両選定前の先頭非参加Vehicle先行確定の記録補修
 
 - 過去に確定済みだった、意思決定窓内 baseline 到着順位の先頭に連続する非参加 Vehicle の先行確定が、設計メモに明文化されていなかった
