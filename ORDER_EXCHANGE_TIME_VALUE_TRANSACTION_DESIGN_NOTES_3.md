@@ -1240,3 +1240,170 @@ formal route: selected の保存済み route、fallback の collector 保存済�
 8. 保存後に新規本番 `uxsim/order_control_tvt_mp_final_rank.py` と専用テスト `tests_order_control_tvt_mp_final_rank.py` だけを実装する。
 
 本節は完全実装前仕様である。Python と専用テストは未着手である。順位台帳更新、Vehicle 金銭台帳更新、atomic apply は実装しない。
+
+## 29. 実装・検証結果（2026-09-26）
+
+**記録日: 2026-09-26**
+
+保存済み完全実装前仕様（本大見出しの §1–§28、commit `e364238`）に従って実装・検証した。上記 §1–§28 は歴史的な実装前仕様として残す。最新の実装完了事実は本節 §29 を参照する。
+
+既存 Python、既存テスト、既存結果型は変更していない。
+
+### 29.1 新規ファイル
+
+| 区分 | パス |
+| --- | --- |
+| 本番 | `uxsim/order_control_tvt_mp_final_rank.py` |
+| 専用テスト | `tests_order_control_tvt_mp_final_rank.py` |
+
+### 29.2 公開要素
+
+**Enum** `OrderControlTvtMpFinalRankStatus`:
+
+- `SELECTED_CANDIDATE_RANKS` = `"selected_candidate_ranks"`
+- `BASELINE_FALLBACK_RANKS` = `"baseline_fallback_ranks"`
+- `NO_VISITS_TO_CONFIRM` = `"no_visits_to_confirm"`
+
+**Enum** `OrderControlTvtMpFinalizationSource`:
+
+- `SELECTED_CANDIDATE` = `"selected_candidate"`
+- `BASELINE` = `"baseline"`
+
+**Visit record** `OrderControlTvtMpFinalRankVisitRecord`（frozen）— field順: `visit_key`、`final_local_rank`、`formal_route_next_link_name`、`finalization_source`。
+
+**Node結果** `OrderControlTvtNodeMpFinalRankResult`（frozen）— field順: `node_name`、`final_rank_status`、`selected_candidate_economic_result`、`final_rank_visits`（tuple）。
+
+**全体結果** `OrderControlTvtMpFinalRankSetResult`（frozen）— field順: `payment_and_compensation_set_result`、`node_final_rank_results`（tuple）。
+
+**API**
+
+```text
+def build_tvt_mp_final_ranks(
+    payment_and_compensation_set_result,
+) -> OrderControlTvtMpFinalRankSetResult:
+```
+
+契約: 位置引数1つ。入力は `OrderControlTvtMpPaymentAndCompensationSetResult` だけ。`real_W` なし。rank state 引数なし。optional 引数なし。全 Node 一括。公開 API はこの関数1つ。部分的 overall result なし。入力 payment set は同一 object 参照で保持する。selected candidate は同一 object 参照で保持する。
+
+### 29.3 入力経路
+
+上流参照連鎖は private helper `_saved_node_columns_from_payment_set` へ集約した。
+
+payment set から、selection、economic、local、FIFO、general trade rank、concrete buyer、inlink、candidate visit set、right-of-entry、leading confirmation、arrived confirmation、alignment fork、baseline collector へ、既存 object の同一参照で到達する。
+
+新しい共通入力型へ情報を複写していない。
+
+payment status は分岐原因として使用しない。payment status は selection status および records との整合確認にだけ使用する。`NO_SELECTED_CANDIDATE` だけを見て、fallback、経済的不成立、`NO_VISITS_TO_CONFIRM` を決めない。
+
+### 29.4 原因別5分岐
+
+#### 分岐1: selected candidateあり
+
+原因: economically feasible 候補から selected candidate が1件選択された。
+
+結果: `SELECTED_CANDIDATE_RANKS`。保存済み区分3と区分4をこの順で使用する。selected candidate は入力と同一 object。payment 金額を順位材料として使用しない。
+
+区分3: `trade_scope_of_this_candidate_visits`。selected candidate の取引後順位。source は `SELECTED_CANDIDATE`。
+
+区分4: `outside_trade_scope_inside_k_fixed_visits`。trade_scope 外で今回の意思決定窓内に残る Visit。baseline 順位。source は `BASELINE`。空でもよい。
+
+区分1・2は再掲しない。
+
+#### 分岐2: 候補検討後、採用候補なし
+
+原因: baseline 情報は揃った。候補検討まで進んだ。FIFO False、局所 unresolved、経済的不成立、またはこれらの混在により採用候補が0件となった。
+
+結果: `BASELINE_FALLBACK_RANKS`。`remaining_decision_window_visit_keys` 全体を baseline 順位で確定する。上限 N で切らない。一部だけ確定しない。全 record の source は `BASELINE`。正常結果であり例外ではない。
+
+#### 分岐3: baseline情報不足
+
+原因: 意思決定窓内 Visit は存在する。候補形成または評価に必要な baseline 情報が不足した。
+
+対象 status: `NOT_BUILT_UNRESOLVED_ARRIVALS`、`UNRESOLVED_RIGHT_OF_ENTRY_PASSAGE`、`UNRESOLVED_CANDIDATE_PASSAGES`。
+
+結果: `BASELINE_FALLBACK_RANKS`。`remaining_decision_window_visit_keys` 全体を baseline 順位で確定する。経済的不成立へ変換しない。全 record の source は `BASELINE`。正常結果であり例外ではない。
+
+#### 分岐4: 意思決定窓内Visitが最初から0件
+
+原因: `decision_window_visit_keys` が空。`remaining_decision_window_visit_keys` も空。
+
+結果: `NO_VISITS_TO_CONFIRM`。selected candidate は None。final rank 列は空 tuple。baseline fallback ではない。架空の候補または金額を作らない。Node 結果を省略しない。
+
+#### 分岐5: 意思決定窓内Visitは存在したが全件先行確定済み
+
+原因: `decision_window_visit_keys` は1件以上。区分2までの先行確定により全件確定済み。`remaining_decision_window_visit_keys` は空。
+
+結果: `NO_VISITS_TO_CONFIRM`。selected candidate は None。final rank 列は空 tuple。baseline fallback ではない。先行確定済み Visit を再掲しない。既確定順位と正式進路を上書きしない。
+
+分岐4と分岐5は同じ status だが、原因を混同しない。
+
+### 29.5 formal route
+
+selected candidate 成立時: binding Visit の `route_next_link_name` を使用する。
+
+baseline fallback 時: remaining window の各 Visit について、baseline collector の `get_baseline_visit_snapshot` から `route_next_link_name` を取得する。上限 N 外に残る Visit も collector から取得する。
+
+次を行わない: World からの再探索、Vehicle からの再探索、route の推測補完。
+
+欠落、None、空文字は重大不整合。`formal_route_next_link_name` を、順位と同じ Visit record へ保存する。
+
+### 29.6 final_local_rank
+
+各 Node の今回の final rank 列内で1から開始する。1から連続する。tuple の保存順と一致する。順位台帳全体の絶対順位ではない。本部品は rank state を読まない。
+
+### 29.7 既確定Visitとの境界
+
+区分1・2を final rank 列へ含めない。先行確定済み Visit を fallback 列へ含めない。arrived 確定済み Visit を再掲しない。既確定順位を上書きしない。既確定正式進路を上書きしない。重複を自動除外して処理を継続しない。混入または重複は重大不整合。
+
+### 29.8 不変性と責務境界
+
+変更しない: payment result、selection result、economic result、local result、FIFO result、collector、rank state、Vehicle、`payment_paid`、`payment_received`、`order_exchange_log`、World、RNG。
+
+本部品は次を行わない: `confirm_visits_and_formal_target_node_routes_atomically` の呼出し、rank state への書込み、Vehicle 金銭台帳更新、atomic apply、上位 driver、actual 処理、utility または welfare 計算。
+
+新しい frozen final rank 結果だけを返す。
+
+### 29.9 独立確認で修正した専用テスト
+
+初回専用テストに次の常時成功条件があった。
+
+```text
+assert "uxsim" not in imported_modules or True
+```
+
+問題: `or True` により必ず成功する。何も検証していない。本番モジュールが既存 uxsim 型を import すること自体は正常であり、トップレベル名 `uxsim` の一律禁止も不適切である。
+
+修正: 常時成功 assert を削除した。不要になった `imported_modules` 変数を削除した。`ast.Import` および `ast.ImportFrom` の収集処理を削除した。具体的な責務外処理の禁止確認は維持した。
+
+維持した確認例: `real_W` なし、World 検索なし、Vehicle 検索なし、rank state 書込みなし、atomic apply 呼出しなし、上流工程再実行なし、Vehicle 金銭属性更新なし、actual passage 処理なし、明示的 for ループ、`dataclass(frozen=True)`、baseline route 取得。
+
+修正後、専用テスト43件は成功し、追加修正は不要である。
+
+### 29.10 検証結果
+
+専用テスト: 件数 43。直接実行 `43 tests passed`。pytest `43 passed`。pytest 収集 43。定義済み test 関数 43。`TESTS` 登録 43。定義と登録は一致する。
+
+py_compile: `uxsim/order_control_tvt_mp_final_rank.py` 成功。`tests_order_control_tvt_mp_final_rank.py` 成功。
+
+関係回帰: 新規専用テストを含む指定16ファイルで `772 passed`。内訳は新規専用テスト 43、その他の関係テスト 729。
+
+全 pytest、GUI、デモ、長時間性能テストは実行していない。
+
+### 29.11 実装完了範囲
+
+実装完了: 2つの公開 Enum。Visit、Node、全体 frozen 結果。payment set だけを入力とする公開 API。private helper による上流参照集約。原因別5分岐。selected candidate の区分3＋区分4。baseline fallback。`NO_VISITS_TO_CONFIRM` の2原因。formal route。`final_local_rank`。重大不整合時の全体停止。部分的 overall result なし。専用テスト43件。関係回帰772件。py_compile。独立確認。
+
+### 29.12 未実装範囲
+
+未実装: final consistency validation。rank state への書込み。Vehicle 金銭台帳更新。atomic apply。上位 driver 本体。実 World 反映。actual 比較。utility または welfare。strategy-proofness 検証。文献制度の移植。
+
+### 29.13 次の再開地点
+
+1. Terminal で本実装結果節を直接表示し、独立確認する。
+2. 問題がなければ進捗第2巻へ要約を別作業で追加する。
+3. 進捗第2巻も Terminal で直接確認する。
+4. 新規本番、新規専用テスト、詳細設計第3巻、進捗第2巻を同一保存単位で commit する。
+5. commit 結果、最新コミット、残存変更を確認する。
+6. 別の指示で push する。
+7. 保存後に final consistency validation の設計へ進む。
+8. atomic apply と上位 driver は、その後の別設計とする。
