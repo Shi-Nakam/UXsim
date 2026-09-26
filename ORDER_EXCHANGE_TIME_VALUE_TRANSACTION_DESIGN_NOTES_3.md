@@ -1939,3 +1939,145 @@ py_compile: `uxsim/order_control_tvt_mp_final_consistency_validation.py` 成功�
 7. 保存後に atomic apply の設計着手前調査へ進む。
 8. 複数 Node の atomic 書込み単位を atomic apply 設計で検討する。
 9. 上位 driver は atomic apply 設計後の別設計とする。
+
+# UXsim正式サンプル・TVT-MP atomic apply設計前スモークテスト
+
+**記録日: 2026-09-27**
+
+TVT-MP final consistency validation の実装・検証・文書化・push 完了後、atomic apply の設計着手前に、UXsim の正式サンプルを実行した記録である。
+
+## 1. 実行目的と位置づけ
+
+**目的**
+
+- 現在の研究用改変によって、既存の通常 UXsim 動作が壊れていないか確認する。
+- FCFS 開発時から保存されている正式サンプルの既知基準値と比較する。
+- atomic apply の設計へ進む前のスモークテストとする。
+
+**本確認が TVT 機能そのものの動作確認ではない理由**
+
+- TVT-MP の上位 driver は未実装である。
+- TVT-MP は実 World の通常実行経路へ未接続である。
+- atomic apply も未実装である。
+- この正式サンプルは通常の UXsim 実行を確認するものである。
+
+**今回確認できたこと**
+
+- 既存 UXsim の通常シミュレーションが異常終了しない。
+- 保存済みの主要交通指標が従来基準値から変化していない。
+- 現時点で通常 UXsim 動作への回帰は検出されなかった。
+
+**確認していないこと**
+
+- TVT-MP を有効化した実シミュレーション。
+- TVT-MP による順位交換。
+- payment・compensation の実 Vehicle 反映。
+- rank state への実適用。
+- TVT-MP の上位 driver。
+- expected 値と actual 値の比較。
+- realized utility。
+- ex-post welfare。
+
+## 2. 実行時コミットと Git 状態
+
+| 項目 | 内容 |
+| --- | --- |
+| 実行時コミット | `de19603` — Implement, test and document TVT-MP final consistency validation |
+| HEAD | `de19603` |
+| `origin/feature/intersection-order-control` | `de19603`（HEAD と一致） |
+| 未追跡 | `diagnostics/order_control.zip` のみ |
+| その他 | 変更なし |
+
+## 3. 実行対象とコマンド
+
+| 項目 | 内容 |
+| --- | --- |
+| 実行対象 | `demos_and_examples/example_00en_simple.py` |
+| 実行コマンド | `python demos_and_examples/example_00en_simple.py` |
+
+**終了状態**
+
+- exit code: 0
+- `simulation finished` を表示
+- 例外なし
+- 異常終了なし
+
+**実行時間（診断情報のみ、回帰判定対象外）**
+
+setup time と simulation 中の computation time は実行環境により変化するため、交通結果の回帰判定対象に含めない。
+
+今回の表示値:
+
+- setup time: 14.76 s
+- simulation 中の computation time: 0.03 s
+
+## 4. 保存済み基準値
+
+旧進捗メモに保存されている正式サンプルの既知基準値（今回新規設定した値ではない。FCFS 開発時から繰り返し確認されている保存済み基準値）:
+
+| 指標 | 基準値 |
+| --- | --- |
+| number of completed trips | 735 / 810 |
+| average speed | 11.7 m/s |
+| total travel time | 119475.0 s |
+| average travel time of trips | 162.6 s |
+| average delay of trips | 62.6 s |
+| delay ratio | 0.385 |
+| total distance traveled | 1632250.0 m |
+
+主な既存参照箇所: `ORDER_EXCHANGE_PROGRESS.md` の「標準挙動維持の確認」、Phase 4-6K 回帰確認、Phase 4-6L 回帰確認、その後の複数の FCFS・BATCH 回帰確認。
+
+## 5. 今回の実行結果と比較
+
+今回の主要交通結果:
+
+| 指標 | 今回の値 |
+| --- | --- |
+| number of completed trips | 735 / 810 |
+| average speed | 11.7 m/s |
+| total travel time | 119475.0 s |
+| average travel time of trips | 162.6 s |
+| average delay of trips | 62.6 s |
+| delay ratio | 0.385 |
+| total distance traveled | 1632250.0 m |
+
+**7指標の比較結果（すべて保存済み基準値と一致）**
+
+- completed trips: 一致
+- average speed: 一致
+- total travel time: 一致
+- average travel time: 一致
+- average delay: 一致
+- delay ratio: 一致
+- total distance traveled: 一致
+
+**結論**
+
+- 現在の `de19603` 時点で、既存の通常 UXsim 動作を壊す回帰は検出されなかった。
+- 正式サンプルは正常終了した。
+- atomic apply 設計着手前のスモークテストとして PASS とする。
+- この結果だけで TVT-MP の実 World 動作が確認済みとはしない。
+
+## 6. 今後の再実行方針
+
+正式サンプルは今後も次の節目で再実行する。
+
+1. **atomic apply 実装後** — 順位台帳と Vehicle 金銭台帳への反映部品追加後に、通常 UXsim が壊れていないか確認する。
+2. **上位 driver 接続後** — TVT を無効にした通常経路で従来基準値が維持されるか確認する。
+3. **TVT-MP を実 World 実行経路へ接続後** — 正式サンプルとは別に、TVT 有効の専用シナリオで実機能を確認する。
+
+**正式サンプルで確認するもの:** 通常 UXsim の既存挙動。異常終了の有無。保存済み主要交通指標。
+
+**正式サンプルだけでは確認しないもの:** TVT-MP の順位交換成立。payment・compensation 実反映。actual passage。prediction error。realized utility。ex-post welfare。
+
+## 7. 次の再開地点
+
+1. Terminal で本スモークテスト記録を直接表示し、内容を独立確認する。
+2. 問題がなければ進捗第2巻へ同じ結果の要約を別作業で追加する。
+3. 進捗第2巻の要約も Terminal で直接確認する。
+4. 詳細設計第3巻と進捗第2巻を同一保存単位で commit する。
+5. commit 結果、最新コミット、残存変更を確認する。
+6. 別の指示で push し、push 後の状態を確認する。
+7. 保存後に atomic apply の設計着手前調査へ進む。
+8. atomic apply 実装後に正式サンプルを再実行する。
+9. 上位 driver 接続後にも正式サンプルを再実行する。

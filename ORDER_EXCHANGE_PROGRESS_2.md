@@ -278,14 +278,32 @@ payment、compensation、P_b比例配分、seller実補償配分、`payment_paid
 
 **未実装:** rank state 書込み、Vehicle 金銭台帳更新、atomic apply、上位 driver、実 World 反映、実 outlink 検査、actual 比較、utility または welfare、strategy-proofness、文献制度の移植、複数 Node の atomic 書込み単位。
 
+## UXsim正式サンプルのatomic apply設計前スモークテストを実施（2026-09-27）
+
+**詳細正本:** `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_3.md` の「UXsim正式サンプル・TVT-MP atomic apply設計前スモークテスト」（記録日 2026-09-27）。
+
+**実行:** `demos_and_examples/example_00en_simple.py`。コマンド `python demos_and_examples/example_00en_simple.py`。実行時コミット `de19603` — Implement, test and document TVT-MP final consistency validation。exit code 0、`simulation finished`、例外なし、異常終了なし。
+
+**基準値と結果:** 旧進捗メモに保存されている FCFS 開発時からの既知基準値を使用（今回新規設定ではない）。確認対象7指標はすべて一致 — completed trips 735/810、average speed 11.7 m/s、total travel time 119475.0 s、average travel time 162.6 s、average delay 62.6 s、delay ratio 0.385、total distance traveled 1632250.0 m。setup time（今回 14.76 s）と computation time（今回 0.03 s）は環境依存のため回帰判定対象外。一致判定には使用していない。
+
+**結論:** `de19603` 時点で通常 UXsim 動作への回帰は未検出。正式サンプルは正常終了。atomic apply 設計前のスモークテストとして PASS。
+
+**確認できたもの:** 通常 UXsim の既存動作、異常終了の有無、保存済み主要交通指標の維持。
+
+**確認していないもの:** TVT-MP 有効化実シミュレーション、順位交換、payment・compensation の Vehicle 反映、rank state 実適用、atomic apply、上位 driver、expected と actual の比較、prediction error、realized utility、ex-post welfare。TVT-MP の上位 driver・atomic apply・実 World 接続は未実装のため、本 PASS は TVT-MP 自体の実動作確認とは扱わない。
+
+**今後の再実行:** (1) atomic apply 実装後 — 通常 UXsim が壊れていないことを再確認。(2) 上位 driver 接続後 — TVT 無効の通常経路で基準値を再確認。(3) TVT-MP を実 World 経路へ接続後 — 正式サンプルとは別の TVT 有効専用シナリオで実機能を確認。
+
 ## 次の再開地点
 
-1. 新規本番、新規専用テスト、詳細設計第3巻、進捗第2巻を同一保存単位で commit する。
-2. commit 結果、最新コミット、残存変更を確認する。
-3. 別の指示で push し、push 後の状態を確認する。
-4. 保存後に atomic apply の設計着手前調査へ進む。
-5. 複数 Node の atomic 書込み単位を atomic apply 設計で検討する。
-6. 上位 driver は atomic apply 設計後の別設計とする。
+1. 詳細設計第3巻と進捗第2巻のスモークテスト記録を Terminal で確認する。
+2. 問題がなければ2文書を同一保存単位で commit する。
+3. commit 結果、最新コミット、残存変更を確認する。
+4. 別の指示で push し、push 後の状態を確認する。
+5. 保存後に atomic apply の設計着手前調査へ進む。
+6. 複数 Node の atomic 書込み単位を atomic apply 設計で検討する。
+7. atomic apply 実装後に正式サンプルを再実行する。
+8. 上位 driver 接続後にも正式サンプルを再実行する。
 
 ## 新しいチャットでの再開方法
 
