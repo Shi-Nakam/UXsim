@@ -196,13 +196,61 @@ payment、compensation、P_b比例配分、seller実補償配分、`payment_paid
 
 **未実装:** final consistency validation、rank state 書込み、Vehicle 金銭台帳更新、atomic apply、上位 driver、実 World 反映、actual 比較、utility/welfare、strategy-proofness 検証、文献制度の移植。
 
+## TVT-MP final consistency validation部品・完全実装前仕様を確定（2026-09-26）
+
+**詳細正本:** `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_3.md` の「TVT-MP final consistency validation部品・完全実装前仕様」（記録日 2026-09-26）。本節は要約である。Python 実装と専用テストは未着手である。
+
+**位置づけ:** final rank construction の次、atomic apply の前。final rank 結果と payment・compensation 結果、および上流結果を相互照合する。順位結果と金銭記録が同じ取引内容を表しているか確認する。全 Node をまとめて確認する。1 Node でも重大不整合があれば承認結果を返さない。部分的 validation result を返さない。frozen 結果間の純照合だけを行う。rank state、Vehicle、World は変更しない。
+
+**正式処理順:** (1) candidate selection、(2) payment・compensation pure calculation、(3) final rank construction、(4) final consistency validation、(5) rank state と Vehicle 金銭台帳への atomic application。
+
+**予定ファイル:** 本番 `uxsim/order_control_tvt_mp_final_consistency_validation.py`、専用テスト `tests_order_control_tvt_mp_final_consistency_validation.py`。
+
+**入力・API:** 唯一の入力は `OrderControlTvtMpFinalRankSetResult`。API `validate_tvt_mp_final_consistency(final_rank_set_result)`。位置引数1つ、final rank set だけ。`real_W` なし。rank state・Vehicle・Vehicle mapping・Node・outlink 集合・RNG・optional 引数なし。全 Node 一括、公開 API は1つ。成功時だけ frozen 全体結果を返す。上流参照は private helper に集約し、新しい共通入力型へ複写しない。
+
+**結果型:** `OrderControlTvtMpFinalConsistencyValidationSetResult`（frozen）。field は `final_rank_set_result` だけ。入力と同一 object 参照。final rank 列・buyer payment records・seller compensation records・formal route を複写しない。rank state・Vehicle・outlink 集合を保持しない。failed status・boolean だけの独立承認 token を作らない。公開 Enum なし。Node 単位の公開 validation result 型なし。部分的な承認結果なし。
+
+**pure validation と実状態:** 本部品は frozen 結果同士の整合、final rank と payment・compensation の対応、selected candidate の対応、buyer・seller の Visit 対応、原因別5分岐、formal route の保存値対応、final rank 列の内部整合を確認する。rank state 上の未確定・既確定、実 outlink 所属、Vehicle 存在、金銭属性の書込み可能性、apply 直前の実状態変化は確認しない。これらは atomic apply が書込み直前に確認する。validation 成功は frozen 結果間の整合確認済みのみを意味し、実状態への書込み成功を保証しない。
+
+**selected 同一 object:** 分岐1では final rank・payment・selection の selected candidate と economic 候補 tuple 内の selected がすべて同一 object（`is`）。値の等しさだけでは不十分。複製は正常としない。
+
+**buyer payment:** selected 時は buyer economic records と buyer payment records が1件以上、件数・保存順・VisitKey・`vehicle_name` が一致、VisitKey 重複なし。各 record の Visit は区分3に存在し role は `BUYER`。区分3の `BUYER` 集合と buyer payment record 集合が一致。`payment_P_b` 式、`G`・`R`・payment 式・tolerance・Decimal の再計算はしない。
+
+**seller compensation:** selected 時は seller economic records と seller compensation records は0件でも正常。件数・保存順・VisitKey・`vehicle_name` が一致、VisitKey 重複なし。各 record の Visit は区分3に存在し role は `SELLER`。区分3の `SELLER` 集合と seller compensation record 集合が一致。`compensation_amount` と保存済み `required_compensation_R_s` が一致。`R_s` 式、VOT・通過時刻差・予想待ち増加・seller role の再計算はしない。
+
+**補償0 seller:** 同時刻 seller、早期通過 seller、申告 VOT が0の遅延 seller はいずれも seller record を保持し `compensation_amount` は0。role は seller を維持、buyer へ変更しない。補償0を理由に record を削除しない。economic record と compensation record の存在と対応を確認する。
+
+**buyer・seller 重複禁止:** 同一 VisitKey を buyer と seller の両方にしない。buyer 内・seller 内の重複なし、buyer と seller の共通 VisitKey なし、payment と compensation の共通 VisitKey なし。重複を自動除外しない。重複は `RuntimeError`。
+
+**非参加・区分4:** 区分3の `NONPARTICIPATING` は final rank に含まれ source は `SELECTED_CANDIDATE`、金銭 record なし。区分4の `OUTSIDE_TRADE_SCOPE` は final rank に含まれ得 source は `BASELINE`、金銭 record なし（空でも正常）。非参加・区分4に金銭 record を要求しない。存在すれば重大不整合。金銭 record を持つのは selected 時の区分3の `BUYER` と `SELLER` だけ。final rank 全 Visit へ金銭 record を要求しない。
+
+**原因別5分岐:** (1) selected — `SELECTED_CANDIDATE_RANKS`・`CALCULATED`・`SELECTED`・同一 selected・buyer records 1件以上・seller 0件以上・区分3 `BUYER`/`SELLER` と金銭一致・非参加・区分4に金銭なし。(2) 採用候補なし — `BASELINE_FALLBACK_RANKS`・`NO_SELECTED_CANDIDATE`・`NO_ECONOMICALLY_FEASIBLE_CANDIDATE`・selected None・金銭空・`BASELINE_INFORMATION_COMPLETE`・remaining 全体・source `BASELINE`。(3) 情報不足 — 同形 fallback・`build_status` は情報不足3種・経済的不成立へ変換しない。(4) 空窓 — `NO_VISITS_TO_CONFIRM`・金銭空・final rank 空・decision/remaining 空・`NOT_BUILT_NO_RIGHT_OF_ENTRY`。(5) 全件先行確定 — 同 `NO_VISITS_TO_CONFIRM`・decision 1件以上・remaining 空・先行確定 Visit を再掲しない。分岐4と5は同じ status だが原因を混同しない。`NO_SELECTED_CANDIDATE` だけでは分岐を決めない。
+
+**formal route:** 全 final rank Visit の `formal_route_next_link_name` が非空 str。selected 時は binding `route_next_link_name`、fallback 時は collector snapshot と VisitKey 対応で一致。実 outlink 集合・Link・World 接続・再探索は確認しない。実 outlink 妥当性は atomic apply が書込み直前に確認。
+
+**final rank 列:** VisitKey 重複なし、`final_local_rank` 1から連続、tuple 順一致、source と Node status 一致、区分1・2・先行確定・arrived 確定の再掲なし。列を再構築しない。
+
+**エラー:** `ValueError` は外部入力が `OrderControlTvtMpFinalRankSetResult` でない場合だけ。`RuntimeError` は Node 対応・status・selected 同一 object・金銭と role・VisitKey 重複・補償0 record 欠落・非参加・区分4・fallback・`NO_VISITS` の金銭・順位・source・route・分岐取り違え・1 Node 後続続行・部分結果。正常扱い: 分岐2–5、seller 0件、補償0 seller、非参加・区分4の金銭なし。
+
+**過剰検証回避:** candidate formation、general trade rank、FIFO、local virtual calculation、economic evaluation、candidate selection、payment・compensation 式、`G`/`R` 再加算、surplus、final rank construction、VOT、passage difference、交通シミュレーションは再実行しない。完成済み結果間の対応だけを確認する。
+
+**不変:** final rank、payment、selection、economic、local、FIFO、collector、rank state、Vehicle、`payment_paid`、`payment_received`、`order_exchange_log`、World、RNG。
+
+**atomic apply:** validation result は apply の入力の一つ。apply は validation 成功を理由に実状態検査を省略しない。書込み直前に rank state・未確定/既確定・outlink・実 route・Vehicle・金銭属性・log・適用 Node・複数 Node 一括単位を確認する予定。本部品は confirm API、台帳書込み、log、rollback、実 World 反映を行わない。複数 Node の一括書込み単位は後続 apply 設計の未確定事項。
+
+**上位 driver（未実装）:** 全 Node を final rank まで通し、final rank set を validation へ、成功結果を apply へ渡す。5分岐・buyer/seller 再照合・金銭列再構築・Node ごとの validation 直後部分適用はしない。
+
+**今回未実装:** validation 本番・専用テスト、rank state 書込み、Vehicle 金銭台帳、atomic apply、上位 driver、実 World 反映、実 outlink 検査、actual、utility/welfare、strategy-proofness、文献制度の移植、複数 Node atomic 書込み単位の確定。
+
 ## 次の再開地点
 
-1. 新規本番、新規専用テスト、詳細設計第3巻、進捗第2巻を同一保存単位で commit する。
-2. commit 結果、最新コミット、残存変更を確認する。
-3. 別の指示で push し、push 後の状態を確認する。
-4. 保存後に final consistency validation の設計へ進む。
-5. atomic apply と上位 driver は、その後の別設計とする。
+1. 詳細設計第3巻と進捗第2巻の final consistency validation 仕様を Terminal で直接確認する。
+2. 問題がなければ2文書を同一保存単位で commit する。
+3. commit 結果、最新コミット、残存変更を確認する。
+4. 別の指示で push し、push 後の状態を確認する。
+5. 保存後に新規本番 `uxsim/order_control_tvt_mp_final_consistency_validation.py` と専用テスト `tests_order_control_tvt_mp_final_consistency_validation.py` だけを実装する。
+6. 実装後に独立確認する。
+7. atomic apply と上位 driver は、その後の別設計とする。
 
 ## 新しいチャットでの再開方法
 

@@ -1407,3 +1407,368 @@ py_compile: `uxsim/order_control_tvt_mp_final_rank.py` 成功。`tests_order_con
 6. 別の指示で push する。
 7. 保存後に final consistency validation の設計へ進む。
 8. atomic apply と上位 driver は、その後の別設計とする。
+
+# TVT-MP final consistency validation部品・完全実装前仕様
+
+**記録日: 2026-09-26**
+
+本節は完全実装前仕様である。Python 実装と専用テストは未着手である。rank state、Vehicle 金銭台帳、実 World は変更しない。
+
+完成済みの final rank 結果、payment・compensation 結果、およびそれらが参照する上流結果を相互照合する純計算部品である。実適用前に、順位、正式進路、買い手支払記録、売り手補償記録、selected candidate、原因別5分岐が相互に矛盾していないことを一括確認する。順位列の構築、金額の計算、台帳への書込みは行わない。
+
+## 1. 位置づけ
+
+次まで実装・検証・保存済みである。候補形成、一般形順位再構成、FIFO 検査、候補別局所仮想計算、全候補局所仮想計算集合、経済性評価、economically feasible 候補間の最終選択、buyer payment・seller compensation の純計算、final rank construction。
+
+保存済みの正式処理順:
+
+1. candidate selection
+2. payment・compensation pure calculation
+3. final rank construction
+4. final consistency validation
+5. rank state と Vehicle 金銭台帳への atomic application
+
+本部品は final rank construction 部品とは別にする。final rank construction は順位列と正式進路を構築する。payment 部品は支払額と補償額を計算する。final consistency validation は両結果を初めて相互照合する。rank state や Vehicle への実書込みは後続 atomic apply が担当する。構築、照合、実適用を分離することで、問題発生箇所と補修箇所を限定する。
+
+## 2. 予定ファイル
+
+| 区分 | パス |
+| --- | --- |
+| 本番 | `uxsim/order_control_tvt_mp_final_consistency_validation.py` |
+| 専用テスト | `tests_order_control_tvt_mp_final_consistency_validation.py` |
+
+既存 Python、既存テスト、既存結果型は変更しない。
+
+## 3. pure validationと実状態検証の境界
+
+本部品は frozen 結果間の純照合だけを行う。
+
+本部品へ入力しないもの: rank state、Vehicle、Vehicle mapping、対象 Node の outlink 集合、`real_W`、Node object、Link object、RNG。
+
+理由: rank state、Vehicle、outlink 集合は validation 成功後から apply までに変化し得る。validation 時点で実状態を確認しても、書込み時点の安全性を保証できない。apply が同じ確認を省略すれば危険であり、apply が再確認するなら不必要な二重検証になる。既存の原子的順位・進路確定 API は書込み直前に実状態を確認できる。Vehicle 金銭台帳も書込み直前に実 Vehicle を確認する。
+
+したがって次は後続 atomic apply で確認する。rank state に Visit が未確定として登録されていること。Visit がすでに確定済みでないこと。formal route が対象 Node の実 outlink 集合に含まれること。Vehicle が実 World に存在すること。`payment_paid`、`payment_received`、`order_exchange_log` が利用可能であること。実適用直前の状態が変更されていないこと。
+
+final consistency validation の成功は、実状態への書込み成功を保証しない。frozen 結果間の相互整合が確認済みであることだけを示す。
+
+## 4. 正式入力
+
+唯一の公開入力は `OrderControlTvtMpFinalRankSetResult` である。
+
+`real_W`、rank state、Vehicle、Vehicle mapping、Node object、対象 Node の outlink 集合、RNG は受け取らない。
+
+final rank set から同一参照の連鎖により、少なくとも次へ到達する。final rank Node 結果、final rank status、final rank Visit records、payment and compensation set result、payment Node 結果、buyer payment records、seller compensation records、candidate selection set result、selection Node 結果、selection status、selected candidate、economic evaluation set result、economic Node 結果、buyer economic records、seller economic records、local virtual calculation result、binding rank sequence、区分1から区分4、binding Visit の trade role、candidate visit set、`build_status`、`decision_window_visit_keys`、`remaining_decision_window_visit_keys`、baseline collector。
+
+新しい共通入力型へ上流情報を複写しない。長い参照連鎖は private helper 一か所へ集約する。照合本体の各所へ長い参照取得処理を散在させない。上流 object は同一参照のまま利用する。
+
+## 5. 正式結果型
+
+`OrderControlTvtMpFinalConsistencyValidationSetResult` は `dataclass(frozen=True)` とする。
+
+field 順:
+
+1. `final_rank_set_result`
+
+契約: `final_rank_set_result` は入力と同一 object 参照である。field は1つだけである。Node 結果列、final rank Visit 列、buyer payment records、seller compensation records、formal route を複写しない。rank state、Vehicle、outlink 集合を保持しない。boolean の承認 token だけを独立保存しない。failed status を保存しない。mutable state を保持しない。
+
+Node 単位の公開 validation result 型は作らない。validation は全 Node 一括で成功または停止する。Node ごとの成功 record を作ると final rank Node 結果列と重複する。Node 単位の問題は `RuntimeError` のメッセージへ Node 名を含める。部分的な承認を後続 apply へ渡さない。
+
+公開 Enum は作らない。`VALIDATED` だけの Enum も作らない。失敗を正常 status として返さない。
+
+## 6. 公開API
+
+```text
+def validate_tvt_mp_final_consistency(
+    final_rank_set_result,
+) -> OrderControlTvtMpFinalConsistencyValidationSetResult:
+```
+
+契約: 位置引数1つ。入力は `OrderControlTvtMpFinalRankSetResult` だけ。`real_W` なし。rank state 引数なし。Vehicle 引数なし。Vehicle mapping 引数なし。Node 引数なし。outlink 集合引数なし。RNG なし。optional 引数なし。外部 validation rule 引数なし。全 Node 一括。公開 API はこの関数1つ。Node 単位公開 API なし。Visit 単位公開 API なし。部分的 validation result なし。成功時だけ frozen 全体結果を返す。
+
+## 7. 採用する設計と採用しない設計
+
+採用する設計: final rank set だけを入力とする pure validation。成功時だけ新しい frozen 全体結果を返す。重大不整合では `RuntimeError`。Node 単位の成功 result は作らない。failed status は作らない。公開 Enum は作らない。順位列、金銭列、route 列を結果へ複写しない。rank state、Vehicle、outlink 集合を保持しない。atomic apply は別部品とする。
+
+採用しない設計: final consistency validation へ rank state、Vehicle、Vehicle mapping、対象 Node の outlink 集合、`real_W` を入力すること。validation 時に順位台帳または Vehicle 金銭台帳へ書き込むこと。pure validation と apply を巨大関数へ統合すること。apply 準備用 snapshot を今回新設すること。Node 単位の空の承認 record を作ること。`VALIDATED` だけの公開 Enum を作ること。failure を正常 status として返すこと。validation 済みの順位列または金銭列を複写すること。
+
+## 8. construction内検証との違い
+
+final rank construction は、final rank 列を構築するときに final rank status、Node 順、selected candidate、区分3と区分4、baseline fallback 列、`final_local_rank`、formal route の存在、Visit 重複、先行確定済み Visit の非再掲、原因別5分岐を確認済みである。
+
+payment 部品は、payment status、buyer payment records、seller compensation records、`payment_P_b`、`compensation_amount`、候補なしの空 records を確認済みである。
+
+candidate selection は、selected candidate の同一 object、selected status、候補なし status を確認済みである。
+
+本部品はこれらを再構築または再計算しない。本部品で初めて可能になる部品間照合を行う。例: final rank の selected candidate と payment の selected candidate が同一 object であること。payment buyer records と selected candidate の buyer economic records が対応すること。seller compensation records と seller economic records が対応すること。buyer record が区分3の `BUYER` role と対応すること。seller record が区分3の `SELLER` role と対応すること。非参加 Visit または区分4 Visit に金銭 record がないこと。fallback または `NO_VISITS_TO_CONFIRM` で金銭 record が空であること。原因別5分岐と金銭結果および順位結果が一致すること。
+
+## 9. selected candidateの同一object
+
+分岐1では、次の selected candidate がすべて同一 object でなければならない。
+
+- final rank Node 結果の `selected_candidate_economic_result`
+- payment Node 結果の `selected_candidate_economic_result`
+- selection Node 結果の `selected_candidate_economic_result`
+- 当該 economic Node 結果の candidate tuple 内にある selected candidate
+
+値が等しいだけでは不十分である。`is` による同一 object 契約を確認する。selected candidate の複製を正常として扱わない。
+
+## 10. buyer paymentの対応
+
+selected candidate 成立時:
+
+- buyer economic records は1件以上
+- buyer payment records も1件以上
+- 件数が一致する
+- 保存順が一致する
+- 各 index の VisitKey が一致する
+- 各 index の `vehicle_name` が一致する
+- buyer VisitKey は重複しない
+- buyer payment record の各 VisitKey は区分3内に存在する
+- 対応する binding Visit の `trade_role` は `BUYER`
+- 区分3内で `BUYER` role の VisitKey 集合は buyer payment records の VisitKey 集合と一致する
+
+`payment_P_b` の式は再計算しない。`R * G_b / G`、`G` の再加算、`R` の再加算、payment 式の再評価、tolerance または Decimal による照合は行わない。payment amount の有限性・非負性等は payment 部品で確認済みなので、同じ深さで再検証しない。payment record と経済 record の Visit 対応は本部品で確認する。
+
+## 11. seller compensationの対応
+
+selected candidate 成立時:
+
+- seller economic records は0件でもよい
+- seller compensation records は0件でもよい
+- 件数が一致する
+- 保存順が一致する
+- 各 index の VisitKey が一致する
+- 各 index の `vehicle_name` が一致する
+- seller VisitKey は重複しない
+- seller compensation record の各 VisitKey は区分3内に存在する
+- 対応する binding Visit の `trade_role` は `SELLER`
+- 区分3内で `SELLER` role の VisitKey 集合は seller compensation records の VisitKey 集合と一致する
+- `compensation_amount` は保存済み `required_compensation_R_s` と一致する
+
+`required_compensation_R_s` の式は再計算しない。declared VOT の読取、passage difference の計算、expected waiting increase の計算、`R_s` の式、seller role の再判定は行わない。`compensation_amount` と保存済み `required_compensation_R_s` の一致は、計算式の再実行ではなく、上流値が正しく写されたことの対応確認である。
+
+## 12. compensation 0のseller
+
+補償額0の seller record を欠落扱いにしない。次の seller は、いずれも seller compensation record を保持し、`compensation_amount` は0である。
+
+1. 同時刻 seller。candidate passage と baseline passage が同じため予想遅延が0であり、保存済み `R_s` が0であり、`compensation_amount` が0である。
+2. 早期通過 seller。candidate passage が baseline passage より早いため補償対象となる予想遅延がなく、waiting increase が0に clip され、保存済み `R_s` が0であり、`compensation_amount` が0である。
+3. 申告 VOT が0の遅延 seller。遅延は存在するが申告 VOT が0であるため、予想待ち増加時間に申告 VOT を掛けた保存済み `R_s` が0であり、`compensation_amount` が0である。
+
+これらの seller は role を維持する。buyer へ変更しない。補償額0であることを理由に record を削除しない。validation では、seller economic record と seller compensation record が存在し、VisitKey と role が対応することを確認する。
+
+## 13. buyerとsellerの重複禁止
+
+同一 candidate の trade scope 内で、同一 VisitKey が buyer と seller の両方になることを許可しない。binding Visit の `trade_role` は `BUYER`、`SELLER`、`NONPARTICIPATING` のうち1つである。buyer economic records と seller economic records は役割別の列である。同一 VisitKey を両方へ登録すると、保存済み role 契約と矛盾する。
+
+確認する事項: buyer VisitKey 集合に重複がないこと。seller VisitKey 集合に重複がないこと。buyer VisitKey 集合と seller VisitKey 集合の共通部分が空であること。payment record と compensation record の VisitKey 共通部分が空であること。重複を自動除外しない。重複は `RuntimeError` とする。
+
+## 14. 非参加Visit
+
+selected candidate 成立時、区分3には `NONPARTICIPATING` role の Visit が存在し得る。非参加 Visit は final rank 列に存在し、selected candidate 順位枠内に存在し、finalization source は `SELECTED_CANDIDATE` である。buyer payment record も seller compensation record も持たない。非参加 Visit に金銭 record を要求しない。非参加 Visit に金銭 record が存在する場合は重大不整合である。
+
+## 15. 区分4Visit
+
+区分4は `outside_trade_scope_inside_k_fixed_visits` である。`trade_role` は `OUTSIDE_TRADE_SCOPE` である。finalization source は `BASELINE` である。selected candidate 成立時の final rank 列には存在する。buyer payment record も seller compensation record も持たない。区分4 Visit に金銭 record を要求しない。区分4 Visit に金銭 record が存在する場合は重大不整合である。区分4が空でも正常である。
+
+## 16. final rank全Visitと金銭recordの関係
+
+final rank 全 Visit と金銭 record の Visit 集合は一致しない。金銭 record を持つのは、selected candidate 成立時の区分3のうち `BUYER` role と `SELLER` role だけである。
+
+金銭 record を持たない正常な final rank Visit: 区分3の `NONPARTICIPATING`、区分4の `OUTSIDE_TRADE_SCOPE`、baseline fallback の全 Visit。`NO_VISITS_TO_CONFIRM` では Visit 自体がない。
+
+したがって次を要求しない。final rank 全 Visit が buyer または seller の金銭 record を持つこと。非参加 Visit が金銭 record を持つこと。区分4 Visit が金銭 record を持つこと。baseline fallback Visit が金銭 record を持つこと。
+
+## 17. 原因別5分岐
+
+### 17.1 分岐1: selected candidateあり
+
+必要な対応: final rank status は `SELECTED_CANDIDATE_RANKS`。payment status は `CALCULATED`。selection status は `SELECTED`。selected candidate は同一 object。buyer payment records は1件以上。seller compensation records は0件以上。final rank 列は区分3＋区分4。区分3の `BUYER` と buyer payment records が一致する。区分3の `SELLER` と seller compensation records が一致する。区分3の `NONPARTICIPATING` に金銭 record はない。区分4の `OUTSIDE_TRADE_SCOPE` に金銭 record はない。formal route は全 final rank Visit に存在する。
+
+### 17.2 分岐2: 候補検討後、採用候補なし
+
+必要な対応: final rank status は `BASELINE_FALLBACK_RANKS`。payment status は `NO_SELECTED_CANDIDATE`。selection status は `NO_ECONOMICALLY_FEASIBLE_CANDIDATE`。selected candidate は None。buyer payment records は空。seller compensation records は空。`build_status` は `BASELINE_INFORMATION_COMPLETE`。final rank 列は remaining window 全体。全 finalization source は `BASELINE`。formal route は全 Visit に存在する。
+
+### 17.3 分岐3: baseline情報不足
+
+必要な対応: final rank status は `BASELINE_FALLBACK_RANKS`。payment status は `NO_SELECTED_CANDIDATE`。selection status は `NO_ECONOMICALLY_FEASIBLE_CANDIDATE`。selected candidate は None。buyer payment records は空。seller compensation records は空。`build_status` は `NOT_BUILT_UNRESOLVED_ARRIVALS`、`UNRESOLVED_RIGHT_OF_ENTRY_PASSAGE`、`UNRESOLVED_CANDIDATE_PASSAGES` のいずれか。final rank 列は remaining window 全体。全 finalization source は `BASELINE`。経済的不成立へ変換しない。formal route は全 Visit に存在する。
+
+### 17.4 分岐4: 意思決定窓内Visitが最初から0件
+
+必要な対応: final rank status は `NO_VISITS_TO_CONFIRM`。payment status は `NO_SELECTED_CANDIDATE`。selection status は `NO_ECONOMICALLY_FEASIBLE_CANDIDATE`。selected candidate は None。buyer payment records は空。seller compensation records は空。final rank 列は空。decision window は空。remaining window は空。`build_status` は `NOT_BUILT_NO_RIGHT_OF_ENTRY`。架空の候補、金銭、順位はない。
+
+### 17.5 分岐5: 意思決定窓内Visitは存在したが全件先行確定済み
+
+必要な対応: final rank status は `NO_VISITS_TO_CONFIRM`。payment status は `NO_SELECTED_CANDIDATE`。selection status は `NO_ECONOMICALLY_FEASIBLE_CANDIDATE`。selected candidate は None。buyer payment records は空。seller compensation records は空。final rank 列は空。decision window は1件以上。remaining window は空。`build_status` は `NOT_BUILT_NO_RIGHT_OF_ENTRY`。先行確定済み Visit を再掲しない。
+
+分岐4と分岐5は同じ status だが、原因を混同しない。
+
+## 18. status対応
+
+正式対応:
+
+- `SELECTED_CANDIDATE_RANKS` は `CALCULATED` および `SELECTED`
+- `BASELINE_FALLBACK_RANKS` は `NO_SELECTED_CANDIDATE` および `NO_ECONOMICALLY_FEASIBLE_CANDIDATE`
+- `NO_VISITS_TO_CONFIRM` は `NO_SELECTED_CANDIDATE` および `NO_ECONOMICALLY_FEASIBLE_CANDIDATE`
+
+`NO_SELECTED_CANDIDATE` だけでは分岐2、3、4、5を区別しない。原因は `build_status`、`decision_window_visit_keys`、`remaining_decision_window_visit_keys` から判断する。
+
+## 19. formal route照合
+
+本部品で確認する事項: 全 final rank Visit の `formal_route_next_link_name` が str であること。空文字でないこと。selected 時は binding Visit の `route_next_link_name` と一致すること。fallback 時は collector snapshot の `route_next_link_name` と一致すること。VisitKey 対応が一致すること。
+
+本部品で確認しない事項: 実 Node の outlink 集合に含まれること。実 Link object が存在すること。World 上の Node と route が接続していること。route を実 World から再探索すること。実 outlink 妥当性は atomic apply が書込み直前に確認する。
+
+## 20. final rank列の純照合
+
+確認する事項: final rank VisitKey に重複がないこと。`final_local_rank` が1から連続すること。tuple 順と `final_local_rank` が一致すること。finalization source と Node status が一致すること。selected 時の区分3は `SELECTED_CANDIDATE` source であること。selected 時の区分4は `BASELINE` source であること。fallback 時の全 Visit は `BASELINE` source であること。`NO_VISITS_TO_CONFIRM` では final rank 列が空であること。区分1・2を再掲していないこと。先行確定済み Visit を再掲していないこと。arrived 確定済み Visit を再掲していないこと。
+
+final rank 列自体を再構築しない。
+
+## 21. 処理順
+
+1. final rank set の外部入力型を確認する。
+2. final rank Node 結果列が tuple であることを確認する。
+3. payment Node 結果列が tuple であることを確認する。
+4. selection、economic、local 等の必要な Node 結果列が tuple であることを必要最小限に確認する。
+5. Node 件数、Node 順、Node 名を確認する。
+6. Node を保存順に明示的 for ループで走査する。
+7. private helper で当該 Node の上流参照連鎖を取得する。
+8. final rank status、payment status、selection status を照合する。
+9. selected candidate の同一 object を照合する。
+10. 原因別5分岐を判定する。
+11. selected 時は buyer records と区分3 `BUYER` role を照合する。
+12. selected 時は seller records と区分3 `SELLER` role を照合する。
+13. buyer と seller の VisitKey 重複がないことを確認する。
+14. `NONPARTICIPATING` と `OUTSIDE_TRADE_SCOPE` に金銭 record がないことを確認する。
+15. fallback 時は両金銭 record が空であることを確認する。
+16. `NO_VISITS_TO_CONFIRM` 時は両金銭 record と final rank 列が空であることを確認する。
+17. final rank VisitKey、`final_local_rank`、source を照合する。
+18. formal route を保存済み binding または collector と照合する。
+19. 全 Node 完了後に frozen validation set result を作る。
+
+1 Node で重大不整合があれば後続 Node を処理しない。部分的 validation result を返さない。
+
+## 22. ValueError
+
+外部入力が `OrderControlTvtMpFinalRankSetResult` でない場合は `ValueError` とする。公開引数は1つだけなので、外部入力型不正だけを `ValueError` とする。
+
+## 23. RuntimeError
+
+保存済み結果間または内部の重大不整合は `RuntimeError` とする。最低限、次を重大不整合とする。
+
+- Node 結果列が tuple でない
+- Node 件数、Node 順、Node 名が一致しない
+- Node 結果が上流 set から欠落している
+- final rank status と payment status が矛盾する
+- final rank status と selection status が矛盾する
+- selected candidate が同一 object でない
+- selected candidate が economic 候補 tuple 内の同一 object でない
+- selected 時に buyer economic records が空である
+- buyer economic records と buyer payment records の件数、順序、VisitKey、`vehicle_name` が不一致である
+- buyer payment record の Visit が区分3 `BUYER` でない
+- 区分3 `BUYER` なのに buyer payment record がない
+- seller economic records と seller compensation records の件数、順序、VisitKey、`vehicle_name` が不一致である
+- seller compensation record の Visit が区分3 `SELLER` でない
+- 区分3 `SELLER` なのに seller compensation record がない
+- `compensation_amount` と `required_compensation_R_s` が一致しない
+- 補償額0の seller record が欠落している
+- buyer VisitKey が重複している
+- seller VisitKey が重複している
+- buyer と seller の VisitKey が重複している
+- `NONPARTICIPATING` に金銭 record が存在する
+- `OUTSIDE_TRADE_SCOPE` に金銭 record が存在する
+- fallback 時に buyer または seller の金銭 record が存在する
+- `NO_VISITS_TO_CONFIRM` 時に buyer または seller の金銭 record が存在する
+- fallback 時に selected candidate が存在する
+- `NO_VISITS_TO_CONFIRM` 時に selected candidate が存在する
+- final rank VisitKey が重複している
+- `final_local_rank` が1から連続しない
+- tuple 順と `final_local_rank` が一致しない
+- finalization source が Node status または binding partition と矛盾する
+- 区分1・2が final rank 列へ再掲されている
+- 先行確定済み Visit が final rank 列へ再掲されている
+- arrived 確定済み Visit が final rank 列へ再掲されている
+- formal route が欠落している、None である、または空文字である
+- selected 時の formal route が binding Visit の route と不一致である
+- fallback 時の formal route が collector snapshot と不一致である
+- 分岐2と分岐3の `build_status` を取り違えている
+- 分岐4と分岐5の decision window を取り違えている
+- 1 Node の不整合後に処理を続ける
+- 部分的 validation result を返す
+
+正常な次の状態は `RuntimeError` にしない。分岐2、分岐3、分岐4、分岐5。seller economic records が0件。seller compensation records が0件。同時刻 seller、早期通過 seller、申告 VOT が0であるため保存済み `R_s` が0となる遅延 seller の `compensation_amount` が0。`NONPARTICIPATING` が金銭 record を持たないこと。`OUTSIDE_TRADE_SCOPE` が金銭 record を持たないこと。
+
+## 24. 過剰検証回避
+
+本部品で照合する事項: 外部入力型、Node 列、status 対応、selected 同一 object、原因別5分岐、buyer economic と buyer payment の対応、seller economic と seller compensation の対応、payment または compensation record と binding role の対応、buyer と seller の VisitKey 一意性、非参加と区分4の金銭 record 非存在、fallback と `NO_VISITS_TO_CONFIRM` の空金銭、final rank 列、source、formal route。
+
+再実行しない事項: candidate formation、general trade rank、FIFO、local virtual calculation、economic evaluation、candidate selection、`P_b` の計算式、`R_s` の計算式、`G` または `R` の再加算、surplus 判定、final rank construction、VOT 読取、passage difference 計算、交通シミュレーション。upstream で確認済みの数値有限性等を同じ深さで繰り返さない。
+
+## 25. 不変性
+
+変更しない対象: final rank result、payment result、selection result、economic result、local result、FIFO result、collector、rank state、Vehicle、`payment_paid`、`payment_received`、`order_exchange_log`、World、World RNG、order-control RNG、`vot_declared`、`vot_true`、`participates_in_order_exchange`。
+
+新しい frozen validation set result だけを返す。
+
+## 26. atomic applyとの境界
+
+validation result は、後続 atomic apply の入力の一つとする。atomic apply は validation result が保持する final rank set を読む。apply は validation 成功済みであることだけを理由に、実状態検査を省略しない。
+
+apply が書込み直前に確認する予定: rank state、Visit の未確定登録、既確定 Visit との衝突、対象 Node の outlink 集合、formal route の実 outlink 妥当性、Vehicle の存在、Vehicle 金銭属性、`order_exchange_log`、実適用対象 Node、複数 Node の一括単位。
+
+本部品は次を行わない。`confirm_visits_and_formal_target_node_routes_atomically` の呼出し。rank state 書込み。Vehicle 金銭台帳更新。log 更新。rollback。実 World 反映。
+
+複数 Node の atomic な書込み単位は、後続 apply 設計の未確定事項として残す。本節では新たに確定しない。
+
+## 27. 上位driverとの境界
+
+上位 driver は未実装である。将来の driver は、全 Node を final rank construction まで通し、final rank set を validation へ渡し、validation 成功結果を atomic apply へ渡す。原因別5分岐を再実装しない。buyer・seller 対応を再照合しない。金銭列を再構築しない。Node ごとに validation 直後の部分適用をしない。driver 本体は本部品では実装しない。
+
+## 28. 専用テスト契約
+
+新規予定ファイルは `tests_order_control_tvt_mp_final_consistency_validation.py` である。Python 実装と専用テストは未着手である。
+
+公開型・API で固定する事項: validation set result が frozen であること。field は `final_rank_set_result` だけであること。入力と同一 object 参照であること。公開 Enum がないこと。公開 Node result 型がないこと。関数名は `validate_tvt_mp_final_consistency` であること。位置引数1つで final rank set だけであること。`real_W`、rank state、Vehicle、outlink 集合、optional 引数がないこと。公開 API は1つであること。
+
+正常5分岐: selected candidate、全候補却下 fallback、情報不足 fallback、最初から空窓、全件先行確定済み。
+
+selected 時: selected 同一 object。buyer economic と payment record の件数・順序・VisitKey・`vehicle_name`。seller economic と compensation record の件数・順序・VisitKey・`vehicle_name`。`BUYER` role 対応。`SELLER` role 対応。`NONPARTICIPATING` に金銭 record がないこと。`OUTSIDE_TRADE_SCOPE` に金銭 record がないこと。seller 0件が正常であること。compensation 0 の seller record を維持すること。buyer と seller の VisitKey 重複を拒否すること。
+
+compensation 0: 同時刻 seller、早期通過 seller、申告 VOT が0であるため保存済み `R_s` が0となる遅延 seller。いずれも seller record を保持し、`compensation_amount` は0であり、role は seller である。
+
+fallback: buyer records 空、seller records 空、selected なし、remaining window 全体、source は `BASELINE`、分岐2と分岐3の `build_status` 区別。
+
+`NO_VISITS_TO_CONFIRM`: buyer records 空、seller records 空、selected なし、final rank 列空。分岐4は decision window 空。分岐5は decision window が1件以上。remaining window は空。分岐4と分岐5を混同しない。
+
+formal route: selected 時に binding route と一致すること。fallback 時に collector route と一致すること。欠落、None、空文字を拒否すること。実 outlink 集合の検査は行わないこと。World 検索なし。Vehicle 検索なし。
+
+重大不整合: input 型不正。Node 対応不一致。status 不一致。selected 別 object。buyer record の欠落、余分、順序違い、VisitKey 違い、`vehicle_name` 違い。seller record の欠落、余分、順序違い、VisitKey 違い、`vehicle_name` 違い。buyer role 不一致。seller role 不一致。buyer と seller の VisitKey 重複。非参加に金銭 record。区分4に金銭 record。fallback に金銭 record。`NO_VISITS_TO_CONFIRM` に金銭 record。compensation 0 の seller record 欠落。final rank 重複。`final_local_rank` 非連続。source 矛盾。formal route 不一致。区分1・2の再掲。先行確定の再掲。arrived 確定の再掲。1 Node 不整合で全体停止。partial result なし。後続 Node 未処理。
+
+不変性: final rank、payment、selection、economic、local、FIFO、collector、rank state、Vehicle、`payment_paid`、`payment_received`、`order_exchange_log`、World、RNG を変更しない。
+
+責務外: rank state 書込みなし。Vehicle 台帳更新なし。atomic apply なし。actual なし。utility または welfare なし。strategy-proofness 主張なし。
+
+## 29. 反証して採用しない事項
+
+次は採用しない。final rank construction で検証済みなので validation を省略すること。status だけを確認して Visit 対応を確認しないこと。final rank 全 Visit、非参加 Visit、区分4 Visit へ金銭 record を要求すること。compensation 0 の seller record を欠落扱い、または seller 列から除外すること。申告 VOT が0の遅延 seller を入力異常にすること。buyer と seller の VisitKey 重複を許可すること。selected candidate の同一 object を確認しないこと。fallback または `NO_VISITS_TO_CONFIRM` で金銭 record を許可すること。pure validation が rank state または Vehicle を変更すること。validation 時に atomic apply を行うこと。validation と apply を巨大関数へ統合すること。validation 成功後に実状態検査を省略すること。Node ごとに validation 直後の部分適用を行うこと。1 Node 失敗後に他 Node を適用すること。rollback 前提で部分書込みすること。actual passage を validation へ混入すること。strategy-proofness を validation で検証すること。`VALIDATED` だけの Enum を作ること。Node 単位の空の承認 result を作ること。順位列や金銭列を validation result へ複写すること。
+
+## 30. 実装範囲と未実装範囲
+
+実装範囲（保存後の次作業）: 全 Node 一括の純照合 API、frozen 全体結果1型、final rank set 1本からの参照連鎖、原因別5分岐と金銭結果の相互照合、buyer・seller と区分3 role の対応、補償0 seller record の維持、非参加と区分4の金銭非存在、formal route の保存値照合、重大不整合時の全体停止、専用テスト。
+
+未実装範囲: 本部品の Python と専用テスト。rank state 書込み。Vehicle 金銭台帳更新。atomic apply。上位 driver 本体。実 World 反映。実 outlink 集合の検査。actual 比較。utility または welfare。strategy-proofness 検証。文献制度の移植。複数 Node の atomic 書込み単位の確定。
+
+## 31. 次の再開地点
+
+1. Terminal で本節を直接表示し、内容を独立確認する。
+2. 問題がなければ進捗第2巻へ本仕様の要約を別作業で追加する。
+3. 進捗第2巻の要約も Terminal で直接確認する。
+4. 詳細設計第3巻と進捗第2巻を同一保存単位で commit する。
+5. commit 結果、最新コミット、残存変更を確認する。
+6. 別の指示で push し、push 後の状態を確認する。
+7. 保存後に新規本番 `uxsim/order_control_tvt_mp_final_consistency_validation.py` と専用テスト `tests_order_control_tvt_mp_final_consistency_validation.py` だけを実装する。
+8. 実装後に独立確認する。
+9. atomic apply と上位 driver は、その後の別設計とする。
+
+本節は完全実装前仕様である。Python 実装と専用テストは未着手である。rank state、Vehicle 金銭台帳、実 World は変更しない。
