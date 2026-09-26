@@ -691,3 +691,552 @@ Vehicle金銭台帳更新、final rank、baseline fallback、formal route、順�
 3. 別の指示でpushし、push後の状態を確認する。
 4. 保存後に、final rank、baseline fallback、formal route、順位台帳接続などの次領域を選ぶ。
 5. Vehicle台帳更新とatomic applyは、final rankと全体整合確認の設計後に扱う。
+
+# TVT-MP final rank construction部品・完全実装前仕様
+
+**記録日: 2026-09-26**
+
+本節は完全実装前仕様である。Python実装と専用テストは未着手である。Cursorの報告だけで実装完了としない。実装後は実コード、専用テスト、差分、Git状態、独立確認を根拠にする。
+
+新しい制度判断は追加しない。第1巻 §14.2–§14.4 および第2巻の原因別最終分岐・拘束順位列4区分は再検討または未確定へ戻さない。`TVT検討なし` という一括表現だけで原因別分岐を潰さない。
+
+## 1. 位置づけと予定ファイル
+
+payment・compensation 純計算（commit `634d9e7`）の次に置く。各対象Nodeについて、今回新たに正式確定する Visit 列と、各 Visit の対象Node通過後の正式進路を構築する純計算部品である。新しい frozen 結果だけを返す。
+
+順位台帳への書込み、Vehicle金銭台帳更新、実World反映は対象外である。confirmation という名称は使わない。台帳反映まで完了したと誤読されるためである。construction により純計算と実適用を区別する。正式名称は FinalRank である。
+
+| 区分 | パス |
+| --- | --- |
+| 新規本番予定 | `uxsim/order_control_tvt_mp_final_rank.py` |
+| 新規専用テスト予定 | `tests_order_control_tvt_mp_final_rank.py` |
+
+既存の payment、候補選択、経済性評価、拘束順位列、順位台帳モジュールおよびそれらの専用テスト、既存結果型は変更しない。
+
+## 2. 原因別5分岐
+
+結果だけでなく、その結果になる原因を記録する。5分岐を混同しない。分岐4と分岐5は同じ `NO_VISITS_TO_CONFIRM` となるが、原因は別である。
+
+### 2.1 分岐1: selected candidateがある
+
+**原因:** economically feasible 候補から selected candidate が1件選ばれた。
+
+**結果:** 区分3と区分4をこの順で使う。区分3は selected candidate の `trade_scope` 内にある Visit。区分3は取引後順位で確定する。区分4は `trade_scope` 外にある、今回の意思決定窓内に残る Visit。区分4は baseline 順位で確定する。区分1と区分2はすでに確定済みなので再確定しない。すでに確定済みの順位を上書きしない。すでに確定済みの正式進路を上書きしない。selected candidate の保存済み拘束順位列を再構築しない。経済性評価、候補選択、payment・compensation を再実行しない。`trade_scope` だけを確定し、残る意思決定窓内 Visit を放置してはいけない。
+
+### 2.2 分岐2: 候補検討の結果、採用候補が0件
+
+**原因:** 意思決定窓内 Visit が存在した。候補検討まで進んだ。FIFO False、局所 unresolved、経済的不成立、またはその混在により採用候補が0件となった。
+
+対象例: FIFO False、局所仮想計算 unresolved、required buyer または seller が horizon 内に通過しない、resolved だが経済的不成立、不採用・未解決・経済的不成立の混在、feasible 候補が0件。
+
+**結果:** 先行確定後に残る意思決定窓内 Visit 全体を baseline 順位で確定する。すでに確定済みの Visit は対象に含めない。すでに確定済みの順位を上書きしない。すでに確定済みの正式進路を上書きしない。正常な baseline fallback とする。一部 Visit だけを確定しない。上限 N で切らない。情報不足と経済的不成立を同一原因として記録しない。payment・compensation は候補なし正常結果で records は空。例外にしない。
+
+### 2.3 分岐3: 必要なbaseline情報不足
+
+**原因:** 意思決定窓内 Visit が存在した。しかし候補形成または評価に必要な baseline 情報が不足した。
+
+対象例: `NOT_BUILT_UNRESOLVED_ARRIVALS`、`UNRESOLVED_RIGHT_OF_ENTRY_PASSAGE`、`UNRESOLVED_CANDIDATE_PASSAGES`。
+
+**結果:** 経済的不成立とは扱わない。unresolved を経済的不成立へ変換しない。部分情報だけで部分的 TVT を形成しない。先行確定後に残る意思決定窓内 Visit 全体を baseline 順位で確定する。すでに確定済みの Visit は対象に含めない。すでに確定済みの順位を上書きしない。すでに確定済みの正式進路を上書きしない。正常な baseline fallback とする。情報不足を任意推定値で補わない。例外にしない。
+
+### 2.4 分岐4: 意思決定窓内Visitが最初から0件
+
+この分岐を、TVT不成立後の baseline fallback として記述しない。
+
+**原因:** `decision_window_visit_keys` が最初から空 tuple。意思決定窓内 Visit が最初から存在しない。
+
+**制度上の意味:** 実質的な TVT候補検討を行わない。候補を形成しない。経済性評価対象を作らない。payment または compensation を計算しない。架空の候補、架空の G、R、payment、compensation を作らない。
+
+**実装上の意味:** 対象Nodeを後段の set result から削除しない。正常な空Node結果を payment set まで伝播させる。架空の候補または金額を作らない。上位driverは対象Node全体について既存の全Node APIを順に呼ぶ。各後段部品は実質的な候補評価や金額計算を行わず、正常な空Node結果を伝播させる。payment Node結果は `NO_SELECTED_CANDIDATE` かつ空recordsとなる。これは payment を計算したという意味ではない。経済条件を検討して不成立になったという意味ではない。
+
+**結果:** `NO_VISITS_TO_CONFIRM`。selected candidate は None。final rank 列は空 tuple。baseline fallback ではない。例外にしない。
+
+「TVT不成立かつ残る意思決定窓内 Visit が0件」を通常の正常分岐として作らない。TVTを実際に検討した結果、採用候補が0件になった場合は分岐2であり、残る意思決定窓内 Visit 全体を baseline 順位で確定する。残る窓が1件以上あるなら `NO_VISITS_TO_CONFIRM` ではない。
+
+### 2.5 分岐5: 意思決定窓内Visitは存在したが、全件が先行確定済み
+
+**原因:** `decision_window_visit_keys` は1件以上。区分2までの先行確定により、その全 Visit がすでに確定された。`remaining_decision_window_visit_keys` が空 tuple となった。final rank construction 部品が追加で確定する Visit はない。
+
+**結果:** `NO_VISITS_TO_CONFIRM`。selected candidate は None。final rank 列は空 tuple。baseline fallback ではない。先行確定済み Visit を final rank 列へ再掲しない。すでに確定済みの順位と正式進路を上書きしない。例外にしない。
+
+**分岐4との違い:** 分岐4は、意思決定窓内 Visit が最初から0件。分岐5は、意思決定窓内 Visit は存在したが、final rank construction 前に全件が先行確定済み。結果 status が同じでも、原因を混同しない。
+
+### 2.6 payment setまでの正常な空Node結果伝播
+
+既存の全Node APIを保存済み処理順に呼んだ場合、次の全Nodeが正常なNode結果として payment set まで伝播する。
+
+- selected candidate あり
+- 候補検討後の採用候補なし
+- baseline 情報不足
+- 意思決定窓内 Visit が最初から0件
+- 先行確定により残る意思決定窓が空
+
+空窓や情報不足では候補や金額を作らず、空候補・空recordsの正常結果が伝播する。架空の payment または架空の selected candidate を作るわけではない。Node結果を省略しない。呼出し忘れによる欠落と、正常な空Node結果を同一視しない。
+
+payment set は、金額計算済み候補だけを意味するものではない。payment set 全体には、selected candidate あり、候補なし、情報不足、空窓、全件先行確定済みの Node結果が含まれ得る。selected candidate がない Node では payment records は空である。空recordsは架空の金額ではない。原因は上流参照連鎖から判定する。payment set は5分岐を final rank へ運ぶ一つの不変な入口として使う。
+
+### 2.7 payment statusを原因として使わない
+
+payment status は final rank 分岐の原因ではない。`NO_SELECTED_CANDIDATE` だけを見て baseline fallback を選ばない。`NO_SELECTED_CANDIDATE` だけを見て経済的不成立と判断しない。`NO_SELECTED_CANDIDATE` は、selected candidate がなく payment records が空であるという後段の結果ラベルである。空窓、baseline 情報不足、全候補却下、全件先行確定済みは、payment 上では同じ `NO_SELECTED_CANDIDATE` へ畳み込まれ得る。final rank 部品は、上流の保存済み原因へ遡って正式分岐を決定する。
+
+正式な原因判定材料:
+
+- `decision_window_visit_keys`
+- `remaining_decision_window_visit_keys`
+- candidate visit set の `build_status`
+- FIFO結果
+- 局所仮想計算の `resolved`
+- 経済性評価結果
+- candidate selection status
+- selected candidate の有無
+- payment status と records
+
+payment status と selection status は整合確認に使うが、それだけで原因別分岐を決めない。
+
+### 2.8 5分岐への到達方法
+
+**分岐1 selected candidate あり:** payment status は `CALCULATED`。selection status は `SELECTED`。selected candidate は入力 economic 候補内の同一 object。保存済み拘束順位列の区分3と区分4を使用する。payment 金額は順位材料に使わない。
+
+**分岐2 候補検討後の採用候補なし:** 意思決定窓内 Visit は1件以上存在した。candidate visit set の `build_status` は `BASELINE_INFORMATION_COMPLETE`。selected candidate は None。payment status は `NO_SELECTED_CANDIDATE`。payment records は空。FIFO False、局所 unresolved、経済的不成立等の詳細原因は上流結果に残る。final rank は残る意思決定窓内 Visit 全体を baseline fallback する。
+
+**分岐3 baseline 情報不足:** 意思決定窓内 Visit は1件以上存在した。`build_status` は `NOT_BUILT_UNRESOLVED_ARRIVALS`、`UNRESOLVED_RIGHT_OF_ENTRY_PASSAGE`、`UNRESOLVED_CANDIDATE_PASSAGES` のいずれか。selected candidate は None。payment status は `NO_SELECTED_CANDIDATE`。payment records は空。経済的不成立とは扱わない。final rank は残る意思決定窓内 Visit 全体を baseline fallback する。残る窓が1件以上あることが前提である。
+
+**分岐4 意思決定窓内 Visit が最初から0件:** `decision_window_visit_keys` が空 tuple。selected candidate は None。payment status は `NO_SELECTED_CANDIDATE`。payment records は空。候補検討または経済条件評価を実質的に行ったという意味ではない。final rank status は `NO_VISITS_TO_CONFIRM`。final rank 列は空 tuple。baseline fallback ではない。
+
+**分岐5 全件先行確定済み:** `decision_window_visit_keys` は1件以上。`remaining_decision_window_visit_keys` が空 tuple。selected candidate は None。payment status は `NO_SELECTED_CANDIDATE`。payment records は空。final rank status は `NO_VISITS_TO_CONFIRM`。final rank 列は空 tuple。baseline fallback ではない。分岐4と原因を混同しない。
+
+## 3. selected candidate成立時の確定範囲
+
+保存済み拘束順位列の区分3と区分4を使う。
+
+**区分3** `trade_scope_of_this_candidate_visits`: selected candidate の取引後順位。非参加 Visit の baseline 順位枠は保存済み拘束順位列へすでに反映済み。Visitごとの確定元は `SELECTED_CANDIDATE`。
+
+**区分4** `outside_trade_scope_inside_k_fixed_visits`: `trade_scope` 外だが今回の確定範囲内に含まれる Visit。baseline 順位。Visitごとの確定元は `BASELINE`。`trade_scope` が意思決定窓より小さい場合に、残る意思決定窓内 Visit を放置しないための列である。
+
+正式関係: `k_fixed = max(k_last_buyer, k_decision_window)`。
+
+確認: 区分3と区分4をこの順で連結する。VisitKey 重複なし。Visit 欠落なし。保存済み binding rank と順序が一致する。区分3の各 Visit に区分3と整合する binding partition が保存されている。区分4の各 Visit に区分4と整合する binding partition が保存されている。先行確定済み区分1・2を含めない。対象Node向け正式進路を各 Visit に対応させる。selected candidate の保存済み拘束順位列を再構築しない。
+
+意思決定窓外 Visit: 不成立または情報不足だけを理由に確定しない。候補母集団に入っただけでは確定しない。上限 N 以内であることだけを理由に確定しない。selected candidate 成立時に `k_fixed` へ含まれる場合だけ確定され得る。
+
+## 4. 区分1から区分4
+
+**区分1** `confirmed_before_this_baseline`: 今回 baseline 開始前から確定済みの Visit。通過済み Visit を含み得る。今回の final rank construction では再保存しない。
+
+**区分2** `preconfirmed_by_this_baseline`: 今回 baseline 内で先行確定された Visit。既到着かつ順位未確定 Visit の先行確定と、先頭連続非参加 Visit の先行確定。候補形成前に順位と正式進路を原子的に確定済み。今回の final rank construction では再保存しない。
+
+**区分3・4:** selected candidate 成立時の最終確定対象。baseline fallback 時の最終確定対象は、先行確定後に残る意思決定窓内 Visit 全体であり、区分1・2を再度 final rank 列へ含めない。
+
+重複 VisitKey を自動除外して処理を続行しない。区分1または区分2の Visit が final rank 列へ混入した場合は重大不整合とする。
+
+## 5. baseline fallback
+
+対象: 先行確定後に残る意思決定窓内 Visit 全体。正本列は `remaining_decision_window_visit_keys`。
+
+順位: 正式 baseline 順。上限 N で切らない。一部だけ確定しない。正式 baseline 順から不要に再ソートしない。根拠は到着 timestep、arrival tiebreaker、vehicle_id。既存部品で確定済みの正式順を再利用する。
+
+formal route: 今回 baseline collector に保存された対象Node通過後の `route_next_link_name`。過去に確定済みの正式進路を上書きしない。進路を推測しない。進路欠落を任意値で補わない。空文字を正式進路として扱わない。進路欠落が実在する場合は重大不整合。
+
+先行確定済み Visit は fallback で再確定しない。final rank 列へ再掲しない。重複 VisitKey を自動除外しない。重複混入は重大不整合。
+
+「残る意思決定窓内 Visit」と「意思決定窓内 Visit 全体」を混同しない。selected candidate 成立時の区分4は、`trade_scope` 外に残る Visit。全候補却下または情報不足時の fallback は、先行確定後に残る意思決定窓内 Visit 全体。
+
+## 6. 全候補却下、情報不足、unresolved
+
+全候補却下（分岐2）と baseline 情報不足（分岐3）は、残る窓が1件以上なら同じ Node status `BASELINE_FALLBACK_RANKS` を使う。詳細原因は上流 `build_status`、FIFO、局所 `resolved`、`economically_feasible` の参照連鎖から確認する。新しい status へ原因を重複複写しない。情報不足を経済的不成立へ変換しない。unresolved を重大不整合にしない。部分情報だけで部分的 TVT を形成しない。
+
+## 7. NO_VISITS_TO_CONFIRM（分岐4と分岐5）
+
+`NO_VISITS_TO_CONFIRM` は、処理結果として次を意味する。
+
+- final rank construction 部品が今回追加で確定する Visit がない
+- final rank 列は空 tuple
+- selected candidate は None
+- baseline fallback 列も作らない
+
+分岐4と分岐5は、いずれもこの status となる。ただし、原因は必ず区別する。`NO_VISITS_TO_CONFIRM` を「最初から意思決定窓内 Visit が0件の場合だけ」と限定しない。分岐4と分岐5を同じ原因として記録しない。
+
+### 7.1 分岐4: 意思決定窓内Visitが最初から0件
+
+§2.4 と同じ原因。`decision_window_visit_keys` が最初から空である。実質的な候補検討や金額計算は行わず、正常な空Node結果を後段へ伝播させる。架空の record を作らない。baseline fallback status にしない。経済的不成立と記録しない。「残る窓全体を baseline 確定」と記録しない。例外にしない。
+
+### 7.2 分岐5: 全件先行確定済み
+
+§2.5 と同じ原因。`decision_window_visit_keys` は1件以上。`remaining_decision_window_visit_keys` が空。final rank 部品が追加確定する Visit はない。分岐4と混同しない。先行確定済み Visit を final rank 列へ再掲しない。すでに確定済みの順位と正式進路を上書きしない。例外にしない。
+
+### 7.3 使わない意味
+
+`NO_VISITS_TO_CONFIRM` を次の意味にはしない。
+
+- TVT検討後に候補が不成立となった結果、残窓を放置する
+- baseline fallback 対象があるのに空結果にする
+- selected candidate があるのに final rank 列を空にする
+
+`remaining_decision_window_visit_keys` が1件以上で selected candidate がない場合は、`BASELINE_FALLBACK_RANKS` であり、`NO_VISITS_TO_CONFIRM` ではない。
+
+## 8. 先行確定済みVisitと意思決定窓外Visit
+
+区分1・2は再保存しない。最終確定対象は成立時は区分3＋区分4、fallback 時は残る窓全体。重複混入は重大不整合。すでに確定済みの順位と正式進路を上書きしない。全件先行確定済みで残る窓が空の場合は、先行確定済み Visit を final rank 列へ再掲せず、`NO_VISITS_TO_CONFIRM` とする。原因は分岐5（§2.5、§7.2）である。
+
+窓外 Visit は、不成立・情報不足・N 外であることだけを理由に確定しない。成立時に `k_fixed` へ含まれる場合だけ確定され得る。
+
+## 9. formal route
+
+formal route は、対象Node通過後の正式 outlink 名である。正式 field 名は `formal_route_next_link_name`。final rank Visit record へ順位と一緒に保存する。
+
+理由: 順位と進路を同じ Visit へ対応付ける。後続 apply が既存の原子的順位・進路確定 API へ渡す。route だけを別部品で保存すると順位と進路がずれる。順位だけ確定し進路が未確定の中途半端な状態を作らない。
+
+採用時: 保存済み `OrderControlTvtMpLocalBindingRankVisit.route_next_link_name` を利用する。`route_origin` の既存契約と整合していることを確認する。route を再推定しない。
+
+fallback 時: 今回 baseline collector の対象Node向け進路を利用する。`remaining_decision_window_visit_keys` の各 Visit へ対応する保存済み進路を取得する。route を Vehicle または World から再探索しない。
+
+本部品では順位台帳へ書き込まない。
+
+## 10. 順位台帳との境界
+
+既存の適用 API は `OrderControlTvtNodeRankState.confirm_visits_and_formal_target_node_routes_atomically`。対象 Visit 全件を先に確認する。VisitKey 重複、既確定の再確定、未登録 Visit、対象Nodeの outlink でない進路を拒否する。候補となる更新後状態を別オブジェクトとして構築し、全体検証後に一括保存する。途中で問題があれば1件も保存しない。空列では no-op 結果を返す。
+
+非技術的な意味: 例えば10台の順位と進路を確定する場合、10台分をすべて先に点検する。問題がなければ10台を一度に登録する。6台目で問題が見つかった場合は、最初の5台を含めて1台も登録しない。
+
+final rank construction 部品はこの API を呼ばない。後続 apply へ渡す純計算結果だけを作る。順位台帳への適用は後続の atomic apply 部品へ分離する。既存順位状態型は変更しない。
+
+## 11. 正式入力
+
+入力は `OrderControlTvtMpPaymentAndCompensationSetResult` だけである。`real_W` は受け取らない。rank state も受け取らない。Vehicle 検索しない。World 検索しない。
+
+次を追加しない。
+
+- selection set の別引数
+- candidate visit set の別引数
+- optional payment 引数
+- common upstream result の新型
+- 空窓専用 API
+- fallback 専用 API
+- selected candidate 専用 API
+
+理由:
+
+- 既存の全Node APIを順に呼んだ場合、5分岐すべての Node が、正常なNode結果として payment set まで伝播する
+- 空窓や情報不足では候補や金額を作らず、空候補・空recordsの正常結果が伝播する
+- 架空の payment または架空の selected candidate を作るわけではない
+- 原因は payment status ではなく、上流の保存済み情報から判定できる
+- 新しい入力型、optional 引数、複数公開 API を追加せずに済む
+- 原因別5分岐の final rank 判定を一つの部品へ集約できる
+- final rank construction を pure calculation に維持できる
+- 後続 atomic apply へ payment 結果と final rank 結果を一つの参照連鎖で渡せる
+
+payment set から参照連鎖により到達できる: payment and compensation status、candidate selection status、selected candidate、economic evaluation result、local virtual calculation result、binding rank sequence、FIFO result、general trade rank result、concrete buyer candidate set、candidate visit set、right-of-entry selection result、leading nonparticipating confirmation result、`remaining_decision_window_visit_keys`、`decision_window_visit_keys`、candidate visit set の `build_status`、baseline collector、selected 時の区分3・4、fallback 時の baseline 順と正式進路。
+
+payment 金額は final rank 順序の材料にしない。payment result は、処理順の維持、payment status と selection status の整合確認、上流結果への一つの参照連鎖、後続 atomic apply へ payment 結果と final rank 結果をそろえて渡す、ために入力として保持する。payment set は5分岐を final rank へ運ぶ一つの不変な入口として使う。金額計算済み候補だけを意味するものではない。
+
+### 11.1 長い参照連鎖の集約方針
+
+payment set から baseline collector までは長い参照連鎖になる。情報を新しい入力型へ複写しない。private helper で参照経路を一か所に集約する。final rank 本体へ長い参照取得処理を散在させない。上流 object は同一参照で保持し、複写しない。
+
+## 12. 公開Enum
+
+`OrderControlTvtMpFinalRankStatus`
+
+- `SELECTED_CANDIDATE_RANKS = "selected_candidate_ranks"`
+- `BASELINE_FALLBACK_RANKS = "baseline_fallback_ranks"`
+- `NO_VISITS_TO_CONFIRM = "no_visits_to_confirm"`
+
+`SELECTED_CANDIDATE_RANKS`: selected candidate が存在する。区分3と区分4から final rank 列を構築する。同じ Node 結果内で、Visitごとの確定元は selected candidate と baseline の両方になり得る。
+
+`BASELINE_FALLBACK_RANKS`: 意思決定窓内 Visit が存在した。TVT検討または必要情報取得を行った。しかし selected candidate がない。先行確定後に残る意思決定窓内 Visit が1件以上ある。その全件を baseline 順位で確定する。全候補却下と情報不足の詳細原因は上流 `build_status` 等から確認する。詳細原因を新しい status へ重複複写しない。
+
+`NO_VISITS_TO_CONFIRM`: final rank construction 部品が今回追加で確定する Visit がない。final rank 列は空 tuple。selected candidate は None。baseline fallback 列も作らない。分岐4（§2.4）または分岐5（§2.5）である。分岐4は `decision_window_visit_keys` が最初から空。分岐5は `decision_window_visit_keys` が1件以上で先行確定により `remaining_decision_window_visit_keys` が空。分岐4と分岐5を同じ原因として記録しない。baseline fallback 後に偶然0件になったという意味ではない。経済条件検討後に不成立になったという意味ではない。残る窓が1件以上あるのに空結果にするという意味ではない。
+
+原因を `TVT検討なし` だけで一括表現しない。
+
+## 13. Visitごとの確定元
+
+同じ Node の selected candidate 成立時でも、区分3は selected candidate 順位、区分4は baseline 順位が混在する。Node status だけではこの違いを表現できない。
+
+`OrderControlTvtMpFinalizationSource`
+
+- `SELECTED_CANDIDATE = "selected_candidate"`
+- `BASELINE = "baseline"`
+
+区分3の record は `SELECTED_CANDIDATE`。区分4の record は `BASELINE`。baseline fallback の全 record は `BASELINE`。`NO_VISITS_TO_CONFIRM` では Visit record 自体が存在しない。
+
+## 14. 公開frozen型
+
+すべて `dataclass(frozen=True)`。公開の順序付き列は `tuple`。live World、Vehicle、Node、Link、rank state、RNG、mutable list、mutable dict を保持しない。件数 field を置かない。
+
+### 14.1 Visit record
+
+`OrderControlTvtMpFinalRankVisitRecord` — field順:
+
+1. `visit_key`（既存 `OrderControlTvtVisitKey`）
+2. `final_local_rank`（今回構築する final rank 列内の1始まり順位）
+3. `formal_route_next_link_name`（対象Node通過後の正式 outlink 名）
+4. `finalization_source`
+
+`final_local_rank` 契約: 1始まり、1から連続、final rank tuple の保存順と一致。順位台帳全体の絶対順位ではない。後続 apply では、既存の `k_confirmed` に続く順として台帳へ登録される。
+
+保存しない: `vehicle_name`（VisitKey から取得できる）、vehicle_id、binding rank Visit 全体、trade role、payment 金額、compensation 金額、G、R、surplus、live object、mutable state。
+
+### 14.2 Node結果
+
+`OrderControlTvtNodeMpFinalRankResult` — field順:
+
+1. `node_name`
+2. `final_rank_status`
+3. `selected_candidate_economic_result`
+4. `final_rank_visits`
+
+`final_rank_visits` は tuple。selected candidate がある場合、`selected_candidate_economic_result` は入力と同一 object 参照。fallback と no visits では selected は `None`。final rank 列は VisitKey 重複なし。`final_local_rank` は1から連続。保存順と `final_local_rank` は一致。
+
+`SELECTED_CANDIDATE_RANKS`: selected は None ではない。列は区分3＋区分4。区分3 record は selected source。区分4 record は baseline source。区分3は1件以上。区分4は空でもよい。
+
+`BASELINE_FALLBACK_RANKS`: selected は None。列は1件以上。全 record は baseline source。残る意思決定窓内 Visit 全体と一致。
+
+`NO_VISITS_TO_CONFIRM`: selected は None。列は空 tuple。`remaining_decision_window_visit_keys` は空。分岐4では `decision_window_visit_keys` も空。分岐5では `decision_window_visit_keys` は1件以上。分岐4と分岐5を混同しない。残る窓が1件以上ある場合はこの status にしない。
+
+### 14.3 全体結果
+
+`OrderControlTvtMpFinalRankSetResult` — field順:
+
+1. `payment_and_compensation_set_result`
+2. `node_final_rank_results`
+
+payment set は入力と同一 object 参照。Node 結果列は tuple。payment、selection の Node 順を維持する。Node 結果を省略しない。部分的 overall result を返さない。上流結果を複数 field で重複保持しない。payment set 1本から参照連鎖を辿る。
+
+## 15. 公開API
+
+```python
+def build_tvt_mp_final_ranks(
+    payment_and_compensation_set_result,
+) -> OrderControlTvtMpFinalRankSetResult:
+```
+
+位置引数1つ。`real_W` なし。rank state 入力なし。全Node一括。公開 API はこの関数1つ。Node単位・Visit単位公開 API なし。空窓専用 API、fallback 専用 API、selected candidate 専用 API なし。mutable state なし。外部 fallback rule 引数なし。route Mapping 引数なし。RNG なし。部分的 overall result なし。optional 引数なし。
+
+## 16. 正常分岐の正式判定
+
+Nodeごとに、上流状態を原因別に確認する。payment status だけを唯一の分岐材料にしない。selection status だけを唯一の分岐材料にしない。`NO_SELECTED_CANDIDATE` だけを見て baseline fallback または経済的不成立と判断しない。
+
+正式判定順:
+
+1. payment set から、Nodeごとの上流参照連鎖を取得する
+2. Node件数、順序、Node名、payment status と selection status の整合を確認する
+3. `decision_window_visit_keys` と `remaining_decision_window_visit_keys` を確認する
+4. `remaining_decision_window_visit_keys` が空の場合:
+   - selected candidate が存在しないことを確認する
+   - payment status が `NO_SELECTED_CANDIDATE` であることを確認する
+   - payment records が空であることを確認する
+   - status を `NO_VISITS_TO_CONFIRM` とする
+   - final rank 列を空 tuple とする
+   - `decision_window_visit_keys` も空なら分岐4
+   - `decision_window_visit_keys` が1件以上なら分岐5（全件先行確定済み）
+   - 分岐4と分岐5を混同しない
+   - baseline fallback とはしない
+5. selected candidate がある場合:
+   - status を `SELECTED_CANDIDATE_RANKS` とする
+   - payment status は `CALCULATED`
+   - selection status は `SELECTED`
+   - 保存済み区分3と区分4を使用する
+   - selected を同一 object 参照で保持する
+6. selected candidate がなく、`remaining_decision_window_visit_keys` が1件以上の場合:
+   - `build_status` 等から全候補却下と情報不足を区別する
+   - status を `BASELINE_FALLBACK_RANKS` とする
+   - 残る窓全体を baseline 順位で確定する
+   - 全 record の source は `BASELINE`
+   - 詳細原因を新しい status へ重複複写しない
+
+selected candidate があるのに remaining decision window が空という状態が、制度上または保存済み拘束列上起こり得るかを、保存済み件数契約で検証する。重大な矛盾であれば fallback または `NO_VISITS_TO_CONFIRM` へ変換せず `RuntimeError` とする。
+
+## 17. 処理順
+
+明示的な Node、区分3、区分4、fallback Visit の for ループを使う。iterator、generator、並列実行は使わない。候補列、拘束列、残る窓列を不要に再ソートしない。
+
+1. payment and compensation set result の外部入力型を確認する
+2. payment Node 結果列が tuple であることを確認する
+3. selection Node 結果列が tuple であることを確認する
+4. economic、local 等の必要な Node 結果列が tuple であることを必要最小限に確認する
+5. Node 件数、Node 順、Node 名を確認する
+6. payment status と selection status の対応を確認する
+7. private helper により、Nodeごとの上流参照連鎖を一か所から取得する
+8. `decision_window_visit_keys` と `remaining_decision_window_visit_keys` を確認する
+9. 残る意思決定窓が空なら、selected なし・`NO_SELECTED_CANDIDATE`・空recordsを確認し、`NO_VISITS_TO_CONFIRM` 結果を作る
+10. `decision_window_visit_keys` も空なら分岐4、1件以上なら分岐5として区別する
+11. selected candidate がある場合、入力 economic 候補内の同一 object であることを確認する
+12. selected candidate の保存済み binding rank sequence を取得する
+13. 区分3を保存順に明示的 for ループで走査する
+14. 区分4を保存順に明示的 for ループで走査する
+15. 区分3と区分4の VisitKey 重複、件数、binding partition、binding rank、正式進路を確認する
+16. 区分3と区分4をこの順で連結する
+17. Visitごとに `final_local_rank` を1から順に付ける
+18. 区分3の finalization source を `SELECTED_CANDIDATE` とする
+19. 区分4の finalization source を `BASELINE` とする
+20. `SELECTED_CANDIDATE_RANKS` の Node 結果を作る
+21. selected candidate がなく、残る意思決定窓が1件以上なら、`build_status` 等から全候補却下と情報不足を区別し、baseline fallback 材料を取得する
+22. 残る意思決定窓内 Visit 全体を正式 baseline 順で明示的 for ループにより走査する
+23. 各 Visit の正式進路を baseline collector から取得する
+24. Visitごとに `final_local_rank` を1から順に付ける
+25. 全 record の finalization source を `BASELINE` とする
+26. `BASELINE_FALLBACK_RANKS` の Node 結果を作る
+27. 全 Node 完了後に全体結果を作る
+
+再実行しない: 候補形成、一般形順位再構成、FIFO検査、局所仮想計算、経済性評価、候補選択、payment・compensation 計算、VOT 読取、交通シミュレーション。
+
+## 18. 重大不整合
+
+外部入力型不正は `ValueError`。保存済み結果間または内部の重大不整合は `RuntimeError`。
+
+主な重大不整合: payment / selection / 必要な上流 Node 結果列が tuple でない。Node 件数、Node 順、Node 名が一致しない。Node結果が上流 set から欠落しているのに処理を続ける。呼出し忘れによる欠落を正常な空Node結果と同一視する。payment status だけで原因別分岐を決める実装。payment status と selection status が矛盾。payment status が `NO_SELECTED_CANDIDATE` なのに payment records が非空。payment status が `CALCULATED` なのに selected candidate がない。payment status が `CALCULATED` なのに selection status が `SELECTED` でない。payment status が `NO_SELECTED_CANDIDATE` なのに selection status が候補なし status でない。selected candidate が入力 economic 候補内の同一 object でない。selected があるのに binding rank sequence がない。selected candidate status なのに payment status が `NO_SELECTED_CANDIDATE`。selected がないのに payment records が存在する。decision window が空なのに selected candidate が存在する。decision window が空なのに payment status が `CALCULATED`。remaining decision window が空なのに baseline fallback status を作る。remaining decision window が1件以上あるのに `NO_VISITS_TO_CONFIRM` を作る。全件先行確定済みなのに、その Visit を final rank 列へ再掲する。すでに確定済みの順位または正式進路を上書きする。分岐4と分岐5を同じ原因として記録する。情報不足なのに `BASELINE_INFORMATION_COMPLETE` として扱う。`BASELINE_INFORMATION_COMPLETE` なのに情報不足 fallback として扱う。成立時に区分3・4の VisitKey が重複。区分1または区分2の Visit が最終列へ混入。baseline fallback 列に先行確定済み Visit が混入。final rank 対象 Visit が重複または欠落。`k_fixed`、`k_last_buyer`、`k_decision_window` と保存済み列件数が矛盾。区分3または区分4の binding partition が不正。final rank 順と保存済み binding rank 順が矛盾。`final_local_rank` が1から連続しない。formal route が欠落または空文字。route 情報を推測で補う必要がある。`NO_VISITS_TO_CONFIRM` なのに final rank record が存在する。`BASELINE_FALLBACK_RANKS` なのに残る意思決定窓が空。`SELECTED_CANDIDATE_RANKS` なのに selected candidate がない。selected candidate の重大不整合を baseline fallback へ変換する。selected candidate の重大不整合を `NO_VISITS_TO_CONFIRM` へ変換する。情報不足理由を経済的不成立へ変換する。意思決定窓内 Visit が最初から0件なのに baseline fallback へ変換する。
+
+正常な次の状態は `RuntimeError` にしない: 全候補却下（分岐2）、情報不足（分岐3）、FIFO False、局所 unresolved、required buyer または seller の horizon 内未通過、resolved だが経済的不成立、分岐4の `NO_VISITS_TO_CONFIRM`、分岐5の `NO_VISITS_TO_CONFIRM`。
+
+1 Node の重大不整合で全体停止する。後続 Node を処理しない。部分的 overall result を返さない。rollback しない。入力、rank state、Vehicle、World を変更しない。
+
+## 19. 過剰検証を避ける方針
+
+本部品で確認する: 外部入力型、Node 結果列の tuple 契約、Node 対応、payment status と selection status の整合、selected の同一 object、意思決定窓件数、残る意思決定窓件数、candidate visit set の build status、区分3・4、fallback 対象列、VisitKey 重複・欠落、binding partition、binding rank の保存順、final rank 連続性、formal route、保存済み件数関係。
+
+payment status は整合確認に使う。payment status だけで原因別分岐を決めない。`NO_SELECTED_CANDIDATE` を空窓、情報不足、全候補却下の原因として使わない。
+
+再実行しない: candidate formation、general trade rank、FIFO、local virtual calculation、economic evaluation、candidate selection、payment・compensation、VOT 読取、交通シミュレーション。
+
+上流で保証済みの buyer 集合、seller 集合、surplus、payment 式、compensation 式、RNG 選択、経済的成立条件の全詳細を無制限に再検証しない。selected 成立時は保存済み区分3・4を再利用する。fallback 時は保存済み `remaining_decision_window_visit_keys` と baseline 情報を利用する。長い参照連鎖は private helper 一か所で辿り、本体へ散在させない。
+
+## 20. 不変性
+
+変更しない: payment and compensation result、candidate selection result、economic evaluation result、local virtual calculation result、FIFO result、collector、rank state、Vehicle、`payment_paid`、`payment_received`、`order_exchange_log`、real World、World RNG、order-control RNG、`vot_declared`、`vot_true`、`participates_in_order_exchange`。
+
+新しい frozen final rank 結果だけを返す。入力結果へ selected flag、final rank、formal route 確定済み flag 等を後書きしない。
+
+## 21. 処理全体での位置
+
+正式順序:
+
+1. candidate selection
+2. payment・compensation pure calculation
+3. final rank construction
+4. final consistency validation
+5. rank state と Vehicle 金銭台帳への atomic application
+
+payment 金額は final rank 順位を変えない。payment 結果は final rank の順位材料として使わない。payment 処理を先に行うのは、上位処理順と後続 atomic apply の入力をそろえるためである。final rank construction が失敗した場合、frozen payment 結果は実適用せず破棄できる。順位台帳と Vehicle 金銭属性への不可逆な更新は atomic apply まで行わない。
+
+### 21.1 将来の上位driverの責務
+
+上位driverは未実装である。将来の上位driverについて、次を実装前仕様として記録する。本部品では実装しない。
+
+- 対象Node全体について、既存の全Node APIを保存済み処理順に呼ぶ
+- Nodeごとに空窓または情報不足を理由として処理チェーンから脱落させない
+- 空窓Nodeも正常な空Node結果として各 set result に残す
+- final rank 部品へ、全Nodeを含む payment set を渡す
+- final rank の原因別5分岐を上位driverで再実装しない
+- baseline fallback 列を上位driverで構築しない
+- 分岐4と分岐5を上位driverで別APIへ分けない
+
+上位driverが payment set を作らず、空窓Nodeを別経路へ送る案は採用しない。
+
+## 22. atomic applyとの境界
+
+本部品は行わない: rank state への書込み、`payment_paid` 更新、`payment_received` 更新、`order_exchange_log` 更新、target Node の outlink 集合検証、複数 Node の実適用、rollback。
+
+後続 atomic apply 部品が行う予定: final rank Visit 列を順位と正式進路の組として Node 順位台帳へ渡す。既存 `confirm_visits_and_formal_target_node_routes_atomically` を利用する。selected candidate が成立した Node について、payment・compensation 結果を Vehicle 金銭台帳へ反映する。final rank と payment・compensation の整合を最終確認する。台帳反映途中の部分更新を防ぐ。
+
+複数 Node 全体をどの単位で atomic にするかは、後続 apply 部品の設計で扱う。本節では新たに確定しない。
+
+## 23. 責務外
+
+rank state への書込み、`Vehicle.payment_paid` 更新、`Vehicle.payment_received` 更新、`order_exchange_log` 更新、atomic apply、target Node outlink 集合の World からの取得、実World交通反映、actual passage 記録、expected と actual の比較、prediction error、realized utility、ex-post welfare、上位 TVT driver、strategy-proofness 検証、文献制度の移植。
+
+## 24. 可読性
+
+正しさを最優先する。Python 初学者が後から追いやすい明示的な実装を前提とする。明示的 Node / 区分3 / 区分4 / fallback Visit の for ループ、意味のある中間変数、小さな private helper、原因と結果が分かるコメント、frozen dataclass、tuple 公開列、明示的な status 分岐。
+
+コメント、docstring、エラーメッセージでは、結果だけでなく原因を明記する。特に次を区別する。意思決定窓内 Visit が最初から0件であるため、実質的な候補検討や金額計算は行わず、正常な空Node結果を後段へ伝播させる。意思決定窓内 Visit は存在したが、全件が先行確定されたため remaining decision window が空となり、final rank 部品が追加確定する Visit はない。baseline 情報が不足しているため候補形成または評価へ進めず、残る意思決定窓内 Visit 全体を baseline fallback する。候補検討まで進んだが採用可能候補が0件となったため、残る意思決定窓内 Visit 全体を baseline fallback する。payment status は原因ではなく、上流結果を final rank へ運ぶ結果ラベルである。
+
+避ける: 長い内包表記、複雑な generator、多段 one-liner、不透明な kind/status 圧縮、原因を `TVT検討なし` だけで一括表現すること、`NO_SELECTED_CANDIDATE` だけで原因を潰すこと、「空窓なので後段へ進まない」と関数呼出し禁止として書くこと、World 検索、Vehicle 検索、rank state 書込み、route 推定、upstream 部品の再実行、final rank と apply の混在、payment との巨大関数化、並列処理、キャッシュ、RNG。
+
+## 25. 専用テスト契約
+
+新規専用テストは `tests_order_control_tvt_mp_final_rank.py`。最低限次を固定する。
+
+公開型: Enum member と value（FinalRankStatus、FinalizationSource）、Visit / Node / overall frozen、field 順、公開列 tuple、入力 payment set と同一 object、selected と入力 candidate の同一 object、live World / Vehicle / rank state / RNG 非保持、禁止 field なし。
+
+公開 API: `build_tvt_mp_final_ranks`、位置引数1つ、`real_W` なし、rank state 引数なし、Node単位・Visit単位公開 API なし、mutable state なし、RNG なし。空窓専用 API、fallback 専用 API、selected 専用 API なし。optional 引数なし。新しい共通入力型なし。
+
+入力経路: payment set だけで5分岐へ到達できる。selection set 等の追加公開引数なし。payment set から上流原因へ同一参照で到達する。private helper で参照連鎖を集約する。
+
+selected candidate: payment status は `CALCULATED`。selected candidate は入力 economic 候補と同一 object。final rank は `SELECTED_CANDIDATE_RANKS`。区分3だけ、区分3＋区分4、区分4空、区分3は selected source、区分4は baseline source、保存済み順維持、binding rank 順維持、formal route 維持、区分1・2を含めない、selected 順位を再構築しない、`trade_scope` だけを確定して残窓を放置しない、窓外 Visit は `k_fixed` へ含まれる場合だけ確定、`final_local_rank` は1から連続。payment 金額を順位材料に使わない。
+
+baseline fallback: 全候補却下、FIFO False 全件、局所 unresolved 全件、経済不成立全件、不採用・未解決・経済不成立の混在、baseline 情報不足、`NOT_BUILT_UNRESOLVED_ARRIVALS`、`UNRESOLVED_RIGHT_OF_ENTRY_PASSAGE`、`UNRESOLVED_CANDIDATE_PASSAGES`、残る意思決定窓内 Visit 全体、上限 N で切らない、一部だけ確定しない、baseline 順維持、formal route 維持、先行確定済み Visit を含めない、全 record の source は baseline、fallback を例外にしない。
+
+情報不足の正常伝播: `build_status` は情報不足 status。payment status は `NO_SELECTED_CANDIDATE`。payment records は空。remaining decision window は1件以上。final rank は `BASELINE_FALLBACK_RANKS`。経済的不成立として扱わない。残る窓全体を baseline 順位で確定。
+
+全候補却下: `build_status` は `BASELINE_INFORMATION_COMPLETE`。selected candidate は None。payment status は `NO_SELECTED_CANDIDATE`。remaining decision window は1件以上。final rank は `BASELINE_FALLBACK_RANKS`。FIFO False、局所 unresolved、経済不成立等の上流原因を維持。
+
+分岐4（空窓）の正常伝播: decision window が最初から空。leading confirmation から payment まで Node結果が省略されない。candidate tuple は空。economic candidate tuple は空。selected candidate は None。payment status は `NO_SELECTED_CANDIDATE`。payment records は空。final rank は `NO_VISITS_TO_CONFIRM`。final rank 列は空。架空の候補または金額なし。baseline fallback ではない。分岐5と別原因として固定する。
+
+分岐5（全件先行確定済み）: decision window は1件以上。remaining decision window は空。selected candidate は None。payment records は空。final rank は `NO_VISITS_TO_CONFIRM`。final rank 列は空。分岐4と別原因として固定する。先行確定済み Visit を final rank 列へ再掲しない。すでに確定済みの順位と正式進路を上書きしない。
+
+formal route: selected の保存済み route、fallback の collector 保存済み route、route を順位と同じ record へ保存、欠落は重大不整合、空文字は重大不整合、推測補完なし、World 検索なし、Vehicle 検索なし。
+
+重大不整合: 入力型不正、Node 対応不一致、Node結果の欠落、payment status と selection status の矛盾、selected 同一 object 違反、selected なのに binding sequence なし、区分3・4重複、区分1・2混入、fallback へ先行確定 Visit 混入、Visit 欠落、件数関係矛盾、binding partition 不正、binding rank 順不一致、final rank 非連続、route 欠落、route 空文字、NO_VISITS なのに records あり、fallback なのに残る窓空、remaining window ありなのに NO_VISITS、decision window 空なのに selected あり、decision window 空なのに payment `CALCULATED`、`build_status` と原因分岐の矛盾、意思決定窓内 Visit が最初から0件なのに fallback、selected の重大不整合を fallback 化、selected の重大不整合を空結果へ変換しない、1 Node 不整合で全体停止、partial なし、後続 Node 未処理。
+
+不変性: payment / selection / economic / local / FIFO / collector / rank state / Vehicle / `payment_paid` / `payment_received` / `order_exchange_log` / World / RNG。
+
+責務外: rank state 書込みなし、Vehicle 台帳更新なし、atomic apply なし、actual なし、utility または welfare なし、strategy-proofness 主張なし。
+
+## 26. 反証して採用しない事項
+
+- selected candidate の `trade_scope` だけを確定し、残る意思決定窓内 Visit を放置する
+- 意思決定窓外 Visit を無条件に確定する
+- fallback で一部 Visit だけを確定する
+- 情報不足を経済的不成立へ変換する
+- 未解決を重大不整合にする
+- 意思決定窓内 Visit が最初から0件なのに TVT不成立 fallback と記録する
+- 意思決定窓内 Visit が最初から0件なのに、実質的な経済条件評価まで進んだと記録する
+- remaining decision window が1件以上あるのに `NO_VISITS_TO_CONFIRM` とする
+- 分岐4と分岐5を同じ原因として記録する
+- 分岐5を、最初から空窓だった分岐4と同一視する
+- 全件先行確定済み Visit を final rank 列へ再掲する
+- すでに確定済みの順位または正式進路を上書きする
+- 空窓に架空の final rank record を作る
+- 空窓Nodeを payment set から脱落させる
+- 空窓だから後段関数を呼ばないと記録する
+- `NO_SELECTED_CANDIDATE` だけを見て baseline fallback または経済的不成立と判断する
+- payment status だけで原因別分岐を決める
+- 空窓Nodeへ架空の `CALCULATED` 結果を作る
+- payment 型へ空窓専用 status を追加する
+- selection set または candidate visit set を別の公開引数として渡す
+- optional payment 引数で正常状態を表現する
+- 新しい共通入力型へ上流情報を大量複写する
+- 空窓専用 API、fallback 専用 API、selected 専用 API を分ける
+- 原因別分岐を上位driverと final rank 部品へ二重実装する
+- 呼出し忘れによる欠落を正常な空Node結果と同一視する
+- 先行確定済み Visit を重複登録する
+- 重複 Visit を自動除外して処理を続ける
+- selected 順位と baseline 順位を重複 Visit 付きで連結する
+- route 未確定 Visit を確定する
+- route を推測で補う
+- final rank construction で順位台帳へ書き込む
+- final rank construction で Vehicle 金銭台帳へ書き込む
+- Nodeごとに部分的な実適用を行う
+- payment、final rank、apply を巨大関数へ混入する
+- candidate selection または経済性評価を再実行する
+- 原因を `TVT検討なし` だけで潰す
+
+## 27. 実装範囲と実装対象外
+
+実装範囲（保存後の次作業）: 全Node一括の純計算 API、2つの Enum、Visit / Node / overall frozen 結果、原因別5分岐、payment set 1本からの参照連鎖、空Node結果の正常伝播、`NO_VISITS_TO_CONFIRM` の分岐4と分岐5の区別、区分3＋区分4の再利用、baseline fallback、formal route の Visit record 保存、重大不整合時の全体停止、専用テスト。
+
+実装対象外: rank state 書込み、Vehicle 金銭台帳、atomic apply、実World交通反映、actual、utility/welfare、上位 TVT driver 本体、strategy-proofness、文献制度の移植。上位driverの責務は §21.1 に記録するが、本部品では実装しない。
+
+## 28. 次の再開地点
+
+1. Terminalで修正後の final rank 完全実装前仕様を直接表示する。
+2. 内容を独立確認する。
+3. 問題がなければ、進捗第2巻へ本仕様の要約を別作業で追加する。
+4. 進捗第2巻の要約も Terminal で直接確認する。
+5. 詳細設計第3巻と進捗第2巻を同一保存単位で commit する。
+6. commit 結果、最新コミット、残存変更を確認する。
+7. 別の指示で push し、push 後の状態を確認する。
+8. 保存後に新規本番 `uxsim/order_control_tvt_mp_final_rank.py` と専用テスト `tests_order_control_tvt_mp_final_rank.py` だけを実装する。
+
+本節は完全実装前仕様である。Python と専用テストは未着手である。順位台帳更新、Vehicle 金銭台帳更新、atomic apply は実装しない。

@@ -120,13 +120,55 @@ payment、compensation、P_b比例配分、seller実補償配分、`payment_paid
 
 **検証:** 専用36件（直接36、pytest 36/36 collected、TESTS 36）。py_compile 新規2ファイル成功。TVT-MP関係8ファイル **437 passed**（新規36＋その他401）。baseline driver/downstream **121 passed**。全pytest・GUI・性能テストは未実行。
 
+## TVT-MP final rank construction部品・完全実装前仕様を確定（2026-09-26）
+
+**詳細正本:** `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_3.md` の「TVT-MP final rank construction部品・完全実装前仕様」（記録日 2026-09-26）。本節は要約である。Python実装と専用テストは未着手である。
+
+**位置づけ:** payment・compensation 純計算の次。今回新たに確定する Visit の順位と正式進路を構築する純計算部品。新しい frozen 結果だけを返す。順位台帳へ書き込まない。Vehicle金銭台帳へ書き込まない。atomic apply は後続の別部品。
+
+**予定ファイル:** `uxsim/order_control_tvt_mp_final_rank.py`、`tests_order_control_tvt_mp_final_rank.py`。
+
+**入力:** `OrderControlTvtMpPaymentAndCompensationSetResult` だけ。`real_W` なし。rank state 引数なし。selection set 等の追加公開引数なし。optional 引数なし。空窓・fallback・selected 専用 API なし。
+
+**公開API:** `build_tvt_mp_final_ranks(payment_and_compensation_set_result)`。位置引数1つ。全Node一括。公開 API は1つ。
+
+**payment set:** 金額計算済み候補だけを意味しない。既存の全Node APIを順に呼ぶことで、空窓・情報不足・採用候補なし・全件先行確定済みも正常な空結果として payment set まで伝播する。空recordsは架空の金額ではない。payment status は原因ではなく結果ラベル。正式原因は上流の保存済み情報（decision window、remaining window、`build_status`、上流候補結果等）から判定する。
+
+**原因別5分岐:**
+
+1. **selected candidate あり** — 区分3と区分4をこの順で使用。区分3は `trade_scope` 内の Visit を selected candidate の取引後順位で確定。区分4は `trade_scope` 外で今回の意思決定窓内に残る Visit を baseline 順位で確定。区分1・2は再確定しない。
+2. **候補検討後、採用候補なし** — 意思決定窓内 Visit は存在した。候補検討後に採用候補が0件。先行確定後に残る意思決定窓内 Visit 全体を baseline 順位で確定。正常な baseline fallback。
+3. **baseline 情報不足** — 意思決定窓内 Visit は存在した。候補形成または評価に必要な baseline 情報が不足。経済的不成立へ変換しない。残る窓全体を baseline 順位で確定。正常な baseline fallback。
+4. **意思決定窓内 Visit が最初から0件** — `decision_window_visit_keys` が最初から空。実質的な候補検討や金額計算を行わず、正常な空Node結果を payment set まで伝播。`NO_VISITS_TO_CONFIRM`、final rank 列は空。baseline fallback ではない。
+5. **意思決定窓内 Visit は存在したが、全件先行確定済み** — `decision_window_visit_keys` は1件以上、`remaining_decision_window_visit_keys` は空。final rank 部品で追加確定する Visit なし。`NO_VISITS_TO_CONFIRM`、final rank 列は空。baseline fallback ではない。先行確定済み Visit を再掲しない。
+
+分岐4と分岐5は同じ `NO_VISITS_TO_CONFIRM` だが、原因は異なる（最初から空窓／窓内はあったが全件先行確定）。
+
+**既確定順位・正式進路:** 区分1・2はすでに確定済み。final rank 列へ再掲しない。baseline fallback は先行確定後に残る意思決定窓内 Visit だけを対象。すでに確定済みの順位・正式進路を上書きしない。重複 Visit を自動除外して続行しない。重複混入は重大不整合。
+
+**formal route:** field 名 `formal_route_next_link_name` を Visit ごとに順位と一緒に保存。selected 時は保存済み binding Visit の route。fallback 時は baseline collector の保存済み route。World・Vehicle から再探索しない。推測しない。欠落・空文字は重大不整合。
+
+**公開型:** Enum `OrderControlTvtMpFinalRankStatus`（`SELECTED_CANDIDATE_RANKS`、`BASELINE_FALLBACK_RANKS`、`NO_VISITS_TO_CONFIRM`）。`OrderControlTvtMpFinalizationSource`（`SELECTED_CANDIDATE`、`BASELINE`）。frozen: `OrderControlTvtMpFinalRankVisitRecord`（`visit_key`、`final_local_rank`、`formal_route_next_link_name`、`finalization_source`）、`OrderControlTvtNodeMpFinalRankResult`、`OrderControlTvtMpFinalRankSetResult`。
+
+**NO_VISITS_TO_CONFIRM:** 分岐4（原因A: `decision_window_visit_keys` が最初から空）と分岐5（原因B: 窓は1件以上だが全件先行確定で remaining が空）。共通: selected は None、final rank 列は空、baseline fallback 列は作らない、例外ではない。残る窓が1件以上で selected がない場合は `BASELINE_FALLBACK_RANKS`（`NO_VISITS_TO_CONFIRM` ではない）。
+
+**payment status:** `NO_SELECTED_CANDIDATE` だけで原因決定・baseline fallback 選択・経済的不成立判断をしない。payment status と selection status は整合確認に使う。
+
+**順位台帳・atomic apply:** 本部品は順位台帳へ書き込まない。既存の原子的確定 API は後続 apply が利用（全件先に確認、問題なければ一括登録、途中問題なら1件も登録しない）。Vehicle金銭台帳更新も後続 apply。複数Node全体の atomic 単位は後続設計。
+
+**上位driver（未実装）:** 全Nodeについて既存 API を payment まで順に呼ぶ。空窓・情報不足を理由に Node をチェーンから落とさない。全Nodeを含む payment set を final rank へ渡す。原因別5分岐・baseline fallback 列・分岐4/5 の別API化は driver で再実装しない。
+
+**不変:** payment / selection / economic / local / FIFO / collector / rank state / Vehicle / `payment_paid` / `payment_received` / `order_exchange_log` / World / RNG。
+
+**今回未実装:** final rank 本番・専用テスト、rank state 書込み、Vehicle金銭台帳、atomic apply、実World反映、actual、utility/welfare、上位driver本体、strategy-proofness、文献制度の移植。
+
 ## 次の再開地点
 
-1. 実装コード、専用テスト、詳細設計第3巻、進捗第2巻を同一保存単位でcommitする。
-2. commit結果、最新コミット、残存変更を確認する。
-3. 別の指示でpushし、push後の状態を確認する。
-4. 保存後に、final rank、baseline fallback、formal route、順位台帳接続などの次領域を選ぶ。
-5. Vehicle台帳更新とatomic applyは、final rankと全体整合確認の設計後に扱う。
+1. 詳細設計第3巻と進捗第2巻の final rank 仕様を Terminal で直接確認する。
+2. 問題がなければ2文書を同一保存単位で commit する。
+3. commit結果、最新コミット、残存変更を確認する。
+4. 別の指示で push し、push 後の状態を確認する。
+5. 保存後に新規本番 `uxsim/order_control_tvt_mp_final_rank.py` と専用テスト `tests_order_control_tvt_mp_final_rank.py` だけを実装する。
 
 ## 新しいチャットでの再開方法
 
