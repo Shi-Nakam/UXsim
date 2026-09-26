@@ -102,15 +102,31 @@ payment、compensation、P_b比例配分、seller実補償配分、`payment_paid
 
 **次の直接作業:** 第3巻新規節と本節をTerminalで直接表示して独立確認する。問題がなければ2文書をcommitしてpushする。保存後に新規本番と専用テストだけを実装する。Vehicle台帳更新とfinal rankは実装しない。
 
+## TVT-MP payment・compensation計算部品を実装・検証（2026-09-26）
+
+**詳細正本:** `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_3.md` の「TVT-MP payment・compensation計算部品・完全実装前仕様」§21 実装・検証結果。前段仕様: commit `1cc579f`。
+
+**新規ファイル:** 本番 `uxsim/order_control_tvt_mp_payment_and_compensation.py`、専用テスト `tests_order_control_tvt_mp_payment_and_compensation.py`。
+
+**実装要点:** candidate selection後の純計算。入力は `OrderControlTvtMpCandidateSelectionSetResult` のみ。`real_W` なし。API `calculate_tvt_mp_payments_and_compensations(candidate_selection_set_result)`。`payment_P_b = R * G_b / G`（buyerごと個別、残差補正なし）。`compensation_amount = R_s`（上流保存済み、再計算なし）。Enum `CALCULATED` / `NO_SELECTED_CANDIDATE`。frozen結果、入力とselectedは同一object参照。
+
+**seller:** 遅延sellerは `compensation_amount = R_s`。同時刻・早期通過sellerは予想遅延がないため上流で `R_s = 0`、補償額と支払額0、role維持。早期通過sellerは支払いなしで時間短縮の交通上便益を得る（`G` に加えない）。申告VOTが0の遅延sellerは、申告VOTが0であるため上流で `R_s = 0`、補償額0（人工的な正値補正なし、role維持）。
+
+**数値:** float、内部丸めなし、tolerance/Decimal/残差補正なし。`sum(P_b)` と `R` のbit一致を重大不整合にしない。
+
+**不変・責務外:** selection/economic/local/FIFO/collector/rank state/Vehicle/台帳/RNG不変。Vehicle台帳更新、final rank、baseline fallback、formal route、順位台帳、atomic apply、実World反映、actualは未実装。
+
+**独立確認:** 初回専用テストの常時成功assertを削除し `test_three_equal_buyers_each_use_formula_without_residual_or_sum_bit_check` に修正。**追加修正不要**。
+
+**検証:** 専用36件（直接36、pytest 36/36 collected、TESTS 36）。py_compile 新規2ファイル成功。TVT-MP関係8ファイル **437 passed**（新規36＋その他401）。baseline driver/downstream **121 passed**。全pytest・GUI・性能テストは未実行。
+
 ## 次の再開地点
 
-1. 詳細設計第3巻と進捗第2巻を同一保存単位でcommitする。
+1. 実装コード、専用テスト、詳細設計第3巻、進捗第2巻を同一保存単位でcommitする。
 2. commit結果、最新コミット、残存変更を確認する。
 3. 別の指示でpushし、push後の状態を確認する。
-4. 保存後に、新規本番 `uxsim/order_control_tvt_mp_payment_and_compensation.py` と専用テスト `tests_order_control_tvt_mp_payment_and_compensation.py` だけを実装する。
-5. 実装後に独立確認する。
-
-Python実装と専用テストは未着手である。Vehicle台帳更新、final rank、実World反映は対象外のまま残る。
+4. 保存後に、final rank、baseline fallback、formal route、順位台帳接続などの次領域を選ぶ。
+5. Vehicle台帳更新とatomic applyは、final rankと全体整合確認の設計後に扱う。
 
 ## 新しいチャットでの再開方法
 

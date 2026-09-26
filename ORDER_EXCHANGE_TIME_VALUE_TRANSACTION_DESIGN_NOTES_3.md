@@ -567,3 +567,127 @@ seller: 遅延では `compensation_amount = R_s` とする。同時刻・早期�
 5. 実装後に独立確認する。
 
 本節は完全実装前仕様である。Pythonと専用テストは未着手である。Vehicle台帳更新とfinal rankは実装しない。
+
+## 21. 実装・検証結果（2026-09-26）
+
+**記録日: 2026-09-26**
+
+保存済み完全実装前仕様（本節 §1–§20、commit `1cc579f`）に従って実装・検証した。上記 §1–§20 は歴史的な実装前仕様として残す。最新の実装完了事実は本節 §21 を参照する。
+
+### 21.1 新規ファイルと公開要素
+
+| 区分 | パス |
+| --- | --- |
+| 本番 | `uxsim/order_control_tvt_mp_payment_and_compensation.py` |
+| 専用テスト | `tests_order_control_tvt_mp_payment_and_compensation.py` |
+
+**Enum** `OrderControlTvtMpPaymentAndCompensationStatus`: `CALCULATED` = `"calculated"`、`NO_SELECTED_CANDIDATE` = `"no_selected_candidate"`。
+
+**buyer record** `OrderControlTvtMpBuyerPaymentRecord`（frozen）— field順: `visit_key`、`vehicle_name`、`payment_P_b`。
+
+**seller record** `OrderControlTvtMpSellerCompensationRecord`（frozen）— field順: `visit_key`、`vehicle_name`、`compensation_amount`。
+
+**Node結果** `OrderControlTvtNodeMpPaymentAndCompensationResult`（frozen）— `node_name`、`payment_and_compensation_status`、`selected_candidate_economic_result`、`buyer_payment_records`、`seller_compensation_records`（いずれもtuple）。
+
+**全体結果** `OrderControlTvtMpPaymentAndCompensationSetResult`（frozen）— `candidate_selection_set_result`、`node_payment_and_compensation_results`（tuple）。
+
+**API** `calculate_tvt_mp_payments_and_compensations(candidate_selection_set_result)` — 位置引数1つ、`real_W` なし、全Node一括、公開計算APIはこれのみ。入力 selection set と selected candidate は同一object参照。部分的overall resultを返さない。
+
+### 21.2 buyer paymentとseller compensation
+
+**buyer:** 各buyer `b` の `payment_P_b = R * G_b / G`。buyerごとに式どおり個別計算。buyer順による金額補正なし。最後のbuyerへの残差割当なし。
+
+**seller:** 各seller `s` の `compensation_amount = required_compensation_R_s`（上流経済性評価の保存済み `R_s` を写す）。VOTや通過時刻から再計算しない。`actual_compensation` field は使わない。早期通過flagは追加しない。
+
+**制度:** sellerへ追加的な金銭surplusを配らない。`surplus = G - R` は制度主体の金銭残高ではない。paymentとcompensationは予測値に基づく事前確定。actual passageによる事後精算なし。strategy-proofnessは未証明。
+
+### 21.3 遅延seller
+
+candidate passageがbaselineより遅いため、上流経済性評価で正の予想待ち増加が保存されている。その結果 `required_compensation_R_s`（`R_s`）が正となる場合、本部品は `compensation_amount = R_s` とする。VOTや通過時刻から再計算しない。
+
+### 21.4 申告VOTが0の遅延seller
+
+**原因:** 申告VOTが0であるため、予想待ち増加の秒数にかけても留保額は金銭0となる。上流経済性評価は `R_s = expected_waiting_increase_seconds * declared_vot_per_second` により、遅延があっても保存済み `R_s` を0とする。
+
+**結果:** `compensation_amount` は0。人工的に正値へ補正しない。入力異常にしない。非参加へ変更しない。buyerへ変更しない。sellerのroleを維持する。
+
+### 21.5 同時刻seller
+
+**原因:** candidate passageとbaseline passageが同じため、予想遅延は0。上流で `expected_waiting_increase = 0`、保存済み `R_s = 0`。
+
+**結果:** `compensation_amount` は0。seller自身の支払額も0。sellerのroleを維持する。
+
+### 21.6 早期通過seller
+
+**原因:** candidate passageがbaselineより早いため、補償対象となる予想遅延はない。上流で waiting increase を0にclipし、保存済み `R_s = 0`。
+
+**結果:** `compensation_amount` は0。seller自身の支払額も0。sellerのroleを維持する。buyerへ変更しない。時間短縮価値を `G` へ加えない。支払いなしで時間短縮の交通上の便益を得る。早期通過flagは追加しない。
+
+### 21.7 候補なしNode
+
+selected candidateがない場合は正常結果。`payment_and_compensation_status` は `NO_SELECTED_CANDIDATE`。`selected_candidate_economic_result` は `None`。`buyer_payment_records` と `seller_compensation_records` は空tuple。例外にしない。0額recordを作らない。Node結果を省略しない。
+
+### 21.8 数値契約
+
+float。内部丸めなし。toleranceなし。Decimalなし。残差補正なし。最後のbuyerへの差額割当なし。buyer順による補正なし。保存済み `G` と buyerの `G_b` を明示forループで加算した値の完全一致、保存済み `R` と sellerの `R_s` を明示forループで加算した値の完全一致を確認する。`sum(P_b)` と `R` のbit単位一致を重大不整合にしない。`payment_P_b <= G_b` のbit単位完全比較を重大不整合にしない。数値表現上の実問題が確認された場合だけ代替方式を再検討する。
+
+### 21.9 不変性
+
+変更しない: candidate selection result、economic evaluation result、local virtual calculation result、FIFO result、collector、rank state、Vehicle、`payment_paid`、`payment_received`、`order_exchange_log`、real World、RNG、`vot_declared`、`vot_true`、`participates_in_order_exchange`。新しいfrozen結果だけを返す。
+
+### 21.10 責務境界（今回未実装）
+
+Vehicle金銭台帳更新、`order_exchange_log` 更新、final rank、baseline fallback、information unresolved時の最終確定、formal route、順位台帳、atomic apply、実World交通反映、actual passage、expectedとactualの比較、prediction error、realized utility、ex-post welfare、上位TVT driver、strategy-proofness検証、文献制度の移植。
+
+金額計算はfinal rank前に行ってよい。Vehicle台帳更新とatomic applyは、final rankと全体整合確認の設計後に扱う。
+
+### 21.11 独立確認で修正した専用テスト
+
+初回専用テスト `test_three_equal_buyers_do_not_require_sum_of_payments_to_match_r_in_bits` に `assert summed_payments != 1.0 or summed_payments == 1.0` があった。値に関係なく常に成功するため、独立確認で問題として検出した。
+
+**修正:** 常時成功条件を削除。テスト名を `test_three_equal_buyers_each_use_formula_without_residual_or_sum_bit_check` に変更。3人のbuyerについて各 `payment_P_b` が `R * G_b / G` であることを確認。最後のbuyerも同じ式を使い残差を割り当てないことを確認。本番が支払総額のbit単位一致を要求しないことを確認。floatの加算結果が1.0になるかに依存しない。
+
+修正後、専用テスト36件は再検証済み。**追加修正不要**。
+
+### 21.12 専用テスト・回帰・py_compile
+
+| 項目 | 結果 |
+| --- | --- |
+| 専用テスト件数 | 36 |
+| 直接実行 | 36 tests passed |
+| pytest | 36 passed |
+| pytest収集 | 36 collected |
+| 定義済みtest関数 | 36 |
+| TESTS登録 | 36（重複なし、登録漏れなし、未定義参照なし） |
+| py_compile | 新規本番・新規専用テストとも成功 |
+
+**TVT-MP関係回帰**（同一実行で8ファイル）: **437 passed**
+
+- 新規専用テスト: 36
+- その他のTVT-MP関係テスト: 401
+
+対象: `tests_order_control_tvt_mp_payment_and_compensation.py`、`tests_order_control_tvt_mp_economic_evaluation.py`、`tests_order_control_tvt_mp_candidate_selection.py`、`tests_order_control_tvt_mp_local_virtual_calculation_set.py`、`tests_order_control_tvt_mp_candidate_local_virtual_calculation.py`、`tests_order_control_tvt_mp_fifo_inspection.py`、`tests_order_control_tvt_mp_general_trade_rank.py`、`tests_order_control_tvt_mp_concrete_buyer_candidate_set.py`。
+
+**baseline関係回帰:** `tests_order_control_baseline_driver.py` と `tests_order_control_baseline_downstream_boundary.py` — **121 passed**（437と合算値だけへまとめない）。
+
+全pytest、GUI、デモ、長時間性能テストは実行していない。
+
+### 21.13 独立確認結果
+
+保存済み完全実装前仕様と整合。純計算、`real_W` なし、式どおりのbuyer payment、保存済み `R_s` のseller compensation、申告VOT=0遅延seller・同時刻・早期通過の因果、候補なし正常、float契約、不変性、Vehicle台帳非更新、専用テスト修正を確認。**追加修正不要**。
+
+### 21.14 実装完了範囲
+
+Enum、buyer/seller/Node/全体frozen結果、一括公開API、候補なし正常、`P_b` 個別計算、`compensation_amount = R_s`、保存済み `G`/`R` と明示加算合計の確認、重大不整合時の全体停止・部分結果なし、専用テスト、TVT-MP関係回帰、baseline関係回帰、独立確認。
+
+### 21.15 未実装範囲
+
+Vehicle金銭台帳更新、final rank、baseline fallback、formal route、順位台帳、atomic apply、実World交通反映、actual記録・比較、realized utility、ex-post welfare、上位TVT driver、strategy-proofness検証、文献制度の移植。
+
+### 21.16 次の再開地点
+
+1. 実装コード、専用テスト、詳細設計第3巻、進捗第2巻を同一保存単位でcommitする。
+2. commit結果、最新コミット、残存変更を確認する。
+3. 別の指示でpushし、push後の状態を確認する。
+4. 保存後に、final rank、baseline fallback、formal route、順位台帳接続などの次領域を選ぶ。
+5. Vehicle台帳更新とatomic applyは、final rankと全体整合確認の設計後に扱う。
