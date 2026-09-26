@@ -1772,3 +1772,170 @@ formal route: selected 時に binding route と一致すること。fallback 時
 9. atomic apply と上位 driver は、その後の別設計とする。
 
 本節は完全実装前仕様である。Python 実装と専用テストは未着手である。rank state、Vehicle 金銭台帳、実 World は変更しない。
+
+## 32. 実装・検証結果（2026-09-27）
+
+**記録日: 2026-09-27**
+
+保存済み完全実装前仕様（本大見出しの §1–§31、commit `7effc68`）に従って実装・検証した。上記 §1–§31 は歴史的な実装前仕様として残す。最新の実装完了事実は本節 §32 を参照する。
+
+既存 Python、既存テスト、既存結果型は変更していない。
+
+### 32.1 新規ファイル
+
+| 区分 | パス |
+| --- | --- |
+| 本番 | `uxsim/order_control_tvt_mp_final_consistency_validation.py` |
+| 専用テスト | `tests_order_control_tvt_mp_final_consistency_validation.py` |
+
+### 32.2 公開要素
+
+**全体結果** `OrderControlTvtMpFinalConsistencyValidationSetResult`（frozen）— field 順: `final_rank_set_result` の1つだけ。入力と同一 object 参照。final rank 列、金銭列、formal route を複写しない。rank state、Vehicle、outlink 集合を保持しない。failed status を保持しない。boolean だけの独立承認 token を作らない。mutable state を保持しない。
+
+公開 Enum は作成していない。公開 Node 単位 validation result 型も作成していない。
+
+**API**
+
+```text
+def validate_tvt_mp_final_consistency(
+    final_rank_set_result,
+) -> OrderControlTvtMpFinalConsistencyValidationSetResult:
+```
+
+契約: 位置引数1つ。入力は `OrderControlTvtMpFinalRankSetResult` だけ。`real_W` なし。rank state 引数なし。Vehicle 引数なし。Node 引数なし。outlink 集合引数なし。RNG なし。optional 引数なし。全 Node 一括。公開 API はこの関数1つ。成功時だけ frozen 全体結果を返す。部分的 validation result なし。
+
+### 32.3 入力経路
+
+上流参照連鎖は private helper `_saved_node_columns_from_final_rank_set` へ集約した。
+
+final rank set から、payment、selection、economic、local、FIFO、general trade rank、concrete buyer、inlink、candidate visit set、right-of-entry、leading confirmation、arrived confirmation、baseline collector へ、既存 object の同一参照で到達する。
+
+新しい共通入力型へ情報を複写していない。長い参照連鎖を validation 本体へ散在させていない。
+
+### 32.4 pure validationと実状態検証の境界
+
+実装したのは frozen 結果間の純照合だけである。
+
+確認するもの: final rank と payment・compensation の対応。final rank と selection の対応。selected candidate の同一 object。buyer・seller の Visit 対応。buyer・seller と区分3 role の対応。非参加 Visit と区分4 Visit の金銭 record 非存在。原因別5分岐。final rank 列。formal route の保存値。
+
+確認しないもの: rank state 上の未確定または既確定状態。formal route の実 Node outlink 所属。Vehicle の実 World 上の存在。Vehicle 金銭属性の書込み可能性。apply 直前の実状態変化。
+
+validation 成功は、保存済み frozen 結果間の整合だけを保証する。実際の順位・金銭書込み成功は保証しない。実状態は後続 atomic apply が書込み直前に再確認する。
+
+### 32.5 selected candidateの同一object
+
+分岐1では、次を `is` で照合した。final rank Node 結果の selected candidate。payment Node 結果の selected candidate。selection Node 結果の selected candidate。economic 候補 tuple 内の selected candidate。
+
+値が等しい複製は拒否する。selected candidate の重大不整合を fallback または `NO_VISITS_TO_CONFIRM` へ変換しない。
+
+### 32.6 buyer paymentの対応
+
+selected candidate 成立時に、buyer economic records と buyer payment records について次を照合する。1件以上。件数一致。保存順一致。VisitKey 一致。`vehicle_name` 一致。buyer VisitKey 重複なし。payment record の Visit が区分3内に存在。対応する binding Visit の role が `BUYER`。区分3の `BUYER` 集合と payment record 集合が一致。
+
+`payment_P_b` の式は再計算しない。`R * G_b / G`、`G` の再加算、`R` の再加算、tolerance、Decimal、丸め、残差補正は再実行しない。
+
+専用テストでは、保存された payment 額を式から再計算せず、そのまま承認することも固定した。
+
+### 32.7 seller compensationの対応
+
+selected candidate 成立時に、seller economic records と seller compensation records について次を照合する。0件でも正常。件数一致。保存順一致。VisitKey 一致。`vehicle_name` 一致。seller VisitKey 重複なし。compensation record の Visit が区分3内に存在。対応する binding Visit の role が `SELLER`。区分3の `SELLER` 集合と compensation record 集合が一致。`compensation_amount` と保存済み `required_compensation_R_s` が一致。
+
+`required_compensation_R_s` の式は再計算しない。declared VOT、通過時刻差、予想待ち増加、seller role を再判定しない。
+
+### 32.8 補償額0のseller
+
+補償額0の seller も record を維持する。
+
+実装・テストで固定した対象:
+
+1. 同時刻 seller。予想遅延が0であるため保存済み `R_s` が0。`compensation_amount` は0。
+2. 早期通過 seller。補償対象となる予想遅延がないため保存済み `R_s` が0。`compensation_amount` は0。
+3. 申告 VOT が0の遅延 seller。遅延は存在する。申告 VOT が0であるため保存済み `R_s` が0。`compensation_amount` は0。
+
+これらは seller role を維持する。buyer へ変更しない。補償額0を理由に record を削除しない。存在すべき seller record が欠落していれば `RuntimeError` とする。
+
+### 32.9 buyerとsellerの重複禁止
+
+同じ VisitKey を buyer と seller の両方にしない。buyer VisitKey 内の重複なし。seller VisitKey 内の重複なし。buyer と seller の VisitKey 集合に共通部分なし。payment record と compensation record に共通 VisitKey なし。重複を自動除外しない。重複は `RuntimeError` とする。
+
+### 32.10 非参加Visitと区分4Visit
+
+区分3の `NONPARTICIPATING`: final rank に存在。source は `SELECTED_CANDIDATE`。buyer payment record なし。seller compensation record なし。
+
+区分4の `OUTSIDE_TRADE_SCOPE`: final rank に存在し得る。source は `BASELINE`。buyer payment record なし。seller compensation record なし。空でも正常。
+
+非参加 Visit または区分4 Visit に金銭 record があれば `RuntimeError` とする。final rank 全 Visit へ金銭 record を要求しない。金銭 record を持つのは selected 時の区分3の `BUYER` と `SELLER` だけである。
+
+### 32.11 原因別5分岐
+
+分岐1 selected candidate あり: `SELECTED_CANDIDATE_RANKS`。`CALCULATED`。`SELECTED`。selected 同一 object。buyer records は1件以上。seller records は0件以上。区分3 `BUYER` と buyer records が一致。区分3 `SELLER` と seller records が一致。非参加・区分4に金銭 record なし。
+
+分岐2 候補検討後、採用候補なし: `BASELINE_FALLBACK_RANKS`。`NO_SELECTED_CANDIDATE`。`NO_ECONOMICALLY_FEASIBLE_CANDIDATE`。selected は None。両金銭列は空。`build_status` は `BASELINE_INFORMATION_COMPLETE`。remaining window 全体。source は `BASELINE`。
+
+分岐3 baseline 情報不足: `BASELINE_FALLBACK_RANKS`。`NO_SELECTED_CANDIDATE`。`NO_ECONOMICALLY_FEASIBLE_CANDIDATE`。selected は None。両金銭列は空。`build_status` は情報不足3 status のいずれか。remaining window 全体。source は `BASELINE`。経済的不成立へ変換しない。
+
+分岐4 最初から空窓: `NO_VISITS_TO_CONFIRM`。両金銭列は空。selected は None。final rank 列は空。decision window は空。remaining window は空。`NOT_BUILT_NO_RIGHT_OF_ENTRY`。正常に次の処理へ進む。シミュレーション停止を意味しない。
+
+分岐5 全件先行確定済み: `NO_VISITS_TO_CONFIRM`。両金銭列は空。selected は None。final rank 列は空。decision window は1件以上。remaining window は空。`NOT_BUILT_NO_RIGHT_OF_ENTRY`。先行確定済み Visit を再掲しない。正常に次の処理へ進む。シミュレーション停止を意味しない。
+
+分岐4と分岐5は同じ status だが原因を混同しない。
+
+### 32.12 final rank列とformal route
+
+照合するもの: VisitKey 重複なし。`final_local_rank` が1から連続。tuple 順と `final_local_rank` が一致。finalization source が正しい。selected 時の区分3は `SELECTED_CANDIDATE`。selected 時の区分4は `BASELINE`。fallback 時の全 Visit は `BASELINE`。`NO_VISITS_TO_CONFIRM` は空列。区分1・2を再掲していない。先行確定済み Visit を再掲していない。arrived 確定済み Visit を再掲していない。
+
+formal route: 非空 str。selected 時は binding Visit の保存 route と一致。fallback 時は collector snapshot と一致。欠落、None、空文字は `RuntimeError`。route を推測しない。実 outlink 集合への所属は確認しない。
+
+正常な処理では既確定 Visit が final rank へ混入しない。既確定 Visit の混入確認は、上流結果の破損または実装ミスを検出する安全確認である。混入しても自動除外または上書きしない。
+
+### 32.13 ValueErrorとRuntimeError
+
+`ValueError`: 入力が `OrderControlTvtMpFinalRankSetResult` でない場合だけ。
+
+`RuntimeError`: Node 対応不一致。status 不一致。selected 同一 object 違反。buyer または seller record 不一致。role 不一致。VisitKey 重複。buyer と seller の重複。補償額0 seller record 欠落。非参加または区分4の金銭 record。fallback または `NO_VISITS_TO_CONFIRM` の金銭 record。final rank 重複または順位不整合。source 不整合。formal route 不一致。区分1・2、先行確定、arrived 確定の再掲。分岐2と3の取り違え。分岐4と5の取り違え。1 Node 不整合後の続行。部分的 validation result。
+
+正常扱い: 分岐2から5。seller 0件。同時刻 seller の補償0。早期通過 seller の補償0。申告 VOT が0であるため保存済み `R_s` が0となる遅延 seller の補償0。非参加 Visit に金銭 record なし。区分4 Visit に金銭 record なし。
+
+### 32.14 不変性と責務境界
+
+変更しない: final rank、payment、selection、economic、local、FIFO、collector、rank state、Vehicle、`payment_paid`、`payment_received`、`order_exchange_log`、World、RNG。
+
+本部品は次を行わない。`confirm_visits_and_formal_target_node_routes_atomically` の呼出し。rank state 書込み。Vehicle 金銭台帳更新。log 更新。rollback。実 World 反映。atomic apply。上位 driver。actual 処理。utility または welfare 計算。
+
+新しい frozen validation set result だけを返す。
+
+### 32.15 独立確認
+
+実ファイルを Terminal で直接確認し、少なくとも次を確認した。公開結果型は1種類。公開 API は1関数。入力は final rank set だけ。Node を保存順に明示的に走査。1 Node の不整合で停止。部分承認なし。selected candidate の同一 object 照合。buyer と payment record の対応。seller と compensation record の対応。補償額0 seller record の欠落検出。buyer と seller の重複拒否。非参加と区分4の金銭 record 拒否。selected 時の区分3＋区分4。fallback 時の remaining window 全体。`NO_VISITS_TO_CONFIRM` の分岐4と分岐5。formal route の保存値照合。既確定 Visit 混入時の停止。rank state、Vehicle、World への書込みなし。
+
+追加修正は不要。
+
+### 32.16 検証結果
+
+専用テスト: 件数 58。直接実行 `58 tests passed`。pytest `58 passed`。pytest 収集 58。定義済み test 関数 58。`TESTS` 登録 58。定義と登録は一致する。
+
+py_compile: `uxsim/order_control_tvt_mp_final_consistency_validation.py` 成功。`tests_order_control_tvt_mp_final_consistency_validation.py` 成功。
+
+関係回帰: 新規専用テストを含む指定17ファイルで `830 passed`。内訳は新規専用テスト 58、その他の関係テスト 772。
+
+全 pytest、GUI、デモ、長時間性能テストは実行していない。
+
+### 32.17 実装完了範囲
+
+実装完了: frozen 全体結果1型。final rank set だけを入力とする公開 API。private helper による上流参照集約。selected 同一 object 照合。buyer payment 対応。seller compensation 対応。補償額0 seller record 維持。buyer・seller 重複禁止。非参加と区分4の金銭 record 非存在。原因別5分岐。final rank 列照合。formal route 照合。重大不整合時の全体停止。部分的 validation result なし。専用テスト58件。関係回帰830件。py_compile。独立確認。
+
+### 32.18 未実装範囲
+
+未実装: rank state 書込み。Vehicle 金銭台帳更新。atomic apply。上位 driver。実 World 反映。実 outlink 集合の検査。actual 比較。utility または welfare。strategy-proofness 検証。文献制度の移植。複数 Node の atomic 書込み単位の確定。
+
+### 32.19 次の再開地点
+
+1. Terminal で本実装結果節を直接表示し、独立確認する。
+2. 問題がなければ進捗第2巻へ実装結果要約を別作業で追加する。
+3. 進捗第2巻も Terminal で直接確認する。
+4. 新規本番、新規専用テスト、詳細設計第3巻、進捗第2巻を同一保存単位で commit する。
+5. commit 結果、最新コミット、残存変更を確認する。
+6. 別の指示で push する。
+7. 保存後に atomic apply の設計着手前調査へ進む。
+8. 複数 Node の atomic 書込み単位を atomic apply 設計で検討する。
+9. 上位 driver は atomic apply 設計後の別設計とする。
