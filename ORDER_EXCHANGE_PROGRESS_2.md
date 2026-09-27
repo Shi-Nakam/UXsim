@@ -376,6 +376,18 @@ payment、compensation、P_b比例配分、seller実補償配分、`payment_paid
 - 可読性方針（明示ループ、prepare/commit境界、初学者が追える構造）を実装で確認した。
 - **未実装:** actual outcome、物理通過利用（`Node.transfer`）、上位driver、実績参考金額、満足評価、welfare 等（詳細は詳細設計第3巻 §32.13）。
 
+## UXsim正式サンプルによるatomic apply実装後スモークテストを実施（2026-09-27）
+
+- `python demos_and_examples/example_00en_simple.py` を実行した（サンプル本体は変更なし）。
+- 1200 秒まで正常完走した。exception・異常停止は確認されなかった。
+- completed trips: 735 / 810
+- average speed: 11.7 m/s
+- average travel time: 162.6 s
+- average delay: 62.6 s
+- atomic apply 関連変更後も、TVT を使わない従来 UXsim の基本動作に明らかな異常がないことを確認した。
+- atomic apply 本体の処理経路は専用テスト 38 件・関連テスト 246 件で確認済みである。
+- 本スモークテストは atomic apply を直接実行する統合テストではない（詳細は詳細設計第3巻 §32.15）。
+
 ## 次の再開地点（TVT-MP atomic apply実装・検証後）
 
 - 詳細設計第3巻 §32 と本節をTerminalで限定確認する。
@@ -384,3 +396,12 @@ payment、compensation、P_b比例配分、seller実補償配分、`payment_paid
 - commitとpushは分ける。
 - push後にUXsim正式サンプルのスモークテストを実施するか判断する。
 - その後、次の未実装部品（actual outcome、上位driver等）の設計へ進む。
+
+**再開地点の更新（2026-09-27・実装後スモークテスト追記後）**
+
+1. 詳細設計第3巻と進捗第2巻の追記を Terminal で限定確認する。
+2. `git diff --check` を実行する。
+3. 変更ファイルを確認する。
+4. 文書 commit する。
+5. commit と push を分離する。
+6. push 後、次の未実装部品の設計へ進む。

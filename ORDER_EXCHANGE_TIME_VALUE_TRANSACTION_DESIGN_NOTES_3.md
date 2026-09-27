@@ -3061,3 +3061,56 @@ Cursor 側の追加回帰では、参照関係の leading confirmation と gener
 7. commit と push を分ける。
 8. push 後に UXsim 正式サンプルのスモークテストを実施するか判断する。
 9. その後、次の未実装部品の設計へ進む。
+
+**再開地点の更新（2026-09-27・実装後スモークテスト後）**
+
+- 実装後スモークテストまで完了した。
+- 次は結果の限定確認、文書 commit・push である。
+- その後、次の未実装部品を検討する。
+
+### 32.15 UXsim正式サンプル・実装後スモークテスト
+
+atomic apply 実装・関連テスト・独立確認・push 後に、UXsim 正式サンプルによるスモークテストを実施した（実行日: 2026-09-27）。
+
+**実行コマンド**
+
+```text
+python demos_and_examples/example_00en_simple.py
+```
+
+- `demos_and_examples/example_00en_simple.py` は変更せず実行した。
+
+**シミュレーション設定**
+
+- simulation duration: 1200 s
+- number of vehicles: 810
+- total road length: 3000 m
+- timestep size: 5 s
+- platoon size: 5 veh
+- number of timesteps: 240
+- number of platoons: 162
+- number of links: 3
+- number of nodes: 4
+
+**実行状況**
+
+- 1200 秒まで正常に完走した。
+- exception は発生しなかった。
+- `simulation finished` を確認した。
+
+**主要交通結果**
+
+- average speed: 11.7 m/s
+- completed trips: 735 / 810
+- total travel time: 119475.0 s
+- average travel time: 162.6 s
+- average delay: 62.6 s
+- delay ratio: 0.385
+- total distance traveled: 1632250.0 m
+
+**確認範囲と限界**
+
+- 本正式サンプルから atomic apply（`apply_tvt_mp_validated_result` 等）は直接呼ばれていない。
+- したがって、本スモークテストが確認するのは、atomic apply 関連の新規モジュール追加と順位台帳内部整理が、TVT を使わない従来 UXsim の基本動作を壊していないことである。
+- atomic apply 自体の正しさは、専用テスト 38 件と関連テスト 246 件で別途確認済みである。
+- 本スモークテストだけで atomic apply の実処理経路を確認したとは記録しない。
