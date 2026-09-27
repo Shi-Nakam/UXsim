@@ -244,6 +244,32 @@ class OrderControlTvtConfirmResult:
     newly_confirmed_count: int
 
 
+@dataclass
+class _OrderControlTvtPreparedFormalRouteConfirmation:
+    """
+    Prepared replacement for one Node rank ledger.
+
+    Not a public type. The only callers are
+    ``OrderControlTvtNodeRankState.confirm_visits_and_formal_target_node_routes_atomically``
+    and the TVT-MP atomic apply coordinator in
+    ``uxsim.order_control_tvt_mp_atomic_apply``. Both must obtain this object
+    from ``_prepare_formal_route_confirmation`` and must not build one by hand.
+
+    ``commit_required`` is false for an empty input. Committing that object
+    does not replace the live ledger.
+    """
+
+    confirmed_visit_keys_in_order: list[OrderControlTvtVisitKey]
+    confirmed_rank_by_visit_key: dict[OrderControlTvtVisitKey, int]
+    confirmed_formal_route_next_link_name_by_visit_key: dict[
+        OrderControlTvtVisitKey,
+        str | None,
+    ]
+    undetermined_visit_keys: set[OrderControlTvtVisitKey]
+    confirm_result: OrderControlTvtConfirmResult
+    commit_required: bool
+
+
 class OrderControlTvtNodeRankState:
     """Per-Node ledger of confirmed ranks and undetermined visits."""
 
@@ -445,7 +471,36 @@ class OrderControlTvtNodeRankState:
 
         The caller supplies each VisitKey with the formal outlink name from the
         baseline that fixed that visit's rank. All inputs are validated before
-        any rank or route is written to the ledger.
+        any rank or route is written to the ledger. This Node is prepared and
+        committed immediately. Multi-Node atomic apply uses the private prepare
+        and commit methods so a later Node can still reject the whole set.
+        """
+        prepared = self._prepare_formal_route_confirmation(
+            visits_with_formal_routes_in_order,
+            target_node_outlink_names,
+        )
+        self._commit_prepared_formal_route_confirmation(prepared)
+        return prepared.confirm_result
+
+    def _prepare_formal_route_confirmation(
+        self,
+        visits_with_formal_routes_in_order: list[
+            OrderControlTvtVisitKeyWithFormalRoute
+        ]
+        | tuple[OrderControlTvtVisitKeyWithFormalRoute, ...],
+        target_node_outlink_names: set[str]
+        | frozenset[str]
+        | list[str]
+        | tuple[str, ...],
+    ) -> _OrderControlTvtPreparedFormalRouteConfirmation:
+        """
+        Validate one Node and return the replacement ledger state.
+
+        Does not assign the live confirmed list, rank dict, formal-route dict,
+        or undetermined set. Callers are this Node's public confirm method and
+        ``apply_tvt_mp_validated_result``, which commits only after every Node
+        has been prepared. An empty visit column returns a no-op result with
+        ``commit_required`` false.
         """
         validated_pairs_tuple = _validate_visits_with_formal_routes_in_order(
             visits_with_formal_routes_in_order,
@@ -456,10 +511,17 @@ class OrderControlTvtNodeRankState:
 
         if len(validated_pairs_tuple) == 0:
             current_k_confirmed = self.k_confirmed()
-            return OrderControlTvtConfirmResult(
-                k_confirmed_before=current_k_confirmed,
-                k_confirmed_after=current_k_confirmed,
-                newly_confirmed_count=0,
+            return _OrderControlTvtPreparedFormalRouteConfirmation(
+                confirmed_visit_keys_in_order=[],
+                confirmed_rank_by_visit_key={},
+                confirmed_formal_route_next_link_name_by_visit_key={},
+                undetermined_visit_keys=set(),
+                confirm_result=OrderControlTvtConfirmResult(
+                    k_confirmed_before=current_k_confirmed,
+                    k_confirmed_after=current_k_confirmed,
+                    newly_confirmed_count=0,
+                ),
+                commit_required=False,
             )
 
         validated_visit_keys: list[OrderControlTvtVisitKey] = []
@@ -538,18 +600,41 @@ class OrderControlTvtNodeRankState:
             newly_confirmed_visit_keys=validated_visit_keys_tuple,
         )
 
-        self._confirmed_visit_keys_in_order = candidate_confirmed_visit_keys_in_order
-        self._confirmed_rank_by_visit_key = candidate_confirmed_rank_by_visit_key
-        self._confirmed_formal_route_next_link_name_by_visit_key = (
-            candidate_confirmed_formal_route_by_visit_key
+        return _OrderControlTvtPreparedFormalRouteConfirmation(
+            confirmed_visit_keys_in_order=candidate_confirmed_visit_keys_in_order,
+            confirmed_rank_by_visit_key=candidate_confirmed_rank_by_visit_key,
+            confirmed_formal_route_next_link_name_by_visit_key=(
+                candidate_confirmed_formal_route_by_visit_key
+            ),
+            undetermined_visit_keys=candidate_undetermined_visit_keys,
+            confirm_result=OrderControlTvtConfirmResult(
+                k_confirmed_before=k_confirmed_before,
+                k_confirmed_after=k_confirmed_after,
+                newly_confirmed_count=newly_confirmed_count,
+            ),
+            commit_required=True,
         )
-        self._undetermined_visit_keys = candidate_undetermined_visit_keys
 
-        return OrderControlTvtConfirmResult(
-            k_confirmed_before=k_confirmed_before,
-            k_confirmed_after=k_confirmed_after,
-            newly_confirmed_count=newly_confirmed_count,
+    def _commit_prepared_formal_route_confirmation(
+        self,
+        prepared: _OrderControlTvtPreparedFormalRouteConfirmation,
+    ) -> None:
+        """
+        Assign four prepared internal attributes and do nothing else.
+
+        No validation, search, or arithmetic. Callers are the public confirm
+        method, immediately after prepare, and the TVT-MP atomic apply
+        coordinator, after every target Node has been prepared. An empty
+        prepare (``commit_required`` false) leaves the live ledger untouched.
+        """
+        if prepared.commit_required is not True:
+            return
+        self._confirmed_visit_keys_in_order = prepared.confirmed_visit_keys_in_order
+        self._confirmed_rank_by_visit_key = prepared.confirmed_rank_by_visit_key
+        self._confirmed_formal_route_next_link_name_by_visit_key = (
+            prepared.confirmed_formal_route_next_link_name_by_visit_key
         )
+        self._undetermined_visit_keys = prepared.undetermined_visit_keys
 
     def confirmed_visit_keys_in_order(
         self,

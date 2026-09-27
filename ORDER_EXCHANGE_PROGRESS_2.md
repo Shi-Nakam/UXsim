@@ -357,3 +357,30 @@ payment、compensation、P_b比例配分、seller実補償配分、`payment_paid
 - commitとpushは分ける。
 - 保存後にatomic apply本番実装と専用テストへ進む。順位台帳の内部prepareとcommitの分離も実装する。
 - Cursor実装後は実コードと専用テストを独立確認する。
+
+上記は完全実装前仕様確定直後の再開地点の保存である。最新の実装・検証結果は、本巻末尾の「TVT-MP atomic apply部品を実装・検証（2026-09-27）」および詳細設計第3巻「TVT-MP atomic apply部品・完全実装前仕様」の §32 を参照する。
+
+## TVT-MP atomic apply部品を実装・検証（2026-09-27）
+
+- atomic apply本番を実装した。正式仕様・実装結果の参照先は、詳細設計第3巻の当該大見出しおよび §32 である。
+- Python変更は3ファイルのみ。新規本番 `uxsim/order_control_tvt_mp_atomic_apply.py`、新規専用テスト `tests_order_control_tvt_mp_atomic_apply.py`、既存 `uxsim/order_control_tvt_node_rank_state.py` の順位台帳内部整理。
+- 1回のvalidation結果の全Nodeを1 apply単位とし、全Node・全対象Vehicleをprepare後にのみcommitする。
+- 順位、正式進路、累計金額、成立時履歴を反映する。`NO_VISITS_TO_CONFIRM` と空Nodeのmapping必須を含む。
+- 0円buyer・0円sellerも成立時履歴へ記録する。
+- `declared_vot_per_second` と `true_vot_per_second` を成立時履歴へ保存する。declaredは経済record、trueはprepare時の `Vehicle.vot_true`。
+- 独立確認で、保存済みdeclared VOTの非負検査漏れを発見し修正した（負値は全体無変更で拒否）。
+- 専用テスト38件成功（定義・`TESTS`登録・pytest収集一致）。
+- 独立確認の関連pytest **246 passed**（失敗なし）。
+- Cursor追加回帰409 passedはCursor実行結果として区別する（正式記録は246件）。
+- py_compile成功。`git diff --check` 問題なし。
+- 可読性方針（明示ループ、prepare/commit境界、初学者が追える構造）を実装で確認した。
+- **未実装:** actual outcome、物理通過利用（`Node.transfer`）、上位driver、実績参考金額、満足評価、welfare 等（詳細は詳細設計第3巻 §32.13）。
+
+## 次の再開地点（TVT-MP atomic apply実装・検証後）
+
+- 詳細設計第3巻 §32 と本節をTerminalで限定確認する。
+- 文書2ファイルとPython・テストの変更範囲を確認し、`git diff --check` を実行する。
+- 文書と実装・テストを同一保存単位でcommitする（commit名に `document` を含める）。
+- commitとpushは分ける。
+- push後にUXsim正式サンプルのスモークテストを実施するか判断する。
+- その後、次の未実装部品（actual outcome、上位driver等）の設計へ進む。

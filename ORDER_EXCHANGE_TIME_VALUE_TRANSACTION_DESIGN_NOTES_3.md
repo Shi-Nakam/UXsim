@@ -2908,4 +2908,156 @@ upstream の frozen 結果は不変である。collector は不変である。Wo
 11. 実装では、新規本番モジュール、新規専用テスト、順位台帳の内部 prepare と commit の分離を扱う。
 12. Cursor 実装後は、実コードと専用テストを独立確認する。
 
-本節は完全実装前仕様である。Python 実装と専用テストは未着手である。
+本節は完全実装前仕様である。上記 §31 は実装着手前の再開地点の保存である。Python 実装と専用テストは、当時は未着手であった。実装・検証完了後の記録と最新の再開地点は §32 を参照する。
+
+## 32. TVT-MP atomic apply部品・実装検証結果（2026-09-27）
+
+**記録日: 2026-09-27**
+
+保存済み完全実装前仕様（本大見出しの §1–§31）に従って実装・検証した。上記 §1–§31 は歴史的な実装前仕様として残す。最新の実装完了事実は本節 §32 を参照する。
+
+atomic apply による Python 変更は、次の3ファイルだけである。
+
+### 32.1 実装ファイル
+
+| 区分 | パス |
+| --- | --- |
+| 新規本番 | `uxsim/order_control_tvt_mp_atomic_apply.py` |
+| 新規専用テスト | `tests_order_control_tvt_mp_atomic_apply.py` |
+| 既存変更 | `uxsim/order_control_tvt_node_rank_state.py` |
+
+### 32.2 公開型と公開API
+
+**公開関数** `apply_tvt_mp_validated_result` — 位置引数3つ（`final_consistency_validation_set_result`、`real_W`、`rank_states_by_node_name`）。optional なし。全 Node 一括。Node 単位・Vehicle 単位の公開 apply なし。
+
+**成功結果型** `OrderControlTvtMpAtomicApplySetResult`（frozen）— field は `final_consistency_validation_set_result` の1つだけ。入力 validation 結果と同一 object 参照。live object、mutable state、Node 別複写、failed status、boolean 承認 token を保持しない。
+
+**成立時履歴型** `OrderControlTvtMpTradeEstablishmentLogRecord`（frozen）— 17 field を §11.9 の順序どおり実装。`binding_rank` と `final_local_rank` は履歴へ保存しない。
+
+**成立時履歴 role 型** `OrderControlTvtMpTradeEstablishmentRole` — `BUYER` と `SELLER` だけ。既存 `OrderControlTvtMpLocalBindingTradeRole` は `NONPARTICIPATING` と `OUTSIDE_TRADE_SCOPE` も含むため、成立時履歴の field 型には使用しなかった。意味は実装前仕様どおりである。
+
+**取引識別** — `OrderControlTvtMpTradeIdentity` は作らない。各成立時 record が平坦に `tvt_decision_timestep`、`node_name`、`buyers_sorted` を保持する。
+
+### 32.3 順位台帳のprepare・commit分離
+
+`OrderControlTvtNodeRankState` 内に、private prepared-state、`_prepare_formal_route_confirmation`、`_commit_prepared_formal_route_confirmation` を実装した。
+
+既存公開 API `confirm_visits_and_formal_target_node_routes_atomically` の公開契約は維持した。同一 Node について prepare 直後に commit する。
+
+空入力では `commit_required=False` とし、live 台帳の内部4参照を置換しない。
+
+atomic apply は、全 Node の prepare 完了後だけ、書込み対象 Node を commit する。
+
+### 32.4 全Node一括prepareとcommit
+
+1回の `OrderControlTvtMpFinalConsistencyValidationSetResult` を1 apply 単位とした。全 Node の更新後順位台帳候補と、全対象 Vehicle の `payment_paid`、`payment_received`、新しい `order_exchange_log` を、最初の実書込み前に準備する。1件でも不整合があれば commit へ進まない。2 Node 目の不整合時も1 Node 目を変更しない。
+
+`NO_VISITS_TO_CONFIRM` は正常な no-op である。空 Node も点検対象から落とさない。空 Node でも `rank_states_by_node_name` の欠落は拒否する。
+
+**commit 順**（全 prepare 成功後のみ）: (1) 全対象 Node の順位台帳内部4状態、(2) 全対象 Vehicle の `payment_paid`、(3) 全対象 Vehicle の `payment_received`、(4) 全対象 Vehicle の新しい `order_exchange_log`（list 代入のみ。commit 中の検査・探索・金額計算・`append` なし）。
+
+### 32.5 順位・正式進路
+
+final rank 列の保存順を維持して順位台帳へ渡す。`formal_route_next_link_name` は final rank record の保存値を使い、World や Vehicle から再推定しない。apply 直前に、実 Node の `outlinks.values()` 上の Link 名集合へ含まれることを確認する。
+
+履歴: `baseline_local_rank` は `candidate_visits` の保存順（1始まり）。`post_trade_local_rank` は selected candidate に対応する general trade rank の `assigned_rank`。`rank_change` は `baseline_local_rank - post_trade_local_rank`。`ledger_assigned_rank` は prepare 開始時の `k_confirmed + final_local_rank`。`binding_rank` は取引前後比較に使わない。`final_local_rank` は `post_trade_local_rank` と重複するため履歴に入れない。
+
+### 32.6 累計金額と成立時履歴
+
+buyer: 保存済み `payment_P_b` を `payment_paid` に加算。今回受取額は0。seller: 保存済み `compensation_amount` を `payment_received` に加算。今回支払額は0。
+
+`G`、`R`、`G_b`、`R_s`、payment 式、compensation 式、VOT、passage difference は再計算しない。金額0でも、正式な buyer または seller なら成立時 record を必ず作る。非参加、区分4、fallback、`NO_VISITS_TO_CONFIRM` には成立時 record を作らない。`order_exchange_log` は prepare 時に新 list を完成させ、commit では属性へ代入するだけである。
+
+### 32.7 VOT
+
+**declared_vot_per_second** — 保存済み buyer または seller economic record から取得。`Vehicle.vot_declared` は再読取りしない。有限の非負値を必須とする。0は正常。
+
+**true_vot_per_second** — prepare 時の live `Vehicle.vot_true` から取得。有限の非負値を必須とする。0は正常。成立時 record へ float で固定する。成立判定・正式金額計算には使わない。
+
+`Vehicle.vot_true` と `Vehicle.vot_declared` は変更しない。
+
+### 32.8 独立確認で発見した問題と修正
+
+独立確認で、保存済み `declared_vot_per_second` について、数値型と有限性は確認していたが、**非負検査が不足**していることを発見した。
+
+- **原因:** `_require_declared_vot` が `value < 0` を拒否していなかった。
+- **修正:** 負値を `RuntimeError` とした。0と正の有限値は正常。上流経済性評価の申告 VOT 契約と一致させた。
+- **テスト追加:** buyer 側・seller 側の負値 declared VOT で、全 Node 順位・全 Vehicle 累計・全 Vehicle 履歴が完全無変更の `RuntimeError` を専用テストで固定した。
+
+### 32.9 専用テスト
+
+ファイル: `tests_order_control_tvt_mp_atomic_apply.py`
+
+- 定義済み `test_` 関数: **38**
+- `TESTS` 登録: **38**
+- pytest 収集: **38**
+- 重複なし、登録漏れなし、未定義参照なし
+- 直接実行: 38件成功
+- pytest 専用: 38件成功
+
+公開契約、selected 正常系、履歴 field、fallback・空 Node、全体 atomic 性、commit 境界、入力型の `ValueError`／live 不整合の `RuntimeError` を固定した。
+
+### 32.10 独立確認と回帰結果
+
+**py_compile 成功:** `uxsim/order_control_tvt_mp_atomic_apply.py`、`uxsim/order_control_tvt_node_rank_state.py`、`tests_order_control_tvt_mp_atomic_apply.py`
+
+**独立確認として Terminal で実行した関連 pytest:**
+
+- `tests_order_control_tvt_node_rank_state.py`
+- `tests_order_control_tvt_mp_final_consistency_validation.py`
+- `tests_order_control_tvt_mp_final_rank.py`
+- `tests_order_control_tvt_mp_payment_and_compensation.py`
+- `tests_order_control_tvt_mp_atomic_apply.py`
+
+**結果: 246 passed**（約20.11秒）。失敗なし。回帰なし。
+
+Cursor 側の追加回帰では、参照関係の leading confirmation と general trade rank を含む **409 passed** も報告されている。正式記録として独立確認で直接実行した件数は **246** とする。409 は Cursor 実行結果として区別する。
+
+`git diff --check` は問題なし。
+
+### 32.11 可読性確認
+
+実装上確認したもの: 明示的な Node ループ、明示的な buyer・seller ループ、意味のある中間変数、prepare と commit の明確な境界、小さな private helper。長い内包表記や複雑な generator は避けた。短さより、Python 初学者が後から処理順を追える構造を優先した。
+
+正しさと契約検査を優先するため、本番モジュールは長い。長いこと自体を理由に統合・短縮しない。
+
+### 32.12 実装済み範囲
+
+- atomic apply 本番
+- 成功結果型
+- 成立時履歴型
+- role 型
+- 全 Node 一括 prepare
+- 全 Vehicle 金銭・履歴 prepare
+- commit
+- 順位台帳内部 prepare・commit 分離
+- 0円 buyer・seller 履歴
+- VOT 保存
+- 専用テスト
+- 関係回帰
+- 独立確認
+
+### 32.13 未実装範囲
+
+- actual outcome record
+- actual passage 評価
+- `Node.transfer` による TVT 確定順位の物理通過利用
+- 上位 driver
+- 実績参考支払額・補償額
+- buyer・seller 別累計分析
+- 実績利得
+- 満足評価
+- welfare
+- strategy-proofness
+
+### 32.14 次の再開地点
+
+1. 詳細設計第3巻の本節 §32 を Terminal で限定確認する。
+2. 進捗第2巻の実装完了要約を Terminal で限定確認する。
+3. `git diff --check` を実行する。
+4. 変更ファイルを確認する（文書2ファイル、Python3ファイル、専用テスト1ファイル）。
+5. 文書と Python・テストをまとめて commit する。
+6. commit 名には `document` を含める。
+7. commit と push を分ける。
+8. push 後に UXsim 正式サンプルのスモークテストを実施するか判断する。
+9. その後、次の未実装部品の設計へ進む。
