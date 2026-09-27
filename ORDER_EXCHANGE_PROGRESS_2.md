@@ -314,3 +314,37 @@ payment、compensation、P_b比例配分、seller実補償配分、`payment_paid
 5. 必要な場合だけ `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES.md`
 
 最新現在地は進捗第2巻から確認する。最新の詳細設計と実装結果は詳細設計第3巻を参照する。過去の詳細は必要な場合だけ旧進捗メモまたは旧設計メモの該当箇所を検索する。旧巻の全文を毎回同時に読み込ませない。
+
+## TVT-MP atomic apply部品の完全実装前仕様を確定（2026-09-27）
+
+- atomic apply設計着手前調査と、Cursor調査結果の独立確認を完了した。
+- 詳細な正式仕様は、`ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_3.md`の「TVT-MP atomic apply部品・完全実装前仕様」を参照する。
+- 1回のvalidation結果に含まれる全Nodeを、1回のapply単位とする。
+- 1 Nodeでも不整合があれば、順位、累計金額、個別取引履歴を一切反映しない。
+- rollbackではなく、全Nodeと全Vehicleの更新後状態を先にprepareし、全件成功後にcommitする。
+- 既存Node順位APIの公開契約は維持し、内部のprepareとcommitの分離を予定する。
+- `payment_paid`と`payment_received`は、開発初期から累計属性である。
+- `order_exchange_log`へ、正式なbuyer・sellerごとの成立時recordを追加する。
+- 金額0でも、正式なbuyerまたはsellerであれば成立時recordを必ず残す。
+- 履歴では`baseline_local_rank`、`post_trade_local_rank`、`ledger_assigned_rank`を区別する。
+- `binding_rank`は取引前後の順位比較に使わない。
+- baseline予想通過時刻とcandidate予想通過時刻は、保存済み経済recordから記録する。
+- buyer・sellerの成立時recordには、取引成立時点の`declared_vot_per_second`と`true_vot_per_second`を両方保存する。
+- declared VOTは経済recordの保存値を使用し、`Vehicle.vot_declared`を再読取りしない。
+- true VOTはatomic applyのprepare時に`Vehicle.vot_true`から読み、成立時recordへ固定する。
+- 基本実験では、統計資料または論文等に基づく`vot_true`を設定し、`vot_declared`を同じ値にする。
+- 将来は、申告VOTと真のVOTが異なる場合や、走行中に申告VOTが変化する研究を妨げない。
+- actual passage、実績時間、実績ベース参考金額、実績利得、満足評価は後続部品とする。
+- 正式支払額・正式補償額をactual passageに基づいて事後精算しない。
+- Python実装、専用テスト、上位driverは未実装である。
+
+## 次の再開地点（TVT-MP atomic apply完全実装前仕様確定後）
+
+- 詳細設計第3巻と進捗第2巻の内容をTerminalで確認する。
+- 両文書の差分と`git diff --check`を確認する。
+- 文書2ファイル以外に変更がないことを確認する。
+- 利用者確認後にcommitする。
+- メモを含むcommit名にはdocumentを含める。
+- commitとpushは分ける。
+- 保存後にatomic applyのPython実装と専用テストへ進む。
+- 実装着手前に、詳細設計第3巻§30に残る正式な型名・field名を固定する。

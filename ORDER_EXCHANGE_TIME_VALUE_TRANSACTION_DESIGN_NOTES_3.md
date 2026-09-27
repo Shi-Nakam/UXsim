@@ -2081,3 +2081,777 @@ setup time と simulation 中の computation time は実行環境により変化
 7. 保存後に atomic apply の設計着手前調査へ進む。
 8. atomic apply 実装後に正式サンプルを再実行する。
 9. 上位 driver 接続後にも正式サンプルを再実行する。
+
+# TVT-MP atomic apply部品・完全実装前仕様
+
+**記録日: 2026-09-27**
+
+本節は完全実装前仕様である。Python 実装と専用テストは未着手である。Cursor の作業だけで実装完了とはしない。
+
+現在地: candidate selection、payment・compensation 純計算、final rank construction、final consistency validation は実装済みである。UXsim 正式サンプルによる atomic apply 設計前スモークテストも実施済みである。atomic apply と上位 driver は未実装である。
+
+本節は、final consistency validation の成功結果を、Node ごとの順位台帳、Visit ごとの正式進路、`Vehicle.payment_paid`、`Vehicle.payment_received`、`Vehicle.order_exchange_log` へ反映する部品の実装前仕様である。設計着手前調査と、実コード・専用テストの確認を前提にする。調査で確定した技術的前提は、実コードと衝突しない限り未確定へ戻さない。
+
+## 1. 位置づけと目的
+
+非技術的には、順位だけ変わって金銭が変わっていない、金銭だけ変わって履歴がない、ある Node だけ反映されて別 Node が未反映、という中途半端な状態を防ぐ部品である。
+
+目的:
+
+- 順位だけ反映され、金銭が未反映になる状態を防ぐ。
+- 金銭だけ反映され、順位が未反映になる状態を防ぐ。
+- 支払額だけ更新され、受取額または履歴が欠ける状態を防ぐ。
+- 一部の Node だけ反映される状態を防ぐ。
+- 通常想定される不整合を、最初の実書込みより前にすべて検出する。
+
+保存済みの正式処理順:
+
+1. candidate selection
+2. payment・compensation pure calculation
+3. final rank construction
+4. final consistency validation
+5. atomic apply
+
+本部品は 5 の atomic apply だけを担当する。構築と照合は再実行しない。実通過後の評価は後続部品へ残す。
+
+## 2. 予定ファイル
+
+| 区分 | パス |
+| --- | --- |
+| 新規本番 | `uxsim/order_control_tvt_mp_atomic_apply.py` |
+| 新規専用テスト | `tests_order_control_tvt_mp_atomic_apply.py` |
+| 既存変更候補 | `uxsim/order_control_tvt_node_rank_state.py` |
+
+既存順位台帳の公開 API 契約は変更しない。validation、final rank、payment、`uxsim.py`、leading confirmation、collector は変更しない。
+
+`uxsim/order_control_tvt_node_rank_state.py` を変更する理由は、1 Node 内の原子的確定を壊さず、複数 Node の候補状態を先に揃えるためである。公開メソッドの入出力、空入力 no-op、拒否条件は維持する。
+
+## 3. atomic applyの一括単位
+
+1回の `OrderControlTvtMpFinalConsistencyValidationSetResult` に含まれる全対象 Node を、1回の apply 単位とする。Node 単位の公開 apply API は作らない。Vehicle 単位の公開 apply API も作らない。
+
+1 Node の不整合では、全 Node の順位、全 Vehicle の累計金額、全 Vehicle の履歴を一切変更しない。
+
+`NO_VISITS_TO_CONFIRM` の Node も点検対象 Node 集合から落とさない。空 Node は正常な no-op である。final rank 列も金銭列も空なので、その Node の台帳と、どの Vehicle の累計・履歴も変えない。空 Node でも `rank_states_by_node_name` からの欠落は拒否する。欠落を正常な空結果と同一視しない。
+
+上位 driver は、全 Node 一括の公開 API を 1 回だけ呼ぶ。
+
+理由:
+
+- 既存の `OrderControlTvtNodeRankState.confirm_visits_and_formal_target_node_routes_atomically` は、1 Node 内では全件検査後に内部状態を一括置換する。複数 Node へ順番に呼ぶと、後続 Node の失敗時に先行 Node だけが残る。
+- `confirm_leading_nonparticipating_decision_window_visits` は、この公開 API を target node 順に呼ぶ。`tests_order_control_tvt_leading_nonparticipating_confirmation.py` の `test_mid_failure_preserves_prior_node_and_skips_later_nodes` は、Node B 失敗時に Node A が確定済みで残ることを既存動作として固定している。atomic apply はその部分更新を引き継がない。
+- `payment_paid` と `payment_received` は Node 台帳の内部ではなく、Vehicle 上の累計属性である。Node 単位の commit では、後続 Node 失敗後に累計だけを戻す手段が既存 API にない。
+
+## 4. rollbackに依存しない構造
+
+prepare 区間と commit 区間を分離する。rollback を前提にしない。World 全体の copy もしない。順位台帳は World の外にあり、World の複製は通過状態まで複製するためである。
+
+prepare 区間で作るもの:
+
+- 全 Node の更新後順位台帳状態
+- 全 Vehicle の更新後 `payment_paid`
+- 全 Vehicle の更新後 `payment_received`
+- 全 Vehicle の新しい `order_exchange_log`
+- 成功結果の候補
+
+prepare 区間では live 状態を変更しない。1件でも問題があれば、この段階で停止する。
+
+commit 区間は、準備済みの値または内部状態を代入するだけである。通常の入力検査を行わない。金額を計算しない。`order_exchange_log` へ `append` しない。上流計算を再実行しない。rollback を行わない。
+
+保証する範囲は、通常の型不正、欠落、重複、既確定、未登録、進路不正、Vehicle 欠落、金銭属性不正、履歴属性不正による部分更新を防ぐことである。Python プロセスの強制終了、OS 障害、`MemoryError` など、commit 中の致命的障害まで完全な transaction にするものではない。本仕様を完全な transaction と読まない。
+
+## 5. 公開入力と公開API
+
+公開 API 案:
+
+```text
+def apply_tvt_mp_validated_result(
+    final_consistency_validation_set_result,
+    real_W,
+    rank_states_by_node_name,
+) -> OrderControlTvtMpAtomicApplySetResult:
+```
+
+契約: 位置引数3つ。optional 引数なし。全 Node 一括。Node 単位公開 API なし。Vehicle 単位公開 API なし。RNG なし。外部 transaction rule 引数なし。部分的成功結果なし。成功時だけ frozen 全体結果を返す。
+
+各入力の意味:
+
+- final consistency validation result は、frozen 結果間の整合が確認済みである入口である。live 状態の正しさまでは保証しない。validation は rank state、Vehicle、outlink を見ていない。
+- `real_W` は、live な Node、outlink、Vehicle、累計金額、履歴への入口である。
+- `rank_states_by_node_name` は、既存の Node 別順位台帳である。先行確定済み順位と未確定集合を既に保持している。
+
+atomic apply 内で rank state を新規作成しない。新規作成すると、先行確定済み順位と未確定集合を失う。mapping は上位 driver が保持しているものを渡す。
+
+関数名と結果型名は §30 の名称候補である。意味と引数契約は本節で固定する。
+
+## 6. 時刻一致
+
+`real_W.T` と、保存済み `baseline_timestep_T` の一致を必須とする。
+
+`baseline_timestep_T` は別の仮想時刻ではない。baseline 計算を開始した実 World の時刻 `T` である。この時刻 `T` に TVT 成立を判断した取引として履歴へ記録する。予測を作った後に実 World が次の timestep へ進んでいれば、古い判断を反映せず停止する。
+
+根拠: `confirm_leading_nonparticipating_decision_window_visits` は、順位書込み前に `real_W.T` と `baseline_timestep_T` の一致を既に要求している。apply がこれを省くと、leading confirmation より弱い時刻条件で台帳を更新する。
+
+空 Node だけの結果でも、結果全体の時刻一致を確認する。空だから時刻検査を省かない。
+
+保存済み連鎖の中で fork 結果の `baseline_timestep_T` と、採用候補がある場合の局所結果の `baseline_timestep_T` が異なる場合は、どちらかを採用せず `RuntimeError` とする。
+
+履歴 field の名称は、既存連鎖と同じ `baseline_timestep_T` とする案と、成立時刻であることを名前で示す `tvt_decision_timestep` とする案がある。保存する整数はどちらでも同じであり、`real_W.T` および上流の `baseline_timestep_T` と一致する。正式な field 名は §30 で実装前に固定する。意味は本節で固定する。
+
+## 7. 既存順位台帳APIの内部整理
+
+維持する公開 API は `OrderControlTvtNodeRankState.confirm_visits_and_formal_target_node_routes_atomically` である。
+
+既存公開契約:
+
+- 1 Node 内で全入力を検査する。
+- 候補状態を作る。
+- 候補状態を検証する。
+- 最後に内部4状態を置換する。内部4状態は、確定 Visit 列、順位 dict、formal route dict、未確定集合である。
+- 空入力は台帳を変えず no-op 結果を返す。
+- 既確定、未登録、重複、対象 Node の outlink でない進路では無変更で拒否する。
+- `OrderControlTvtConfirmResult` を返す。`k_confirmed_before`、`k_confirmed_after`、`newly_confirmed_count` を持つ。
+
+内部変更案:
+
+- private prepare helper
+- private prepared state
+- private commit helper
+
+private prepare が作るもの:
+
+- 新しい confirmed Visit 列
+- 新しい rank dict
+- 新しい formal route dict
+- 新しい undetermined 集合
+- `k_confirmed_before`
+- `k_confirmed_after`
+- `newly_confirmed_count`
+
+private prepare では live な内部4属性を変更しない。絶対順位は、prepare 開始時の `k_confirmed` の次から、入力列の順に振る。`final_local_rank` は受け取らない。
+
+private commit は、準備済みの4参照を代入するだけとする。
+
+既存公開 API は、同一 Node について private prepare の直後に private commit を呼び、既存動作を維持する。外部から見た拒否条件と空列 no-op は変えない。
+
+atomic apply は、全 Node の private prepare を終了した後で、書込み対象 Node だけを private commit する。`NO_VISITS_TO_CONFIRM` は commit リストに入れない。状態オブジェクト自体を触らない。
+
+prepared state を公開型にしない。mutable list や dict を外部へ公開しない。prepare が作った list と dict は、commit 後に台帳の内部状態になる。公開すると外部が台帳の実体を保持する。
+
+private commit は、atomic apply と既存公開 API の内部からのみ呼ぶ。モジュール外の任意の候補状態を受け取って台帳へ書く入口にはしない。不正な外部呼出しで、検査を飛ばした状態を台帳へ入れないためである。
+
+`confirm_visits_in_order` は formal route を `None` にする。apply は使わない。route 付きの公開 API だけを、内部整理の対象にする。
+
+## 8. final rankと順位台帳の接続
+
+final rank 列の保存順を維持する。その順で、VisitKey と `formal_route_next_link_name` の組を順位台帳へ渡す。
+
+`final_local_rank` は、今回追加する final rank 列内の1始まり順位である。順位台帳全体の絶対順位ではない。validation は、この値が1から連続し、tuple 順と一致することを確認済みである。
+
+順位台帳へ登録される絶対順位は、prepare 開始時の `k_confirmed + final_local_rank` である。`k_confirmed` が0のときだけ、絶対順位と `final_local_rank` は同じ数値になる。`final_local_rank` を絶対順位として上書きしない。過去の確定が既にある台帳を、列内順位で拒否しない。
+
+formal route は、final rank record の保存値を使う。World や Vehicle から再推定しない。実 Node の現在の outlink 所属だけを、apply 直前に確認する。
+
+outlink 名の取得:
+
+- `real_W.get_node(node_name)`
+- `node.outlinks.values()`
+- 各 Link の `name`
+
+`outlinks` の keys だけを正式検査材料にしない。leading confirmation の `_valid_outlink_names_at_target_node` が、keys ではなく values の Link 名を使う。apply は同じ規則の確認を自モジュールに置く。leading confirmation の private helper は公開しない。
+
+## 9. Vehicle金銭属性
+
+開発初期 commit `6a0578d` から、次が確定している。`uxsim.py` の導入時 docstring は Cumulative と明記している。旧進捗第1巻のフェーズ1も、支払累計額・受取累計額・順序交換履歴と記録している。
+
+- `Vehicle.payment_paid` は累計支払額である。
+- `Vehicle.payment_received` は累計受取額である。
+- `Vehicle.order_exchange_log` は、当該 Vehicle に関する order-exchange event の履歴 list である。1件の正式形式は、本節で成立時 record として初めて定める。導入時には list であることと、event の履歴であることが定義され、項目は未確定だった。
+
+atomic apply では次を行う。
+
+buyer:
+
+- 保存済み `payment_P_b` を `payment_paid` へ加える。
+- `payment_received` は増やさない。
+
+seller:
+
+- 保存済み `compensation_amount` を `payment_received` へ加える。
+- `payment_paid` は増やさない。
+
+行わないこと: `G`、`R`、`G_b`、`R_s` の再計算。payment 式の再計算。VOT の再読取。passage timetable の再計算。actual passage による事後精算。金額の丸め。tolerance。Decimal。残差補正。
+
+金額0でも累計へ0を加え、個別取引履歴を必ず残す。0を足す経路と、正の金額を足す経路を分けない。
+
+## 10. 同一Vehicleの複数金銭record
+
+現行 baseline collector は、1回の snapshot-fixed baseline run で同一 Vehicle 名を1 Visit だけ登録する。`order_control_baseline_collector.py` は、同一 `vehicle_name` の2件目を snapshot 登録時に拒否する。
+
+現行の正常な上流結果では、1回の validation 結果内で同一 Vehicle に複数の buyer または seller 金銭 record は通常発生しない。複数 Node を1回の apply にまとめる主因は、同一 Vehicle の合算ではない。後続 Node の失敗で先行 Node の順位または金銭が残ることである。
+
+現行 atomic apply では、同一 `vehicle_name` が金銭 record へ複数回現れた場合は `RuntimeError` とする。合算して処理を続けない。現行上流契約違反として扱う。
+
+将来 collector が複数 Visit 対応になった場合、Vehicle 単位集約へ拡張する可能性を禁止しない。「将来も常に1 Vehicle 1 record でなければならない」とは記録しない。
+
+## 11. order_exchange_logの成立時record
+
+1要素は frozen dataclass を採用する。
+
+理由: dict より field 名と型が明確である。tuple より可読性が高い。後日の実績 record と `isinstance` で区別できる。live object を保持せずに済む。
+
+buyer 用と seller 用に型を分けない。共通の成立時 record 型を採用する。分けると、順位と時刻の field が二箇所になる。role と両金額を持ち、使わない側は0にする。
+
+live な Vehicle、Node、World、rank state は入れない。
+
+### 11.1 取引識別
+
+共通 field の識別部分:
+
+- TVT 成立時刻 `T`
+- `node_name`
+- `visit_key`
+- `vehicle_name`
+- `trade_role`（`BUYER` または `SELLER`）
+- 取引識別材料
+
+`vehicle_name` は VisitKey の先頭から得られる。既存の buyer payment record と seller compensation record は `vehicle_name` も保持している。履歴だけ VisitKey に縮めると、金銭 record と履歴の対応が読みにくくなる。VisitKey の先頭および金銭 record の `vehicle_name` と一致することを確認した写しを残す。
+
+取引識別材料は、少なくとも次から構成する。
+
+- TVT 成立時刻 `T`
+- `node_name`
+- `buyers_sorted`
+
+`id()`、`hash()`、live object 参照は使わない。新しい連番 transaction ID は現段階では作らない。
+
+根拠: candidate selection は、安定した候補識別として Node 名と公式の `buyers_sorted` を既に使っている。1 Node の1回の validation 結果には、採用候補は高々1つである。`baseline_timestep_T` を足すと、同じ Node の別時刻の取引と分かれる。
+
+`buyers_sorted` を各 buyer および各 seller の成立時 record へ保持する。seller の record だけを見ても、同じ取引の buyer 集合を特定できる。後続の実績記録は、この材料で成立時 record と結び付く。別のヘッダ record を後から探す必要はない。識別材料をネストした別 frozen 型にするかは §30 の名称判断である。持たせる情報は本項で固定する。
+
+この識別材料は、二重適用防止の正本にしない。二重適用の拒否は、順位台帳が既確定 Visit の再確定を拒否することである。`order_exchange_log` は研究コードが list を差し替えできる。
+
+### 11.2 順位情報
+
+履歴へ残す順位は次の3種類だけとする。
+
+`baseline_local_rank`:
+
+- 今回の TVT `candidate_visits` 内における正式 baseline 順位である。
+- `candidate_visits` の保存順を1始まりで読む。
+- 到着時刻、tiebreaker、Vehicle id で apply が再ソートしない。
+- 先行確定済み Visit は `candidate_visits` から除外済みである。
+- 交差点に関係する全 Vehicle の絶対順位ではない。
+- 今回の TVT 候補車両内の比較用順位である。
+
+取得できる理由: general trade rank の `_build_baseline_order_and_ranks` は、保存済み `candidate_visits` の位置を1始まりで読んだ一時 dict を作り、その dict は結果型へ保存しない、と実装コメントにある。並びの再ソートはしていない。apply は同じ定義で位置を読む。上流型へ baseline 順位 field を追加しない。候補集合に無い Visit は `RuntimeError` とし、順位を推定しない。
+
+`post_trade_local_rank`:
+
+- 同じ `candidate_visits` 母集団における取引後順位である。
+- selected candidate の general trade rank の `assigned_rank` を利用する。
+- `baseline_local_rank` と同じ母集団なので、順位変化の比較に使える。
+
+結び付け: selected 側の `concrete_buyer_candidate_set.buyers_sorted` と、general trade rank 側の `buyers_sorted` が同じ並びである候補だけを使う。別候補の trade rank は使わない。この参照は保存済み連鎖の読取りであり、順位の再構成ではない。
+
+`ledger_assigned_rank`:
+
+- 順位台帳全体に実際に登録される絶対順位である。
+- prepare 時の `k_confirmed + final_local_rank` である。
+- 先行確定済み Vehicle を含む順位台帳全体の順位である。
+- commit 後に台帳を読み返して履歴を埋めない。prepare 時に決まり、成立時 record へ書く。
+
+`rank_change` は `baseline_local_rank - post_trade_local_rank` である。正なら前進、0なら順位不変、負なら後退である。
+
+履歴へ保存しないもの:
+
+- `binding_rank`
+- `post_trade_local_rank` と重複する `final_local_rank`
+- buyer・seller について常に selected candidate 由来となる `finalization_source`
+
+理由:
+
+- `binding_rank` は、区分1・2を含む局所 binding 列の位置である。`candidate_visits` 内の取引前後順位と同じ母集団ではない。純粋な取引前後の比較には使わない。
+- buyer と seller について、`post_trade_local_rank` と今回列の `final_local_rank` は同じ取引後順になる。同じ数を二 field にしない。
+- 履歴を作る Visit は selected 時の buyer と seller だけである。source は selected candidate に決まる。fallback の Visit は履歴を作らないため、source を履歴 field にしない。
+
+`final_local_rank` 自体は台帳接続に使う。履歴へ重複保存しないだけである。絶対順位は `ledger_assigned_rank` だけが表す。
+
+### 11.3 正式進路
+
+`formal_route_next_link_name` を残す。final rank record に保存された正式進路を利用する。World や Vehicle から再推定しない。実 Node の outlink 所属だけを apply 直前に確認する。
+
+### 11.4 予想通過時刻
+
+`baseline_passage_timestep` と `candidate_passage_timestep` を残す。
+
+取得元は `OrderControlTvtMpBuyerEconomicRecord` と `OrderControlTvtMpSellerEconomicRecord` の保存済み int である。経済 record は、採用候補についてこの2時刻を int で保持する。局所仮想計算の passage record は `None` を許すため、履歴の取得元にしない。局所仮想計算を再実行しない。live な local World へ戻らない。
+
+### 11.5 今回の正式金額
+
+`payment_paid_in_this_transaction` と `payment_received_in_this_transaction` を残す。
+
+buyer:
+
+- `payment_paid_in_this_transaction` は `payment_P_b`
+- `payment_received_in_this_transaction` は 0
+
+seller:
+
+- `payment_paid_in_this_transaction` は 0
+- `payment_received_in_this_transaction` は `compensation_amount`
+
+金額0を省略しない。累計属性へ足す値と、履歴に残す今回額は同じ保存済み金額である。
+
+field 名は §30 の候補である。buyer は支払額だけを累計へ足し、seller は補償額だけを累計へ足す、という対応は §9 で固定する。
+
+### 11.6 申告VOTと真のVOT
+
+成立時 record には、次の両方を float として保存する。
+
+- `declared_vot_per_second` は、その取引の成立判定と正式金額の計算で使われた、取引成立時点の申告 VOT である。
+- `true_vot_per_second` は、後続の実績利得と満足・不満足評価で使う、取引成立時点の真の VOT である。
+
+`declared_vot_per_second` の取得元は、対応する `OrderControlTvtMpBuyerEconomicRecord.declared_vot_per_second` または `OrderControlTvtMpSellerEconomicRecord.declared_vot_per_second` である。buyer の履歴は buyer の経済 record、seller の履歴は seller の経済 record と、VisitKey で対応していることを確認する。atomic apply で `Vehicle.vot_declared` を再読取りしない。申告 VOT が0でも正式な値として保存する。補償額0または支払額0を理由に省略しない。
+
+`true_vot_per_second` は、現在の buyer・seller 経済 record には保存されていない。atomic apply の prepare 時に、対応する live Vehicle の `Vehicle.vot_true` を読み取る。これは経済 record からの取得ではなく、成立時点の値を履歴へ固定するための新規読取りである。
+
+読む対象は、正式な金銭 record を持つ buyer または seller だけである。`NONPARTICIPATING`、区分4、baseline fallback、`NO_VISITS_TO_CONFIRM` では成立時 record を作らない。それらの Visit について、今回の履歴材料として `vot_true` も読まない。
+
+`Vehicle.vot_true` を成立判定または正式金額計算に使わない。atomic apply は保存するだけであり、実績利得や満足判定を計算しない。`Vehicle.vot_true` も `Vehicle.vot_declared` も変更しない。
+
+正式な buyer または seller について、取引成立時点の `vot_true` は次を必須とする。bool ではない。Python の int または float である。有限値である。0以上である。成立時 record へ書くときは float とする。
+
+次は、最初の実書込みより前に `RuntimeError` とする。`vot_true` が `None`。bool。int または float でない。NaN。正または負の無限大。負。1台でも不正なら、順位、金銭、履歴を一切変更しない。
+
+`vot_true` が0は有効である。真の VOT が0の Vehicle も研究上の有効な設定として扱う。不参加の表現には使わない。不参加は `participates_in_order_exchange=False` で表す。満足評価に必要な取引時点の真の VOT が保存できない場合、後から個別取引を正確に評価できない。
+
+申告 VOT を履歴へ残す理由は、個別履歴だけから次を確認できるようにするためである。
+
+- 申告 VOT が0であるため seller 補償額が0だったこと。
+- 後続の実績ベース参考支払額・参考補償額が、取引時点の申告 VOT を使えること。
+- 金額0を、遅延が無い場合と、遅延があっても申告 VOT が0の場合とに分けること。
+
+### 11.7 VOT設定の研究上の前提
+
+基本実験では、統計資料または論文等に基づいて各 Vehicle へ `vot_true` を設定する。基本実験では `vot_declared` を `vot_true` と同じ値に設定する。正しい VOT 申告を前提として TVT-MP を評価する。
+
+将来の虚偽申告研究では、`vot_true` を車両が本当に持つ時間価値として扱う。`vot_declared` を `vot_true` と異なる値に設定する。申告行動、成立候補、支払額、補償額、実績利得、満足度への影響を調べる。車両が複数の申告 VOT を試し、より有利な申告値を探索する発展研究を妨げない。成立時 record は、申告値と真値が違っていても正常とする。
+
+現時点の基本方針では、`vot_true` は Vehicle へ一度設定した後、ネットワーク内を走行中は不変とする。基本実験では `vot_declared` も走行中は不変とする。
+
+将来拡張として、`vot_declared` が走行中に変化する研究を排除しない。`vot_true` が走行中に変化するシナリオも、設計上は完全には排除しない。したがって、後続評価時に Vehicle の現在値を読むだけでは足りない。各取引の成立時点の両 VOT を、成立時 record へ保存する。将来 live Vehicle の VOT が変わっても、既存の成立時 record の保存値は変えない。
+
+### 11.8 申告VOTと真のVOTの役割分担
+
+`declared_vot_per_second` を使うもの: 取引成立判定。buyer 価値 `G_b`。seller 要求補償 `R_s`。正式支払額。正式補償額。実績ベース参考支払額と参考補償額。
+
+`true_vot_per_second` を使うもの: buyer 実績利得。seller 実績利得。満足・不満足の最終判定。1秒当たり支払額・補償額と真の VOT の比較。虚偽申告研究における申告値と真値の差の分析。
+
+atomic apply では、これらの評価計算を実行しない。両 VOT を成立時 record へ保存するだけである。
+
+## 12. order_exchange_logへ記録しないVisit
+
+成立時 record を作るのは、正式な buyer と seller だけである。
+
+作らないもの:
+
+- `NONPARTICIPATING`
+- `OUTSIDE_TRADE_SCOPE`
+- baseline fallback の Visit
+- `NO_VISITS_TO_CONFIRM`
+- 候補なし Node
+
+理由: これらは正式な金銭取引当事者ではない。final rank に含まれても、金銭 record は無い。金額0の buyer・seller とは区別する。金額0の buyer・seller は金銭 record が存在し、role が buyer または seller である。非参加と区分4は金銭 record が存在しない。
+
+補償額0の seller は正式な seller なので必ず記録する。apply は原因を再判定しない。原因の再計算もしない。
+
+上流の経済 record に原因は残る。それに加え、成立時 record が `declared_vot_per_second`、`baseline_passage_timestep`、`candidate_passage_timestep` を持つため、個別履歴だけでも次を区別できる。
+
+- `candidate_passage_timestep` と `baseline_passage_timestep` が同じであるため、予想遅延が0である。
+- `candidate_passage_timestep` が `baseline_passage_timestep` より早いため、補償対象の予想遅延が0である。
+- `candidate_passage_timestep` が `baseline_passage_timestep` より遅いが、`declared_vot_per_second` が0であるため、補償額が0である。
+
+申告 VOT が0の場合も、その0を履歴から落とさない。落とすと、遅延が無かった場合と区別できなくなる。
+
+seller role を buyer へ変更しない。補償0を理由に record を削除しない。
+
+## 13. 成立時recordとactual outcomeの分離
+
+成立時 record へ、次の未確定 field を `None` でも置かない。
+
+- actual passage timestep
+- 実績時間節約
+- 実績遅延
+- 実績ベース参考支払額
+- 実績ベース参考補償額
+- realized gain
+- satisfaction classification
+
+成立時 record を後から書き換えない。未確定値と、record がまだ無いことを混同しないためである。
+
+後続の actual passage・事後評価部品が、別の frozen actual outcome record を `order_exchange_log` へ追加する。同じ取引識別材料により、成立時 record と actual outcome record を結び付ける。list に複数型が入る場合の区別は `isinstance` とする。種別だけの Enum は、2種類目を実装するまで作らない。
+
+actual outcome 型は後続部品の設計で定める。今回の atomic apply 実装対象には含めない。
+
+## 14. 将来の事後評価
+
+今回は実装しない。後続設計のため、確定方針を残す。atomic apply では計算しない。
+
+buyer の予想時間節約は、`baseline_passage_timestep - candidate_passage_timestep` である。
+
+buyer の実績時間節約は、`baseline_passage_timestep - actual_passage_timestep` である。符号の意味は、正が baseline 予想より早い、0が baseline 予想と同じ、負が baseline 予想より遅い、である。
+
+seller の予想遅延は、`candidate_passage_timestep - baseline_passage_timestep` である。
+
+seller の実績遅延は、`actual_passage_timestep - baseline_passage_timestep` である。符号の意味は、正が baseline 予想より遅い、0が baseline 予想と同じ、負が baseline 予想より早い、である。
+
+baseline 予測には、取引による影響と周辺交通の予想が含まれる。baseline 予測に対する実績差は、制度の予想全体がどの程度外れたかを顕在化する評価値とする。取引だけの純粋な因果効果とは断定しない。
+
+buyer の累計は buyer role の取引だけを合計する。seller の累計は seller role の取引だけを合計する。
+
+## 15. 実績ベース参考金額
+
+正式精算を変更しない補足指標である。`payment_paid` と `payment_received` を、実績に合わせて書き換えない。取引参加者全員の実通過結果が揃った後に計算する。Vehicle 単独では計算できない。同じ取引の buyer と seller 全員をまとめて評価する後続部品の責務とする。
+
+事後評価上の不成立条件:
+
+- buyer の1人でも実績時間節約が正でない。
+- または、全 buyer の実績節約価値合計が、全 seller の実績要求補償額合計を下回る。
+
+不成立時: 全 buyer の参考支払額を0にする。全 seller の参考補償額を0にする。
+
+事後評価上も成立する場合:
+
+- 各 buyer の参考支払額は、実績ベースの seller 必要補償総額を、各 buyer の実績節約価値の比率で配分する。
+- 各 seller の参考補償額は、正の実績遅延に、成立時 record の `declared_vot_per_second` を掛けた額である。後続評価で `Vehicle.vot_declared` を読み直さない。取引時点の申告 VOT を使う。
+- seller の参考補償額は負にしない。
+- 実績では早く通過した seller を buyer へ変更しない。
+
+## 16. buyer・seller別の累計評価
+
+同一 Vehicle が走行中に buyer にも seller にもなり得る。役割別に集計する。
+
+buyer: 正式支払額累計。予想時間節約累計。実績時間節約累計。buyer 取引回数。予想と実績の差。buyer 実績利得。
+
+seller: 正式補償額累計。予想遅延累計。実績遅延累計。seller 取引回数。予想と実績の差。seller 実績利得。
+
+新しい Vehicle 累計属性は現段階で追加しない。個別履歴から役割別に集計する。成立時 record があれば、正式金額、予想通過時刻の組、`declared_vot_per_second`、`true_vot_per_second`、順位変化、取引回数の元が取れる。実績累計は、後続 record が実通過 timestep を持ってから足す。実績利得に使う真の VOT は、成立時 record の `true_vot_per_second` であり、評価時点の `Vehicle.vot_true` ではない。
+
+## 17. 満足・不満足評価
+
+今回の atomic apply では計算しない。計算に使う true VOT は、成立時 record の `true_vot_per_second` である。評価時点の `Vehicle.vot_true` を読み直さない。
+
+直接的な最終判定:
+
+- buyer 実績利得は、true VOT × 実績時間節約累計 − 正式支払額累計である。
+- seller 実績利得は、正式補償額累計 − true VOT × 実績遅延累計である。
+- 0以上を満足、0未満を不満足とする。
+
+補助的な区分:
+
+buyer:
+
+- 実績時間節約累計が0以下なら、自明な不満足とする。
+- 実績時間節約累計が正で、1秒当たり正式支払額が true VOT を超えるなら、価格面の不満足とする。
+- 実績時間節約累計が正で、1秒当たり正式支払額が true VOT 以下なら、価格面でも満足とする。
+
+seller:
+
+- 実績遅延累計が0以下なら、自明な満足とする。
+- 実績遅延累計が正で、1秒当たり正式補償額が true VOT 未満なら、補償面の不満足とする。
+- 実績遅延累計が正で、1秒当たり正式補償額が true VOT 以上なら、補償面でも満足とする。
+
+実績時間累計が0以下の場合、1秒当たり金額の割り算は行わない。直接的な実績利得で最終判定し、割り算指標で満足・不満足の理由を区分する。
+
+## 18. 全件事前検査
+
+最初の実書込み前に、全 Node と全 Vehicle について確認する。validation の再実行はしない。validation は live 状態を見ていない。再実行しても、書込み直前の台帳と Vehicle のずれは検出できない。
+
+### 18.1 公開入力
+
+- validation result の正式型。
+- `real_W` の正式型。`World` であること。
+- `rank_states_by_node_name` の Mapping 契約。
+- mapping の各値が `OrderControlTvtNodeRankState` であること。
+- validation result 内の final rank set を、その結果が保持する同一 object 参照で使用すること。
+- upstream 計算を再実行しないこと。
+
+### 18.2 全体
+
+- Node 結果列。
+- Node 件数。
+- Node 名の重複が無いこと。
+- 保存順を維持すること。
+- `real_W.T` と保存済み成立時刻 `T` が一致すること。
+- baseline 時刻の保存値同士が一致すること。
+
+### 18.3 Node
+
+- `real_W.get_node` で対象 Node が存在すること。
+- `rank_states_by_node_name` に全対象 Node が存在すること。
+- `rank_state.node_name` が一致すること。
+- 空 Node でも mapping 欠落を拒否すること。
+- final rank の VisitKey が重複しないこと。
+- 対象 Visit が rank state で undetermined として登録済みであること。
+- 対象 Visit が既確定でないこと。
+- formal route が、現在の実 Node の outlink 名集合に存在すること。
+- final rank の保存順を維持すること。
+- `final_local_rank` を絶対順位と誤解しないこと。
+
+### 18.4 Vehicle
+
+- buyer と seller の Vehicle が `real_W.VEHICLES` に存在すること。
+- VisitKey の `vehicle_name` と record の `vehicle_name` が一致すること。
+- `payment_paid` が bool でない有限数であること。
+- `payment_received` が bool でない有限数であること。
+- 現在値が非負であること。
+- 更新後値が有限かつ非負であること。
+- `order_exchange_log` が list であること。
+- 保存済み金額を使用すること。
+- 金額式を再計算しないこと。
+- 金額0でも成立時 record を作ること。
+- 同一 `vehicle_name` の複数金銭 record を、現行契約では拒否すること。
+- 正式な buyer または seller の live Vehicle に `vot_true` があること。
+- `vot_true` が bool でない有限の非負数であること。`None`、bool、int または float でない値、NaN、無限大、負は拒否すること。`vot_true` が0は正常であること。
+- 保存済み経済 record の `declared_vot_per_second` を成立時 record へ使うこと。
+- live な `Vehicle.vot_declared` を再読取りしないこと。
+- `true_vot_per_second` は live な `Vehicle.vot_true` から prepare 時に読み、成立時 record へ固定すること。
+- `vot_true` とその他の live Vehicle 属性を変更しないこと。
+- 1台でも `vot_true` が不正なら、順位、金銭、履歴を一切変更せず `RuntimeError` とすること。
+
+### 18.5 履歴材料
+
+- selected candidate の取引識別材料が取れること。
+- `baseline_local_rank` が `candidate_visits` から一意に取得できること。
+- `post_trade_local_rank` が、selected の general trade rank から一意に取得できること。
+- `ledger_assigned_rank` が prepare 時に一意に決まること。
+- baseline passage timestep が economic record に存在すること。
+- candidate passage timestep が economic record に存在すること。
+- `declared_vot_per_second` が、対応する buyer または seller の経済 record の保存済み値と一致すること。
+- `Vehicle.vot_declared` を再読取りしないこと。
+- 申告 VOT が0でも成立時 record へ保存すること。
+- `true_vot_per_second` が、prepare 時の `Vehicle.vot_true` を float で固定した値であること。
+- 非参加、区分4、fallback、`NO_VISITS_TO_CONFIRM` では成立時 record を作らず、その Visit の `vot_true` を履歴材料として読まないこと。
+- buyer または seller の role と金銭 record が対応すること。
+- formal route が final rank record と対応すること。
+- buyer と seller 以外に成立時 record を作らないこと。
+
+## 19. Vehicle prepare
+
+Vehicle ごとに、次の準備済み状態を作る。
+
+- `updated_payment_paid`
+- `updated_payment_received`
+- `updated_order_exchange_log`
+
+新しい log は、既存 list の copy へ成立時 record を加えた新しい list とする。既存 list へ in-place の `append` をしない。commit 前に、全 Vehicle 分の新しい list を完成させる。
+
+同一 Vehicle が buyer と seller の両方、または複数金銭 record に現れた場合は、現行契約では commit 前に `RuntimeError` とする。既存 log に既に入っている要素の形式は、今回の成立時 record の検査対象にしない。今回追加する要素だけを本仕様の型にする。既存 list が list であることだけを要求する。
+
+## 20. commit順
+
+commit 開始前に、全 Node の順位候補と、全 Vehicle の更新後状態を完成させる。
+
+実 commit 順:
+
+1. 書込み対象の全 Node について、順位台帳の内部4状態を置換する。
+2. 全対象 Vehicle の `payment_paid` を、準備済みの値へ置換する。
+3. 全対象 Vehicle の `payment_received` を、準備済みの値へ置換する。
+4. 全対象 Vehicle の `order_exchange_log` を、新しい list へ置換する。
+
+理由: 順位を先に残すと、commit 途中の致命的終了後に再実行した場合、既確定 Visit として停止できる。金銭を先に書くと、順位が未確定のまま再実行され、累計金額を二重加算する危険がある。金銭の二重加算より、順位だけ確定して停止し、人が不整合を検知する状態を優先する。
+
+この順序でも、順位 commit 後かつ金銭 commit 前の致命的終了による部分状態は自動修復しない。通常の検査失敗による部分更新を防ぐ設計である。完全な transaction ではない。
+
+空 Node と、金銭 record が無い fallback Visit は、2から4の対象に入らない。fallback で final rank 列がある Node は、1の順位 commit の対象である。
+
+## 21. 成功結果型
+
+`OrderControlTvtMpAtomicApplySetResult` は `dataclass(frozen=True)` とする。名称は §30 の候補である。
+
+field は `final_consistency_validation_set_result` の1つだけとする。入力 validation result と同一 object 参照を保持する。
+
+保持しないもの: live World。live Node。live Vehicle。live rank state。mutable list。mutable dict。Node 別件数。Vehicle 別金額の複写。failed status。boolean だけの承認 token。
+
+Node 別件数と金額は、入力 frozen 結果と適用後の台帳から確認できる。結果へ重複保存しない。
+
+## 22. ValueErrorとRuntimeError
+
+`ValueError` は、公開3引数の外部入力型が正式型でない場合だけである。validation 結果型でない、`World` でない、mapping でない、mapping の値が `OrderControlTvtNodeRankState` でない、が該当する。
+
+`RuntimeError` は、型は正式だが、保存済み結果または live 状態が矛盾する場合である。
+
+主な `RuntimeError`: Node 件数・順序・名前の不一致。Node 名の重複。時刻不一致。対象 Node の欠落。rank state mapping の欠落。`rank_state.node_name` の不一致。Visit 未登録。Visit 既確定。Visit 重複。formal route が実 outlink に無い。Vehicle 欠落。Vehicle 名不一致。金銭属性の型不正。金銭属性が非有限。金銭属性が負。更新後金額が非有限または負。`order_exchange_log` が list でない。同一 Vehicle の複数金銭 record。baseline 順位を一意に取得できない。post-trade 順位を一意に取得できない。passage timestep を取得できない。trade role の不一致。取引識別材料の不一致。正式な buyer または seller の `vot_true` が無いこと。`vot_true` が `None`、bool、int または float でない、NaN、無限大、または負であること。
+
+正常であり `RuntimeError` にしないもの: 分岐2から5。fallback。`NO_VISITS_TO_CONFIRM`。空 Node。seller 0件。補償額0の seller。支払額0の buyer。非参加 Visit に履歴が無いこと。区分4 Visit に履歴が無いこと。`vot_true` が0であること。`declared_vot_per_second` と `true_vot_per_second` が異なること。
+
+## 23. 不変性
+
+失敗時に変更しないもの: validation result。final rank result。payment result。selection result。economic result。local result。FIFO result。collector。全 rank state。全 Vehicle の `payment_paid`。全 Vehicle の `payment_received`。全 Vehicle の `order_exchange_log`。World。Node。Link。RNG。`vot_declared`。`vot_true`。`participates_in_order_exchange`。
+
+成功時に変更するものだけ:
+
+- final rank 列がある Node の rank state。空 Node の rank state は変えない。
+- buyer の `payment_paid`。
+- seller の `payment_received`。
+- buyer と seller の `order_exchange_log`。
+
+成功時も変更しないもの: `vot_true`。`vot_declared`。`participates_in_order_exchange`。成立時 record へ写したあとも、Vehicle 上の値は変えない。
+
+fallback の Node は、final rank 列があるなら rank state だけを変える。累計と履歴は変えない。非対象 Node と非対象 Vehicle は変えない。
+
+## 24. 上位driverとの境界
+
+上位 driver は未実装である。本部品では実装しない。
+
+上位 driver が行うこと:
+
+- `rank_states_by_node_name` を保持する。
+- 全 Node の処理チェーンを正式順に呼ぶ。
+- final consistency validation を1回呼ぶ。
+- 成功した validation result で atomic apply を1回呼ぶ。
+- apply の例外を成功扱いにしない。
+- apply 成功後だけ次の処理へ進む。
+
+上位 driver が行わないこと:
+
+- Node 単位の部分 apply。
+- final rank の再構築。
+- 金額の再計算。
+- buyer と seller の対応の再照合。
+- 履歴 record の構築。
+- rollback。
+- 原因別5分岐の再実装。
+- actual passage の評価。
+- 実績参考金額の計算。
+- 満足評価。
+
+呼出し境界は、baseline 時刻で driver が明示的に1回呼ぶ側である。`Node.transfer` の途中や `user_function` の途中へ apply を入れない。現在の `Node.transfer` は `fcfs` と `batch` だけを特別扱いし、`time_value` の確定順位は通過順に使っていない。その物理的利用は本部品の外である。
+
+## 25. 責務外
+
+`Node.transfer` による TVT 確定順位の物理的利用。実 World の通過順制御。actual passage record。prediction error。実績時間節約。実績遅延。実績ベース参考支払額。実績ベース参考補償額。realized utility。satisfaction classification。welfare。上位 driver。strategy-proofness。文献制度の移植。
+
+## 26. 可読性
+
+正しさを最優先する。Python 初学者が後から追える明示的な実装にする。明示的な Node ループ。明示的な Vehicle ループ。意味のある中間変数。小さすぎる helper への過剰分割を避ける。長い内包表記を避ける。複雑な generator を避ける。commit 前と commit 後の境界をコード上で明確にする。原因と結果をコメントへ明記する。upstream 計算を再実行しない。live object を履歴へ保存しない。
+
+## 27. 専用テスト契約
+
+新規予定ファイルは `tests_order_control_tvt_mp_atomic_apply.py` である。Python 実装と専用テストは未着手である。
+
+### 27.1 公開型とAPI
+
+公開 API は全 Node 一括の1関数である。位置引数3つ。optional なし。成功結果は frozen である。field は validation result の同一参照だけである。live object を保持しない。
+
+### 27.2 正常selected
+
+Node 順位と formal route が反映される。buyer の `payment_paid` が増える。seller の `payment_received` が増える。buyer と seller の成立時履歴が増える。金額は保存済み値である。金額式を再計算しない。0円 buyer を記録する。0円 seller を記録する。非参加と区分4に履歴が無い。
+
+### 27.3 順位履歴
+
+`baseline_local_rank` は `candidate_visits` の正式 baseline 順である。`post_trade_local_rank` は selected の general trade rank である。`rank_change` の符号を固定する。`ledger_assigned_rank` は既存 `k_confirmed` を含む絶対順位である。`binding_rank` を履歴に保存しない。`final_local_rank` を履歴へ重複保存しない。先行確定済み Visit が存在する場合も、3順位の意味が崩れない。
+
+### 27.4 passage履歴
+
+buyer と seller の経済 record の baseline passage timestep を使用する。candidate passage timestep を使用する。局所仮想計算を再実行しない。actual field を成立時 record へ置かない。
+
+### 27.4.1 成立時VOT
+
+buyer の成立時 record に `declared_vot_per_second` と `true_vot_per_second` が保存される。seller の成立時 record にも両方が保存される。`declared_vot_per_second` は経済 record の保存値を使い、live な `Vehicle.vot_declared` を再読取りしない。`true_vot_per_second` は apply 時の live な `Vehicle.vot_true` を float で保存する。申告 VOT が0でも保存する。`declared_vot_per_second` と `true_vot_per_second` が異なっていても正常である。`true_vot_per_second` が0でも正常である。`vot_true` が `None`、負、NaN、無限大、bool のいずれかなら、全体を無変更のまま拒否する。非参加 Visit と区分4 Visit には成立時 record を作らない。atomic apply は true VOT を金額計算や成立判定へ使わない。`Vehicle.vot_true` と `Vehicle.vot_declared` を変更しない。将来 live Vehicle の VOT が変わっても、既存の成立時 record の保存値は変わらない。
+
+### 27.5 fallbackと空Node
+
+fallback は順位と formal route だけを反映する。fallback では累計金額と履歴は不変である。`NO_VISITS_TO_CONFIRM` は全台帳が不変である。空 Node も mapping の存在を要求する。Node 結果を脱落させない。
+
+### 27.6 全体atomic性
+
+2 Node 目の不整合で1 Node 目も未変更である。Vehicle 不整合で全 Node が未変更である。outlink 不整合で全 Node と全 Vehicle が未変更である。金銭属性の不整合で全 Node と全 Vehicle が未変更である。log の型不正で全 Node と全 Vehicle が未変更である。同一 Vehicle の複数 record で全体が未変更である。`real_W.T` の不一致で全体が未変更である。`vot_true` の欠落または不正で全体が未変更である。
+
+### 27.7 既存順位API回帰
+
+既存公開 API の正常動作を維持する。空入力 no-op を維持する。既確定拒否を維持する。未登録拒否を維持する。route 不正拒否を維持する。candidate verification 失敗時の無変更を維持する。`tests_order_control_tvt_node_rank_state.py` を回帰対象にする。
+
+### 27.8 不変性
+
+upstream の frozen 結果は不変である。collector は不変である。World RNG は不変である。order-control RNG は不変である。非対象 Vehicle は不変である。非対象 Node は不変である。
+
+## 28. 反証して採用しない事項
+
+採用しないもの:
+
+- Node 単位の公開 apply。
+- Node ごとの validation 直後の部分反映。
+- 既存公開 Node API の単純な順次呼出し。検査を複製し、1か所でもずれると先行 Node が残る。
+- apply での金額再計算。
+- apply での順位再構築。
+- apply での baseline 再実行。
+- apply での局所仮想計算の再実行。
+- commit 中の検査。
+- commit 中の金額加算の計算。
+- commit 中の `log.append`。
+- rollback 前提。
+- World 全体の copy。
+- live object の履歴への保存。
+- `order_exchange_log` を二重適用防止の唯一の正本にすること。
+- 金額0の buyer または seller の記録を省略すること。
+- actual field を成立時 record へ `None` で追加すること。
+- 成立時 record を後から変更すること。
+- `binding_rank` を順位交換の前後比較に使うこと。
+- `final_local_rank` と `post_trade_local_rank` を重複保存すること。
+- 非参加または区分4を、0円の取引相手として記録すること。
+- actual passage による正式金額の事後精算。
+- 同一 Vehicle の複数 record を黙って合算すること。
+- 致命的なプロセス終了まで完全な transaction であると主張すること。
+
+## 29. 実装範囲と未実装範囲
+
+実装範囲（保存後の次作業）: 全 Node 一括の公開 API。成功結果型。成立時履歴型。全件 live 検査。全 Node の順位 prepare。全 Vehicle の金銭と履歴の prepare。prepare 完了後の commit。既存順位台帳の内部 prepare と commit の分割。金額0の buyer と seller の履歴。専用テスト。既存順位台帳の回帰。関係回帰。独立確認。
+
+未実装範囲: actual outcome record。physical passage の制御。上位 driver。actual passage の評価。実績参考金額。buyer と seller 別の累計分析。満足評価。welfare。strategy-proofness。文献制度の移植。
+
+本節の記録は実装完了ではない。
+
+## 30. 実装前に残る判断
+
+本節で固定した意味は、未確定へ戻さない。実装前に正式名称だけを固定する。
+
+既存の命名は、`validate_tvt_mp_final_consistency`、`build_tvt_mp_final_ranks`、`OrderControlTvtMpFinalConsistencyValidationSetResult`、`OrderControlTvtMpBuyerPaymentRecord` のように、処理を表す関数名と、`OrderControlTvtMp` で始まる frozen 型名である。field は snake_case で、既存結果の field 名を重ねられるときは重ねる。
+
+名称候補:
+
+| 対象 | 推奨候補 | 理由 | 代替 |
+| --- | --- | --- | --- |
+| 公開関数 | `apply_tvt_mp_validated_result` | validation 成功結果を live へ反映する、という引数の意味と一致する | 実装前に別名へ変える場合でも、引数3つと全 Node 一括は変えない |
+| 成功結果型 | `OrderControlTvtMpAtomicApplySetResult` | 既存の set result 命名と一致する | なしを第一候補とする |
+| 成立時履歴型 | `OrderControlTvtMpTradeEstablishmentLogRecord` | 成立時であり、actual outcome ではないことが型名で分かる | 実装前に短縮する場合でも、共通1型であることは変えない |
+| 成立時刻 field | `baseline_timestep_T` | 上流 frozen 結果と同じ整数と同じ field 名である。docstring に、実 World の成立判断時刻であり別仮想時刻ではない、と書く | `tvt_decision_timestep`。単独で読むと成立時刻であることが分かりやすい。上流名とは揃わない |
+| 取引識別 | record 上の `node_name`、成立時刻、`buyers_sorted` | 新しい識別型を増やさず、seller の1行から取引全体が分かる | ネストした frozen 識別型。情報は増えない。actual record との共有が目的なら後続で切る |
+| baseline 順位 | `baseline_local_rank` | `candidate_visits` 内であり、台帳絶対順位ではない | なしを第一候補とする |
+| 取引後順位 | `post_trade_local_rank` | 同じ母集団の取引後順位である。`final_local_rank` とは重複保存しない | なしを第一候補とする |
+| 台帳絶対順位 | `ledger_assigned_rank` | `k_confirmed + final_local_rank` であり、台帳へ書く順位である | なしを第一候補とする |
+| 今回支払・受取 | `payment_paid_in_this_transaction`、`payment_received_in_this_transaction` | 累計の `payment_paid`、`payment_received` と、今回額を名前で分ける | なしを第一候補とする |
+| 成立時の申告 VOT | `declared_vot_per_second` | 経済 record の field 名と揃える。取引時点の申告 VOT である | なしを第一候補とする |
+| 成立時の真の VOT | `true_vot_per_second` | 申告 VOT と対になる。取引時点の `Vehicle.vot_true` を float で固定する | なしを第一候補とする |
+
+成立時刻 field 名と、取引識別をネスト型にするかは、実装着手前に利用者確認で固定する。それ以外の推奨候補は、既存命名との衝突が無い。意味を変えるための別名検討ではない。
+
+`declared_vot_per_second` と `true_vot_per_second` を成立時 record へ保存することは確定済みである。保存するかどうかは未決事項から外す。残るのは、上表の正式名称を実装着手前に固定することだけである。両 VOT の field 名は、経済 record の `declared_vot_per_second` に揃えた上の2候補を優先する。
+
+## 31. 次の再開地点
+
+1. Terminal で詳細設計第3巻の本節を直接表示する。
+2. 内容を独立確認する。
+3. 問題があれば文書だけ修正する。
+4. 問題がなければ、進捗第2巻の要約が本節と一致することを確認する。
+5. 進捗第2巻を Terminal で直接表示する。
+6. 両文書の差分を確認する。
+7. `git diff --check` を実行する。
+8. 文書2ファイルだけが変更されていることを確認する。
+9. 利用者の確認後に commit する。
+10. commit と push は分ける。
+11. メモを含む commit 名には `document` を含める。
+12. 保存後に、Python 実装と専用テストへ進む。
+
+本節は完全実装前仕様である。Python 実装と専用テストは未着手である。
