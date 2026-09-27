@@ -66,3 +66,47 @@
 5. commit 名に `document` を含めて commit する。
 6. commit と push を分ける。
 7. 保存後、詳細設計第4巻で上位 driver 完全実装前仕様を作成する。
+
+## TVT-MP上位driverの完全実装前仕様を確定（2026-09-28）
+
+正式な技術詳細は、詳細設計第4巻「TVT-MP上位driver・完全実装前仕様」を参照する。
+
+- 詳細設計第4巻へ、上位driverの完全実装前仕様を記録した。
+- 公開関数名は `run_tvt_mp_driver` とする。
+- 成功結果型は `OrderControlTvtMpDriverResult` とする。
+- 公開入力は `real_W` の位置引数1つとする。
+- 成功結果は `atomic_apply_set_result` だけを保持する。
+- TVT対象Nodeが0件の場合は `atomic_apply_set_result=None` とする。
+- TVT対象Nodeが0件の場合は、World、順位台帳、Vehicle、driver開始時刻を一切変更しない正常no-opとする。
+- 対象Nodeが引き続き0件なら、同じ実時刻Tに再度呼ばれても再び正常no-opとする。
+- TVT対象Nodeが1件以上の場合は、同一時刻の二重実行と時刻逆行を共通設定より先に検査する。すべての検査に通過した後、16段開始前にdriver開始時刻を記録する。
+- 対象Nodeが1件以上ある同じTでの再実行は拒否する。
+- 順位台帳はWorldが保持し、実行ごとに作り直さない。
+- TVT対象Nodeは `order_control_type == "time_value"` かつ `order_control_eligible is True` のNodeを、World登録順に収集する。
+- 参加情報の正本は `Vehicle.participates_in_order_exchange` とする。
+- declared VOT=0を不参加扱いしない。
+- baseline horizonの共通初期値は6とする。
+- TVT候補Visit数上限は暗黙の既定値を置かず、World初期値をNoneとする。
+- TVT対象Nodeが1件以上ある場合、候補数上限はbool以外のPython intかつ1以上を明示設定する。
+- TVT対象Nodeが0件の場合、候補数上限がNoneでも正常no-opとする。
+- 完成済み16段を明示的な順序で呼び、最後にatomic applyを全Node一括で1回呼ぶ。
+- 正常な取引不成立、fallback、NO_VISITS_TO_CONFIRMはdriverの正常成功になり得る。
+- 後段例外時も、正常完了済みの未確定Visit登録、既到着Visit確定、先頭非参加Visit確定は取り消さない。
+- 上位driver単体の実装では、World自動起動とNode.transferによる物理通過接続を行わない。
+- 本番予定ファイルは `uxsim/order_control_tvt_mp_driver.py` とする。
+- 専用テスト予定ファイルは `tests_order_control_tvt_mp_driver.py` とする。
+- `uxsim/uxsim.py` はWorld属性の初期化だけを変更予定とする。
+- 実装では短さや高度なPython技法より、初学者が16段の流れを追える明示的な構造を優先する。
+- 利用者判断が必要な事項は解消済みである。
+- 対象から外れたNodeの順位台帳を削除する時期だけは将来課題として残し、今回の実装では削除しない。
+
+## 最新の再開地点
+
+1. 詳細設計第4巻と進捗第3巻をTerminalで限定確認する。
+2. `git diff --check`を実行する。
+3. 変更対象が第4巻と進捗第3巻だけであることを確認する。
+4. 文書をcommitする。
+5. commit名には `document` を含める。
+6. commitとpushを分ける。
+7. 保存後、上位driver本番と専用テストを実装する。
+8. 実装対象は、新規本番、新規専用テスト、World属性初期化の3ファイルとする。
