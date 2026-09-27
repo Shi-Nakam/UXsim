@@ -405,3 +405,39 @@ payment、compensation、P_b比例配分、seller実補償配分、`payment_paid
 4. 文書 commit する。
 5. commit と push を分離する。
 6. push 後、次の未実装部品の設計へ進む。
+
+## TVT-MP actual passage・事後評価の将来仕様を記録（2026-09-27）
+
+- atomic apply 検討中に先行して議論した、実通過後の評価仕様を詳細設計第3巻へ保存した。
+- 正式参照先は、詳細設計第3巻の「TVT-MP actual passage・事後評価・役割別累計の将来仕様」である。
+- 成立時 record は変更せず、後続部品が別の frozen actual outcome record を `order_exchange_log` へ追加する。
+- buyer の実績時間節約と seller の実績遅延は、負値も切り上げず符号付きで記録する。
+- 同じ Vehicle が buyer と seller の両方になり得るため、役割別に集計する。
+- 実績ベース参考金額は、同じ取引の全 buyer・seller の actual passage が揃った後に取引全体で計算する。
+- 参考金額は正式支払額・正式補償額を変更する事後精算ではない。
+- 実時間ベースでは、各 buyer の実績節約価値を先に確認する。
+- buyer が1人でも実績節約価値が0以下なら、参考支払額・参考補償額を全員0とし、按分しない。
+- 全 buyer の実績節約価値が正の場合だけ、buyer 価値合計と seller 要求補償総額を比較する。
+- buyer 価値合計が seller 要求補償総額以上の場合だけ、buyer の参考支払額を按分する。
+- declared VOT=0 は有効な申告であり、不参加の代理にしない。
+- declared VOT=0 の Vehicle を buyer に含む候補は `G_b=0` となるため経済的に成立しない。
+- declared VOT=0 の seller は正式 seller になり得て、補償額0の record も残す。
+- true VOT=0 の許容可否は、採用する論文・統計分布が0を取り得るかに従って後で決める。
+- 最終的な満足・不満足判定は実績利得を正本とする。
+- buyer 満足と seller 満足を車両1台の総合判定へ統合するかは未確定。
+- actual outcome の正式型、field、actual passage 捕捉場所、完了管理主体は未確定。
+- この将来仕様は未実装であり、上位 driver の設計前調査を妨げない。
+
+## 最新の再開地点
+
+- 詳細設計第3巻と進捗第2巻を Terminal で限定確認する。
+- `git diff --check` を実行する。
+- 正本2文書だけが変更されていることを確認する。
+- commit 名に `document` を含めて commit する。
+- commit と push を分ける。
+- 保存後、上位 driver 設計前調査の独立確認へ戻る。
+- 次に確認する4ファイル:
+  - `order_control_tvt_baseline_fork_alignment.py`
+  - `order_control_tvt_arrived_confirmation.py`
+  - `order_control_tvt_leading_nonparticipating_confirmation.py`
+  - `order_control_tvt_mp_local_virtual_calculation_set.py`
