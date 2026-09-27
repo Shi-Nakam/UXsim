@@ -337,14 +337,23 @@ payment、compensation、P_b比例配分、seller実補償配分、`payment_paid
 - actual passage、実績時間、実績ベース参考金額、実績利得、満足評価は後続部品とする。
 - 正式支払額・正式補償額をactual passageに基づいて事後精算しない。
 - Python実装、専用テスト、上位driverは未実装である。
+- 公開関数名を`apply_tvt_mp_validated_result`へ確定した。
+- 成功結果型を`OrderControlTvtMpAtomicApplySetResult`へ確定した。
+- 成立時履歴型を`OrderControlTvtMpTradeEstablishmentLogRecord`へ確定した。
+- 成立時刻fieldを`tvt_decision_timestep`へ確定した。値は上流の`baseline_timestep_T`および実Worldの`T`と同じである。
+- 取引識別は`tvt_decision_timestep`、`node_name`、`buyers_sorted`を各recordへ直接持たせる。
+- 専用`OrderControlTvtMpTradeIdentity`型は現段階では作らない。
+- 成立時recordの17 fieldと順序は詳細設計第3巻§11.9で正式確定した（本メモへ複写しない）。
+- 詳細設計第3巻§30の命名判断は解消済みである。
 
 ## 次の再開地点（TVT-MP atomic apply完全実装前仕様確定後）
 
-- 詳細設計第3巻と進捗第2巻の内容をTerminalで確認する。
+- 正式名称は確定済みである。詳細設計第3巻を正式参照先とする。
+- 詳細設計第3巻と進捗第2巻の内容をTerminalで限定確認する。
 - 両文書の差分と`git diff --check`を確認する。
 - 文書2ファイル以外に変更がないことを確認する。
 - 利用者確認後にcommitする。
 - メモを含むcommit名にはdocumentを含める。
 - commitとpushは分ける。
-- 保存後にatomic applyのPython実装と専用テストへ進む。
-- 実装着手前に、詳細設計第3巻§30に残る正式な型名・field名を固定する。
+- 保存後にatomic apply本番実装と専用テストへ進む。順位台帳の内部prepareとcommitの分離も実装する。
+- Cursor実装後は実コードと専用テストを独立確認する。

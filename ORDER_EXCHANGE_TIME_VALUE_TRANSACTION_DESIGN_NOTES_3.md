@@ -2162,7 +2162,7 @@ commit 区間は、準備済みの値または内部状態を代入するだけ�
 
 ## 5. 公開入力と公開API
 
-公開 API 案:
+公開 API（正式）:
 
 ```text
 def apply_tvt_mp_validated_result(
@@ -2171,6 +2171,8 @@ def apply_tvt_mp_validated_result(
     rank_states_by_node_name,
 ) -> OrderControlTvtMpAtomicApplySetResult:
 ```
+
+公開関数名は `apply_tvt_mp_validated_result`、成功結果型名は `OrderControlTvtMpAtomicApplySetResult` として正式確定する。
 
 契約: 位置引数3つ。optional 引数なし。全 Node 一括。Node 単位公開 API なし。Vehicle 単位公開 API なし。RNG なし。外部 transaction rule 引数なし。部分的成功結果なし。成功時だけ frozen 全体結果を返す。
 
@@ -2182,7 +2184,7 @@ def apply_tvt_mp_validated_result(
 
 atomic apply 内で rank state を新規作成しない。新規作成すると、先行確定済み順位と未確定集合を失う。mapping は上位 driver が保持しているものを渡す。
 
-関数名と結果型名は §30 の名称候補である。意味と引数契約は本節で固定する。
+意味と引数契約は本節で固定する。正式名称は §30 で確定済みである。
 
 ## 6. 時刻一致
 
@@ -2196,7 +2198,12 @@ atomic apply 内で rank state を新規作成しない。新規作成すると�
 
 保存済み連鎖の中で fork 結果の `baseline_timestep_T` と、採用候補がある場合の局所結果の `baseline_timestep_T` が異なる場合は、どちらかを採用せず `RuntimeError` とする。
 
-履歴 field の名称は、既存連鎖と同じ `baseline_timestep_T` とする案と、成立時刻であることを名前で示す `tvt_decision_timestep` とする案がある。保存する整数はどちらでも同じであり、`real_W.T` および上流の `baseline_timestep_T` と一致する。正式な field 名は §30 で実装前に固定する。意味は本節で固定する。
+成立時履歴へ保存する成立時刻 field の正式名称は `tvt_decision_timestep` である。
+
+- 値は、上流 frozen 結果の `baseline_timestep_T` と同じ整数である。baseline 計算を開始した実 World の時刻 `T` であり、TVT 成立を判断した実 World の時刻 `T` でもある。仮想計算内の将来通過時刻ではない。
+- prepare 時に、保存済み `baseline_timestep_T` を読み、`tvt_decision_timestep` へ写す。
+- apply は `real_W.T` と、保存済み `baseline_timestep_T` の一致を確認する。書き込む履歴の `tvt_decision_timestep` も同じ整数である。
+- `baseline_timestep_T` は、上流参照連鎖の field 名として引き続き使用する。成立時履歴の field 名だけを `tvt_decision_timestep` とする。`baseline_passage_timestep` との混同を避ける。
 
 ## 7. 既存順位台帳APIの内部整理
 
@@ -2300,34 +2307,35 @@ seller:
 
 理由: dict より field 名と型が明確である。tuple より可読性が高い。後日の実績 record と `isinstance` で区別できる。live object を保持せずに済む。
 
-buyer 用と seller 用に型を分けない。共通の成立時 record 型を採用する。分けると、順位と時刻の field が二箇所になる。role と両金額を持ち、使わない側は0にする。
+buyer 用と seller 用に型を分けない。共通の成立時 record 型 `OrderControlTvtMpTradeEstablishmentLogRecord` を正式採用する。分けると、順位と時刻の field が二箇所になる。role と両金額を持ち、使わない側は0にする。
 
 live な Vehicle、Node、World、rank state は入れない。
 
 ### 11.1 取引識別
 
-共通 field の識別部分:
+各成立時 record は、次の3 field を直接保持し、この組を取引識別材料とする。
 
-- TVT 成立時刻 `T`
-- `node_name`
-- `visit_key`
-- `vehicle_name`
-- `trade_role`（`BUYER` または `SELLER`）
-- 取引識別材料
-
-`vehicle_name` は VisitKey の先頭から得られる。既存の buyer payment record と seller compensation record は `vehicle_name` も保持している。履歴だけ VisitKey に縮めると、金銭 record と履歴の対応が読みにくくなる。VisitKey の先頭および金銭 record の `vehicle_name` と一致することを確認した写しを残す。
-
-取引識別材料は、少なくとも次から構成する。
-
-- TVT 成立時刻 `T`
+- `tvt_decision_timestep`
 - `node_name`
 - `buyers_sorted`
 
+`OrderControlTvtMpTradeIdentity` などの専用 frozen 識別型は、現段階では作らない。後続 actual outcome record の設計時に、共通 identity 型が本当に必要と判明した場合だけ再検討する。
+
+`visit_key` は、各 Vehicle の個別 record を識別する情報であり、取引全体の identity には入れない。
+
+各 record は、さらに次を持つ。
+
+- `visit_key`
+- `vehicle_name`
+- `trade_role`（`BUYER` または `SELLER`）
+
+`vehicle_name` は VisitKey の先頭から得られる。既存の buyer payment record と seller compensation record は `vehicle_name` も保持している。履歴だけ VisitKey に縮めると、金銭 record と履歴の対応が読みにくくなる。VisitKey の先頭および金銭 record の `vehicle_name` と一致することを確認した写しを残す。
+
 `id()`、`hash()`、live object 参照は使わない。新しい連番 transaction ID は現段階では作らない。
 
-根拠: candidate selection は、安定した候補識別として Node 名と公式の `buyers_sorted` を既に使っている。1 Node の1回の validation 結果には、採用候補は高々1つである。`baseline_timestep_T` を足すと、同じ Node の別時刻の取引と分かれる。
+根拠: candidate selection は、安定した候補識別として Node 名と公式の `buyers_sorted` を既に使っている。1 Node の1回の validation 結果には、採用候補は高々1つである。`tvt_decision_timestep` を足すと、同じ Node の別時刻の取引と分かれる。
 
-`buyers_sorted` を各 buyer および各 seller の成立時 record へ保持する。seller の record だけを見ても、同じ取引の buyer 集合を特定できる。後続の実績記録は、この材料で成立時 record と結び付く。別のヘッダ record を後から探す必要はない。識別材料をネストした別 frozen 型にするかは §30 の名称判断である。持たせる情報は本項で固定する。
+`buyers_sorted` を各 buyer および各 seller の成立時 record へ保持する。seller の record だけを見ても、同じ取引の buyer 集合を特定できる。後続の実績記録は、この材料で成立時 record と結び付く。別のヘッダ record を後から探す必要はない。
 
 この識別材料は、二重適用防止の正本にしない。二重適用の拒否は、順位台帳が既確定 Visit の再確定を拒否することである。`order_exchange_log` は研究コードが list を差し替えできる。
 
@@ -2403,7 +2411,7 @@ seller:
 
 金額0を省略しない。累計属性へ足す値と、履歴に残す今回額は同じ保存済み金額である。
 
-field 名は §30 の候補である。buyer は支払額だけを累計へ足し、seller は補償額だけを累計へ足す、という対応は §9 で固定する。
+field 名は §30 で正式確定済みである。buyer は支払額だけを累計へ足し、seller は補償額だけを累計へ足す、という対応は §9 で固定する。
 
 ### 11.6 申告VOTと真のVOT
 
@@ -2449,6 +2457,30 @@ field 名は §30 の候補である。buyer は支払額だけを累計へ足�
 `true_vot_per_second` を使うもの: buyer 実績利得。seller 実績利得。満足・不満足の最終判定。1秒当たり支払額・補償額と真の VOT の比較。虚偽申告研究における申告値と真値の差の分析。
 
 atomic apply では、これらの評価計算を実行しない。両 VOT を成立時 record へ保存するだけである。
+
+### 11.9 正式field一覧と順序
+
+`OrderControlTvtMpTradeEstablishmentLogRecord` の field は、次の順序で固定する。
+
+1. `tvt_decision_timestep`
+2. `node_name`
+3. `buyers_sorted`
+4. `visit_key`
+5. `vehicle_name`
+6. `trade_role`
+7. `baseline_local_rank`
+8. `post_trade_local_rank`
+9. `ledger_assigned_rank`
+10. `rank_change`
+11. `formal_route_next_link_name`
+12. `baseline_passage_timestep`
+13. `candidate_passage_timestep`
+14. `payment_paid_in_this_transaction`
+15. `payment_received_in_this_transaction`
+16. `declared_vot_per_second`
+17. `true_vot_per_second`
+
+`binding_rank` と `final_local_rank` は成立時履歴へ保存しない。
 
 ## 12. order_exchange_logへ記録しないVisit
 
@@ -2668,7 +2700,7 @@ commit 開始前に、全 Node の順位候補と、全 Vehicle の更新後状�
 
 ## 21. 成功結果型
 
-`OrderControlTvtMpAtomicApplySetResult` は `dataclass(frozen=True)` とする。名称は §30 の候補である。
+成功結果型の正式名称は `OrderControlTvtMpAtomicApplySetResult` である。`dataclass(frozen=True)` とする。
 
 field は `final_consistency_validation_set_result` の1つだけとする。入力 validation result と同一 object 参照を保持する。
 
@@ -2743,7 +2775,19 @@ fallback の Node は、final rank 列があるなら rank state だけを変え
 
 ### 27.1 公開型とAPI
 
-公開 API は全 Node 一括の1関数である。位置引数3つ。optional なし。成功結果は frozen である。field は validation result の同一参照だけである。live object を保持しない。
+公開 API は全 Node 一括の1関数 `apply_tvt_mp_validated_result` である。位置引数3つ。optional なし。成功結果型は `OrderControlTvtMpAtomicApplySetResult` で frozen である。field は `final_consistency_validation_set_result` の1つだけであり、入力 validation result と同一 object 参照を保持する。成立時履歴型は `OrderControlTvtMpTradeEstablishmentLogRecord` である。live object を保持しない。
+
+専用テストは、少なくとも次を正式名称として照合する。
+
+- 公開関数名が `apply_tvt_mp_validated_result` である。
+- 成功結果型が `OrderControlTvtMpAtomicApplySetResult` である。
+- 成立時履歴型が `OrderControlTvtMpTradeEstablishmentLogRecord` である。
+- 成立時刻 field が `tvt_decision_timestep` である。
+- `tvt_decision_timestep` が、上流 `baseline_timestep_T` および `real_W.T` と一致する。
+- 成立時 record の field 名と field 順が §11.9 の正式契約どおりである。
+- 取引識別は、`tvt_decision_timestep`、`node_name`、`buyers_sorted` の平坦な3 field である。
+- `OrderControlTvtMpTradeIdentity` 型を現段階では作らない。
+- `binding_rank` と `final_local_rank` を成立時履歴へ保存しない。
 
 ### 27.2 正常selected
 
@@ -2813,13 +2857,13 @@ upstream の frozen 結果は不変である。collector は不変である。Wo
 
 本節の記録は実装完了ではない。
 
-## 30. 実装前に残る判断
+## 30. 正式名称とfield構成の確定
 
-本節で固定した意味は、未確定へ戻さない。実装前に正式名称だけを固定する。
+本節で固定した意味は、未確定へ戻さない。公開関数名、成功結果型名、成立時履歴型名、成立時刻 field 名、取引識別の持ち方、履歴 field 名、履歴 field 順は、利用者確認と独立確認の後に正式確定した。
 
 既存の命名は、`validate_tvt_mp_final_consistency`、`build_tvt_mp_final_ranks`、`OrderControlTvtMpFinalConsistencyValidationSetResult`、`OrderControlTvtMpBuyerPaymentRecord` のように、処理を表す関数名と、`OrderControlTvtMp` で始まる frozen 型名である。field は snake_case で、既存結果の field 名を重ねられるときは重ねる。
 
-名称候補:
+名称候補（判断経緯・歴史的比較）:
 
 | 対象 | 推奨候補 | 理由 | 代替 |
 | --- | --- | --- | --- |
@@ -2835,23 +2879,33 @@ upstream の frozen 結果は不変である。collector は不変である。Wo
 | 成立時の申告 VOT | `declared_vot_per_second` | 経済 record の field 名と揃える。取引時点の申告 VOT である | なしを第一候補とする |
 | 成立時の真の VOT | `true_vot_per_second` | 申告 VOT と対になる。取引時点の `Vehicle.vot_true` を float で固定する | なしを第一候補とする |
 
-成立時刻 field 名と、取引識別をネスト型にするかは、実装着手前に利用者確認で固定する。それ以外の推奨候補は、既存命名との衝突が無い。意味を変えるための別名検討ではない。
+### 30.1 正式採用結果
 
-`declared_vot_per_second` と `true_vot_per_second` を成立時 record へ保存することは確定済みである。保存するかどうかは未決事項から外す。残るのは、上表の正式名称を実装着手前に固定することだけである。両 VOT の field 名は、経済 record の `declared_vot_per_second` に揃えた上の2候補を優先する。
+| 対象 | 正式名称 |
+| --- | --- |
+| 公開関数 | `apply_tvt_mp_validated_result` |
+| 成功結果型 | `OrderControlTvtMpAtomicApplySetResult` |
+| 成功結果 field | `final_consistency_validation_set_result`（入力 validation 結果と同一 object 参照） |
+| 成立時履歴型 | `OrderControlTvtMpTradeEstablishmentLogRecord` |
+| 成立時刻 field | `tvt_decision_timestep`（値は上流 `baseline_timestep_T` と `real_W.T` と同じ整数。prepare 時に上流値を写す） |
+| 取引識別 | 平坦な3 field：`tvt_decision_timestep`、`node_name`、`buyers_sorted`。`OrderControlTvtMpTradeIdentity` は現段階では作らない |
+| 成立時 record field 順 | §11.9 の17 field（`binding_rank` と `final_local_rank` は含めない） |
+
+`declared_vot_per_second` と `true_vot_per_second` を成立時 record へ保存することは確定済みである。上表の名称判断は解消済みである。`baseline_timestep_T` か `tvt_decision_timestep` か、TradeIdentity 型を作るか、正式な型名・field 名は、未決事項として残さない。
 
 ## 31. 次の再開地点
 
-1. Terminal で詳細設計第3巻の本節を直接表示する。
-2. 内容を独立確認する。
-3. 問題があれば文書だけ修正する。
-4. 問題がなければ、進捗第2巻の要約が本節と一致することを確認する。
-5. 進捗第2巻を Terminal で直接表示する。
-6. 両文書の差分を確認する。
-7. `git diff --check` を実行する。
-8. 文書2ファイルだけが変更されていることを確認する。
-9. 利用者の確認後に commit する。
-10. commit と push は分ける。
-11. メモを含む commit 名には `document` を含める。
-12. 保存後に、Python 実装と専用テストへ進む。
+1. 正式名称と field 構成は確定済みである。
+2. Terminal で詳細設計第3巻の本節（§5、§6、§11、§21、§27、§30）を限定表示し、内容を独立確認する。
+3. 進捗第2巻の要約が本節と一致することを確認する。
+4. 両文書の差分を確認する。
+5. `git diff --check` を実行する。
+6. 文書2ファイルだけが変更されていることを確認する。
+7. 利用者の確認後に commit する。
+8. commit と push は分ける。
+9. メモを含む commit 名には `document` を含める。
+10. 保存後に、atomic apply 本番実装と専用テストの実装へ進む。
+11. 実装では、新規本番モジュール、新規専用テスト、順位台帳の内部 prepare と commit の分離を扱う。
+12. Cursor 実装後は、実コードと専用テストを独立確認する。
 
 本節は完全実装前仕様である。Python 実装と専用テストは未着手である。
