@@ -3817,3 +3817,13 @@ actual passage の捕捉場所は、物理通過接続の設計時に同時確�
   - `order_control_tvt_arrived_confirmation.py`
   - `order_control_tvt_leading_nonparticipating_confirmation.py`
   - `order_control_tvt_mp_local_virtual_calculation_set.py`
+
+# 第4巻への移行（2026-09-28）
+
+詳細設計第3巻は、atomic applyの実装・検証、UXsim正式サンプルによる実装後スモークテスト、およびpredicted and actual outcome evaluationの詳細将来仕様までを記録した正式な過去記録として保存する。
+
+上位driver以降の最新詳細設計は、次を参照する。
+
+`ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_4.md`
+
+第3巻の既存内容は削除・再構成せず、第4巻から必要に応じて正式参照する。

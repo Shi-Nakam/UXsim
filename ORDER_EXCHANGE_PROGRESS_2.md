@@ -441,3 +441,15 @@ payment、compensation、P_b比例配分、seller実補償配分、`payment_paid
   - `order_control_tvt_arrived_confirmation.py`
   - `order_control_tvt_leading_nonparticipating_confirmation.py`
   - `order_control_tvt_mp_local_virtual_calculation_set.py`
+
+## 進捗第3巻への移行（2026-09-28）
+
+進捗第2巻は、atomic applyの実装・検証、実装後スモークテスト、およびpredicted and actual outcome evaluation仕様の記録までを含む正式な過去記録として保存する。
+
+以後の最新進捗は、次を参照する。
+
+`ORDER_EXCHANGE_PROGRESS_3.md`
+
+最新の詳細設計は、次を参照する。
+
+`ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_4.md`
