@@ -282,3 +282,43 @@
 7. commit と push を分離する。
 8. 保存後、`Node.transfer` による TVT 順位の物理利用へ進む前に、その完全実装前仕様を作成する。
 9. 実装後は Cursor 報告だけで完了判断せず、独立確認する。
+
+## TVT-MP確定順位の物理通過接続に関する設計判断を確定（2026-09-29）
+
+正式な記録は、詳細設計第4巻「TVT-MP確定順位の物理通過接続 設計判断」を参照する。完全実装前仕様はまだ作成していない。
+
+- TVT 順位は通過保証ではなく、通過試行機会の順位である。
+- 実 World は、T の driver 完了後の最新確定順位を使う。
+- 現在の `incoming_vehicles` だけを候補にする。
+- 通過済み Visit 集合は追加しない。
+- 実進路は `Vehicle.route_next_link` である。
+- formal route を強制しない。
+- 物理先頭、容量、入口空間不足は一時スキップする。
+- clearance 未充足だけ、その時刻の対象 Node 処理を終了する。
+- signal 判定を追加しない。
+- baseline fork は、T-1 以前の確定順位を維持する。
+- T の新順位を baseline へ混ぜない。
+- fork copy 時点の台帳複製で区別する。
+- `confirmed_at_timestep` は追加しない。
+- baseline fork は、過去確定群を先に試す。
+- その後、通常 baseline 群を既存の通常合流で処理する。
+- 一時スキップした過去確定 Vehicle を通常群へ混ぜない。
+- 到着列を一時差し替えない。
+- 許可集合付き通常合流 helper を基本方針とする。
+- collector と observer の一回性を維持する。
+- actual passage と actual outcome は次段階である。
+- 以前の、baseline fork では TVT 順位を使わないという中間整理は訂正した。
+- 利用者判断が必要な事項は、現時点で残っていない。
+
+## 最新の再開地点
+
+1. 第4巻と進捗第3巻を Terminal で分割確認する。
+2. `git diff --check` と変更ファイルを確認する。
+3. 文書 2 ファイルを commit する。
+4. commit 名に `document` を含める。
+5. commit 名に `complete` を使用しない。
+6. commit と push を分離する。
+7. 保存後、この設計判断を基に完全実装前仕様を作成する。
+8. 完全実装前仕様を保存してから Python と専用テストを実装する。
+9. 実装後は本番コード、専用テスト、差分、回帰結果を独立確認する。
+10. その後、actual passage・actual outcome の設計へ進む。
