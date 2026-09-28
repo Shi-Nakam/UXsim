@@ -1008,6 +1008,7 @@ def test_fork_result_does_not_include_plan_or_rank_ledger_fields():
         "final_fork_timestep",
         "registered_visit_count",
         "inlink_physical_orders",
+        "downstream_boundary_result",
     }
 
 

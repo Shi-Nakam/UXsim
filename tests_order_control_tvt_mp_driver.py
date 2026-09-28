@@ -681,12 +681,13 @@ def test_success_does_not_change_vehicle_participation_vot_or_rng():
     assert after_names == link_names
 
 
-def test_exec_simulation_and_node_transfer_do_not_call_the_driver():
+def test_exec_simulation_connects_driver_but_node_transfer_does_not():
     simulation_source = inspect.getsource(World.exec_simulation)
     transfer_source = inspect.getsource(Node.transfer)
-    assert "run_tvt_mp_driver" not in simulation_source
-    assert "order_control_tvt_mp_driver" not in simulation_source
+    assert "run_tvt_mp_driver" in simulation_source
+    assert "order_control_tvt_mp_driver" in simulation_source
     assert "run_tvt_mp_driver" not in transfer_source
+    assert "order_control_tvt" not in transfer_source
     assert "time_value" not in transfer_source
 
 

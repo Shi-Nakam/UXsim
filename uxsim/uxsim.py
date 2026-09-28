@@ -4067,6 +4067,9 @@ class World:
         W.order_control_tvt_driver_started_timestep = None
         W.order_control_tvt_baseline_horizon_steps = 6
         W.order_control_tvt_max_candidate_visit_count = None
+        # Last timestep that still runs real traffic and TVT. None keeps
+        # ordinary TSIZE termination and does not auto-start the driver.
+        W.order_control_tvt_evaluation_end_timestep = None
         # Fork-only baseline visit collector; real_W keeps None (see design memo §25.11).
         W._order_control_baseline_collector = None
         # Fork-only downstream boundary observer for all-World baseline; real_W keeps None.
@@ -4900,6 +4903,36 @@ class World:
         print(" number of nodes:\t", len(W.NODES))
         print(" setup time:\t\t", f"{time.time()-W.world_start_time:.2f}", "s")
 
+    def _require_tvt_evaluation_end_timestep(W):
+        """
+        Return the TVT evaluation end timestep, or None when unset.
+
+        A set value is the last timestep that still runs traffic and TVT.
+        It must be a non-bool int in ``0 .. TSIZE-1``. ``TSIZE`` itself is
+        not a valid last timestep.
+        """
+        value = W.order_control_tvt_evaluation_end_timestep
+        if value is None:
+            return None
+        if type(value) is not int or value < 0 or value >= W.TSIZE:
+            raise ValueError(
+                "order_control_tvt_evaluation_end_timestep must be None or a "
+                "Python int greater than or equal to 0 and less than TSIZE; "
+                f"got {value!r}, TSIZE={W.TSIZE}."
+            )
+        return value
+
+    def _tvt_evaluation_has_ended(W, evaluation_end_timestep):
+        """
+        True after the real World has moved past the last evaluation timestep.
+
+        The evaluation end timestep itself is still inside the evaluation.
+        ``World.T == evaluation_end_timestep + 1`` is the first ended state.
+        """
+        if evaluation_end_timestep is None:
+            return False
+        return W.T > evaluation_end_timestep
+
     def exec_simulation(W, until_t:float|None=None, duration_t:float|None=None, duration_t2:float|None=None):
         """
         Execute the main loop of the simulation.
@@ -4933,6 +4966,12 @@ class World:
         if W.finalized == 0:
             W.finalize_scenario()
 
+        evaluation_end_timestep = W._require_tvt_evaluation_end_timestep()
+        # Already past the last evaluation timestep. Do not simulate the
+        # internal baseline margin, and do not analyze again.
+        if W._tvt_evaluation_has_ended(evaluation_end_timestep):
+            return 1
+
         #determine the simulation time
         start_ts = W.T
         if until_t != None:
@@ -4945,6 +4984,13 @@ class World:
             end_ts = W.TSIZE
         if end_ts > W.TSIZE:
             end_ts = W.TSIZE
+        # Include evaluation_end_timestep itself. The following timesteps
+        # belong to the internal baseline margin and stay unsimulated.
+        if (
+            evaluation_end_timestep is not None
+            and end_ts > evaluation_end_timestep
+        ):
+            end_ts = evaluation_end_timestep
 
         if start_ts == end_ts == W.TSIZE:
             if W.print_mode and W.show_progress:
@@ -4954,10 +5000,19 @@ class World:
         if end_ts < start_ts:
             raise Exception("exec_simulation error: Simulation duration is not positive. Check until_t or duration_t or duration_t2")
 
+        # Local import avoids a cycle: the driver imports World from this
+        # module at runtime. Skip it when evaluation end is unset.
+        if evaluation_end_timestep is not None:
+            from uxsim.order_control_tvt_mp_driver import run_tvt_mp_driver
+
         #the main loop
         #print("preping:", W.T, start_ts, end_ts, W.check_simulation_ongoing())
         for W.T in range(start_ts, end_ts+1):
             #print("execing:", W.T, start_ts, end_ts, W.check_simulation_ongoing())
+            # One TVT decision before Link.update. A baseline fork replays
+            # from Link.update, so the real World must not update links first.
+            if evaluation_end_timestep is not None:
+                run_tvt_mp_driver(W)
             if W.T == 0:
                 W.print("      time| # of vehicles| ave speed| computation time", flush=True)
                 W.analyzer.show_simulation_progress()
@@ -5026,7 +5081,15 @@ class World:
                 W.analyzer.show_simulation_progress()
             W.simulation_terminated()
             return 1
-        
+        # T is evaluation_end_timestep + 1 here, and TSIZE is still ahead.
+        # Analyze once. A later call hits the ended check above.
+        if (
+            evaluation_end_timestep is not None
+            and W.T == evaluation_end_timestep + 1
+        ):
+            W.simulation_terminated()
+            return 1
+
         return 0 #simulation not yet finished
 
     def check_simulation_ongoing(W) -> bool:
@@ -5040,6 +5103,9 @@ class World:
         """
         if W.finalized == 0:
             return True
+        evaluation_end_timestep = W._require_tvt_evaluation_end_timestep()
+        if W._tvt_evaluation_has_ended(evaluation_end_timestep):
+            return False
         return W.T <= W.TSIZE-1
 
     def simulation_terminated(W):

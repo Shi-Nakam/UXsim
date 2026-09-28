@@ -308,6 +308,10 @@ def _prepare_baseline_fork(
     baseline_timestep_T = real_W.T
 
     fork_W = real_W.copy()
+    # The copy keeps the real World's evaluation end. Clear it on the fork
+    # only, before fork checks and before forward, so the fork can run the
+    # full horizon on the internal margin and does not analyze there.
+    fork_W.order_control_tvt_evaluation_end_timestep = None
     _validate_copied_fork(
         real_W=real_W,
         fork_W=fork_W,

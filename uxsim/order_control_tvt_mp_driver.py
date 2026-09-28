@@ -265,6 +265,34 @@ def _require_common_settings(real_W):
             f"got {max_candidate_visit_count!r}."
         )
 
+    _require_evaluation_end_margin(real_W)
+
+
+def _require_evaluation_end_margin(real_W):
+    """
+    Require horizon + 1 timesteps counted from the evaluation end.
+
+    The evaluation end timestep is the first of those remaining timesteps.
+    Unset evaluation end keeps manual driver calls unchanged. The decision
+    window length is not part of this count.
+    """
+    if real_W.order_control_tvt_evaluation_end_timestep is None:
+        return
+    evaluation_end_timestep = real_W._require_tvt_evaluation_end_timestep()
+    horizon = real_W.order_control_tvt_baseline_horizon_steps
+    remaining_steps = real_W.TSIZE - evaluation_end_timestep
+    required_steps = horizon + 1
+    if remaining_steps < required_steps:
+        raise ValueError(
+            "Insufficient internal timesteps at the evaluation end for "
+            "baseline_horizon_steps plus one post-horizon timestep margin: "
+            f"evaluation_end_timestep={evaluation_end_timestep}, "
+            f"baseline_horizon_steps={horizon}, "
+            f"remaining_steps={remaining_steps}, "
+            f"required_steps={required_steps}, "
+            f"TSIZE={real_W.TSIZE}."
+        )
+
 
 def _ensure_target_rank_states(rank_states, target_node_names):
     if type(rank_states) is not dict:

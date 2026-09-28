@@ -1922,3 +1922,216 @@ actual outcome の型名、field 名、status 名は、本節では意図して�
 6. commit と push を分離する。
 7. 保存後、本節どおり Python と専用テストを実装する。
 8. `Node.transfer` による物理通過接続は、その後の別段階とする。
+
+## 28. 実装・独立確認・検証結果（2026-09-28）
+
+本節は、直前の完全実装前仕様を実装し、Terminal で独立確認した結果である。§1 から §27 は実装前の正式仕様として残す。削除も短縮もしない。
+
+### 実装ファイル
+
+変更した本番ファイル:
+
+- `uxsim/uxsim.py`
+- `uxsim/order_control_tvt_mp_driver.py`
+- `uxsim/order_control_baseline_driver.py`
+
+新規専用テスト:
+
+- `tests_order_control_tvt_mp_evaluation_end.py`
+
+正式契約へ追随させた既存テスト:
+
+- `tests_order_control_tvt_mp_driver.py`
+- `tests_order_control_tvt_baseline_driver_registration.py`
+
+### World属性
+
+`uxsim/uxsim.py` の `World.__init__` へ次を追加した。
+
+```text
+order_control_tvt_evaluation_end_timestep = None
+```
+
+意味:
+
+- 最後に実 World の交通計算を行う時刻番号
+- 最後に TVT-MP 形成を検討する時刻番号
+- 10,000 timestep 評価なら `9999`
+- `None` なら従来 UXsim の `TSIZE` 終了契約
+- `None` なら driver を自動起動しない
+
+driver は属性を初回作成しない。
+
+### 自動起動条件と位置
+
+評価終了時刻が `None` でない実 World だけで自動起動する。各処理時刻の時刻ループ先頭で、`run_tvt_mp_driver(W)` を 1 回呼ぶ。
+
+呼出し位置は次より前である。
+
+- `T = 0` の進捗見出し
+- `Link.update`
+- `Node.generate`
+- `Node.transfer`
+- `Vehicle.update`
+- `World.user_function`
+
+`T = 0` と最終評価時刻を含む。複数 TVT 対象 Node でも、driver は 1 時刻に 1 回だけである。対象 Node の収集は driver だけが行う。`uxsim.py` へ対象判定を複製していない。driver の 16 段を `exec_simulation` へ複製していない。
+
+`uxsim.py` のファイル先頭では driver を import していない。評価終了時刻が有効で、まだ終了済みでない実行だけ、`exec_simulation` 内で時刻ループ前に局所 import する。時刻ループ内で毎回 import しない。
+
+### 評価終了制御
+
+`finalize_scenario()` の後、交通計算と driver 起動の前に評価終了時刻を検査する。`None` 以外は、`type(value) is int`、`bool` 不可、`0` 以上、`TSIZE` 未満である。不正は `ValueError` である。不正時は交通計算も driver も始めない。同じ検査 helper を `exec_simulation`、`check_simulation_ongoing`、手動 driver 実行時の余白検査から利用する。
+
+評価終了時刻を含めて交通計算する。10 timestep 評価、評価終了時刻 `9` の場合は、`T = 0` から `9` を処理し、処理後の `World.T` は `10` である。`T = 10` 以降へ進まない。
+
+評価終了済みは、評価終了時刻が `None` でなく、`World.T` が評価終了時刻より大きいことで判断する。専用の終了済み flag は追加していない。評価終了のために `T`、`TIME`、`TSIZE`、`TMAX`、`finalized` は書き換えない。`T` は既存ループの +1 だけで進む。
+
+評価終了時刻が `None` の場合は、従来の `TSIZE` 終了と再呼出し動作を維持する。
+
+### check_simulation_ongoing
+
+`finalized` 前は従来どおり `True` である。評価終了時刻そのものでは `True` である。評価終了時刻の次の時刻では `False` である。評価終了時刻が `None` なら、従来の `TSIZE` 判定だけを使う。
+
+### 終了集計
+
+評価終了到達時に、既存 `simulation_terminated()` を 1 回呼ぶ。その中の `Analyzer.basic_analysis()` も 1 回実行する。
+
+評価終了後に `exec_simulation()` を再度呼んでも、交通計算しない。`simulation_terminated()` を再度呼ばない。`basic_analysis()` を再度呼ばない。`World.T` を進めない。例外にしない。戻り値は `1` である。
+
+### baseline fork制限解除
+
+`uxsim/order_control_baseline_driver.py` の `_prepare_baseline_fork()` で実装した。`fork_W = real_W.copy()` の直後に、fork 側だけ次を代入する。
+
+```text
+fork_W.order_control_tvt_evaluation_end_timestep = None
+```
+
+配置は `_validate_copied_fork`、collector 接続、downstream observer 接続、baseline forward より前である。`real_W` の評価終了時刻は変わらない。fork は従来の `TSIZE` 終了契約へ戻る。horizon を短縮しない。`remaining_steps >= baseline_horizon_steps + 1` を維持する。`fork_W.T < fork_W.TSIZE` を維持する。fork 上で `simulation_terminated()` と `Analyzer.basic_analysis()` を呼ばない。Visit 0 件時の forward 省略も維持する。
+
+### 内部余白検査
+
+対象 Node が 1 件以上で、評価終了時刻が設定されている場合だけ、上位 driver で事前検査する。検査順は、既存 baseline horizon 検査、既存候補数上限検査、新しい内部余白検査である。
+
+```text
+TSIZE - evaluation_end_timestep >= baseline_horizon_steps + 1
+```
+
+10 timestep 評価、評価終了時刻 `9`、horizon 30 の場合、`TSIZE = 40` なら成功、`TSIZE = 39` なら不足である。不足は driver 開始時刻記録前の `ValueError` である。不足時、`order_control_tvt_driver_started_timestep` は変わらない。意思決定窓の `6` は余白計算に使わない。baseline driver 側の既存余白検査も残す。
+
+### 対象Node 0件
+
+対象 Node が 0 件の場合は、driver の既存完全 no-op を維持する。World、順位台帳、Vehicle、driver 開始時刻を変更しない。共通設定を検査しない。baseline horizon に対する内部余白を要求しない。`exec_simulation` 側の評価終了時刻の型・範囲検査と、実 World の評価終了制御は有効である。
+
+### driver例外
+
+`exec_simulation` は driver 例外を捕捉しない。警告、fallback、正常結果、別例外へ変換しない。driver 例外が出た時刻では、`Link.update` その他の交通計算へ進まない。driver が記録済みの開始時刻や先行確定は rollback しない。
+
+### 分割実行
+
+評価終了より前の `duration_t2` 等の途中停止では終了集計しない。途中停止後は再開できる。`until_t` が評価終了時刻より後でも、評価終了時刻へ切り詰める。既存の `until_t`、`duration_t2`、`duration_t` の計算式は変更していない。`duration_t` の既存の 1 時刻差も今回変更していない。
+
+### Analyzerと未完了Vehicle
+
+`Analyzer` 本体は変更していない。評価終了時点の既存状態を `basic_analysis` で集計する。完了 Vehicle だけが完了 trip、旅行時間、遅延へ入る。未完了 Vehicle は未完了のままである。将来の到着結果を補完しない。総走行距離等は既存契約のままである。専用テストでは、総 trip 数 2、完了 trip 数 1 を確認した。内部余白は実 World で未実行なので、基本集計へ混ざらない。リンク配列全体を使う分析の評価期間限定は未実装である。
+
+### 新規専用テスト
+
+新規ファイルは `tests_order_control_tvt_mp_evaluation_end.py` である。定義済み test 関数、`TESTS` 登録、pytest 収集はいずれも 22 件である。重複、登録漏れ、未定義参照はない。
+
+直接実行結果は `22 tests passed` である。pytest 結果は `22 passed in 14.20s` である。
+
+記録する主要ケース:
+
+- 属性初期値 `None`
+- `None` では driver を自動起動しない
+- `None` では従来 `TSIZE` 終了
+- `bool`、負数、`TSIZE` 以上を `ValueError`
+- 不正値では交通計算も driver も開始しない
+- 10 timestep 評価は `T = 0` から `9`
+- 処理後 `T = 10`
+- `T = 0` と `T = 9` で driver を呼ぶ
+- `T = 10` 以降へ進まない
+- 終了後の再実行で再集計しない
+- 分割実行と再開
+- driver は `Link.update` と `Node.transfer` より前
+- driver 例外時は交通計算しない
+- 対象 Node 0 件では余白不要
+- horizon 30 の必要下限と 1 不足
+- 意思決定窓 `6` とは独立
+- fork 側だけ評価終了制限を解除
+- fork は horizon 50 を全量計算
+- fork 上で終了集計しない
+- Visit 0 件では forward しない
+- 完了 Vehicle と未完了 Vehicle を区別
+- `Node.transfer` は TVT 順位を物理利用しない
+
+### 既存テスト更新
+
+`tests_order_control_tvt_mp_driver.py` の旧テスト `test_exec_simulation_and_node_transfer_do_not_call_the_driver` は、`test_exec_simulation_connects_driver_but_node_transfer_does_not` へ更新した。今回の正式仕様により、`exec_simulation` は条件付きで `run_tvt_mp_driver` へ接続する。`Node.transfer` は `run_tvt_mp_driver`、`order_control_tvt`、`time_value` を扱わない契約を維持した。
+
+`tests_order_control_tvt_baseline_driver_registration.py` の `test_fork_result_does_not_include_plan_or_rank_ledger_fields` の期待 field 集合へ `downstream_boundary_result` を追加した。保存済みコミット `f29996a` の `OrderControlBaselineForkResult` に、この field はすでに存在した。今回の実装は結果型を変更していない。既存テスト期待値の追随漏れである。
+
+### 独立確認
+
+Cursor 報告だけでは完了判断していない。次を Terminal で直接確認した。
+
+- `uxsim.py` の World 属性
+- 評価終了時刻検査 helper
+- 評価終了済み判定 helper
+- `exec_simulation` の局所 import
+- driver 呼出し位置
+- `end_ts` 切り詰め
+- 終了集計の一回性
+- `check_simulation_ongoing`
+- driver の内部余白検査
+- baseline fork 複製直後の制限解除
+- 新規専用テスト 22 件の本文
+- 既存テスト 2 件の変更本文
+- 保存済み `f29996a` 時点の baseline 結果型
+
+### 回帰結果
+
+主要 5 テストファイルは `179 passed in 19.11s` である。baseline から atomic apply、自動起動・評価終了制御までの関係テスト全体は `994 passed in 26.16s` である。
+
+### py_compile
+
+変更・修正した 6 ファイルの `py_compile` は成功した。
+
+### 正式サンプル
+
+実行は `python demos_and_examples/example_00en_simple.py` である。
+
+- 1200秒まで正常完走
+- completed trips: 735 / 810
+- average speed: 11.7 m/s
+- total travel time: 119475.0 s
+- average travel time: 162.6 s
+- average delay: 62.6 s
+- delay ratio: 0.385
+- total distance traveled: 1632250.0 m
+
+従来結果と一致した。`git diff --check` は問題なしである。
+
+### 未実装範囲
+
+- `Node.transfer` による TVT 順位の物理利用
+- actual passage
+- actual outcome
+- 実績評価
+- 満足評価
+- welfare
+- リンク分析の評価期間限定
+- 対象外 Node の順位台帳削除
+
+### 次の再開地点
+
+1. 第4巻と進捗第3巻を Terminal で限定確認する。
+2. 実装・テスト 6 ファイルの変更範囲を確認する。
+3. `git diff --check` を実行する。
+4. 文書、実装、テストを同一保存単位で commit する。
+5. commit 名に `document` を含める。
+6. commit 名に `complete` を使用しない。
+7. commit と push を分離する。
+8. 保存後、`Node.transfer` による TVT 順位の物理利用へ進む前に、その完全実装前仕様を作成する。
+9. 実装後は Cursor 報告だけで完了判断せず、独立確認する。

@@ -248,3 +248,37 @@
 7. 保存後、完全実装前仕様どおり Python と専用テストを実装する。
 8. 実装後は Cursor 報告だけで完了判断せず、本番コード、専用テスト、差分、テスト結果を独立確認する。
 9. `Node.transfer` による物理通過接続は、その後の別段階とする。
+
+## TVT-MPをWorldから起動し評価終了時刻で止める接続を実装・独立確認（2026-09-28）
+
+正式な技術詳細は、詳細設計第4巻「TVT-MP自動起動・評価終了制御・fork制限解除 完全実装前仕様」の §28 を参照する。
+
+- 本番 3 ファイルと新規専用テストを実装した。
+- World 属性 `order_control_tvt_evaluation_end_timestep` を追加した。初期値は `None` である。
+- 評価終了時刻が設定された World だけで、各時刻に driver を起動する。
+- driver は `Link.update` より前である。
+- 最終評価時刻を含めて処理する。
+- 評価終了後は実 World を内部余白へ進めない。
+- 終了集計は一度だけである。
+- fork 側だけ評価終了制限を解除する。
+- 対象 Node が 1 件以上のときだけ内部余白を検査する。
+- 対象 Node が 0 件なら余白は不要である。
+- 専用テスト 22 件は成功した。直接実行は `22 tests passed`、pytest は `22 passed in 14.20s` である。
+- 主要 5 ファイルは `179 passed in 19.11s` である。
+- 関係テストは `994 passed in 26.16s` である。
+- 変更・修正した 6 ファイルの `py_compile` は成功した。
+- 正式サンプルは従来結果と一致した。completed trips は 735 / 810、average speed は 11.7 m/s である。
+- 既存テスト 2 件を正式契約へ限定更新した。`exec_simulation` は条件付きで driver へ接続し、`Node.transfer` は TVT を扱わない。`downstream_boundary_result` は保存済み結果型への期待追随である。
+- 未実装は、`Node.transfer` による TVT 順位の物理利用、actual passage、actual outcome、実績評価、満足評価、welfare、リンク分析の評価期間限定、対象外 Node の順位台帳削除である。
+
+## 最新の再開地点
+
+1. 第4巻と進捗第3巻を Terminal で限定確認する。
+2. 実装・テスト 6 ファイルの変更範囲を確認する。
+3. `git diff --check` を実行する。
+4. 文書、実装、テストを同一保存単位で commit する。
+5. commit 名に `document` を含める。
+6. commit 名に `complete` を使用しない。
+7. commit と push を分離する。
+8. 保存後、`Node.transfer` による TVT 順位の物理利用へ進む前に、その完全実装前仕様を作成する。
+9. 実装後は Cursor 報告だけで完了判断せず、独立確認する。
