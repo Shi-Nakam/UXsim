@@ -194,3 +194,57 @@
 6. 保存後、自動起動・評価終了制御の完全実装前仕様を作る。
 7. その後に Python と専用テストを実装する。
 8. `Node.transfer` による物理通過接続は、その後の別段階とする。
+
+## TVT-MP自動起動・評価終了制御の完全実装前仕様を確定（2026-09-28）
+
+正式な技術詳細は、詳細設計第4巻「TVT-MP自動起動・評価終了制御・fork制限解除 完全実装前仕様」を参照する。
+
+- 詳細設計第4巻へ、TVT-MP 自動起動、実 World の評価終了制御、baseline fork の評価終了制限解除に関する完全実装前仕様を記録した。
+- 利用者判断が必要な事項は解消済みである。
+- World の正式属性は `order_control_tvt_evaluation_end_timestep` とする。
+- 初期値は `None` とする。
+- `None` の場合は、従来 UXsim の `TSIZE` 終了契約を使い、TVT-MP driver を自動起動しない。
+- 10,000 timestep 評価では、評価終了時刻は `9999` とする。
+- 評価終了時刻が設定されている場合だけ、各処理時刻で `run_tvt_mp_driver(W)` を 1 回自動起動する。
+- driver は時刻ループの先頭、進捗表示、`Link.update`、`Node.generate`、`Node.transfer`、`Vehicle.update` より前に呼ぶ。
+- `T = 0` と最終評価時刻を含む。
+- driver 例外は捕捉せず、その時刻の交通計算へ進まない。
+- `uxsim.py` では driver をファイル先頭で import せず、`exec_simulation` 内で局所 import する。
+- 対象 Node の収集は driver だけが行い、`uxsim.py` へ重複実装しない。
+- 対象 Node が 0 件の場合は、driver の既存完全 no-op を維持する。
+- 対象 Node が 0 件なら、baseline horizon に対する内部余白を要求しない。
+- 評価終了時刻の型、`bool`、負数、`TSIZE` 以上は交通計算前に `ValueError` とする。
+- 対象 Node が 1 件以上の場合だけ、driver の共通設定検査で内部余白を検査する。
+- 内部余白条件は `internal_TSIZE - evaluation_end_timestep >= baseline_horizon_steps + 1` である。
+- 10,000 timestep、horizon 50 なら `internal_TSIZE` は 10,050 以上である。
+- `internal_TSIZE = 10049` は不足である。
+- 余白不足は driver 開始時刻の記録前に `ValueError` とする。
+- baseline driver 側の既存余白検査も残す。
+- 実 World は最終評価時刻を含めて処理し、処理後の `World.T` は評価終了時刻 `+ 1` となる。
+- 評価終了到達時に既存 `simulation_terminated` を 1 回呼ぶ。
+- `Analyzer.basic_analysis` も既存経路で 1 回実行する。
+- 評価終了後に `exec_simulation` を再度呼んでも、交通計算も終了集計も行わず、正常終了コード `1` を返す。
+- `check_simulation_ongoing` は、評価終了時刻の次の時刻で `False` を返す。
+- 評価終了より前の分割実行では終了集計せず、その後再開できる。
+- baseline fork は `World.copy` 直後に、fork 側だけ `order_control_tvt_evaluation_end_timestep = None` とする。
+- fork 側の解除は `_validate_copied_fork` より前、collector 接続より前、baseline forward より前に行う。
+- 実 World の評価終了時刻は変更しない。
+- fork は既存の `horizon + 1` 契約を維持し、fork 上で終了集計を実行しない。
+- 未完了 Vehicle は未完了のまま扱い、将来の到着結果を補完しない。
+- actual outcome 未観測の型や field は今回実装しない。
+- 新規専用テスト予定ファイルは `tests_order_control_tvt_mp_evaluation_end.py` とする。
+- 実装対象は `uxsim/uxsim.py`、`uxsim/order_control_tvt_mp_driver.py`、`uxsim/order_control_baseline_driver.py`、新規専用テストである。
+- `Node.transfer` による TVT 順位の物理利用は今回実装しない。
+- actual passage、actual outcome、実績評価、満足評価、welfare、リンク分析の評価期間限定は未実装のままである。
+
+## 最新の再開地点
+
+1. 詳細設計第4巻と進捗第3巻を Terminal で限定確認する。
+2. `git diff --check` と変更ファイルを確認する。
+3. 文書 2 ファイルを commit する。
+4. commit 名に `document` を含める。
+5. commit 名に `complete` を使用しない。
+6. commit と push を分離する。
+7. 保存後、完全実装前仕様どおり Python と専用テストを実装する。
+8. 実装後は Cursor 報告だけで完了判断せず、本番コード、専用テスト、差分、テスト結果を独立確認する。
+9. `Node.transfer` による物理通過接続は、その後の別段階とする。
