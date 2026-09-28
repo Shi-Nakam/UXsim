@@ -1068,3 +1068,362 @@ baseline から atomic apply、driver までの関係テスト一式は `940 pas
 6. commit と push を分離する。
 7. 保存後、World から driver を自動起動する接続の設計へ進む。
 8. `Node.transfer` による物理通過接続は、その後の別段階とする。
+
+# TVT-MP評価期間・baseline内部余白・実World終了制御
+
+記録日: 2026-09-28
+
+本節は、TVT-MP の評価期間と baseline fork 用の内部余白を分け、実 World だけを評価終了時刻で正式終了する設計の記録である。方式Aを採用する。Python と専用テストは未着手である。属性名 `order_control_tvt_evaluation_end_timestep` は本節で正式名とする。
+
+## 1. 評価期間の定義
+
+評価対象が 10,000 timestep の場合、評価時刻は次である。
+
+```text
+T = 0, 1, ..., 9999
+```
+
+時刻の個数は 10,000 個である。最終評価時刻 `T = 9999` を含む全評価時刻で、通常どおり TVT-MP 形成を検討する。
+
+終盤だけ次を行う方針は採用しない。
+
+- TVT-MP driver の起動をスキップする
+- baseline horizon を短縮する
+- baseline 不足の例外を握り潰す
+- 最終評価時刻付近の Visit を TVT 形成検討から除外する
+
+## 2. 意思決定窓とbaseline horizonの区別
+
+意思決定窓は次である。
+
+```text
+T < baseline_arrival_timestep <= T + 6
+```
+
+この `6` は意思決定窓の長さである。
+
+baseline horizon は、全 World baseline fork を何 timestep 先まで進めるかである。意思決定窓とは独立して設定する。30 や 50 などを取り得る。
+
+意思決定窓の `6` を理由に、baseline horizon を `6` へ固定しない。
+
+## 3. horizon + 1の根拠
+
+登録 Visit が 1 件以上ある baseline fork では、次を維持する。
+
+```text
+remaining_steps >= baseline_horizon_steps + 1
+```
+
+`+1` は、horizon 分の仮想交通計算の後も `fork_W.T` を `fork_W.TSIZE` 未満に保ち、fork 上で `simulation_terminated()` と `Analyzer.basic_analysis()` を実行しないための技術的余白である。
+
+下流境界の観測に、追加で 1 timestep の交通計算が必要という意味ではない。
+
+登録 Visit が 0 件の場合は baseline forward を行わない。既存契約どおり、余白検査も行わない。
+
+## 4. 採用方式
+
+方式Aを採用する。
+
+World を作成する時点で、最終評価時刻において `baseline_horizon_steps + 1` 個の残り時刻数を確保できるよう、内部 `TSIZE` を設定する。最終評価時刻そのものを、残り時刻数の 1 個目に含める。実 World の交通計算は、評価終了時刻より後へ進めない。
+
+評価 timestep 数を `evaluation_timestep_count`、最終評価時刻を `evaluation_end_timestep` とすると、次である。
+
+```text
+evaluation_end_timestep = evaluation_timestep_count - 1
+```
+
+最終評価時刻から必要な残り時刻数の条件は、次である。
+
+```text
+internal_TSIZE - evaluation_end_timestep >= baseline_horizon_steps + 1
+```
+
+したがって、内部 `TSIZE` の条件は、次である。
+
+```text
+internal_TSIZE >= evaluation_end_timestep + baseline_horizon_steps + 1
+```
+
+これを評価 timestep 数で表すと、次と同じである。
+
+```text
+internal_TSIZE >= evaluation_timestep_count + baseline_horizon_steps
+```
+
+誤解防止:
+
+- 「評価期間より horizon + 1 timestep 長くする」とは書かない
+- 評価 timestep 数との比較では、内部 `TSIZE` は baseline horizon 分だけ長い
+- 最終評価時刻から数える残り時刻数は `baseline_horizon_steps + 1` 個である
+- 最終評価時刻自身を残り時刻数の 1 個目に含める
+- 意思決定窓の `6` は、この計算に使用しない
+- baseline horizon が 30、50 などに変わっても同じ一般式を使う
+- 実 World は評価終了時刻より後へ進めない
+
+10,000 timestep、horizon 50 の例:
+
+```text
+evaluation_timestep_count = 10000
+evaluation_end_timestep = 9999
+baseline_horizon_steps = 50
+```
+
+必要条件は、次である。
+
+```text
+internal_TSIZE >= 9999 + 50 + 1
+internal_TSIZE >= 10050
+```
+
+これは、次と同じである。
+
+```text
+internal_TSIZE >= 10000 + 50
+internal_TSIZE >= 10050
+```
+
+`T = 9999` で baseline fork を 50 timestep 進めると、処理後の fork 時刻は次である。
+
+```text
+fork_W.T = 9999 + 50 = 10049
+```
+
+内部 `TSIZE` が 10,050 なら、次を満たす。
+
+```text
+fork_W.T < fork_W.TSIZE
+10049 < 10050
+```
+
+したがって、fork 上で `simulation_terminated()` と `Analyzer.basic_analysis()` は実行されない。
+
+不足境界:
+
+内部 `TSIZE` が 10,049 の場合は不足である。
+
+```text
+internal_TSIZE - evaluation_end_timestep = 10049 - 9999 = 50
+```
+
+必要な残り時刻数は 51 個なので、次の必要条件を満たさない。
+
+```text
+50 >= 51  （不成立）
+```
+
+この場合は、既存契約どおり baseline 開始前に `ValueError` とする。
+
+実 World の交通計算は `T = 9999` までである。`T = 9999` の処理後、実 World の `T` は `10000` である。`T = 10000` 以降の実 World 交通計算は行わない。
+
+方式B、つまり実 World の `TSIZE` を評価期間ちょうどにし、`World.copy()` の後で fork だけ期間と配列を延長する方式は採用しない。
+
+## 5. 評価終了時刻
+
+World へ、最後に評価対象として交通計算と TVT-MP 形成検討を行う時刻を保存する。
+
+正式属性名:
+
+```text
+order_control_tvt_evaluation_end_timestep
+```
+
+初期値は `None` である。`None` の場合は、従来 UXsim の `TSIZE` による終了契約を使う。対象 Node が 0 件でも、この属性が `None` なら従来どおり最後の内部時刻まで実行する。
+
+設定する場合の値は次を満たす。
+
+- Python の `int`
+- `bool` 不可
+- `0` 以上
+- `TSIZE` 未満
+- baseline horizon と内部 `TSIZE` の余白条件を満たす
+
+`TSIZE` は `finalize_scenario()` で初めて決まる。`TSIZE` 未満であることと、余白条件は `World.__init__` では検査しない。`exec_simulation()` の開始時に検査する。余白条件は次である。
+
+```text
+TSIZE - order_control_tvt_evaluation_end_timestep >= baseline_horizon_steps + 1
+```
+
+不足は baseline の例外を隠さず、交通計算の前に `ValueError` とする。horizon を実行前に変えた場合も、その時点の horizon で検査する。
+
+10,000 timestep 評価の値は `9999` である。10 timestep 評価の値は `9` である。
+
+この属性は次で共通利用する。
+
+- 実 World の交通計算終了
+- TVT-MP driver の自動起動範囲
+- 将来の actual outcome 未観測判定
+
+baseline horizon とは別設定である。`TMAX` は秒、`TSIZE` は内部に処理可能な時刻数、この属性は最後に評価する時刻番号である。処理後の `World.T = 10000` は、最後に評価した時刻 `9999` そのものではない。
+
+自動起動は、`T` がこの値以下の時刻で driver を呼ぶ。`T = 9999` も含む。
+
+## 6. exec_simulationの終了制御
+
+評価終了時刻が設定されている実 World では、次とする。
+
+- `T` が評価終了時刻以下なら交通計算を行う
+- 最終評価時刻も処理する
+- 処理後、`World.T` は評価終了時刻 `+ 1` となる
+- その時点で `simulation_terminated()` を一度だけ呼ぶ
+- `Analyzer.basic_analysis()` も一度だけ実行する
+- 以後、`exec_simulation()` を呼んでも交通計算を再開しない
+- 内部余白期間へ実 World を進めない
+- `check_simulation_ongoing()` は `False` を返す
+
+専用の終了済み flag は追加しない。`World.finalized` はシナリオ準備済みを表す既存属性であり、評価終了済みには使わない。
+
+評価終了済みの条件は次である。
+
+```text
+World.T > order_control_tvt_evaluation_end_timestep
+```
+
+10,000 timestep 評価では、`T = 9999` はまだこの条件を満たさないので処理する。処理後の `T = 10000` で条件を満たす。その後の `exec_simulation()` は、交通計算も終了集計も再度行わない。
+
+評価終了より前の途中停止では終了集計しない。その後、最終評価時刻まで再開できる。
+
+引数なしの `exec_simulation()` でも、要求終了が最終評価時刻より後でも、実 World の交通計算は最終評価時刻で打ち切る。`T` も `TSIZE` も、この打ち切りのために変更しない。
+
+評価終了時刻が `None` なら、従来の `TSIZE` 終了処理を維持する。`T == TSIZE` のときだけ `simulation_terminated()` を呼ぶ既存契約は、この場合に残す。評価終了と `TSIZE` 終了が同時に真になる場合も、終了集計は 1 回だけにする。
+
+`check_simulation_ongoing()` を更新するのは、`while` で区切って `exec_simulation()` を呼ぶ既存の使い方が、内部余白へ進まずに終われるようにするためである。
+
+## 7. baseline forkの扱い
+
+`World.copy()` は評価終了時刻属性も fork へコピーする。そのままでは fork も実 World の評価終了時刻で停止し、horizon の先へ進めない。停止時に fork 上の終了集計も走ってしまう。
+
+baseline fork の複製直後に、fork 側だけ次とする。
+
+```text
+fork_W.order_control_tvt_evaluation_end_timestep = None
+```
+
+これにより次となる。
+
+- 実 World は評価終了時刻で停止する
+- fork は内部 `TSIZE` を使って horizon 全体を仮想計算する
+- fork 上では従来の `TSIZE` 終了契約を使う
+- baseline の `horizon + 1` 契約を維持する
+- fork 上で終了集計を実行しない
+- 実 World には影響しない
+
+例として、`T = 9999`、horizon 50、内部 `TSIZE = 10050` の fork は 50 timestep 進み、処理後の `fork_W.T` は `10049` である。`10049 < 10050` なので、fork では `simulation_terminated()` を呼ばない。
+
+fork 専用の `exec_simulation` 引数は追加しない。fork 実行中であることを示す既存の collector も、この停止判定には使わない。
+
+この代入は、終盤だけ horizon を縮める処理ではない。余白不足の `ValueError` を消す処理でもない。
+
+## 8. Analyzerと未完了Vehicle
+
+評価終了時点の既存状態で `basic_analysis()` を実行する。新しい集計関数は作らない。呼び方は、処理後の `T` が評価終了時刻の次になったとき、既存の `simulation_terminated()` を 1 回呼ぶことである。
+
+集計の扱い:
+
+- 完了 Vehicle は完了 trip として集計する
+- 未完了 Vehicle は完了 trip、旅行時間、遅延へ含めない
+- 未完了 Vehicle を強制的に完了扱いにしない
+- 評価終了後の到着時刻を補完しない
+- 総走行距離など、既存基本集計が未完了 Vehicle を含む項目は既存契約を維持する
+
+完了は、既存どおり `travel_time != -1` の Vehicle である。走行中、出発待ち、未出発は未完了のままである。中断 Vehicle の `travel_time` は `-1` なので完了に含めない。
+
+総走行距離には未完了 Vehicle も含む。走行中は、その時点のリンク内位置も距離に入る。これは通常 UXsim の既存契約である。
+
+評価終了後の内部余白は、実 World では未実行なので基本集計へ含めない。`basic_analysis()` は Vehicle の状態を見るため、未実行時刻の交通結果は基本集計へ混ざらない。
+
+初回の OD 集計で `flag_od_analysis` が立つ。終了集計を再度呼んでも、旅行時間などの数値は再計算されない。`exec_simulation()` の経路では、評価終了後に `simulation_terminated()` を再呼び出ししない。
+
+## 9. 研究出力の集計範囲
+
+時間に沿って集計する研究出力は、評価期間だけを対象とする。
+
+10,000 timestep 評価なら、対象は次である。
+
+```text
+T = 0, 1, ..., 9999
+```
+
+内部余白を研究結果へ含めない。
+
+リンク旅行時間、流量、密度、速度などを将来使用する場合も、`TMAX` または内部 `TSIZE` 全体ではなく、評価期間へ限定する。
+
+今回はリンク分析の範囲制御を実装しない。評価結果として使用する分析を、内部余白全体へ無条件に適用しない。
+
+基本集計、その表示、OD 集計は評価終了時点の Vehicle 状態から得る。`link_analysis_coarse()`、累積配列を `TSIZE` 全体から読む処理、`TMAX` 全体の図は、長い内部期間のまま評価結果として使わない。`traveltime_actual` は内部 `TSIZE` 全体を初期値で持ち、未実行部分まで値が入ることがある。Edie 行列も `TMAX` 全体の大きさであり、車両軌跡がない後半は評価期間の観測ではない。
+
+## 10. actual outcome未観測
+
+`T = 9999` で成立または確定した TVT 結果は正式に記録する。
+
+ただし、評価終了までに actual passage が判明しない場合は、次として扱う。
+
+- 取引失敗ではない
+- 事後不成立ではない
+- 時間節約 0 ではない
+- 実績遅延 0 ではない
+- actual outcome 未観測
+
+正式支払額、正式補償額、成立時履歴は残す。
+
+未観測の場合は、実績時間節約、実績遅延、実績利得、満足評価を計算しない。
+
+具体的な型名、field 名、status 名は actual outcome 実装時に決める。未観測の境界は `order_control_tvt_evaluation_end_timestep` より後である。処理後の `World.T` だけを、最後に観測した時刻とみなさない。
+
+## 11. 維持する既存契約
+
+次は維持する。
+
+- baseline horizon を短縮しない
+- `remaining_steps >= horizon + 1`
+- fork 終了時は `fork_W.T < fork_W.TSIZE`
+- fork 上で `simulation_terminated` と Analyzer を呼ばない
+- Visit 0 件時の baseline forward 省略
+- baseline 不足 `ValueError`
+- 意思決定窓の `6` と baseline horizon を分離する
+- `Node.transfer` の物理通過順は今回変更しない
+
+## 12. 研究上の説明
+
+対外的には、次のように区別する。
+
+- 評価期間は 10,000 timestep である
+- 評価時刻は `T = 0` から `9999` である
+- 全評価時刻で TVT-MP 形成を検討する
+- 最終評価時刻でも完全な baseline horizon を使う
+- 内部 World には baseline 用の計算余白を持つ
+- 実 World の交通観測は評価期間終了時点で打ち切る
+- 評価終了後の車両結果は未観測である
+
+内部 `TSIZE` が 10,000 より長くても、TVT-MP の評価期間は 10,000 timestep である。
+
+## 13. 実装予定範囲
+
+次の設計・実装段階で扱う。
+
+- World 属性の追加
+- `exec_simulation` の評価終了制御
+- `check_simulation_ongoing` の評価終了制御
+- 評価終了時の `simulation_terminated` 一回呼出し
+- baseline fork 複製直後の評価終了制限解除
+- TVT-MP driver の時刻ループ先頭での自動起動
+- 専用テスト
+
+今回まだ扱わない。
+
+- `Node.transfer` による TVT 順位の物理利用
+- actual passage
+- actual outcome
+- 満足評価
+- welfare
+- リンク分析の評価期間限定実装
+
+## 14. 次の再開地点
+
+1. 本節を Terminal で分割確認する。
+2. 進捗第3巻へ短い要約を追記する。
+3. `git diff --check` と変更ファイルを確認する。
+4. 文書を commit する。
+5. commit 名に `document` を含める。
+6. commit と push を分離する。
+7. 保存後、自動起動・評価終了制御の完全実装前仕様を作る。
+8. その後に Python と専用テストを実装する。

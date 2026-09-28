@@ -146,3 +146,51 @@
 6. commit と push を分離する。
 7. 保存後、World から driver を自動起動する接続の設計へ進む。
 8. `Node.transfer` による物理通過接続は、その後の別段階とする。
+
+## TVT-MP評価期間とbaseline内部余白の方針を確定（2026-09-28）
+
+正式な技術詳細は、詳細設計第4巻「TVT-MP評価期間・baseline内部余白・実World終了制御」を参照する。
+
+- 評価対象が 10,000 timestep の場合、評価時刻は `T = 0` から `9999` である。
+- `T = 9999` を含む全評価時刻で、通常どおり TVT-MP 形成を検討する。
+- 終盤だけ driver をスキップしない。
+- 終盤だけ baseline horizon を短縮しない。
+- baseline 不足例外を握り潰さない。
+- 意思決定窓の `6` と baseline horizon は独立した設定である。
+- baseline horizon は 30、50 などを取り得る。
+- 最終評価時刻においても、`baseline_horizon_steps + 1` 個の残り時刻数を確保する。
+- 最終評価時刻自身を、残り時刻数の 1 個目に含める。
+- `evaluation_end_timestep = evaluation_timestep_count - 1` である。
+- 必要条件は、`internal_TSIZE - evaluation_end_timestep >= baseline_horizon_steps + 1` である。
+- 同じ条件を評価 timestep 数で表すと、`internal_TSIZE >= evaluation_timestep_count + baseline_horizon_steps` である。
+- 10,000 timestep、horizon 50 なら、`evaluation_end_timestep` は `9999`、`internal_TSIZE` は 10,050 以上である。
+- `internal_TSIZE = 10049` は不足であり、10,050 なら十分である。
+- 評価 timestep 数との比較では、内部 `TSIZE` は baseline horizon 分だけ長い。
+- 「評価期間より horizon + 1 timestep 長くする」とは表現しない。
+- 実 World の交通計算は `T = 9999` までであり、処理後の `World.T` は `10000` である。
+- `T = 10000` 以降の実 World 交通計算は行わない。
+- 内部余白は baseline fork だけが仮想計算に利用する。
+- World の正式属性名は `order_control_tvt_evaluation_end_timestep` とする。
+- 初期値 `None` では従来 UXsim の `TSIZE` 終了契約を使う。
+- 評価終了後に `exec_simulation` を再度呼んでも、実 World を内部余白へ進めない。
+- 評価終了時に `simulation_terminated` と `basic_analysis` を一度だけ実行する。
+- baseline fork では、複製直後に fork 側の `order_control_tvt_evaluation_end_timestep` だけを `None` へ戻す。
+- fork は従来どおり horizon 全体を計算し、fork 上で終了集計を実行しない。
+- 評価終了時の未完了 Vehicle は未完了のまま扱い、将来の到着結果を補完しない。
+- 時間に沿う研究出力は評価期間だけを対象とし、内部余白を含めない。
+- 評価終了までに actual passage が判明しない TVT 結果は、失敗や 0 ではなく actual outcome 未観測として扱う。
+- 正式支払額、正式補償額、成立時履歴は残す。
+- 未観測の場合、実績時間節約、実績遅延、実績利得、満足評価は計算しない。
+- 具体的な actual outcome の型名や field 名は後続実装時に決める。
+- `Node.transfer` による物理通過順は、今回まだ変更しない。
+
+## 最新の再開地点
+
+1. 詳細設計第4巻と進捗第3巻を Terminal で限定確認する。
+2. `git diff --check` と変更ファイルを確認する。
+3. 文書 2 ファイルを commit する。
+4. commit 名に `document` を含める。
+5. commit と push を分離する。
+6. 保存後、自動起動・評価終了制御の完全実装前仕様を作る。
+7. その後に Python と専用テストを実装する。
+8. `Node.transfer` による物理通過接続は、その後の別段階とする。
