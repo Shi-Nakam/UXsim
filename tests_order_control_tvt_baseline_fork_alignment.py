@@ -884,6 +884,7 @@ def test_does_not_modify_existing_result_types():
         "target_node_names",
         "baseline_timestep_T",
         "configured_horizon_steps",
+        "downstream_boundary_result",
         "fork_steps_executed",
         "final_fork_timestep",
         "registered_visit_count",

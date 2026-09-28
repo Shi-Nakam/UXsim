@@ -826,3 +826,245 @@ driver 実装時に維持するもの:
 4. 文書を commit する。
 5. commit と push を分離する。
 6. 保存後、上位 driver 本番と専用テストを実装する。
+
+## 27. 実装・独立確認・検証結果（2026-09-28）
+
+§1 から §26 は、実装前の正式仕様として残す。本節は、その仕様に従って実装し、独立確認した記録である。仕様の意味、名称、例外境界、処理順は変更していない。
+
+### 実装ファイル
+
+新規:
+
+- `uxsim/order_control_tvt_mp_driver.py`
+- `tests_order_control_tvt_mp_driver.py`
+
+既存変更:
+
+- `uxsim/uxsim.py`。`World.__init__` への属性初期化だけ
+- `tests_order_control_tvt_baseline_fork_alignment.py`。既存期待 field の追随漏れ1件だけ
+
+`exec_simulation` と `Node.transfer` は変更していない。
+
+### 公開API
+
+公開関数は `run_tvt_mp_driver(real_W)` である。成功結果型は frozen dataclass `OrderControlTvtMpDriverResult` である。field は `atomic_apply_set_result` だけである。対象 Node が1件以上のとき、16段目 `apply_tvt_mp_validated_result` の戻り値と同一 object を保持する。
+
+実装した処理:
+
+- TVT 対象 Node を World 登録順で収集する
+- 対象条件は `order_control_type == "time_value"` かつ `order_control_eligible is True`
+- 対象 Node 0件の完全 no-op
+- 対象 Node がある場合の同一 `T` 二重実行防止
+- 時刻逆行の拒否
+- 共通 baseline horizon の検査
+- TVT 候補 Visit 数上限の検査
+- World 所有の順位台帳の作成と再利用
+- `Vehicle.participates_in_order_exchange` からの参加表構築
+- 完成済み16段の明示的な順次呼出し
+- final consistency validation 成功後の atomic apply 1回
+- atomic apply 結果と同一 object を成功結果へ保存する
+- 既存例外を別例外へ包まない
+- 後段例外時に開始時刻と完了済み先行処理を rollback しない
+
+### World属性
+
+`uxsim/uxsim.py` の `World.__init__` へ次を追加した。
+
+- `order_control_tvt_rank_states_by_node_name = {}`
+- `order_control_tvt_driver_started_timestep = None`
+- `order_control_tvt_baseline_horizon_steps = 6`
+- `order_control_tvt_max_candidate_visit_count = None`
+
+### 対象0件no-op
+
+- 16段を呼ばない
+- baseline fork を呼ばない
+- atomic apply を呼ばない
+- 順位台帳を追加しない
+- driver 開始時刻を変更しない
+- Vehicle を変更しない
+- 候補数上限が `None` でも正常
+- `atomic_apply_set_result` は `None`
+- 同じ `T` で再度呼ばれても、対象が0件のままなら再び正常 no-op
+
+### 二重実行
+
+対象 Node が1件以上の場合の順序:
+
+1. World と `T` を検査する
+2. 対象 Node を収集する
+3. `started_timestep` 型を検査する
+4. 同一 `T` を拒否する
+5. 時刻逆行を拒否する
+6. 共通設定を検査する
+7. 全検査成功後、16段開始前に開始時刻を記録する
+8. 以後の例外でも開始時刻を戻さない
+
+同一 `T` で開始済みかつ設定も不正なら、二重実行 `RuntimeError` を優先する。初回設定不正なら `ValueError` で、開始時刻は変更しない。設定修正後、同じ `T` の未開始の初回実行として再実行できる。
+
+### 順位台帳
+
+開始時刻の記録後に、不足している対象 Node へ `OrderControlTvtNodeRankState` を既存 dict へ追加する。既存 object は捨てない。型不一致と `node_name` 不一致は `RuntimeError` である。対象外 Node の台帳は削除しない。
+
+### 参加表
+
+- 2段目成功後、3段目前に構築する
+- 意思決定窓 `T < arrival <= T + 6` の Visit だけを対象にする
+- `VisitKey[0]` から Vehicle 名を取得する
+- `Vehicle.participates_in_order_exchange` を正本とする
+- declared VOT=0 では参加・不参加を判断しない
+- Vehicle 欠落、型不正、属性欠落、bool 以外は `RuntimeError`
+
+### 16段接続
+
+完成済み16段を公開関数の中で、名前のある中間変数へ順に受ける。関数 list の loop、`getattr`、decorator は使っていない。atomic apply は最後に全 Node 一括で1回だけ呼ぶ。正常な取引不成立、fallback、`NO_VISITS_TO_CONFIRM` も、各段が成功すれば driver 成功である。
+
+### 後段失敗
+
+ある段が例外を出したら後段は呼ばない。例外を成功結果へ変換しない。既存部品の例外は包まない。開始時刻と、正常完了済みの未確定 Visit 登録、既到着 Visit 確定、先頭非参加 Visit 確定は戻さない。
+
+### 既存テスト期待値修正
+
+`tests_order_control_tvt_baseline_fork_alignment.py` の `test_does_not_modify_existing_result_types` について、`OrderControlBaselineForkResult` の期待 field 集合へ `downstream_boundary_result` を追加した。
+
+原因:
+
+- 保存済みコミット `c703d9b` の本番結果型には、既に `downstream_boundary_result` が存在した
+- 同じ保存済みコミットのテスト期待値から同 field が漏れていた
+- 今回の上位 driver 実装による本番型変更や回帰ではない
+- 既存テスト期待値の追随漏れを修正した
+
+### 独立確認
+
+Cursor 報告だけでは完了判断していない。次を独立確認した。
+
+- 新規 driver 本体
+- 専用テスト
+- `uxsim.py` の属性追加箇所
+- baseline 結果型
+- 失敗した既存テストの期待 field
+- 保存済み `c703d9b` 時点の本番型と既存テスト期待値
+
+### 専用テスト結果
+
+- 定義済み test 関数: 31
+- `TESTS` 登録: 31
+- pytest 収集: 31
+- 重複なし
+- 登録漏れなし
+- 未定義参照なし
+- 全31件成功
+
+専用テスト: `31 passed in 14.66s`
+
+直接実行: `31 tests passed`
+
+### 実部品統合テスト
+
+追加テスト: `test_real_sixteen_stages_reach_atomic_apply_on_quiet_junction`
+
+目的:
+
+- monkeypatch した代替部品ではなく、本物の16部品が driver を介して連続動作することを確認する
+- 最後の atomic apply まで正常に到達することを確認する
+- 取引成立自体や物理通過順の変更を確認するテストではない
+
+交通シナリオ:
+
+- TVT 対象 Node は `junction` の1件
+- `order_control_type="time_value"`
+- `order_control_eligible=True`
+- 単車線
+- inlink と outlink を各1本
+- Vehicle は `late_car` の1台
+- 出発時刻は200秒
+- 意思決定時刻は `T=15`
+- baseline horizon は6
+- TVT 候補 Visit 数上限は1
+- `participates_in_order_exchange=True`
+- `vot_declared=1.0`
+- `vot_true=2.0`
+
+この条件では、`late_car` は意思決定窓内へ入らない。
+
+呼出し: `run_tvt_mp_driver(world)`
+
+driver 内の16公開関数は monkeypatch しない。
+
+確認内容:
+
+- `atomic_apply_set_result` が `OrderControlTvtMpAtomicApplySetResult`
+- `final_consistency_validation_set_result` から `final_rank_set_result` まで参照連鎖をたどれる
+- Node 結果は1件
+- `node_name` は `junction`
+- `final_rank_status` は `NO_VISITS_TO_CONFIRM`
+- `final_rank_visits` は空
+- `order_control_tvt_driver_started_timestep` は現在の `T`
+- World 内に `junction` の `OrderControlTvtNodeRankState` が存在
+- rank state の `node_name` は `junction`
+- `late_car` の参加設定と VOT は維持
+- `late_car.link is None` であり、この時点では未出発
+- `Node.transfer` による物理通過順はこのテストの確認対象ではない
+
+### 回帰結果
+
+修正対象を含む確認として、次の2ファイルをまとめて実行した。
+
+- `tests_order_control_tvt_baseline_fork_alignment.py`
+- `tests_order_control_tvt_mp_driver.py`
+
+結果は `56 passed in 14.57s` である。
+
+baseline から atomic apply、driver までの関係テスト一式は `940 passed in 20.22s` である。失敗はない。
+
+### py_compile
+
+次の4ファイルで成功した。
+
+- `uxsim/order_control_tvt_mp_driver.py`
+- `uxsim/uxsim.py`
+- `tests_order_control_tvt_mp_driver.py`
+- `tests_order_control_tvt_baseline_fork_alignment.py`
+
+### 正式サンプル
+
+実行は `python demos_and_examples/example_00en_simple.py` である。
+
+- 1200秒まで正常完走
+- exception なし
+- completed trips: 735 / 810
+- average speed: 11.7 m/s
+- total travel time: 119475.0 s
+- average travel time: 162.6 s
+- average delay: 62.6 s
+- delay ratio: 0.385
+- total distance traveled: 1632250.0 m
+
+正式サンプルは driver を直接呼ばない。World 属性追加後も従来 UXsim の基本動作を壊していないことを確認する回帰テストである。`git diff --check` は問題なしである。
+
+### 未実装範囲
+
+次は未実装のままである。
+
+- World の各 timestep からの自動起動
+- `exec_simulation` への driver 接続
+- `Node.transfer` による TVT 順位の物理利用
+- actual passage
+- actual outcome
+- 実時間ベースの事後評価
+- 満足評価
+- welfare
+- 対象外 Node の順位台帳削除
+
+上位 driver 実装だけでは、実際の車両通過順はまだ変わらない。
+
+### 次の再開地点
+
+1. 第4巻と進捗第3巻を Terminal で限定確認する。
+2. Python・テスト4ファイルの変更範囲を確認する。
+3. `git diff --check` を実行する。
+4. 文書、実装、テストを同一保存単位で commit する。
+5. commit 名に `document` を含める。
+6. commit と push を分離する。
+7. 保存後、World から driver を自動起動する接続の設計へ進む。
+8. `Node.transfer` による物理通過接続は、その後の別段階とする。

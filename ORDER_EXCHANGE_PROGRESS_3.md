@@ -110,3 +110,39 @@
 6. commitとpushを分ける。
 7. 保存後、上位driver本番と専用テストを実装する。
 8. 実装対象は、新規本番、新規専用テスト、World属性初期化の3ファイルとする。
+
+## TVT-MP上位driverを実装・独立確認（2026-09-28）
+
+正式な契約は、詳細設計第4巻「TVT-MP上位driver・完全実装前仕様」を参照する。本節はその実装と独立確認の記録である。
+
+- 上位driver本体 `uxsim/order_control_tvt_mp_driver.py` と専用テスト `tests_order_control_tvt_mp_driver.py` を実装した。
+- 公開関数は `run_tvt_mp_driver(real_W)`、成功結果型は `OrderControlTvtMpDriverResult`、field は `atomic_apply_set_result` である。
+- `uxsim/uxsim.py` の `World.__init__` へ、順位台帳、開始時刻、baseline horizon 初期値6、候補Visit数上限初期値 `None` の4属性を追加した。
+- 完成済み16段を正式順に接続し、最後に atomic apply を全Node一括で1回呼ぶ。
+- 対象Node 0件は、World、順位台帳、Vehicle、開始時刻を変更しない正常 no-op である。同じ `T` でも対象が0件なら再び no-op である。
+- 対象Nodeが1件以上のときだけ、設定検査の前に同一 `T` と時刻逆行を拒否し、検査成功後に開始時刻を記録する。以後の例外では開始時刻を戻さない。
+- 順位台帳は World が保持し、実行ごとに作り直さない。
+- 参加表は2段目成功後に、`Vehicle.participates_in_order_exchange` から構築する。declared VOT=0 では判断しない。
+- 専用テストは定義、`TESTS` 登録、pytest 収集がいずれも31件である。実部品統合テストを1件追加した。
+- `test_real_sixteen_stages_reach_atomic_apply_on_quiet_junction` では、driver 内の16部品を monkeypatch せず、本物の部品で atomic apply まで到達する。経路は `NO_VISITS_TO_CONFIRM` である。
+- 専用テストは全31件成功した。直接実行は `31 tests passed` である。
+- `tests_order_control_tvt_baseline_fork_alignment.py` と専用テストをまとめて実行し、56 passed in 14.57s である。
+- baseline から atomic apply、driver までの関係回帰は 940 passed in 20.22s である。失敗はない。
+- `Node.transfer` による物理通過順は、まだ検証対象外である。
+- 本番、`uxsim.py`、専用テスト、期待 field を直した既存テストの py_compile は成功した。
+- `python demos_and_examples/example_00en_simple.py` は1200秒まで正常完走した。completed trips は 735 / 810、average speed は 11.7 m/s である。正式サンプルは driver を直接呼ばない。
+- `tests_order_control_tvt_baseline_fork_alignment.py` の期待 field 集合へ `downstream_boundary_result` を追加した。
+- これは今回の回帰ではない。保存済みコミット `c703d9b` の本番型に既にあった field が、既存テスト期待値から漏れていた追随漏れである。
+- 未実装は、World 自動起動、`exec_simulation` 接続、`Node.transfer` による物理利用、actual passage、actual outcome、事後評価、満足評価、welfare、対象外 Node の台帳削除である。
+- driver 単体では物理通過順は変わらない。
+
+## 最新の再開地点
+
+1. 第4巻と進捗第3巻を Terminal で限定確認する。
+2. Python・テスト4ファイルの変更範囲を確認する。
+3. `git diff --check` を実行する。
+4. 文書、実装、テストを同一保存単位で commit する。
+5. commit 名に `document` を含める。
+6. commit と push を分離する。
+7. 保存後、World から driver を自動起動する接続の設計へ進む。
+8. `Node.transfer` による物理通過接続は、その後の別段階とする。

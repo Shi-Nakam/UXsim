@@ -4062,6 +4062,11 @@ class World:
         W.order_control_batch_level_2_resolved_count = 0
         W.order_control_batch_level_2_unresolved_count = 0
         W.order_control_batch_level_2_level_1_fallback_count = 0
+        # TVT-MP upper driver state. The driver does not create these attributes.
+        W.order_control_tvt_rank_states_by_node_name = {}
+        W.order_control_tvt_driver_started_timestep = None
+        W.order_control_tvt_baseline_horizon_steps = 6
+        W.order_control_tvt_max_candidate_visit_count = None
         # Fork-only baseline visit collector; real_W keeps None (see design memo §25.11).
         W._order_control_baseline_collector = None
         # Fork-only downstream boundary observer for all-World baseline; real_W keeps None.
