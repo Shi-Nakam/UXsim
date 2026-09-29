@@ -322,3 +322,61 @@
 8. 完全実装前仕様を保存してから Python と専用テストを実装する。
 9. 実装後は本番コード、専用テスト、差分、回帰結果を独立確認する。
 10. その後、actual passage・actual outcome の設計へ進む。
+
+## TVT-MP確定順位の物理通過接続 完全実装前仕様を確定（2026-09-29）
+
+正式な仕様は、詳細設計第4巻「TVT-MP確定順位の物理通過接続 完全実装前仕様」を参照する。入力は、同じ第4巻の「TVT-MP確定順位の物理通過接続 設計判断」である。Python とテストは未実装である。
+
+- 設計判断を、関数名、引数、呼出し順、テスト契約まで具体化した。
+- 正式な新規 module は `uxsim/order_control_tvt_mp_physical_transfer.py` である。
+- `Node.transfer` は、FCFS、BATCH の次に、`time_value` かつ eligible の TVT 物理通過を置く。
+- 公開関数は `transfer_tvt_mp_passage_attempts(node)` である。戻り値は `None` である。
+- 通常合流 helper は `Node._transfer_normal_merge(self, allowed_vehicles=None, enforce_order_control_clearance=False)` である。
+- 1 台移動 helper は `Node._transfer_one_vehicle_between_links(self, vehicle, inlink, outlink)` である。
+- 終了処理は `Node._finish_node_transfer(self)` であり、`Node.transfer` の正常経路で 1 回だけ呼ぶ。
+- 実 World は最新の確定群だけを使う。未確定は通常群へ落とさず、`RuntimeError` である。
+- baseline fork は、凍結台帳の過去確定群を先に試し、過去確定群の clearance で終了しなければ開始時の通常群を通常合流する。
+- baseline fork の通常 baseline 群にも order-control clearance を適用する。
+- 通常群の選択順は、既存の通常合流のままである。
+- 通常群の clearance 未充足で、その時刻の通常群処理を終了する。
+- 通常群の通過成功後も、order-control clearance 履歴を更新する。
+- 通常の信号交差点では、信号設定上の全赤時間によって clearance を確保する。
+- UXsim の自動付与に依存せず、全赤時間を明示的に設定する。
+- TVT、FCFS、BATCH では order-control clearance を使う。
+- order-control clearance の条件は strict greater-than である。
+- clearance 設定値0でも、別 inlink への切替は同一 timestep 内に許されない。
+- clearance 設定値0では、最短で次の timestep に通過できる。
+- clearance 設定値1では、最短で次の次の timestep に通過できる。
+- clearance 設定値1では、間の 1 timestep を確実に空ける。
+- 「clearanceなし」という表現は、order-control clearance 設定値0を指す語として使わない。
+- 既存名に `no_clearance` を含む関数とテストは、名称を変更しない。名称だけから clearance 設定値0と同じ意味だと推測しない。
+- 研究評価の基本方式は、安全のための clearance ありである。
+- 研究評価で使う clearance 値は、各実験設定に従う。本訂正で新しい数値は決めない。
+- 既存 candidate 局所仮想計算との整合確認により、通常 baseline 群の clearance 契約を修正した。
+- これは新しい利用者判断ではない。
+- 実進路は `Vehicle.route_next_link` である。formal route は強制しない。
+- 正常な TVT 通過候補では `route_next_link` は必ず存在する。
+- `route_next_link is None` は一時スキップではなく `RuntimeError` である。
+- formal route を代替進路として使用しない。
+- 次時刻まで待って自然解消する状態として扱わない。
+- 目的地到着、trip abort、局所仮想計算の下流境界等とは契約を分ける。
+- 物理先頭、容量、入口空間不足は一時スキップする。clearance 未充足だけ、その時刻を終了する。
+- collector は通過 1 回につき prepare と apply を 1 回行う。observer は `Node.transfer` の外のままである。
+- 通過済み Visit 集合と `confirmed_at_timestep` は追加しない。
+- actual passage と actual outcome は未実装のままである。
+- 新規専用テストは `tests_order_control_tvt_mp_physical_transfer.py` の 30 件である。
+- 既存のソース検査 2 件だけ、TVT 物理通過を呼ぶ契約へ更新する。FCFS、BATCH、通常 Node、正式サンプルは現行結果を維持する。
+- 利用者判断が必要な事項は残っていない。
+- 実装前仕様であるため、Python とテストは変更していない。
+
+## 最新の再開地点
+
+1. 修正後の第4巻と進捗第3巻を Terminal で再確認する。
+2. `git diff --check` と変更ファイルを確認する。
+3. 文書 2 ファイルを commit する。
+4. commit 名に `document` を含める。
+5. commit 名に `complete` を使用しない。
+6. commit と push を分離する。
+7. 保存後、完全実装前仕様どおり Python と専用テストを実装する。
+8. 実装後は本番コード、専用テスト、差分、回帰結果を独立確認する。
+9. その後、actual passage・actual outcome の設計へ進む。

@@ -2205,7 +2205,9 @@ TVT-MP の確定順位は、実際の通過結果を保証しない。
 
 物理通過時の outlink には、その時点の `Vehicle.route_next_link` を使う。
 
-順位台帳の `formal_route_next_link_name` は、TVT 判断時の baseline 予測である。formal route を実 World へ強制しない。`Vehicle.route_next_link` を formal route へ上書きしない。formal route と実進路が異なっても、`RuntimeError` にしない。
+正常な TVT 通過候補では、`Vehicle.route_next_link` は必ず存在する。`None` の場合に formal route を代替進路として使わない。`None` の場合は、次時刻まで待たせず、通常 baseline 群へ fallback せず、重大不整合として `RuntimeError` にする。これは、実在する正常な交通現象への新しい制度判断ではない。万一の内部状態破損を、原因不明の永久待機にしないための防御である。
+
+順位台帳の `formal_route_next_link_name` は、TVT 判断時の baseline 予測である。formal route を実 World へ強制しない。`Vehicle.route_next_link` を formal route へ上書きしない。formal route と実進路が異なっても、`route_next_link` が有効な Link である限り `RuntimeError` にしない。
 
 順位、支払、補償、成立時履歴を再計算しない。formal route と実進路の差は、次段階の actual passage・actual outcome で予測差として記録する。
 
@@ -2213,19 +2215,30 @@ UXsim の最新経路選択により、ネットワーク上の実際の混雑�
 
 ## 8. 一時スキップ
 
-次は正常な物理制約であり、例外にしない。
+次は正常な物理制約であり、例外にしない。一時スキップは、この一覧に限る。`route_next_link is None` は含めない。
 
 - inlink 物理先頭でない
 - Node 流量不足
 - inlink 流出容量不足
 - outlink 流入容量不足
 - outlink 入口空間不足
+- 既に `incoming_vehicles` からいなくなった
 
 この場合、Vehicle を候補や順位台帳から削除しない。その時刻では後続順位を試す。次の timestep で再評価する。
 
 ## 9. clearance
 
-直前通過 inlink と今回候補の inlink が異なる場合だけ clearance を確認する。同一 inlink なら clearance は不要である。`last_order_control_inlink` が `None` でも clearance は不要である。
+交差点では、制御方式を問わず、安全のための clearance が必要である。実装の仕方は制御方式で異なる。
+
+通常の信号交差点は `order_control_type="none"` を使う。青信号と次の青信号の間に、全赤時間を信号設定として明示する。UXsim が全赤時間を自動で足す、という意味ではない。grid 型ネットワークの研究評価でも、この全赤時間による clearance を基本方式とする。
+
+TVT、FCFS、BATCH の交差点は、次の order-control clearance で、方向が切り替わるときの安全時間を確保する。
+
+- `last_order_control_inlink`
+- `last_order_control_entry_timestep`
+- `order_control_clearance_timesteps`
+
+直前通過 inlink と今回候補の inlink が異なる場合だけ、この order-control clearance を確認する。同一 inlink なら、order-control clearance 上の追加待機は不要である。`last_order_control_inlink` が `None` でも、order-control clearance 上は通過できる。
 
 通過可能条件は、既存 FCFS、BATCH、局所仮想計算と同じである。
 
@@ -2233,11 +2246,22 @@ UXsim の最新経路選択により、ネットワーク上の実際の混雑�
 W.T - last_order_control_entry_timestep > order_control_clearance_timesteps
 ```
 
-未充足なら、その timestep の対象 Node 処理を終了する。後続順位と通常 baseline 群を処理しない。clearance 未充足は例外ではない。
+この比較は strict greater-than である。直前の別 inlink の通過時刻を T とする。
+
+- `order_control_clearance_timesteps=0` では、T の差は 0 であり、`0 > 0` は偽である。同じ timestep の別 inlink 通過は許されない。最短は T+1 であり、その差は 1 なので `1 > 0` が真になる。
+- `order_control_clearance_timesteps=1` では、T+1 の差は 1 であり、`1 > 1` は偽である。最短は T+2 であり、その差は 2 なので `2 > 1` が真になる。間の 1 timestep を確実に空ける。
+
+したがって clearance 設定値0は、同一 timestep 内の別 inlink 通過を許す方式ではない。次の timestep まで待たせる。order-control clearance について、「clearanceなし」という語は使わない。
+
+研究評価の基本設定として採用する clearance 値は、本仕様で新しい数値を決めず、完全実装前仕様と各実験設定に従う。比較と回帰確認では、clearance 設定値0と clearance 設定値1の双方を確認できる。通常の信号交差点の全赤時間とは、実装方式が異なる。
+
+未充足なら、その timestep の対象 Node 処理を終了する。後続順位と通常 baseline 群を処理しない。clearance 未充足は例外ではない。研究評価の基本方式は、安全のための clearance ありである。
 
 ## 10. signalとeligible
 
-TVT 対象 Node は無信号を前提とする。TVT 物理通過へ `signal_phase`、`signal_group` の判定を追加しない。信号付き `time_value` Node への新規拒否検査も追加しない。
+TVT 対象 Node は無信号を前提とする。TVT 物理通過へ `signal_phase`、`signal_group` の判定を追加しない。これは、TVT で clearance が不要という意味ではない。TVT は order-control clearance を使う。信号付き `time_value` Node への新規拒否検査も追加しない。
+
+`order_control_type="none"` の信号交差点では、青と次の青の間に全赤時間を信号設定として置く。UXsim が全赤時間を自動で付けることには依存しない。この全赤時間と、TVT・FCFS・BATCH の order-control clearance は、安全のための clearance を別の方法で実現しているだけである。
 
 `time_value` かつ `order_control_eligible=False` は、正常な研究実行では発生しない。TVT 物理通過を使う Node は次である。
 
@@ -2303,8 +2327,9 @@ baseline fork では次の順に処理する。
 
 1. 過去確定群を `assigned_rank` 順に一度ずつ試す。
 2. 物理先頭、容量、入口空間不足なら一時スキップする。
-3. clearance 未充足なら、その timestep の対象 Node 処理を終了する。
-4. clearance で終了していなければ、開始時に固定した通常 baseline 群を従来の通常合流で処理する。
+3. 過去確定群で order-control clearance が未充足なら、通常 baseline 群を開始せず、その timestep の対象 Node 処理を終了する。
+4. 過去確定群で clearance 終了しなかった場合は、開始時に固定した通常 baseline 群へ進む。車両の選択順は従来の通常合流である。通過前には、過去確定群と同じ order-control clearance を確認する。
+5. 通常 baseline 群で order-control clearance が未充足なら、例外にせず、その時刻の通常群処理を終了する。後続の通常 baseline Vehicle は処理しない。
 
 過去確定順位は、排他的な通行予約ではない。過去確定 Vehicle へ先に通過試行機会を与えたあと、物理条件により通れなかった場合でも、通常 baseline 群を処理してよい。
 
@@ -2314,9 +2339,17 @@ baseline fork では次の順に処理する。
 
 `Node.incoming_vehicles` を一時的に差し替えない。例外時の live 状態破損を避けるためである。
 
-通常合流処理を、処理してよい Vehicle 集合を任意引数として受ける Node の private helper へ抽出する。
+通常合流処理を、処理してよい Vehicle 集合と、order-control clearance を適用するかを明示引数で受ける Node の private helper へ抽出する。完全実装前仕様の正式 signature は次である。
 
-許可集合を省略した場合は、現在の通常 Node の合流処理をそのまま維持する。
+```text
+Node._transfer_normal_merge(
+    self,
+    allowed_vehicles=None,
+    enforce_order_control_clearance=False,
+) -> None
+```
+
+`allowed_vehicles` を省略し、`enforce_order_control_clearance=False` のときは、現在の通常 Node の合流処理をそのまま維持する。この呼出しは order-control clearance を検査せず、通過後も order-control 用の clearance 履歴を更新しない。これは安全のための clearance が不要という意味ではない。通常の信号交差点では、信号設定として明示した全赤時間がその役割を担う。責務を分けるための引数である。
 
 許可集合を指定した場合は、次のとおりとする。
 
@@ -2325,10 +2358,9 @@ baseline fork では次の順に処理する。
 - 一時スキップした過去確定 Vehicle を `merge_priority` や乱数の対象へ戻さない。
 - 過去確定群が消費した最新容量を使う。
 - 通常合流の `merge_priority`、hard deterministic、信号条件を維持する。
+- baseline fork の通常 baseline 群では `enforce_order_control_clearance=True` とする。選択順は通常合流のままである。clearance だけを、order-control 対象 Node の物理制約として適用する。
 
-TVT 専用の信号判定は追加しない。`time_value` Node は無信号なので、通常 helper 内の既存条件は通過を止めない。
-
-helper の正式名と引数は、完全実装前仕様で確定する。
+TVT 専用の信号判定は追加しない。`time_value` Node は無信号なので、通常 helper 内の既存信号条件は通過を止めない。TVT の安全時間は order-control clearance が担う。
 
 ## 16. 共通1台移動helper
 
@@ -2356,10 +2388,13 @@ helper の正式名と引数は、完全実装前仕様で確定する。
 
 - 候補順位
 - 通過可否判定
-- clearance 判定
+- order-control clearance の判定
+- order-control clearance 履歴の更新
 - `merge_priority`
 - actual passage
 - actual outcome
+
+1 台移動 helper は、order-control clearance 履歴を更新しない。TVT 確定群の順位走査と、`enforce_order_control_clearance=True` の通常合流 helper が、通過成功後に更新する。通常の信号交差点の全赤時間は、信号設定側で扱う。`order_control_type="none"` の通常合流は、この履歴を使わない。
 
 FCFS と BATCH の移動処理は今回共通化しない。大規模リファクタリングを避ける。helper の正式な範囲と引数は、完全実装前仕様で確定する。
 
@@ -2408,13 +2443,13 @@ TVT helper、通常合流 helper、1 台移動 helper から observer を直接�
 
 正常な物理制約は例外にしない。物理先頭でないこと、容量不足、入口空間不足、clearance 未充足は、ここへ含まれる。
 
-重大不整合として既存の到着記録と同じく例外にするのは、現在 Visit が無い場合と、現在 Visit の Node や inlink が `Vehicle.link` と一致しない場合だけである。formal route との差、信号、台帳外、eligible の途中変更は、この例外にしない。
+重大不整合として `RuntimeError` にするのは、現在 Visit が無い場合、現在 Visit の Node や inlink が `Vehicle.link` と一致しない場合、および正常な TVT 通過候補で `route_next_link is None` の場合である。`None` は次時刻に自然解消する容量待ちではない。formal route との差、信号、台帳外、eligible の途中変更は、この例外にしない。目的地到着の trip 終了待ち、outlink が無い trip abort、taxi、`specified_route`、局所仮想計算の World 全体 copy で `route_next_link is None` を許容する確認は、今から対象 Node を通過する研究対象 Vehicle の契約ではない。
 
 ## 22. 実装構造の基本方針
 
 `Node.transfer` は、FCFS と BATCH の早期 return を維持する。`time_value` かつ `order_control_eligible is True` のときだけ、TVT 物理通過へ入って return する。それ以外は、許可集合を省略した通常合流 helper である。
 
-TVT 物理通過では、開始時 snapshot を過去確定群と通常 baseline 群へ分ける。過去確定群を `assigned_rank` 順に試す。clearance で終了していなければ、通常 baseline 群だけを許可集合として通常合流 helper を呼ぶ。終了処理は 1 回である。
+TVT 物理通過では、開始時 snapshot を過去確定群と通常 baseline 群へ分ける。過去確定群を `assigned_rank` 順に試す。過去確定群の order-control clearance で終了していなければ、通常 baseline 群だけを許可集合とし、`enforce_order_control_clearance=True` で通常合流 helper を呼ぶ。通常群の選択順は通常合流のままである。通常群自身の order-control clearance が未充足なら、その時刻の通常群処理を終える。終了処理は 1 回である。
 
 実 World と baseline fork で関数は分けない。見る順位台帳が、実 World では T の driver 完了後の最新台帳、fork では copy 時点の凍結台帳である。局所仮想計算の拘束順位走査は呼ばない。formal route 不一致を例外にする契約と、通過済み集合を使う契約が、今回の実 World 方式と違うためである。
 
@@ -2428,12 +2463,32 @@ TVT 物理通過では、開始時 snapshot を過去確定群と通常 baseline
 - 通過済み Visit 集合を作らない。未到着の確定 Visit は候補にしない。
 - 非参加 Vehicle も順位どおり試す。
 - formal route と `route_next_link` が違っても、`route_next_link` を使い、台帳、金額、成立時履歴を変えない。
-- 物理先頭、容量、入口空間の不足は一時スキップし、後続を試す。
+- 実 World の確定候補で `route_next_link is None` なら `RuntimeError` である。
+- baseline fork の過去確定群で `route_next_link is None` なら `RuntimeError` である。
+- baseline fork の通常 baseline 群でも、開始時 snapshot の分類時点で current Visit と `route_next_link` を検査する。正常な研究対象 Vehicle なら `route_next_link` は存在する。`None` なら `RuntimeError` である。通常合流 helper が `allowed_vehicles=None` の通常 Node で `None` を outlink 候補から外す契約とは別である。
+- 物理先頭、容量、入口空間の不足は一時スキップし、後続を試す。`route_next_link is None` は一時スキップにしない。
 - clearance 未充足では、その時刻の後続と通常 baseline 群を処理しない。
 - 次時刻に再評価する。
+- clearance 設定値0でも、同一 timestep 内の別 inlink 通過を許さない。
+- clearance 設定値0は、次の timestep で通過可能になる。
+- clearance 設定値1は、次の次の timestep で通過可能になる。
+- 同一 inlink には、方向切替の order-control clearance を要求しない。
+- 通常の信号交差点では、明示した全赤時間を使う。
+- 既存名に `no_clearance` を含む比較・回帰確認用関数は、名称を理由に clearance 設定値0と同一視しない。関数名と実装は今回変更しない。
 - baseline fork は、T-1 以前の確定順位を copy し、copy 後の実 World の新確定を混ぜない。
 - 過去確定群を先に試し、一時スキップした過去確定 Vehicle を通常群へ混ぜない。
 - 通常群は既存の `merge_priority` と hard deterministic を維持し、過去確定群が消費した容量を見る。
+- 通常 baseline 群にも order-control clearance を適用する。
+- 通常 baseline 群の clearance 未充足では、後続の通常群を処理しない。
+- 通常 baseline 群の通過成功後に、order-control clearance 履歴を更新する。
+- `order_control_type="none"` の通常合流では、order-control clearance 履歴を更新しない。
+- 通常の信号交差点では、明示した全赤時間を含む信号設定を使う。UXsim の自動付与には依存しない。
+- 過去確定群が通過した直後、別 inlink の通常群は同じ時刻に通過しない。
+- 過去確定群と同じ inlink の通常群は、容量等を満たせば、order-control clearance 上の追加待機は不要である。
+- 通常 baseline 群で 1 台通過した後、別 inlink の後続通常群へ order-control clearance を適用する。
+- 比較と回帰確認では、clearance 設定値0と clearance 設定値1の双方を確認できる。
+- 研究評価の基本方式は、安全のための clearance ありである。
+- 研究評価で使う clearance 値は、実験設定に従う。本判断で新しい数値は決めない。
 - collector は通過 1 回につき 1 回だけ更新する。
 - observer は `node.transfer()` 1 回につき外側で 1 回のままである。
 - trip 終了待ちは維持する。
@@ -2474,6 +2529,9 @@ field 名、型名、status 名は今回決めない。
 - 通過済み VisitKey 集合を追加する。
 - formal route を実進路へ強制する。
 - formal route と実進路の差を `RuntimeError` にする。
+- `route_next_link is None` を、次時刻に自然解消する一時的な容量待ちとして扱う。
+- `route_next_link is None` の Vehicle を永久にスキップし続ける。
+- formal route を `route_next_link` の代替として強制する。
 - 順位、支払、補償、成立時履歴を、実進路の差を理由に再計算する。
 - 正常成功後の台帳外・未確定 Vehicle への特別 fallback や永久待機対策を追加する。
 - TVT 物理通過へ信号判定を追加する。
@@ -2486,6 +2544,13 @@ field 名、型名、status 名は今回決めない。
 - FCFS と BATCH の移動処理を大規模に共通化する。
 - 局所仮想計算の拘束順位走査を、実 World の `Node.transfer` から呼ぶ。
 - actual passage と actual outcome を、この物理接続と同時に実装する。
+- 通常 baseline 群を、order-control clearance を無視して通す。
+- 通常 baseline 群の通過後に、order-control clearance 履歴を更新しない。
+- `order_control_type="none"` だから、安全のための clearance も不要だと扱う。
+- 通常の信号交差点の全赤時間を、UXsim が自動で追加すると仮定する。
+- clearance 設定値0を、同一 timestep 内の別 inlink 通過を許す「clearanceなし」と解釈する。
+- clearance 設定値1を、直後の次 timestep で通過可能と解釈する。
+- 通常の信号交差点の全赤時間と、order-control clearance 設定値を、同じ内部機構として扱う。
 
 ## 26. 以前の誤った中間整理と訂正
 
@@ -2521,7 +2586,7 @@ field 名、型名、status 名は今回決めない。
 
 現時点では残っていない。
 
-通過試行機会の意味、実 World の候補、実進路、一時スキップ、clearance、signal、eligible、baseline の意味、fork の凍結台帳、過去確定群と通常 baseline 群の順、許可集合付き通常合流、到着列の終了処理、collector と observer の一回性、通過済み集合を作らないことは、本節で確定した。
+通過試行機会の意味、実 World の候補、実進路、一時スキップ、order-control clearance、信号設定上の全赤時間、eligible、baseline の意味、fork の凍結台帳、過去確定群と通常 baseline 群の順、許可集合と clearance 適用有無を分けた通常合流、到着列の終了処理、collector と observer の一回性、通過済み集合を作らないことは、本節で確定した。通常 baseline 群へ order-control clearance を適用する訂正は、既存の局所仮想計算との整合であり、新しい制度判断ではない。clearance 設定値0と clearance 設定値1の時系列は、既存の strict greater-than を文書化する訂正であり、新しい制度判断ではない。正常な TVT 通過候補で `route_next_link is None` を `RuntimeError` にする訂正は、正常系では `route_next_link` が存在するという確認に基づく防御であり、新しい制度判断ではない。
 
 ## 29. 次の再開地点
 
@@ -2535,3 +2600,701 @@ field 名、型名、status 名は今回決めない。
 8. 完全実装前仕様を保存してから Python と専用テストを実装する。
 9. 実装後は本番コード、専用テスト、差分、回帰結果を独立確認する。
 10. その後、actual passage・actual outcome の設計へ進む。
+
+# TVT-MP確定順位の物理通過接続 完全実装前仕様
+
+記録日: 2026-09-29
+
+本節は完全実装前仕様である。正式な入力は、同じ第4巻の「TVT-MP確定順位の物理通過接続 設計判断」である。その節の制度判断は、本節で別の方式へ戻さない。Python と専用テストは未着手である。
+
+## 1. 目的
+
+TVT-MP は順位、支払、補償、成立時履歴を確定できる。`Node.transfer` は、その順位をまだ物理通過へ使っていない。
+
+本仕様は、確定順位を実 World と baseline fork の通過試行へ接続する。`assigned_rank` は通過保証ではなく、通過を試す機会の順位である。actual passage、actual outcome、実績価値、満足度、welfare は、この接続の次の段階である。
+
+## 2. 正式な実装範囲
+
+- `time_value` かつ `order_control_eligible is True` の Node で、`Node.transfer` が TVT 物理通過を使う。
+- 実 World は、その時刻の driver 完了後の最新順位台帳を使う。
+- baseline fork は、`World.copy()` 時点の凍結順位台帳を使う。
+- 候補は、その時点の `incoming_vehicles` だけである。
+- 確定群は `assigned_rank` 順に一度ずつ試す。
+- 実進路は `Vehicle.route_next_link` である。
+- baseline fork では、clearance で終了していなければ、開始時に固定した通常 baseline 群を通常合流する。
+- 通常 Node の合流は、許可集合を省略した private helper へ移す。結果は現行と同じにする。
+- 1 台の物理移動は、通常合流と TVT 確定群で共有する。FCFS と BATCH は共有しない。
+
+## 3. 非実装範囲
+
+- actual passage
+- actual outcome
+- 実績評価、満足評価、welfare
+- Vehicle 単位の buyer 回数、seller 回数、比率、価値の合算
+- 非参加 Vehicle の外部効果集計
+- signal 統合、複数車線への一般化
+- `taxi`、`specified_route`、trip 終了 Vehicle の TVT 参加
+- 対象外 Node の順位台帳削除
+- 確定時刻 field
+- 通過済み VisitKey 集合
+- formal route の強制、順位や金額の再計算
+- FCFS と BATCH の移動処理の共通化
+- 局所仮想計算の拘束順位走査の変更
+
+## 4. 通過試行機会順位
+
+確定順位は、その順位で必ず通過できる保証ではない。
+
+- `assigned_rank` 順に一度ずつ試す。
+- 正常な物理制約で通れなければ、順位も台帳も消さない。
+- その時刻では後続を試す。
+- 次の timestep で再評価する。
+- clearance 未充足だけ、その時刻の対象 Node 処理を終える。通常 baseline 群も処理しない。
+
+## 5. 対象Node
+
+TVT 物理通過へ入る Node は、次を同時に満たす。
+
+```text
+order_control_eligible is True
+かつ
+order_control_type == "time_value"
+```
+
+`eligible is True` は、`bool` の `True` だけである。真と評価される他の値では入らない。実行中に `eligible` を `False` へ戻す特別処理は追加しない。信号判定も追加しない。信号判定を追加しないことは、clearance が不要という意味ではない。TVT 対象 Node は order-control clearance を使う。
+
+比較対象の通常の信号交差点は、`order_control_type="none"` と、青と次の青の間に明示した全赤時間を使う。UXsim が全赤時間を自動で付けることには依存しない。
+
+## 6. Node.transferの分岐順
+
+`Node.transfer` の順は次である。
+
+1. `order_control_eligible` かつ `order_control_type == "fcfs"` なら、既存の `transfer_fcfs_clearance` を呼んで return する。
+2. `order_control_eligible` かつ `order_control_type == "batch"` なら、既存の `transfer_batch` を呼んで return する。
+3. `order_control_eligible is True` かつ `order_control_type == "time_value"` なら、`transfer_tvt_mp_passage_attempts(self)` を呼び、その後 `_finish_node_transfer` を 1 回呼んで return する。
+4. それ以外は `_transfer_normal_merge()` を呼び、その後 `_finish_node_transfer` を 1 回呼ぶ。
+
+FCFS と BATCH の本体は変更しない。FCFS と BATCH は通常合流 helper を通らない。
+
+## 7. import方針
+
+`uxsim.py` の先頭では、TVT 物理通過 module を import しない。`time_value` 分岐の中でだけ、次を局所 import する。
+
+```text
+from uxsim.order_control_tvt_mp_physical_transfer import (
+    transfer_tvt_mp_passage_attempts,
+)
+```
+
+物理通過 module の先頭では `uxsim.uxsim` を import しない。Node、Vehicle、Link は引数の object として使う。順位台帳型は `uxsim.order_control_tvt_node_rank_state` から import してよい。この module は `uxsim.py` を import しないので、循環 import にしない。
+
+## 8. 正式な新規module
+
+正式ファイル名は `uxsim/order_control_tvt_mp_physical_transfer.py` である。
+
+既存の `order_control_tvt_mp_` 接頭辞に合わせる。局所仮想計算の `order_control_tvt_mp_candidate_binding_transfer.py` とは別名である。中に置くのは、候補分類、順位順の試行、clearance による終了、通常 baseline 群を通常合流 helper へ渡す処理だけである。
+
+## 9. 正式な関数一覧
+
+| 場所 | 正式名 | 戻り値 |
+| --- | --- | --- |
+| 新規 module | `transfer_tvt_mp_passage_attempts(node)` | `None` |
+| `Node` | `_transfer_one_vehicle_between_links(self, vehicle, inlink, outlink)` | `None` |
+| `Node` | `_transfer_normal_merge(self, allowed_vehicles=None, enforce_order_control_clearance=False)` | `None` |
+| `Node` | `_finish_node_transfer(self)` | `None` |
+
+clearance で終了したことは、戻り値では返さない。`transfer_tvt_mp_passage_attempts` の内部で通常 baseline 群を呼ばなければ足りる。呼出し側の `Node.transfer` は、正常 return のあと必ず終了処理を 1 回行う。
+
+## 10. 各関数の責務
+
+`transfer_tvt_mp_passage_attempts` は、開始時 snapshot の分類、確定群の順位順試行、一時スキップ、clearance 終了、fork の通常 baseline 群の呼出しを行う。1 台移動、通常合流の選択、終了処理の本体は持たない。
+
+`_transfer_one_vehicle_between_links` は、呼出し側が通過可能と判断した 1 台を、指定した inlink から指定した outlink へ移す。順位、clearance、通過可否、`merge_priority`、経路選択、formal route、observer は扱わない。
+
+`_transfer_normal_merge` は、現行の通常合流の outlink 試行と車両選択を行う。終了処理は行わない。`enforce_order_control_clearance=True` のときは、選んだ Vehicle を通す前に order-control clearance を検査する。未充足なら、その helper 全体を正常 return する。通過成功後は order-control clearance 履歴を更新する。`False` のときは order-control clearance を検査せず、その履歴も更新しない。`False` は、安全のための clearance が不要という意味ではない。通常の信号交差点では、信号設定上の全赤時間がその役割を担う。
+
+`_finish_node_transfer` は、各 inlink 先頭の trip 終了待ちを既存どおり終了し、`incoming_vehicles` を空にする。
+
+## 11. 各関数の引数
+
+`transfer_tvt_mp_passage_attempts(node)` の `node` は、対象の `Node` である。World は `node.W` から読む。
+
+`_transfer_one_vehicle_between_links(self, vehicle, inlink, outlink)` は、移動する Vehicle、移動前の inlink、移動先 outlink を別引数で受ける。移動後に `vehicle.link` から inlink を取り直さない。
+
+`_transfer_normal_merge(self, allowed_vehicles=None, enforce_order_control_clearance=False)` の `allowed_vehicles` は、`None` または Vehicle の tuple である。`None` は、現在の `incoming_vehicles` 全体を候補にする。tuple を指定したときは、その固定候補だけを対象にする。`enforce_order_control_clearance` は `bool` である。`False` が既定であり、標準 UXsim の通常合流が使う。`True` は baseline fork の通常 baseline 群が使う。意味は docstring に書く。
+
+`_finish_node_transfer(self)` は引数を増やさない。
+
+## 12. 各関数の戻り値
+
+4 関数とも `None` である。成功した台数や clearance 終了フラグは返さない。過去確定群の clearance 終了は、通常 baseline 群を呼ばないことで表現する。通常 baseline 群の clearance 終了は、`enforce_order_control_clearance=True` の helper が残りを処理せず正常 return することで表現する。どちらのあとでも、`Node.transfer` は終了処理を 1 回行う。
+
+## 13. 実Worldとbaseline forkの識別
+
+識別は `node.W._order_control_baseline_collector` である。
+
+- `None` なら実 World 規則である。
+- `None` でなければ baseline fork 規則である。
+
+collector があることを理由に、TVT 順位を無効化しない。fork でも、凍結台帳で confirmed の Visit は確定群として試す。実 World の研究実行では、この属性は `None` のままである。baseline driver が fork へ collector を付ける既存契約を使う。新しい識別 flag は作らない。
+
+## 14. 順位台帳取得
+
+`node.W.order_control_tvt_rank_states_by_node_name` を読む。次は `RuntimeError` である。
+
+- この属性の型が `dict` でない。
+- `node.name` の台帳が無い。
+- 台帳の型が `OrderControlTvtNodeRankState` でない。
+- `rank_state.node_name` が `node.name` と違う。
+
+台帳を複製しない。確定も削除もしない。
+
+## 15. current Visit検査
+
+確定群へ入れる前に、各 Vehicle で次を見る。
+
+- `vehicle.order_control_current_visit` がある。
+- `current_visit["node"] is node`。
+- `current_visit["inlink"] is vehicle.link`。
+- `vehicle.state == "run"`。
+- `flag_waiting_for_trip_end` ではない。
+
+最初の 4 件が壊れていれば `RuntimeError` である。trip 終了待ちは例外にせず、確定群にも通常群にも入れない。終了処理が、inlink 先頭の trip 終了待ちを既存どおり処理する。
+
+current Visit 検査を通過し、確定群または通常 baseline 群の候補として残る Vehicle について、次を行う。
+
+```text
+outlink = vehicle.route_next_link
+if outlink is None:
+    raise RuntimeError(...)
+```
+
+例外メッセージには、`node.name`、`vehicle.name`、`route_next_link=None`、正常な TVT 通過候補には有効な outlink が必要であることを含める。この検査は、実 World の確定候補、baseline fork の過去確定群、baseline fork の通常 baseline 群に、開始時 snapshot の分類時点で同じように行う。`None` を一時スキップにしない。次時刻まで待たせない。通常 baseline 群へ fallback しない。formal route で補完しない。`route_next_link` を選び直さない。順位、支払、補償、成立時履歴は再計算しない。
+
+## 16. VisitKey
+
+```text
+visit_key = (vehicle.name, current_visit["visit_id"])
+```
+
+`visit_id` は、`begin_order_control_visit_on_link_entry` を呼ぶ前の値である。通過後の新しい Visit は、この時刻の候補に使わない。
+
+## 17. assigned_rank
+
+確定群では `rank_state.assigned_rank(visit_key)` を使う。confirmed なのに `assigned_rank` が `None` なら `RuntimeError` である。同じ `assigned_rank` が候補内に 2 件あれば `RuntimeError` である。
+
+並びは `assigned_rank` の昇順だけである。Vehicle id、乱数、`merge_priority` は使わない。
+
+## 18. 実進路
+
+確定群と通常 baseline 群の outlink は `vehicle.route_next_link` である。正常な TVT 通過候補では、これは必ず存在する。
+
+- `None` なら `RuntimeError` である。§15 の分類時点で出す。formal route で補完しない。次時刻へ持ち越して解消を待たない。
+- `None` でなく、`outlink.start_node is node` でない、または `node.outlinks` に登録されたその Link object でない場合も `RuntimeError` である。
+
+通常合流 helper は、現行どおり `route_next_link` を使う。上書きしない。`allowed_vehicles=None` で通常 Node から呼ばれるときは、現行どおり `route_next_link is None` を outlink 候補から除外する。これは TVT 研究対象 Vehicle の契約ではない。
+
+## 19. formal route
+
+`formal_route_next_link_name` は、通過先の決定に使わない。差の検査も、この実装では追加しない。差があっても `RuntimeError` にしない。順位、支払、補償、成立時履歴は変更しない。差の記録は actual passage・actual outcome の段階である。
+
+## 20. 実Worldの候補分類
+
+collector が `None` のとき、開始時 snapshot の研究対象 Vehicle は全件確定群である。`is_confirmed(visit_key)` が偽なら `RuntimeError` である。通常 baseline 群へ fallback しない。分類時点で `route_next_link is None` なら、確定群へ入れる前に `RuntimeError` である。
+
+driver 正常成功後は、到着中の研究対象 Vehicle は確定済みである。この例外は、その契約が壊れたときだけ起きる。
+
+## 21. baseline forkの候補2群
+
+collector が `None` でないとき、開始時 snapshot を次へ分ける。同じ Vehicle は片方だけである。
+
+- `is_confirmed(visit_key)` が真なら過去確定群である。T-1 以前の確定である。
+- それ以外は通常 baseline 群である。未確定、台帳外、T で初めて到着したもの、fork 前進中に到着したものがここへ入る。
+
+通常 baseline 群は、開始時の tuple のまま保持する。過去確定群の後に `incoming_vehicles` から作り直さない。T で新しく到着した研究対象 Visit と、fork 前進中に到着した研究対象 Visit も、正常なら `route_next_link` を持つ。分類時点で current Visit と `route_next_link` を検査し、`None` なら通常群へ入れず `RuntimeError` である。
+
+## 22. 候補snapshot
+
+`Node.transfer` に入った直後、`transfer_tvt_mp_passage_attempts` が `list(node.incoming_vehicles)` を 1 回作る。以後の分類と試行は、この list を使う。
+
+同じ Vehicle object が list に 2 回あれば、2 回目は無視する。例外にはしない。
+
+分類の前に、trip 終了待ちを除く各 Vehicle へ §15 の current Visit 検査と `route_next_link` 検査を行う。`route_next_link is None` はこの時点で `RuntimeError` である。試行直前に、まだ `node.incoming_vehicles` にいるかを見る。いなければ、その 1 台だけをスキップする。
+
+## 23. 確定群の並べ替え
+
+確定群だけを、明示的な list にして `assigned_rank` 昇順で sort する。一度ずつ評価する。スキップしても list から削除しない。台帳からも削除しない。
+
+## 24. 通過可否
+
+評価直前に、次が全部真なら通過させる。
+
+- まだ `incoming_vehicles` にいる。
+- `vehicle.link is` 分類時の inlink。
+- `inlink.vehicles` が空でない。
+- `vehicle is inlink.vehicles[0]`。
+- outlink 入口空間がある。条件は現行の通常合流と同じである。`len(outlink.vehicles) < outlink.number_of_lanes`、または入口側車両の `x` が `outlink.delta_per_lane * DELTAN` より大きい。
+- `outlink.capacity_in_remain >= node.W.DELTAN`。
+- `inlink.capacity_out_remain >= node.W.DELTAN`。
+- `node.flow_capacity_remain >= node.W.DELTAN`。
+- clearance が不要か、すでに満たされている。
+
+`vehicle.link` が分類時の inlink と違う場合は、一時スキップにしない。§15 の Visit と link の対応が壊れているので `RuntimeError` である。`route_next_link is None` は、この通過可否の一時スキップではない。§15 の分類時点で既に `RuntimeError` である。
+
+通常 baseline 群の選択順は §30 の通常合流である。`enforce_order_control_clearance=True` のとき、選ばれた Vehicle の通過前に、上と同じ order-control clearance を確認する。未充足は一時スキップではなく、その時刻の通常群処理の終了である。
+
+## 25. 一時スキップ
+
+次は `continue` である。例外にしない。台帳からも到着列からも、この理由では削除しない。
+
+- もう `incoming_vehicles` にいない。
+- 物理先頭でない。
+- Node 流量不足。
+- inlink 流出容量不足。
+- outlink 流入容量不足。
+- outlink 入口空間不足。
+
+`route_next_link is None` は、この一覧に入れない。§15 の `RuntimeError` である。スキップした Vehicle は、同じ呼出しの通常 baseline 群へ入れない。
+
+## 26. clearance
+
+別 inlink のときだけ確認する。同一 inlink、または `last_order_control_inlink is None` なら不要である。
+
+`last_order_control_inlink` と `last_order_control_entry_timestep` の片方だけが `None` なら `RuntimeError` である。
+
+別 inlinkで、次が偽なら未充足である。
+
+```text
+node.W.T - node.last_order_control_entry_timestep
+> node.order_control_clearance_timesteps
+```
+
+この比較は strict greater-than である。直前の別 inlink の通過時刻を T とする。
+
+- `order_control_clearance_timesteps=0` では、T では通過できない。T+1 で通過できる。
+- `order_control_clearance_timesteps=1` では、T+1 では通過できない。T+2 で通過できる。
+
+したがって clearance 設定値0でも、同一 timestep 内の別 inlink 通過は禁止される。clearance 設定値1では、間の 1 timestep を確実に空ける。order-control clearance について、「clearanceなし」という語は使わない。
+
+この order-control clearance は、実 World の TVT 確定群、baseline fork の過去確定群、baseline fork の通常 baseline 群に同じ条件で適用する。通常 baseline 群は、車両の選択順を通常合流のままにし、選んだ Vehicle を通す前にこの条件を確認する。
+
+過去確定群で未充足なら、確定群の残りを見ない。通常 baseline 群も呼ばない。例外にはしない。関数は `None` で戻る。`Node.transfer` が終了処理を 1 回行う。
+
+通常 baseline 群で未充足なら、例外にしない。その時刻の通常群処理を終了し、後続の通常 baseline Vehicle を処理しない。共通の終了処理へ進み、次時刻に再評価する。
+
+通過成功の直後、移動前の inlink を `last_order_control_inlink` に入れ、`last_order_control_entry_timestep` を `node.W.T` にする。この更新は 1 台移動 helper の中では行わない。TVT 確定群の試行側と、`enforce_order_control_clearance=True` の通常合流 helper が、1 台移動 helper の正常 return の後に行う。一時スキップでは更新しない。
+
+`order_control_type="none"` の標準の信号交差点では、この order-control clearance を使わない。信号設定として明示した全赤時間を使う。UXsim が全赤時間を自動で付けることには依存しない。この全赤時間と、order-control clearance 設定値0・1は、別の実装方式である。研究評価の基本方式は、安全のための clearance ありである。研究評価で使う clearance 値は、各実験設定に従う。本仕様で新しい数値は決めない。比較と回帰確認では、clearance 設定値0と clearance 設定値1の双方を確認できる。
+
+## 27. 1台物理移動
+
+`_transfer_one_vehicle_between_links` は次の順で行う。現行の通常合流の 1 台移動と同じ更新である。
+
+1. 移動前の `current_visit["visit_id"]` を局所変数へ取る。現在 Visit が無ければ `None` とする。
+2. collector が `None` でなければ `prepare_baseline_passage_recording` を呼ぶ。引数は車両名、その visit id、`node.name` である。
+3. `inlink.cum_departure[-1]` と `outlink.cum_arrival[-1]` を `DELTAN` だけ増やす。
+4. `inlink.traveltime_actual` を、現行と同じ範囲で更新する。
+5. `vehicle.link_arrival_time` を `W.T * W.DELTAT` にする。
+6. inlink 流出、outlink 流入を `DELTAN` だけ減らす。`flow_capacity` が `None` でなければ Node 流量も減らす。
+7. `inlink.vehicles.popleft()`。
+8. `outlink.vehicles_enter_log` へ記録する。
+9. `vehicle.link = outlink`。
+10. `vehicle.begin_order_control_visit_on_link_entry()`。
+11. `x`、follower、leader、lane、`move_remain`、`v` を現行と同じ式で更新する。
+12. 移動後の inlink 先頭が trip 終了待ちなら、その 1 台を `end_trip` する。
+13. `outlink.vehicles.append(vehicle)`。
+14. `incoming_vehicles` からその Vehicle を削除する。
+15. prepare の戻りが `None` でなければ `apply_baseline_passage_timestep` を、現在の `W.T` で呼ぶ。
+
+新しい rollback は作らない。prepare の後に移動が失敗した場合、現行の通常合流と同じく、そこまでの変更は戻さない。collector の例外は別の例外で包まない。
+
+## 28. clearance状態更新
+
+TVT 確定群と、baseline fork の通常 baseline 群は、通過成功後に order-control clearance 履歴を更新する。一時スキップでは更新しない。
+
+`order_control_type="none"` の通常合流は、`enforce_order_control_clearance=False` であり、order-control clearance 履歴を更新しない。通常の信号交差点の全赤時間は、信号設定側で扱う。1 台移動 helper は、どちらの履歴も更新しない。
+
+## 29. 通常baseline群
+
+fork で過去確定群の clearance 終了がなければ、開始時 tuple の通常 baseline 群を次で渡す。tuple が空なら呼ばない。
+
+```text
+node._transfer_normal_merge(
+    allowed_vehicles=ordinary_baseline_vehicles,
+    enforce_order_control_clearance=True,
+)
+```
+
+実 World では、この helper を TVT 側から呼ばない。未確定は例外であり、通常群ではない。
+
+## 30. 許可集合付き通常合流
+
+`allowed_vehicles is None` のときは、現行の通常合流と同じく、その時点の `incoming_vehicles` 全体から outlink 候補を作る。
+
+tuple のときは、その tuple に含まれる Vehicle だけから outlink 候補を作る。車両選択も、その tuple に含まれ、まだ `incoming_vehicles` にいる Vehicle だけである。
+
+どちらも、現行と同じく次を維持する。
+
+- outlink の車線数だけ試行を並べる。
+- `hard_deterministic_mode` でなければ、その outlink 列を `W.rng.shuffle` する。
+- `signal_phase` と `signal_group`、または `len(signal) <= 1`。
+- `merge_priority`。合計が 0 なら一様にする。
+- hard deterministic のときは、現行と同じ最大 priority の選択。
+- 入口空間と容量は、試行時点の live 値。
+- 1 台移動は `_transfer_one_vehicle_between_links`。
+
+`time_value` Node は無信号であり、`signal` は `[0]` である。helper 内の既存信号条件は、その Node では通過を止めない。TVT 専用の信号条件は足さない。TVT の安全時間は order-control clearance が担う。
+
+`enforce_order_control_clearance=True` のときは、選ばれた Vehicle の通過前に §26 の order-control clearance を確認する。同一 inlink、または `last_order_control_inlink is None` なら、order-control clearance 上は通過できる。別 inlink で未充足なら、helper は正常 return し、残りの許可集合を処理しない。通過成功後は、移動前 inlink と現在の `W.T` で clearance 履歴を更新する。その後の別 inlink は、同じ時刻にはこの条件を満たさない。同じ inlink の後続は、容量等を満たせば、order-control clearance 上の追加待機は不要である。履歴の片側だけが `None` なら `RuntimeError` である。
+
+標準 UXsim の通常合流からの正式呼出しは `node._transfer_normal_merge()` である。既定の `False` では、order-control clearance を検査せず、その履歴も更新しない。`allowed_vehicles=None` のときは、現行どおり `route_next_link is None` の Vehicle を outlink 候補から除外する。通常合流 helper のこの一般契約は変えない。
+
+`allowed_vehicles=ordinary_baseline_vehicles` で呼ぶときは、呼出し前に TVT 物理通過関数が、その tuple の `route_next_link` が全件有効であることを保証している。helper 内で `None` を容量待ちへ変えない。
+
+許可集合の実装は、多重の内包表記にしない。outlink を明示的な loop で集め、`allowed_vehicles is None` のときの並びは、現行の `incoming_vehicles` 順と同じにする。
+
+## 31. 通常Node回帰
+
+許可集合を省略した通常 Node は、次を変えない。
+
+- outlink 候補の生成順
+- 車線数に応じた試行回数
+- shuffle
+- 信号判定
+- `merge_priority`
+- RNG の呼出し順
+- hard deterministic
+- 物理移動の更新
+- collector 記録
+- trip 終了処理
+- `incoming_vehicles` の全消去
+- order-control clearance 履歴を更新しないこと
+
+通常の信号交差点では、次だけを維持する。
+
+- order-control clearance 履歴を使わない。
+- 信号設定として明示した全赤時間を使う。
+- 全赤時間を、UXsim の自動付与へ依存しない。
+
+order-control clearance を通常 Node へ重ねて追加しない。既存名に `no_clearance` を含む関数がある。名称は変更しない。本節の clearance 設定値0とは区別する。関数名と実装は今回変更しない。研究評価の基本方式は、安全のための clearance ありである。
+
+固定 seed の正式サンプルの数値が変わることは、回帰失敗である。
+
+## 32. incoming_vehicles終了処理
+
+通過成功 Vehicle は、1 台移動 helper が到着列から削除する。
+
+一時スキップした Vehicle と、通れなかった通常群 Vehicle は、到着列に残ってよい。`Node.transfer` の最後の `_finish_node_transfer` が、到着列を空にする。
+
+FCFS と BATCH も、途中終了のあと到着列を空にする。リンク終端に残った Vehicle は、同じ時刻の後段の `Vehicle.update` が再登録する。TVT も同じである。
+
+`_finish_node_transfer` を、TVT 分岐と通常分岐の両方で、正常 return のあと 1 回だけ呼ぶ。`_transfer_normal_merge` は呼ばない。TVT 関数も呼ばない。clearance 終了でも、通常群を処理したあとでも、この 1 回だけである。
+
+例外が `transfer_tvt_mp_passage_attempts` または `_transfer_normal_merge` から出た場合は、終了処理を呼ばない。現行の FCFS が途中例外で最後の全消去へ到達しないことと同じである。新しい `try` / `finally` は足さない。
+
+## 33. trip終了待ち
+
+`_finish_node_transfer` は、現行の通常合流末尾と同じ loop である。各 inlink の各車線について、先頭が `flag_waiting_for_trip_end` なら `end_trip` し、そうでなければその車線の確認を終える。
+
+1 台移動の直後に、移動した inlink の新しい先頭が trip 終了待ちなら、その場でも `end_trip` する。これは現行の通常合流と同じであり、終了処理とは別の 1 台である。終了処理を 2 回呼ぶことではない。
+
+## 34. baseline collector
+
+collector は baseline fork だけで `None` でない。通過成功時だけ、1 台移動 helper が prepare と apply を 1 回行う。容量不足や入口不足では prepare しない。
+
+prepare の `visit_id` は、`begin_order_control_visit_on_link_entry` より前の current Visit ID である。現在 Visit が無ければ、現行の通常合流と同じく `visit_id=None` を渡す。
+
+実 outlink が登録済み `route_next_link_name` や formal route と違っても、一致検査は追加しない。同じ Visit の二重 apply は、既存 collector が拒否する。その例外は包まない。
+
+## 35. downstream boundary observer
+
+`exec_simulation` の外側を維持する。
+
+1. `capture_before_transfer`
+2. `node.transfer`
+3. `commit_after_transfer`
+4. `finally` で `clear_pending`
+
+`transfer_tvt_mp_passage_attempts`、`_transfer_normal_merge`、`_transfer_one_vehicle_between_links`、`_finish_node_transfer` は observer を呼ばない。`Node.transfer` の中でも呼ばない。
+
+## 36. 通過済みVisit
+
+通過済み VisitKey 集合は作らない。通過した Vehicle は到着列から削除される。次 Node が制御対象なら、リンク進入時に新しい `visit_id` の Visit ができる。対象外なら `order_control_current_visit` は `None` になる。順位台帳の確定は履歴として残す。
+
+## 37. 重大不整合
+
+`RuntimeError` にするのは、次だけである。
+
+- 順位台帳の型、欠如、`node_name` 不一致。
+- 現在 Visit が無い。
+- 現在 Visit の Node または inlink が、その Vehicle の現在 link と一致しない。
+- `state` が `"run"` でない。ただし trip 終了待ちは §15 のとおり候補外であり、例外にしない。
+- 実 World で、到着中の研究対象 Visit が confirmed でない。
+- confirmed なのに `assigned_rank` が `None`。
+- 同じ `assigned_rank` が確定群に 2 件ある。
+- `route_next_link is None`。これは実 World の確定候補、baseline fork の過去確定群、baseline fork の通常 baseline 群で同じである。開始時分類で出す。
+- `route_next_link` が別 Node の Link、または `node.outlinks` の登録 object でない。
+- clearance 履歴の片側だけが `None`。これは TVT 確定群でも、`enforce_order_control_clearance=True` の通常 baseline 群でも同じである。
+
+物理先頭でないこと、容量不足、入口空間不足、clearance 未充足は例外にしない。目的地到着の trip 終了待ち、outlink が無い trip abort、局所仮想計算が World 全体の copy で `route_next_link is None` を許容する確認は、この `RuntimeError` の対象ではない。
+
+## 38. 例外型
+
+本仕様が新しく出す例外は `RuntimeError` だけである。メッセージには `node.name` を含める。Vehicle が分かっているときは `vehicle.name` も含める。`route_next_link is None` のメッセージには、加えて `route_next_link=None` と、正常な TVT 通過候補には有効な outlink が必要であることを含める。collector が既に出す `ValueError` や `RuntimeError` は、そのまま伝播する。
+
+## 39. 例外時の変更状態
+
+新しい rollback は作らない。例外より前に通過した Vehicle の移動、容量、台帳、支払は戻さない。終了処理は、例外が外へ出た呼出しでは実行されない。`incoming_vehicles` に残った Vehicle は、その時点の list のままである。
+
+## 40. live状態の変更範囲
+
+変更してよいのは、通過した Vehicle と、その inlink、outlink、Node の容量、累積、旅行時間、TVT 確定群または baseline 通常群の通過成功後の order-control clearance 履歴、到着列、trip 終了、baseline collector の通過時刻である。`order_control_type="none"` の通常合流は、order-control clearance 履歴を変更しない。
+
+変更しないのは、順位台帳の確定と未確定、支払、補償、成立時履歴、`route_next_link`、formal route、`order_control_eligible`、`order_control_type`、評価終了時刻、observer の呼出しである。
+
+## 41. 不変性
+
+- 確定順位は、通過できなくても削除しない。
+- 過去の確定を解除しない。
+- T の新しい確定を fork の台帳へ書かない。本実装は fork 台帳へ書かない。
+- formal route を実進路へ上書きしない。
+- `route_next_link is None` を formal route で補完しない。
+- `route_next_link` を物理接続処理で選び直さない。
+- `route_next_link is None` を待機状態へ変換しない。
+- 到着列を別 list へ差し替えない。削除は、通過した 1 台と、最後の全消去だけである。
+- FCFS と BATCH の関数本体を編集しない。
+- `order_control_type="none"` の通常合流で、order-control clearance 履歴を更新しない。
+- 通常の信号交差点の全赤時間を、UXsim の自動付与へ移さない。明示した信号設定のままとする。
+
+## 42. driverとの関係
+
+`Node.transfer` は `run_tvt_mp_driver` を呼ばない。driver は、これまでどおり `exec_simulation` の時刻先頭で動く。実 World の `Node.transfer` は、その戻りより後なので、最新の確定順位を読む。
+
+driver、atomic apply、支払、final rank、順位台帳型は変更しない。
+
+## 43. baseline forkとの関係
+
+fork は、T の未確定登録と確定より前に copy される。既存の baseline driver はこの順を維持する。本実装は、その copy を変更しない。
+
+fork 前進中の `Node.transfer` は、fork に付いている凍結台帳と collector を使う。T で実 World に追加された確定は、fork へ伝播しない。登録 Visit が 0 件のとき forward しない既存契約は維持する。horizon 全量と、fork で終了集計を呼ばない契約も維持する。
+
+## 44. 局所仮想計算との関係
+
+`scan_and_transfer_tvt_mp_binding_visits_at_current_timestep` は呼ばない。変更しない。
+
+理由は、それが候補の拘束順位列専用であること、formal route の不一致を例外にすること、通過済み集合を使うこと、今回の実 World と baseline fork の契約と違うことである。
+
+## 45. evaluation endとの関係
+
+評価終了時刻、自動起動、実 World を内部余白へ進めないこと、終了集計を 1 回にすることは変更しない。fork は評価終了時刻を `None` にしたまま、horizon を計算する。
+
+## 46. actual passage・actual outcomeへの接続点
+
+接続点は、`_transfer_one_vehicle_between_links` が apply を終えた直後である。今回は、そこに記録関数を呼ばない。field 名、型名、status 名も決めない。
+
+次段階では、通過前の VisitKey、実通過時刻、実 inlink、実 outlink、formal route との差を、この位置へ追加できる。未通過は未観測とする。
+
+## 47. 実装対象ファイル
+
+変更する。
+
+- `uxsim/uxsim.py`。`Node.transfer` の分岐、3 つの private method だけである。FCFS と BATCH の関数本体は変更しない。
+
+新規作成する。
+
+- `uxsim/order_control_tvt_mp_physical_transfer.py`
+- `tests_order_control_tvt_mp_physical_transfer.py`
+
+既存テストは、次の 2 件だけ期待を更新する。どちらも、`Node.transfer` のソースに TVT 物理通過が無いことを検査している。実装後は、その検査が偽になる。
+
+- `tests_order_control_tvt_mp_driver.py` の `test_exec_simulation_connects_driver_but_node_transfer_does_not`
+- `tests_order_control_tvt_mp_evaluation_end.py` の `test_node_transfer_does_not_use_tvt_rank`
+
+更新後の契約は、`Node.transfer` が `run_tvt_mp_driver` を呼ばないこと、`transfer_tvt_mp_passage_attempts` を `time_value` 分岐から呼ぶこと、である。driver を `Node.transfer` へ移す期待にはしない。
+
+順位台帳、driver、atomic apply、支払、baseline driver、局所仮想計算は変更しない。
+
+## 48. 新規専用テスト
+
+正式ファイル名は `tests_order_control_tvt_mp_physical_transfer.py` である。
+
+直接実行と pytest の両方で動かす。テスト数は 30 である。1 テストに複数の独立シナリオを詰め込まない。同じ通過を別テストで繰り返さないため、容量不足の種類は 1 テストの中の明示的な case 列とする。order-control clearance の別契約は、別の test 関数に分ける。clearance 設定値0と clearance 設定値1の off-by-one は、同じ test へまとめない。
+
+## 49. test関数一覧
+
+1. `test_time_value_branch_is_only_for_eligible_time_value`
+2. `test_candidates_are_only_current_incoming_vehicles`
+3. `test_does_not_retry_passed_or_unarrived_visits`
+4. `test_attempts_follow_assigned_rank_not_baseline_order`
+5. `test_nonparticipant_attempts_in_confirmed_rank`
+6. `test_passage_uses_live_route_next_link_without_rewriting_ledger_or_payments`
+7. `test_temporary_skip_tries_the_next_rank`
+8. `test_clearance_ends_the_timestep_and_the_next_timestep_retries`
+9. `test_clearance_zero_allows_different_inlink_only_from_next_timestep`
+10. `test_clearance_one_requires_one_full_empty_timestep`
+11. `test_finish_runs_once_and_ends_waiting_trips`
+12. `test_broken_current_visit_or_unconfirmed_on_real_world_raises`
+13. `test_fork_ledger_stays_at_pre_decision_confirms`
+14. `test_fork_tries_past_confirmed_before_ordinary_group`
+15. `test_skipped_past_confirmed_vehicle_is_excluded_from_ordinary_merge`
+16. `test_clearance_stop_skips_ordinary_group`
+17. `test_ordinary_group_keeps_merge_priority_and_hard_deterministic_choice`
+18. `test_ordinary_group_sees_capacity_after_past_confirmed_passage`
+19. `test_ordinary_group_stops_on_unmet_order_control_clearance`
+20. `test_ordinary_passage_updates_order_control_clearance_history`
+21. `test_same_inlink_ordinary_group_needs_no_extra_clearance_wait`
+22. `test_different_inlink_after_passage_does_not_pass_in_the_same_timestep`
+23. `test_ordinary_signal_node_does_not_update_order_control_clearance_history`
+24. `test_collector_prepare_and_apply_once_per_passage`
+25. `test_transfer_does_not_call_downstream_observer`
+26. `test_zero_visits_skip_forward_and_fork_does_not_terminate`
+27. `test_ordinary_node_merge_is_unchanged`
+28. `test_fcfs_and_batch_return_before_tvt`
+29. `test_route_next_link_none_is_runtime_error_for_tvt_candidate`
+30. `test_registry_matches_defined_functions`
+
+`test_temporary_skip_tries_the_next_rank` は、物理先頭でない、Node 流量不足、inlink 流出不足、outlink 流入不足、入口空間不足を、別々の小さな case としてこの関数の中で確認する。それぞれで後続順位を試す。`route_next_link is None` はこの関数へ入れない。
+
+`test_route_next_link_none_is_runtime_error_for_tvt_candidate` は、同じ分類検査を共有する 3 つの明示的な case である。実 World の確定候補、baseline fork の過去確定群、baseline fork の通常 baseline 群で、`route_next_link is None` なら `RuntimeError` であることを確認する。例外メッセージに Node 名と Vehicle 名が含まれること、Vehicle は通過していないこと、formal route へ上書きされていないこと、順位台帳、支払、補償、成立時履歴が変わらないことを確認する。
+
+`test_clearance_ends_the_timestep_and_the_next_timestep_retries` は、clearance 未充足でその時刻を終え、次時刻に再評価することを確認する。clearance 設定値0と clearance 設定値1の off-by-one は、この 1 件だけでは固定しない。
+
+`test_clearance_zero_allows_different_inlink_only_from_next_timestep` は、`order_control_clearance_timesteps=0` の別 inlink が、直前通過と同じ timestep では通れず、次の timestep で通れることを確認する。
+
+`test_clearance_one_requires_one_full_empty_timestep` は、`order_control_clearance_timesteps=1` の別 inlink が、次の timestep では通れず、次の次の timestep で通れることを確認する。間の 1 timestep を空ける。同一 inlink には、この方向切替の待機を要求しない。
+
+`test_fork_ledger_stays_at_pre_decision_confirms` は、copy 後に実 World へ確定を足しても fork 台帳が変わらないことと、T の新順位を baseline の通過へ使わないことを確認する。
+
+`test_zero_visits_skip_forward_and_fork_does_not_terminate` は、登録 Visit 0 件で forward しないこと、horizon を計算する fork が終了集計を呼ばないこと、評価終了の内部余白契約を崩さないことを確認する。
+
+`test_broken_current_visit_or_unconfirmed_on_real_world_raises` は、現在 Visit の欠如、Node または inlink の不一致、実 World の未確定を `RuntimeError` として確認する。容量不足を例外にしないことも確認する。
+
+`test_ordinary_group_stops_on_unmet_order_control_clearance` は、通常 baseline 群の order-control clearance が未充足なら、後続の通常群を処理しないことを確認する。`test_clearance_stop_skips_ordinary_group` は、過去確定群の未充足で通常群を開始しないことを確認する。この 2 件は分けたままとする。
+
+`test_ordinary_passage_updates_order_control_clearance_history` は、通常群の通過成功後に `last_order_control_inlink` と `last_order_control_entry_timestep` が更新されることを確認する。`test_same_inlink_ordinary_group_needs_no_extra_clearance_wait` は、過去確定群と同じ inlink の通常群が、容量等を満たせば order-control clearance 上の追加待機なしで通れることを確認する。`test_different_inlink_after_passage_does_not_pass_in_the_same_timestep` は、過去確定群の通過直後の別 inlink の通常群と、通常群で 1 台通過した直後の別 inlink の後続が、同じ時刻には通らないことを確認する。
+
+`test_ordinary_signal_node_does_not_update_order_control_clearance_history` は、`order_control_type="none"` の通常合流が order-control clearance 履歴を更新しないことを確認する。全赤時間を UXsim が自動で足すことは確認しない。明示した信号設定が、既存の信号判定のまま残ることを確認する。
+
+## 50. TESTS登録
+
+`tests_order_control_tvt_mp_driver.py` と同じ方式にする。`test_` で始まる関数を定義順に `TESTS` tuple へ集める。`test_registry_matches_defined_functions` が、定義と `TESTS` の一致を確認する。`__main__` では `TESTS` を順に実行する。
+
+## 51. 関係回帰
+
+新規 30 件に加え、実装後に次を実行する。
+
+- `tests_order_control_tvt_mp_physical_transfer.py`
+- `tests_order_control_tvt_mp_driver.py`
+- `tests_order_control_baseline_driver.py`
+- `tests_order_control_tvt_baseline_fork_alignment.py`
+- `tests_order_control_tvt_mp_evaluation_end.py`
+- FCFS と BATCH の既存 `Node.transfer` テスト
+- 既存関数 `transfer_fcfs_no_clearance` の回帰。既存名は `no_clearance` を含むが、名称だけから `order_control_clearance_timesteps=0` と同じ意味だと推測しない。本節の clearance 設定値0とは区別する。関数名と実装は今回変更せず、その意味も今回再定義しない。比較・回帰確認用として維持する。
+
+§47 の 2 テストは、更新後のソース契約で成功させる。それ以外の既存アサーションは、失敗したら本番を合わせて黙って期待値を変えない。失敗内容を報告して止まる。
+
+## 52. 正式サンプル回帰
+
+`demos_and_examples/example_00en_simple.py` を実行する。評価終了時刻は未設定のままである。completed trips、average speed、旅行時間、delay、走行距離が、保存済みの従来結果と一致することを確認する。このサンプルの信号設定を、全赤時間の自動追加へ変更しない。研究評価で信号交差点を使うときは、青と次の青の間の全赤時間を信号設定として明示する。
+
+## 53. py_compile
+
+次を `py_compile` する。
+
+- `uxsim/uxsim.py`
+- `uxsim/order_control_tvt_mp_physical_transfer.py`
+- `tests_order_control_tvt_mp_physical_transfer.py`
+- §47 で期待を更新した 2 つの既存テスト
+
+## 54. git diff --check
+
+実装後に `git diff --check` を実行する。空白エラーは残さない。
+
+## 55. 実装順序
+
+1. `Node.transfer` の通常合流を、`_transfer_one_vehicle_between_links`、`_transfer_normal_merge`、`_finish_node_transfer` へ移す。この時点では `time_value` 分岐を足さない。通常 Node の結果が変わらないことを確認する。
+2. `time_value` 分岐と `transfer_tvt_mp_passage_attempts` を足す。
+3. 新規専用テスト 30 件を足す。
+4. §47 の 2 テストだけを、新しいソース契約へ更新する。
+5. §51 から §54 を実行する。
+
+## 56. 独立確認手順
+
+実装報告だけで完了にしない。確認する人は、次を自分で見る。
+
+- `Node.transfer` の分岐順が §6 と一致する。
+- FCFS と BATCH の関数本体の diff が空である。
+- 物理通過 module が formal route を通過先に使っていない。
+- 通過済み集合の属性を追加していない。
+- collector が `None` でない fork でも、confirmed を確定群として試している。
+- `_finish_node_transfer` が `Node.transfer` の正常経路で 1 回だけ呼ばれる。
+- 専用テスト 30 件、関係回帰、正式サンプル、`py_compile`、`git diff --check` の結果。
+- 正常な TVT 通過候補の `route_next_link is None` が、一時スキップではなく `RuntimeError` であること。
+- clearance 設定値0は次の timestep、clearance 設定値1は次の次の timestep で、別 inlink が通過できること。
+- baseline fork の通常 baseline 群が、通常合流の選択順のまま order-control clearance を適用していること。
+
+## 57. 採用しない方向
+
+設計判断節の「採用しない方向」を維持する。加えて、次も採用しない。
+
+- clearance 終了を戻り値の bool で `Node.transfer` へ返してから、呼出し側が通常群を分岐する。終了判断は `transfer_tvt_mp_passage_attempts` の内部に置く。
+- 1 台移動 helper の中で clearance 履歴を更新する。通常 Node まで履歴が変わる。
+- `incoming_vehicles` を許可集合だけへ差し替える。
+- FCFS と BATCH の移動を、今回の 1 台移動 helper へ移す。
+- 局所仮想計算の走査を、実 World の `Node.transfer` から呼ぶ。
+- actual passage の field を、この実装で先に作る。
+- 通常 baseline 群を、order-control clearance を無視して通す。
+- 通常 baseline 群の通過後に、order-control clearance 履歴を更新しない。
+- `order_control_type="none"` だから、安全のための clearance も不要だと扱う。
+- 通常の信号交差点の全赤時間を、UXsim が自動で追加すると仮定する。
+- clearance 設定値0を、同一 timestep 内の別 inlink 通過を許す「clearanceなし」と解釈する。
+- clearance 設定値1を、直後の次 timestep で通過可能と解釈する。
+- 通常の信号交差点の全赤時間と、order-control clearance 設定値を、同じ内部機構として扱う。
+- clearance 設定値0を、本当の意味で待機時間がない方式として扱う。
+- clearance 設定値0で、同一 timestep 内の別 inlink 通過を許す。
+- clearance 設定値1で、T+1 の別 inlink 通過を許す。
+- 既存の `no_clearance` という関数名だけから、`order_control_clearance_timesteps=0` と同じ意味だと推測する。
+- `route_next_link is None` を、次時刻に自然解消する一時的な容量待ちとして扱う。
+- `route_next_link is None` の Vehicle を永久にスキップし続ける。
+- formal route を `route_next_link` の代替として強制する。
+
+## 58. 未確定事項
+
+現時点では残っていない。
+
+関数名、module 名、引数、戻り値、終了処理の位置、例外型、テスト名は本節で確定した。通常 baseline 群へ order-control clearance を適用する訂正は、既存の局所仮想計算との整合であり、新しい利用者判断ではない。clearance 設定値0と clearance 設定値1の時系列は、既存の strict greater-than を文書化する訂正であり、新しい利用者判断ではない。正常な TVT 通過候補で `route_next_link is None` を `RuntimeError` にする訂正は、正常系では `route_next_link` が存在するという確認に基づく防御であり、新しい利用者判断ではない。制度判断は、入力にした設計判断節から変更していない。
+
+## 59. 完了条件
+
+実装が完了したと言えるのは、次が全部真のときである。
+
+- §6 の分岐で、対象 Node だけが TVT 物理通過を使う。
+- 実 World は最新の確定順位だけを使い、未確定を通常群へ落とさない。
+- baseline fork は凍結台帳の過去確定群を先に試し、clearance で終了しなければ開始時の通常群だけを通常合流する。
+- 一時スキップした過去確定 Vehicle が通常群に入らない。
+- 実進路は `route_next_link` であり、formal route は強制されない。
+- 正常な TVT 通過候補で `route_next_link is None` なら `RuntimeError` であり、一時スキップでも formal route による補完でもない。
+- `test_route_next_link_none_is_runtime_error_for_tvt_candidate` が、実 World、過去確定群、通常 baseline 群の 3 case で成功する。
+- 通過済み集合と確定時刻 field が無い。
+- collector は通過 1 回につき prepare と apply が 1 回である。
+- observer は `Node.transfer` の外の既存 1 回のままである。
+- 通常 Node、FCFS、BATCH、正式サンプルの結果が現行と一致する。
+- baseline fork の通常 baseline 群が、通常合流の選択順のまま order-control clearance を適用し、未充足でその時刻の通常群を終え、通過成功後に clearance 履歴を更新する。
+- `order_control_type="none"` の通常合流は、order-control clearance 履歴を更新しない。
+- clearance 設定値0では、別 inlink は直前通過と同じ timestep に通れず、次の timestep で通れる。
+- clearance 設定値1では、別 inlink は次の timestep に通れず、次の次の timestep で通れる。間の 1 timestep を空ける。
+- この off-by-one を、`test_clearance_zero_allows_different_inlink_only_from_next_timestep` と `test_clearance_one_requires_one_full_empty_timestep` で固定する。
+- §48 の 30 件と §51 の関係回帰が成功する。
+- actual passage と actual outcome は未実装のままである。
+
+## 60. 次の再開地点
+
+1. 第4巻と進捗第3巻の追加本文を Terminal で分割確認する。
+2. `git diff --check` と変更ファイルを確認する。
+3. 文書 2 ファイルを commit する。
+4. commit 名に `document` を含める。
+5. commit 名に `complete` を使用しない。
+6. commit と push を分離する。
+7. 保存後、本仕様どおり Python と専用テストを実装する。
+8. 実装後は本番コード、専用テスト、差分、回帰結果を独立確認する。
+9. その後、actual passage・actual outcome の設計へ進む。
