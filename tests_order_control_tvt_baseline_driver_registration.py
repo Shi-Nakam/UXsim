@@ -18,12 +18,16 @@ from uxsim.order_control_baseline_driver import (
     run_snapshot_fixed_baseline_fork,
     run_snapshot_fixed_baseline_fork_with_tvt_rank_ledger_registration,
 )
+import uxsim.order_control_baseline_driver as baseline_driver_module
 from uxsim.order_control_baseline_snapshot import (
     apply_snapshot_fixed_visit_registration_plan,
     prepare_snapshot_fixed_visit_registration_plan,
     register_snapshot_fixed_visits,
 )
 from uxsim.order_control_tvt_node_rank_state import OrderControlTvtNodeRankState
+from uxsim.order_control_tvt_mp_physical_transfer import (
+    transfer_tvt_mp_passage_attempts,
+)
 from uxsim.order_control_tvt_snapshot_undetermined_registration import (
     register_undetermined_visits_from_snapshot_plan,
 )
@@ -209,20 +213,91 @@ def _zero_visit_run_kwargs():
     }
 
 
+def _place_vehicle_on_inlink_with_new_order_control_visit(
+    W,
+    vehicle,
+    *,
+    inlink_name,
+    outlink_name,
+    snapshot_timestep,
+    x_position=180.0,
+):
+    # Move one vehicle onto a downstream inlink without transferring it
+    # through the upstream time_value node. The new Visit comes from the
+    # ordinary link-entry method, not a handwritten current-visit dict.
+    inlink = W.get_link(inlink_name)
+    outlink = W.get_link(outlink_name)
+    old_link = vehicle.link
+    if old_link is not None and vehicle in old_link.vehicles:
+        old_link.vehicles.remove(vehicle)
+    if vehicle.leader is not None:
+        vehicle.leader.follower = None
+    if vehicle.follower is not None:
+        vehicle.follower.leader = None
+    vehicle.leader = None
+    vehicle.follower = None
+
+    vehicle.link = inlink
+    vehicle.state = "run"
+    vehicle.x = x_position
+    vehicle.link_arrival_time = float((snapshot_timestep - 1) * W.DELTAT)
+    vehicle.route_next_link = outlink
+    vehicle.lane = 0
+    vehicle.leader = None
+    vehicle.follower = None
+    if vehicle not in inlink.vehicles:
+        inlink.vehicles.append(vehicle)
+    vehicle.begin_order_control_visit_on_link_entry()
+    if old_link is not None and vehicle in old_link.end_node.incoming_vehicles:
+        old_link.end_node.incoming_vehicles.remove(vehicle)
+    if vehicle in inlink.end_node.incoming_vehicles:
+        inlink.end_node.incoming_vehicles.remove(vehicle)
+
+    current_visit = vehicle.order_control_current_visit
+    assert vehicle.link is inlink
+    assert vehicle in inlink.vehicles
+    assert vehicle.route_next_link is outlink
+    assert current_visit is not None
+    assert current_visit["node"] is inlink.end_node
+    assert current_visit["inlink"] is inlink
+    assert current_visit["arrival_time"] is None
+    assert current_visit["arrival_tiebreaker"] is None
+    assert vehicle not in inlink.end_node.incoming_vehicles
+    assert vehicle.state == "run"
+
+
 def _build_two_node_snapshot_world_with_visits_on_both_nodes():
     W = _build_two_time_value_nodes_world()
     snapshot_T = 25
     W.T = snapshot_T
     vehicle_b = W.addVehicle("orig_a", "dest", 0, name="veh_b")
-    _advance_until_on_inlink(vehicle_b, "in_b")
+    _advance_until_on_inlink(vehicle_b, "in_a")
+    _place_vehicle_on_inlink_with_new_order_control_visit(
+        W,
+        vehicle_b,
+        inlink_name="in_b",
+        outlink_name="out_b",
+        snapshot_timestep=snapshot_T,
+    )
+    # vehicle_a still has to enter in_a on the real World. At x=180 that
+    # advance reaches junction_b, which has no rank ledger. Hold vehicle_b
+    # short of the downstream node until that advance finishes. The
+    # not-yet-arrived placement below restores x=180 without a new Visit.
+    vehicle_b.x = 0.0
+    vehicle_b.x_next = 0.0
+    vehicle_b.move_remain = 0
     vehicle_a = W.addVehicle("orig_a", "dest", 0, name="veh_a")
     _advance_until_on_inlink(vehicle_a, "in_a")
+    visit_before_not_yet_arrived_place = vehicle_b.order_control_current_visit
+    visit_id_before_not_yet_arrived_place = vehicle_b.order_control_visit_id
     _place_not_yet_arrived_vehicle_at_snapshot(
         W,
         vehicle_b,
         inlink_name="in_b",
         snapshot_timestep=snapshot_T,
     )
+    assert vehicle_b.order_control_current_visit is visit_before_not_yet_arrived_place
+    assert vehicle_b.order_control_visit_id == visit_id_before_not_yet_arrived_place
     _place_arrived_vehicle_at_snapshot(
         W,
         vehicle_a,
@@ -1052,6 +1127,201 @@ def test_zero_visit_tvt_driver_result_includes_empty_inlink_physical_orders():
     assert result.inlink_physical_orders == ()
 
 
+def test_tvt_api_passes_true_and_result_collector_mode_is_true():
+    W = _zero_visit_two_node_world()
+    seen_modes = []
+    original_prepare = baseline_driver_module._prepare_baseline_fork
+
+    def spy(
+        real_W,
+        *,
+        target_node_names,
+        baseline_horizon_steps,
+        apply_copied_tvt_confirmed_ranks,
+    ):
+        seen_modes.append(apply_copied_tvt_confirmed_ranks)
+        return original_prepare(
+            real_W,
+            target_node_names=target_node_names,
+            baseline_horizon_steps=baseline_horizon_steps,
+            apply_copied_tvt_confirmed_ranks=apply_copied_tvt_confirmed_ranks,
+        )
+
+    with patch.object(baseline_driver_module, "_prepare_baseline_fork", spy):
+        result = run_snapshot_fixed_baseline_fork_with_tvt_rank_ledger_registration(
+            W,
+            **_zero_visit_run_kwargs(),
+        )
+    assert seen_modes == [True]
+    assert result.collector.apply_copied_tvt_confirmed_ranks is True
+
+
+def _place_snapshot_visit(W, vehicle_name, inlink_name, visit_id, arrival_time):
+    inlink = W.get_link(inlink_name)
+    junction = W.get_node("junction")
+    outlink = W.get_link("out")
+    vehicle = W.addVehicle(inlink.start_node.name, "dest", 0, name=vehicle_name)
+    vehicle.state = "run"
+    vehicle.link = inlink
+    vehicle.x = inlink.length
+    vehicle.x_old = inlink.length
+    vehicle.route_next_link = outlink
+    vehicle.order_control_visit_id = visit_id
+    vehicle.order_control_current_visit = {
+        "visit_id": visit_id,
+        "node": junction,
+        "inlink": inlink,
+        "arrival_time": arrival_time,
+        "arrival_tiebreaker": 0.2,
+    }
+    inlink.vehicles.append(vehicle)
+    junction.incoming_vehicles.append(vehicle)
+    inlink.capacity_out_remain = 10
+    return vehicle
+
+
+def test_invalid_rank_states_raise_before_frozen_copy():
+    # Existing registration tests do not show that the driver rejects a bad
+    # mapping before copy.deepcopy. These three causes use the same messages.
+    W = _zero_visit_two_node_world()
+    cases = [
+        (
+            {"junction_a": OrderControlTvtNodeRankState("junction_a")},
+            "Missing rank state for target node 'junction_b'",
+        ),
+        (
+            {
+                "junction_a": object(),
+                "junction_b": OrderControlTvtNodeRankState("junction_b"),
+            },
+            "rank_states_by_node_name['junction_a'] must be an "
+            "OrderControlTvtNodeRankState",
+        ),
+        (
+            {
+                "junction_a": OrderControlTvtNodeRankState("other_node"),
+                "junction_b": OrderControlTvtNodeRankState("junction_b"),
+            },
+            "rank_states_by_node_name key 'junction_a' does not match "
+            "rank_state.node_name 'other_node'",
+        ),
+    ]
+
+    def deepcopy_must_not_run(*args, **kwargs):
+        raise AssertionError("deepcopy must not run before rank-state validation")
+
+    for rank_states, expected_message in cases:
+        with patch.object(
+            baseline_driver_module.copy,
+            "deepcopy",
+            side_effect=deepcopy_must_not_run,
+        ):
+            _expect_value_error(
+                lambda rank_states=rank_states: (
+                    run_snapshot_fixed_baseline_fork_with_tvt_rank_ledger_registration(
+                        W,
+                        target_node_names=_two_node_target_names(),
+                        baseline_horizon_steps=5,
+                        rank_states_by_node_name=rank_states,
+                    )
+                ),
+                expected_message,
+            )
+
+
+def test_tvt_rank_applying_fork_uses_independent_pre_registration_rank_snapshot():
+    # Caller ledger is not the real World's attribute. The fork must still
+    # receive its confirmed ranks, without T's new undetermined visit.
+    W = World(
+        name="frozen_rank_copy",
+        deltan=1,
+        tmax=300,
+        print_mode=0,
+        save_mode=0,
+        show_mode=0,
+        random_seed=0,
+    )
+    W.addNode("orig_a", 0, 1)
+    W.addNode("orig_b", 0, -1)
+    W.addNode(
+        "junction",
+        1,
+        0,
+        order_control_eligible=True,
+        order_control_type="time_value",
+        flow_capacity=1,
+    )
+    W.addNode("dest", 2, 0)
+    W.addLink("in_a", "orig_a", "junction", length=100, free_flow_speed=20, number_of_lanes=1)
+    W.addLink("in_b", "orig_b", "junction", length=100, free_flow_speed=20, number_of_lanes=1)
+    W.addLink("out", "junction", "dest", length=100, free_flow_speed=20, number_of_lanes=1)
+    _prepare_network(W)
+    W.T = 25
+    for link in W.LINKS:
+        if len(link.cum_arrival) == 0:
+            link.cum_arrival.append(0)
+            link.cum_departure.append(0)
+        link.capacity_in_remain = 10
+        link.capacity_out_remain = 10
+    new_vehicle = _place_snapshot_visit(W, "new_at_t", "in_a", 2, 10.0)
+    confirmed_vehicle = _place_snapshot_visit(W, "past_confirmed", "in_b", 1, 8.0)
+    junction = W.get_node("junction")
+    junction.incoming_vehicles = [new_vehicle, confirmed_vehicle]
+    past_key = ("past_confirmed", 1)
+    new_key = ("new_at_t", 2)
+    rank_state = OrderControlTvtNodeRankState("junction")
+    rank_state.register_undetermined_visit(past_key)
+    rank_state.confirm_visits_and_formal_target_node_routes_atomically(
+        [(past_key, "out")],
+        ["out"],
+    )
+    caller_rank_states = {"junction": rank_state}
+    assert W.order_control_tvt_rank_states_by_node_name == {}
+    captured_fork_ledgers = []
+    fork_links_after_transfer = {}
+    original_transfer = transfer_tvt_mp_passage_attempts
+
+    def capture_fork_ledger(node):
+        captured_fork_ledgers.append(
+            node.W.order_control_tvt_rank_states_by_node_name
+        )
+        original_transfer(node)
+        for vehicle in node.W.VEHICLES.values():
+            fork_links_after_transfer[vehicle.name] = vehicle.link.name
+
+    with patch(
+        "uxsim.order_control_tvt_mp_physical_transfer.transfer_tvt_mp_passage_attempts",
+        side_effect=capture_fork_ledger,
+    ):
+        result = run_snapshot_fixed_baseline_fork_with_tvt_rank_ledger_registration(
+            W,
+            target_node_names=["junction"],
+            baseline_horizon_steps=1,
+            rank_states_by_node_name=caller_rank_states,
+        )
+
+    assert len(captured_fork_ledgers) == 1
+    fork_rank_states = captured_fork_ledgers[0]
+    fork_rank_state = fork_rank_states["junction"]
+    assert result.collector.apply_copied_tvt_confirmed_ranks is True
+    assert fork_rank_state.is_confirmed(past_key) is True
+    assert fork_rank_state.assigned_rank(past_key) == 1
+    assert fork_rank_state.formal_route_next_link_name(past_key) == "out"
+    assert fork_links_after_transfer["past_confirmed"] == "out"
+    assert fork_links_after_transfer["new_at_t"] == "in_a"
+    assert rank_state.is_undetermined(new_key) is True
+    assert fork_rank_state.is_undetermined(new_key) is False
+    assert fork_rank_state.is_confirmed(new_key) is False
+    assert fork_rank_states is not caller_rank_states
+    assert fork_rank_state is not rank_state
+    rank_state.register_undetermined_visit(("after_call_original", 3))
+    fork_rank_state.register_undetermined_visit(("after_call_fork", 4))
+    assert fork_rank_state.is_undetermined(("after_call_original", 3)) is False
+    assert rank_state.is_undetermined(("after_call_fork", 4)) is False
+    assert confirmed_vehicle.link.name == "in_b"
+    assert new_vehicle.link.name == "in_a"
+
+
 def test_preserves_distinct_visit_keys_for_node_revisit():
     W, vehicle = _build_arrived_junction_world()
     rank_state = OrderControlTvtNodeRankState("junction")
@@ -1101,6 +1371,9 @@ TESTS = [
     test_fork_result_does_not_include_plan_or_rank_ledger_fields,
     test_tvt_driver_result_includes_inlink_physical_orders,
     test_zero_visit_tvt_driver_result_includes_empty_inlink_physical_orders,
+    test_tvt_api_passes_true_and_result_collector_mode_is_true,
+    test_invalid_rank_states_raise_before_frozen_copy,
+    test_tvt_rank_applying_fork_uses_independent_pre_registration_rank_snapshot,
     test_preserves_distinct_visit_keys_for_node_revisit,
 ]
 

@@ -2105,6 +2105,212 @@ class Node:
 
         s.incoming_vehicles = []
 
+    def _transfer_one_vehicle_between_links(s, vehicle, inlink, outlink):
+        """
+        Move one vehicle from inlink to outlink.
+
+        The caller has already decided that this vehicle may pass. This helper
+        performs the physical move and, on a baseline fork, collector prepare
+        and apply. It does not choose a route, judge clearance, update
+        order-control clearance history, or call the downstream observer.
+        inlink and outlink are the objects from before the move. They are not
+        read again from vehicle.link after vehicle.link changes.
+        """
+        baseline_collector = s.W._order_control_baseline_collector
+        pending_passage_record = None
+        if baseline_collector is not None:
+            current_visit = vehicle.order_control_current_visit
+            if current_visit is None:
+                passage_visit_id = None
+            else:
+                passage_visit_id = current_visit["visit_id"]
+            pending_passage_record = (
+                baseline_collector.prepare_baseline_passage_recording(
+                    vehicle_name=vehicle.name,
+                    visit_id=passage_visit_id,
+                    node_name=s.name,
+                )
+            )
+
+        inlink.cum_departure[-1] += s.W.DELTAN
+        outlink.cum_arrival[-1] += s.W.DELTAN
+        inlink.traveltime_actual[int(vehicle.link_arrival_time/s.W.DELTAT):] = s.W.T*s.W.DELTAT - vehicle.link_arrival_time
+
+        vehicle.link_arrival_time = s.W.T*s.W.DELTAT
+
+        inlink.capacity_out_remain -= s.W.DELTAN
+        outlink.capacity_in_remain -= s.W.DELTAN
+        if s.flow_capacity != None:
+            s.flow_capacity_remain -= s.W.DELTAN
+
+        inlink.vehicles.popleft()
+        outlink.vehicles_enter_log[s.W.T*s.W.DELTAT] = vehicle
+        vehicle.link = outlink
+        vehicle.begin_order_control_visit_on_link_entry()
+        vehicle.x = 0
+
+        if vehicle.follower != None:
+            vehicle.follower.leader = None
+            vehicle.follower = None
+
+        if len(outlink.vehicles) > 0:
+            vehicle.lane = (outlink.vehicles[-1].lane + 1)%outlink.number_of_lanes
+        else:
+            vehicle.lane = 0
+
+        vehicle.leader = None
+        if len(outlink.vehicles) >= outlink.number_of_lanes:
+            vehicle.leader = outlink.vehicles[-outlink.number_of_lanes]
+            vehicle.leader.follower = vehicle
+            assert vehicle.leader.lane == vehicle.lane
+
+        x_next = vehicle.move_remain*outlink.u/inlink.u
+        if vehicle.leader != None:
+            x_cong = vehicle.leader.x_old - vehicle.link.delta_per_lane*vehicle.W.DELTAN
+            if x_cong < vehicle.x:
+                x_cong = vehicle.x
+            if x_next > x_cong:
+                x_next = x_cong
+
+        if x_next >= outlink.length:
+            x_next = outlink.length
+
+        vehicle.x = x_next
+        vehicle.v += vehicle.x/s.W.DELTAT
+        vehicle.move_remain = 0
+
+        if len(inlink.vehicles) and inlink.vehicles[0].flag_waiting_for_trip_end:
+            inlink.vehicles[0].end_trip()
+
+        outlink.vehicles.append(vehicle)
+        s.incoming_vehicles.remove(vehicle)
+
+        if baseline_collector is not None and pending_passage_record is not None:
+            baseline_collector.apply_baseline_passage_timestep(
+                pending_passage_record, s.W.T
+            )
+
+    def _order_control_clearance_blocks_passage(s, vehicle, inlink):
+        """
+        Return True when this inlink must wait for order-control clearance.
+
+        One-sided clearance history is RuntimeError. None last inlink, or the
+        same inlink, does not wait. A different inlink waits unless
+        W.T - last_entry_timestep > order_control_clearance_timesteps.
+        """
+        last_inlink = s.last_order_control_inlink
+        last_timestep = s.last_order_control_entry_timestep
+        if (last_inlink is None) != (last_timestep is None):
+            raise RuntimeError(
+                f"Node {s.name}: vehicle {vehicle.name} has one-sided "
+                "order-control clearance history: "
+                f"last_order_control_inlink={last_inlink!r}, "
+                f"last_order_control_entry_timestep={last_timestep!r}."
+            )
+        if last_inlink is None:
+            return False
+        if inlink is last_inlink:
+            return False
+        clearance_gap = s.W.T - last_timestep
+        return not (clearance_gap > s.order_control_clearance_timesteps)
+
+    def _transfer_normal_merge(
+        s,
+        allowed_vehicles=None,
+        enforce_order_control_clearance=False,
+    ):
+        """
+        Run ordinary merge selection without the end-of-transfer cleanup.
+
+        allowed_vehicles is None for standard UXsim merge: every current
+        incoming vehicle is a candidate, and order-control clearance is not
+        checked or recorded. That does not mean a signalized intersection has
+        no safety clearance. All-red time belongs to the signal setting.
+
+        allowed_vehicles as a tuple limits both outlink trials and vehicle
+        choice to that fixed set. enforce_order_control_clearance=True checks
+        order-control clearance before each selected vehicle moves. If it is
+        not satisfied, this helper returns normally and leaves the rest of the
+        set for a later timestep. A successful move then updates clearance
+        history. This helper does not clear incoming_vehicles.
+        """
+        outlinks = []
+        seen_outlinks = {}
+        if allowed_vehicles is None:
+            outlink_source = s.incoming_vehicles
+        else:
+            outlink_source = allowed_vehicles
+        for vehicle in outlink_source:
+            if allowed_vehicles is not None and vehicle not in s.incoming_vehicles:
+                continue
+            next_link = vehicle.route_next_link
+            if next_link is None:
+                continue
+            if next_link in seen_outlinks:
+                continue
+            seen_outlinks[next_link] = True
+        for outlink in seen_outlinks:
+            lane_index = 0
+            while lane_index < outlink.number_of_lanes:
+                outlinks.append(outlink)
+                lane_index += 1
+
+        if s.W.hard_deterministic_mode == False:
+            s.W.rng.shuffle(outlinks)
+
+        for outlink in outlinks:
+            if (len(outlink.vehicles) < outlink.number_of_lanes or outlink.vehicles[-outlink.number_of_lanes].x > outlink.delta_per_lane*s.W.DELTAN) and outlink.capacity_in_remain >= s.W.DELTAN and s.flow_capacity_remain >= s.W.DELTAN:
+                if allowed_vehicles is None:
+                    choice_source = s.incoming_vehicles
+                else:
+                    choice_source = allowed_vehicles
+                vehs = []
+                for veh in choice_source:
+                    if allowed_vehicles is not None and veh not in s.incoming_vehicles:
+                        continue
+                    if veh == veh.link.vehicles[0] and veh.route_next_link == outlink and (s.signal_phase in veh.link.signal_group or len(s.signal)<=1) and veh.link.capacity_out_remain >= s.W.DELTAN:
+                        vehs.append(veh)
+                if len(vehs) == 0:
+                    continue
+                merge_priorities = np.array([veh.link.merge_priority for veh in vehs], dtype=float)
+                if sum(merge_priorities) == 0:
+                    merge_priorities = np.ones(len(merge_priorities))
+                if s.W.hard_deterministic_mode == False:
+                    veh = s.W.rng.choice(vehs, p=merge_priorities/sum(merge_priorities))
+                else:
+                    veh = max(zip(merge_priorities, vehs), key=lambda x:x[0])[1]
+
+                inlink = veh.link
+                if enforce_order_control_clearance is True:
+                    clearance_blocks = s._order_control_clearance_blocks_passage(
+                        veh,
+                        inlink,
+                    )
+                    if clearance_blocks:
+                        return
+
+                s._transfer_one_vehicle_between_links(veh, inlink, outlink)
+
+                if enforce_order_control_clearance is True:
+                    s.last_order_control_inlink = inlink
+                    s.last_order_control_entry_timestep = s.W.T
+
+    def _finish_node_transfer(s):
+        """
+        End waiting trips at inlink heads and clear incoming_vehicles.
+
+        Called once from Node.transfer after a normal return. Not called when
+        transfer raises. Does not call the downstream observer.
+        """
+        for link in s.inlinks.values():
+            for lane in range(link.number_of_lanes):
+                if len(link.vehicles) and link.vehicles[0].flag_waiting_for_trip_end:
+                    link.vehicles[0].end_trip()
+                else:
+                    break
+
+        s.incoming_vehicles = []
+
     def transfer(s):
         """
         Transfers vehicles between links at the node.
@@ -2113,11 +2319,15 @@ class Node:
         -----
         This method handles the transfer of vehicles from one link to another at the node.
         A vehicle is eligible for transfer if:
-        
+
         - The next link it intends to move to has space.
         - The vehicle has the right signal phase to proceed.
         - The current link has enough capacity to allow the vehicle to exit.
         - The node capacity is not exceeded.
+
+        FCFS and batch return before ordinary merge. An eligible time_value node
+        tries TVT-MP ranks, then the same end-of-transfer cleanup. Other nodes
+        use ordinary merge. The downstream observer stays outside this method.
         """
         if s.order_control_eligible and s.order_control_type == "fcfs":
             s.transfer_fcfs_clearance()
@@ -2127,124 +2337,16 @@ class Node:
             s.transfer_batch()
             return
 
-        outlinks = []
-        outlink_candidates = {veh.route_next_link:0 for veh in s.incoming_vehicles if veh.route_next_link != None}
-        for outlink in outlink_candidates.keys():
-            for i in range(outlink.number_of_lanes):#車線の数だけ受け入れ試行回数あり
-                outlinks.append(outlink)
-        
-        if s.W.hard_deterministic_mode == False:
-            s.W.rng.shuffle(outlinks)
+        if s.order_control_eligible is True and s.order_control_type == "time_value":
+            from uxsim.order_control_tvt_mp_physical_transfer import (
+                transfer_tvt_mp_passage_attempts,
+            )
+            transfer_tvt_mp_passage_attempts(s)
+            s._finish_node_transfer()
+            return
 
-        for outlink in outlinks: 
-            if (len(outlink.vehicles) < outlink.number_of_lanes or outlink.vehicles[-outlink.number_of_lanes].x > outlink.delta_per_lane*s.W.DELTAN) and outlink.capacity_in_remain >= s.W.DELTAN and s.flow_capacity_remain >= s.W.DELTAN:
-                #受け入れ可能かつ流出可能の場合，リンク優先度に応じて選択
-                vehs = [
-                    veh for veh in s.incoming_vehicles 
-                    if veh == veh.link.vehicles[0] and #送り出しリンクで先頭車線の車両
-                    veh.route_next_link == outlink and #行先リンクが受け入れリンク
-                    (s.signal_phase in veh.link.signal_group or len(s.signal)<=1) and #信号が合致
-                    veh.link.capacity_out_remain >= s.W.DELTAN
-                ] 
-                if len(vehs) == 0:
-                    continue
-                merge_priorities = np.array([veh.link.merge_priority for veh in vehs], dtype=float)
-                if sum(merge_priorities) == 0:
-                    merge_priorities = np.ones(len(merge_priorities))
-                if s.W.hard_deterministic_mode == False:
-                    veh = s.W.rng.choice(vehs, p=merge_priorities/sum(merge_priorities)) #車線の少ないリンクは，車線の多いリンクの試行回数の恩恵を受けて少し有利になる．大きな差はでないので許容する
-                else:
-                    veh = max(zip(merge_priorities, vehs), key=lambda x:x[0])[1]
-                
-                inlink = veh.link
-
-                baseline_collector = s.W._order_control_baseline_collector
-                pending_passage_record = None
-                if baseline_collector is not None:
-                    current_visit = veh.order_control_current_visit
-                    if current_visit is None:
-                        passage_visit_id = None
-                    else:
-                        passage_visit_id = current_visit["visit_id"]
-                    pending_passage_record = (
-                        baseline_collector.prepare_baseline_passage_recording(
-                            vehicle_name=veh.name,
-                            visit_id=passage_visit_id,
-                            node_name=s.name,
-                        )
-                    )
-
-                #累積台数関連更新
-                inlink.cum_departure[-1] += s.W.DELTAN
-                outlink.cum_arrival[-1] += s.W.DELTAN
-                inlink.traveltime_actual[int(veh.link_arrival_time/s.W.DELTAT):] = s.W.T*s.W.DELTAT - veh.link_arrival_time #自分の流入時刻より後の実旅行時間も今の実旅行時間で仮決め．後に流出した車両が上書きする前提
-
-                veh.link_arrival_time = s.W.T*s.W.DELTAT
-
-                inlink.capacity_out_remain -= s.W.DELTAN
-                outlink.capacity_in_remain -= s.W.DELTAN
-                if s.flow_capacity != None:
-                    s.flow_capacity_remain -= s.W.DELTAN
-
-                #リンク間遷移実行
-                inlink.vehicles.popleft()
-                outlink.vehicles_enter_log[s.W.T*s.W.DELTAT] = veh
-                veh.link = outlink
-                veh.begin_order_control_visit_on_link_entry()
-                veh.x = 0
-
-                if veh.follower != None:
-                    veh.follower.leader = None
-                    veh.follower = None
-
-                if len(outlink.vehicles) > 0:
-                    veh.lane = (outlink.vehicles[-1].lane + 1)%outlink.number_of_lanes
-                else:
-                    veh.lane = 0
-                
-                veh.leader = None
-                if len(outlink.vehicles) >= outlink.number_of_lanes:
-                    veh.leader = outlink.vehicles[-outlink.number_of_lanes]
-                    veh.leader.follower = veh
-                    assert veh.leader.lane == veh.lane
-
-                #走り残し処理
-                x_next = veh.move_remain*outlink.u/inlink.u
-                if veh.leader != None:
-                    x_cong = veh.leader.x_old - veh.link.delta_per_lane*veh.W.DELTAN
-                    if x_cong < veh.x:
-                        x_cong = veh.x
-                    if x_next > x_cong:
-                        x_next = x_cong
-
-                if x_next >= outlink.length:
-                    x_next = outlink.length
-                    
-                veh.x = x_next
-                veh.v += veh.x/s.W.DELTAT
-                veh.move_remain = 0
-
-                #今移動した車両の後続車両がトリップ終了待ちの場合，トリップ終了させる
-                if len(inlink.vehicles) and inlink.vehicles[0].flag_waiting_for_trip_end:
-                    inlink.vehicles[0].end_trip()
-
-                outlink.vehicles.append(veh)
-                s.incoming_vehicles.remove(veh)
-
-                if baseline_collector is not None and pending_passage_record is not None:
-                    baseline_collector.apply_baseline_passage_timestep(
-                        pending_passage_record, s.W.T
-                    )
-
-        #各リンクの先頭のトリップ終了待ち車両をトリップ終了させる
-        for link in s.inlinks.values():
-            for lane in range(link.number_of_lanes):
-                if len(link.vehicles) and link.vehicles[0].flag_waiting_for_trip_end:
-                    link.vehicles[0].end_trip()
-                else:
-                    break
-
-        s.incoming_vehicles = []
+        s._transfer_normal_merge()
+        s._finish_node_transfer()
 
     def update(s):
         """

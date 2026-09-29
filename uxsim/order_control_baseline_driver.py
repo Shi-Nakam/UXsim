@@ -7,6 +7,7 @@ single fork-side exec_simulation() batch forward. Institutional TVT logic stays 
 
 from __future__ import annotations
 
+import copy
 from collections.abc import Mapping
 from dataclasses import dataclass
 
@@ -279,7 +280,13 @@ def _prepare_baseline_fork(
     *,
     target_node_names: list[str] | tuple[str, ...],
     baseline_horizon_steps: int,
+    apply_copied_tvt_confirmed_ranks: bool,
 ) -> _BaselineForkPrepared:
+    if not isinstance(apply_copied_tvt_confirmed_ranks, bool):
+        raise ValueError(
+            "apply_copied_tvt_confirmed_ranks must be a bool, "
+            f"got {apply_copied_tvt_confirmed_ranks!r}."
+        )
     fixed_target_node_names = _validate_and_freeze_target_node_names(
         target_node_names
     )
@@ -318,7 +325,9 @@ def _prepare_baseline_fork(
         baseline_timestep_T=baseline_timestep_T,
     )
 
-    collector = OrderControlBaselineCollector()
+    collector = OrderControlBaselineCollector(
+        apply_copied_tvt_confirmed_ranks=apply_copied_tvt_confirmed_ranks,
+    )
     fork_W._order_control_baseline_collector = collector
 
     return _BaselineForkPrepared(
@@ -454,6 +463,7 @@ def run_snapshot_fixed_baseline_fork(
         real_W,
         target_node_names=target_node_names,
         baseline_horizon_steps=baseline_horizon_steps,
+        apply_copied_tvt_confirmed_ranks=False,
     )
     plan = prepare_snapshot_fixed_visit_registration_plan(
         prepared.fork_W,
@@ -470,6 +480,45 @@ def run_snapshot_fixed_baseline_fork(
     )
 
 
+def _validate_rank_states_for_frozen_fork_copy(
+    plan,
+    rank_states_by_node_name,
+) -> None:
+    """
+    Check caller rank ledgers before the pre-registration fork copy.
+
+    Same node checks as undetermined registration: the mapping type, a ledger
+    for every plan target node, the rank-state type, and key versus node_name.
+    Reads only. Does not change rank states, the plan, a World, a collector,
+    or any Vehicle, Node, or Link.
+    """
+    if not isinstance(rank_states_by_node_name, Mapping):
+        raise ValueError(
+            "rank_states_by_node_name must be a Mapping from node name str to "
+            "OrderControlTvtNodeRankState; got "
+            f"{type(rank_states_by_node_name).__name__}."
+        )
+
+    for node_name in plan.target_node_names:
+        if node_name not in rank_states_by_node_name:
+            raise ValueError(
+                f"Missing rank state for target node {node_name!r} in "
+                "rank_states_by_node_name."
+            )
+        rank_state = rank_states_by_node_name[node_name]
+        if not isinstance(rank_state, OrderControlTvtNodeRankState):
+            raise ValueError(
+                f"rank_states_by_node_name[{node_name!r}] must be an "
+                "OrderControlTvtNodeRankState; got "
+                f"{type(rank_state).__name__}."
+            )
+        if rank_state.node_name != node_name:
+            raise ValueError(
+                f"rank_states_by_node_name key {node_name!r} does not match "
+                f"rank_state.node_name {rank_state.node_name!r}."
+            )
+
+
 def run_snapshot_fixed_baseline_fork_with_tvt_rank_ledger_registration(
     real_W: World,
     *,
@@ -480,23 +529,36 @@ def run_snapshot_fixed_baseline_fork_with_tvt_rank_ledger_registration(
     """
     Copy real_W, register snapshot-fixed visits on fork_W, and run one fixed horizon.
 
-    Before baseline virtual simulation, registers rank-ledger-unregistered
-    snapshot-fixed visits from a single prepared plan onto caller-owned TVT rank
-    ledgers (undetermined sets only), then applies the same plan to the fork
-    collector. Does not own rank ledgers, confirm ranks, run baseline alignment,
-    or select right-of-entry vehicles. Does not modify real_W. Does not return
-    fork_W. Raises on invalid input or internal inconsistency; does not return
-    partial results on failure.
+    Before baseline virtual simulation, validates the caller-owned rank ledgers,
+    copies them independently, and attaches that pre-registration copy to the
+    fork. Then registers rank-ledger-unregistered snapshot-fixed visits from a
+    single prepared plan onto the original caller-owned ledgers only, and
+    applies the same plan to the fork collector. Does not share rank-ledger
+    objects with the caller, confirm ranks, run baseline alignment, or select
+    right-of-entry vehicles. Does not modify real_W. Does not return fork_W.
+    Raises on invalid input or internal inconsistency; does not return partial
+    results on failure.
     """
     prepared = _prepare_baseline_fork(
         real_W,
         target_node_names=target_node_names,
         baseline_horizon_steps=baseline_horizon_steps,
+        apply_copied_tvt_confirmed_ranks=True,
     )
 
     plan = prepare_snapshot_fixed_visit_registration_plan(
         prepared.fork_W,
         target_node_names=prepared.fixed_target_node_names,
+    )
+    _validate_rank_states_for_frozen_fork_copy(
+        plan,
+        rank_states_by_node_name,
+    )
+    frozen_rank_states_by_node_name = copy.deepcopy(
+        dict(rank_states_by_node_name)
+    )
+    prepared.fork_W.order_control_tvt_rank_states_by_node_name = (
+        frozen_rank_states_by_node_name
     )
     register_undetermined_visits_from_snapshot_plan(
         plan,

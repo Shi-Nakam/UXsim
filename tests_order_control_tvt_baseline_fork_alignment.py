@@ -205,20 +205,91 @@ def _build_arrived_junction_world():
     return W, vehicle
 
 
+def _place_vehicle_on_inlink_with_new_order_control_visit(
+    W,
+    vehicle,
+    *,
+    inlink_name,
+    outlink_name,
+    snapshot_timestep,
+    x_position=180.0,
+):
+    # Move one vehicle onto a downstream inlink without transferring it
+    # through the upstream time_value node. The new Visit comes from the
+    # ordinary link-entry method, not a handwritten current-visit dict.
+    inlink = W.get_link(inlink_name)
+    outlink = W.get_link(outlink_name)
+    old_link = vehicle.link
+    if old_link is not None and vehicle in old_link.vehicles:
+        old_link.vehicles.remove(vehicle)
+    if vehicle.leader is not None:
+        vehicle.leader.follower = None
+    if vehicle.follower is not None:
+        vehicle.follower.leader = None
+    vehicle.leader = None
+    vehicle.follower = None
+
+    vehicle.link = inlink
+    vehicle.state = "run"
+    vehicle.x = x_position
+    vehicle.link_arrival_time = float((snapshot_timestep - 1) * W.DELTAT)
+    vehicle.route_next_link = outlink
+    vehicle.lane = 0
+    vehicle.leader = None
+    vehicle.follower = None
+    if vehicle not in inlink.vehicles:
+        inlink.vehicles.append(vehicle)
+    vehicle.begin_order_control_visit_on_link_entry()
+    if old_link is not None and vehicle in old_link.end_node.incoming_vehicles:
+        old_link.end_node.incoming_vehicles.remove(vehicle)
+    if vehicle in inlink.end_node.incoming_vehicles:
+        inlink.end_node.incoming_vehicles.remove(vehicle)
+
+    current_visit = vehicle.order_control_current_visit
+    assert vehicle.link is inlink
+    assert vehicle in inlink.vehicles
+    assert vehicle.route_next_link is outlink
+    assert current_visit is not None
+    assert current_visit["node"] is inlink.end_node
+    assert current_visit["inlink"] is inlink
+    assert current_visit["arrival_time"] is None
+    assert current_visit["arrival_tiebreaker"] is None
+    assert vehicle not in inlink.end_node.incoming_vehicles
+    assert vehicle.state == "run"
+
+
 def _build_two_node_snapshot_world_with_visits_on_both_nodes():
     W = _build_two_time_value_nodes_world()
     snapshot_T = 25
     W.T = snapshot_T
     vehicle_b = W.addVehicle("orig_a", "dest", 0, name="veh_b")
-    _advance_until_on_inlink(vehicle_b, "in_b")
+    _advance_until_on_inlink(vehicle_b, "in_a")
+    _place_vehicle_on_inlink_with_new_order_control_visit(
+        W,
+        vehicle_b,
+        inlink_name="in_b",
+        outlink_name="out_b",
+        snapshot_timestep=snapshot_T,
+    )
+    # vehicle_a still has to enter in_a on the real World. At x=180 that
+    # advance reaches junction_b, which has no rank ledger. Hold vehicle_b
+    # short of the downstream node until that advance finishes. The
+    # not-yet-arrived placement below restores x=180 without a new Visit.
+    vehicle_b.x = 0.0
+    vehicle_b.x_next = 0.0
+    vehicle_b.move_remain = 0
     vehicle_a = W.addVehicle("orig_a", "dest", 0, name="veh_a")
     _advance_until_on_inlink(vehicle_a, "in_a")
+    visit_before_not_yet_arrived_place = vehicle_b.order_control_current_visit
+    visit_id_before_not_yet_arrived_place = vehicle_b.order_control_visit_id
     _place_not_yet_arrived_vehicle_at_snapshot(
         W,
         vehicle_b,
         inlink_name="in_b",
         snapshot_timestep=snapshot_T,
     )
+    assert vehicle_b.order_control_current_visit is visit_before_not_yet_arrived_place
+    assert vehicle_b.order_control_visit_id == visit_id_before_not_yet_arrived_place
     _place_arrived_vehicle_at_snapshot(
         W,
         vehicle_a,

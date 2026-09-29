@@ -325,7 +325,7 @@
 
 ## TVT-MP確定順位の物理通過接続 完全実装前仕様を確定（2026-09-29）
 
-正式な仕様は、詳細設計第4巻「TVT-MP確定順位の物理通過接続 完全実装前仕様」を参照する。入力は、同じ第4巻の「TVT-MP確定順位の物理通過接続 設計判断」である。Python とテストは未実装である。
+正式な仕様は、詳細設計第4巻「TVT-MP確定順位の物理通過接続 完全実装前仕様」を参照する。入力は、同じ第4巻の「TVT-MP確定順位の物理通過接続 設計判断」である。TVT 物理通過、明示 mode、空の到着列で台帳を要求しない処理の Python とテストは作業中であり、まだ保存していない。登録前凍結コピーの Python 実装は、まだ行っていない。
 
 - 設計判断を、関数名、引数、呼出し順、テスト契約まで具体化した。
 - 正式な新規 module は `uxsim/order_control_tvt_mp_physical_transfer.py` である。
@@ -335,8 +335,8 @@
 - 1 台移動 helper は `Node._transfer_one_vehicle_between_links(self, vehicle, inlink, outlink)` である。
 - 終了処理は `Node._finish_node_transfer(self)` であり、`Node.transfer` の正常経路で 1 回だけ呼ぶ。
 - 実 World は最新の確定群だけを使う。未確定は通常群へ落とさず、`RuntimeError` である。
-- baseline fork は、凍結台帳の過去確定群を先に試し、過去確定群の clearance で終了しなければ開始時の通常群を通常合流する。
-- baseline fork の通常 baseline 群にも order-control clearance を適用する。
+- TVT 順位適用 baseline fork は、凍結台帳の過去確定群を先に試し、過去確定群の clearance で終了しなければ開始時の通常群を通常合流する。
+- TVT 順位適用 baseline fork の通常 baseline 群にも order-control clearance を適用する。汎用 baseline fork には適用しない。
 - 通常群の選択順は、既存の通常合流のままである。
 - 通常群の clearance 未充足で、その時刻の通常群処理を終了する。
 - 通常群の通過成功後も、order-control clearance 履歴を更新する。
@@ -364,19 +364,98 @@
 - collector は通過 1 回につき prepare と apply を 1 回行う。observer は `Node.transfer` の外のままである。
 - 通過済み Visit 集合と `confirmed_at_timestep` は追加しない。
 - actual passage と actual outcome は未実装のままである。
-- 新規専用テストは `tests_order_control_tvt_mp_physical_transfer.py` の 30 件である。
+- 新規専用テストは `tests_order_control_tvt_mp_physical_transfer.py` の 34 件である。空の到着列で台帳を要求しない 1 件を、未保存の専用テストへ追加済みである。
 - 既存のソース検査 2 件だけ、TVT 物理通過を呼ぶ契約へ更新する。FCFS、BATCH、通常 Node、正式サンプルは現行結果を維持する。
-- 利用者判断が必要な事項は残っていない。
-- 実装前仕様であるため、Python とテストは変更していない。
+- baseline fork には、汎用 fork と TVT 順位適用 fork の 2 種類がある。
+- collector の明示 bool で区別する。正式属性名は `apply_copied_tvt_confirmed_ranks` である。既定値は `False` である。
+- 汎用 fork は、従来の通常合流を維持する。Node 別順位台帳を要求しない。
+- TVT 順位適用 fork だけが、T-1 以前の確定順位を物理適用する。必要な Node 別順位台帳の欠如は `RuntimeError` である。
+- Node 別順位台帳の有無から、fork 種別を推測しない。
+- この仕様不足は、実装後の既存 baseline 回帰で判明した。代表例外は `RuntimeError: Node junction: TVT rank ledger is missing.` である。
+- 失敗した既存回帰は、`tests_order_control_baseline_driver.py`、`tests_order_control_tvt_baseline_fork_alignment.py`、`tests_order_control_tvt_mp_evaluation_end.py` の一部である。
+- 既存 baseline テストの期待値は変更していない。
+- 明示 mode により、既存の引数なし constructor と 2 つの公開 baseline API の後方互換を維持する。
+- collector と baseline driver の既存テストへ追加する mode 契約は、専用テスト 34 件へ含めない。関係回帰として別に記録する。
+- TVT 順位適用 baseline API へ渡された順位台帳を、T の未確定登録前に独立複製する。
+- 複製を fork World へ明示接続する。
+- T の未確定登録は元台帳だけへ適用する。
+- fork には T の新規登録を混ぜない。
+- 正常 driver 経路と baseline API 単独経路の双方を同じ契約にする。
+- この不足は fork alignment 回帰で判明した。
+- 既存テストの期待値は変更していない。
+- 独立性テスト `test_tvt_rank_applying_fork_uses_independent_pre_registration_rank_snapshot` は、`tests_order_control_tvt_baseline_driver_registration.py` へ置く。専用テスト 34 件には含めない。
+- Python 実装は作業中で未保存である。登録前凍結コピーの接続は、まだ実装していない。
+- 利用者判断が必要な事項は残っていない。これは制度変更ではない。既存の汎用 baseline API と、TVT 順位台帳登録付き baseline API を共存させ、呼出し側台帳を fork と共有しない技術的接続である。
+- 今回の文書修正では、Python とテストは変更していない。作業開始前からの未保存差分は残っている。
 
 ## 最新の再開地点
 
-1. 修正後の第4巻と進捗第3巻を Terminal で再確認する。
-2. `git diff --check` と変更ファイルを確認する。
-3. 文書 2 ファイルを commit する。
-4. commit 名に `document` を含める。
-5. commit 名に `complete` を使用しない。
-6. commit と push を分離する。
-7. 保存後、完全実装前仕様どおり Python と専用テストを実装する。
-8. 実装後は本番コード、専用テスト、差分、回帰結果を独立確認する。
-9. その後、actual passage・actual outcome の設計へ進む。
+1. 今回の文書修正を Terminal で限定確認する。
+2. Python とテストの作業開始前からの未保存差分が、今回の文書作業で変化していないことを確認する。
+3. `run_snapshot_fixed_baseline_fork_with_tvt_rank_ledger_registration()` で、対象 Node 検査のあと、登録前に `copy.deepcopy` し、fork World へ接続する。
+4. 時刻 T の未確定登録は、元の呼出し側 mapping だけへ適用する。
+5. `tests_order_control_tvt_baseline_driver_registration.py` へ `test_tvt_rank_applying_fork_uses_independent_pre_registration_rank_snapshot` を追加する。専用テスト 34 件には含めない。
+6. fork alignment と baseline driver registration を再実行する。既存期待値は、失敗を隠すために変えない。
+7. 専用テスト 34 件、FCFS、BATCH、正式サンプルを再実行する。
+8. 実装結果を第4巻と進捗第3巻へ記録する。
+9. 差分と回帰結果を独立確認してから commit する。
+
+上記の再開地点は履歴として残す。実装、独立確認、回帰結果は、本巻末尾の「TVT-MP確定順位の物理通過接続を実装・独立確認・検証（2026-09-29）」と、詳細設計第4巻の「TVT-MP確定順位の物理通過接続 実装・独立確認・検証結果」を参照する。
+
+## TVT-MP確定順位の物理通過接続を実装・独立確認・検証（2026-09-29）
+
+正式な記録は、詳細設計第4巻「TVT-MP確定順位の物理通過接続 実装・独立確認・検証結果」を参照する。入力は、同じ第4巻の完全実装前仕様と設計判断である。それらは履歴として残し、削除も短縮もしない。
+
+最新の保存済み・push 済みコミットは `cc0cafa` である。本節の本番、テスト、文書はまだ Git 保存していない。`diagnostics/order_control.zip` は未追跡のままである。
+
+完全実装前仕様どおり実装した。実装中に判明した仕様不足は、明示 mode、空の incoming snapshot、登録前凍結コピー、テスト fixture の直接配置で解消した。既存の期待値や assert は、失敗を回避するために変更していない。
+
+実装した本番 4 ファイル:
+
+- `uxsim/uxsim.py`
+- `uxsim/order_control_baseline_collector.py`
+- `uxsim/order_control_baseline_driver.py`
+- `uxsim/order_control_tvt_mp_physical_transfer.py`
+
+変更・新規作成したテスト 7 ファイル:
+
+- `tests_order_control_baseline_collector.py`
+- `tests_order_control_baseline_driver.py`
+- `tests_order_control_tvt_baseline_driver_registration.py`
+- `tests_order_control_tvt_baseline_fork_alignment.py`
+- `tests_order_control_tvt_mp_driver.py`
+- `tests_order_control_tvt_mp_evaluation_end.py`
+- `tests_order_control_tvt_mp_physical_transfer.py`
+
+- `Node.transfer` は、FCFS、BATCH、TVT、通常合流の順である。FCFS と BATCH は早期 return のままで、関数本体は変更していない。
+- TVT は time_value 分岐の中で局所 import し、`transfer_tvt_mp_passage_attempts(node)` のあと、正常時だけ `_finish_node_transfer()` を 1 回呼ぶ。例外時は終了処理へ到達しない。
+- Node private helper は、`_transfer_one_vehicle_between_links`、`_transfer_normal_merge`、`_finish_node_transfer` である。clearance helper は `_order_control_clearance_blocks_passage` である。
+- 実 World、TVT 順位適用 baseline fork、汎用 baseline fork を、順位台帳を読む前に 3 分類する。台帳の有無から種別を推測しない。
+- collector の明示 bool は `apply_copied_tvt_confirmed_ranks` である。既定値は False である。非 bool は `ValueError` である。汎用 API は False、TVT 用 API は True を明示する。
+- TVT 用 API は、呼出し側台帳を登録前に検査し、`copy.deepcopy(dict(rank_states_by_node_name))` で独立複製して fork World へ接続する。時刻 T の未確定 Visit は元台帳だけへ登録する。fork へ混ぜない。fork 側 mapping と Node 別台帳は元側と共有しない。
+- 空の incoming snapshot では、実 World と TVT 順位適用 fork でも台帳を要求せず正常 return する。到着候補が 1 台以上あれば、Node 別台帳を要求する。
+- 実 World は最新確定順位を使う。TVT 順位適用 fork は、凍結コピーの T-1 以前の確定順位を使う。過去確定群のあと、固定 snapshot の通常 baseline 群を処理する。通常 baseline 群にも order-control clearance を適用する。汎用 fork は台帳を読まず、従来の通常合流で、order-control clearance を適用しない。
+- clearance は strict greater-than である。設定値 0 では、別 inlink は同一 timestep に通れず、最短で次の timestep である。設定値 1 では、次の timestep には通れず、最短で次の次の timestep であり、間の 1 timestep を空ける。
+- 実進路は `route_next_link` である。formal route は強制しない。正常な TVT 通過候補で `route_next_link is None` なら `RuntimeError` である。一時スキップではない。
+- 物理先頭、容量、入口空間不足は一時スキップである。clearance 未充足だけ、その時刻の後続を終える。
+- collector は通過 1 回につき prepare と apply を 1 回行う。downstream boundary observer は直接呼ばない。actual passage と actual outcome は未実装である。
+- テスト準備が、台帳の無い `junction_a` を実際に通過させていた。本番は緩めず、2 つのテスト fixture だけを直接配置へ修正した。helper は `_place_vehicle_on_inlink_with_new_order_control_visit` である。`vehicle_a` を進める間だけ `vehicle_b` を `x=0` へ退避し、その後 `x=180` へ戻した。Visit は `begin_order_control_visit_on_link_entry()` で作り、Visit ID は巻き戻していない。
+- 専用物理通過テストは 34 件である。mode と登録前凍結コピーの関係テストは 34 件に含めない。
+- 中核 7 ファイルは `253 passed in 19.69s` である。内訳は、物理通過 34、baseline collector 35、baseline driver 71、TVT baseline registration 35、fork alignment 25、TVT-MP driver 31、evaluation end 22 である。
+- FCFS 関係は 73 件成功である。BATCH の残り単体は 293 件成功である。
+- 正式サンプルは保存済み数値と一致した。completed trips は 735 / 810、average speed は 11.7 m/s、total travel time は 119475.0 s、average travel time は 162.6 s、average delay は 62.6 s、delay ratio は 0.385、total distance traveled は 1632250.0 m である。
+- 変更・新規作成した本番とテスト 11 ファイルの `py_compile` は成功した。`git diff --check` も成功した。
+- Terminal で、1 台移動、clearance、通常合流、終了処理、`Node.transfer`、TVT 物理通過、collector mode、`_prepare_baseline_fork`、登録前凍結コピーを直接確認した。完全実装前仕様と一致した。重大不整合と一時スキップは分離されている。
+- 未解決失敗はない。仕様衝突はない。利用者判断が必要な事項はない。まだ Git 保存していない。
+
+## 最新の再開地点
+
+1. 第4巻と進捗第3巻の実装結果記録を Terminal で分割確認する。
+2. 本番・テスト・文書の最終差分を確認する。
+3. 関係回帰結果と変更ファイルを最終確認する。
+4. 文書 2 ファイルを含む全実装対象を stage する。
+5. `diagnostics/order_control.zip` は stage しない。
+6. `git diff --cached --check` と `git diff --cached --stat` を確認する。
+7. commit 名に document は必須ではない。今回は実装コミットである。
+8. commit と push を分離する。
+9. 保存後、actual passage・actual outcome の設計へ進む。

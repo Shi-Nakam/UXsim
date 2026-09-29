@@ -17,8 +17,10 @@ from uxsim.order_control_baseline_downstream_boundary import (
 )
 from uxsim.order_control_baseline_driver import (
     OrderControlBaselineForkResult,
+    _prepare_baseline_fork,
     run_snapshot_fixed_baseline_fork,
 )
+import uxsim.order_control_baseline_driver as baseline_driver_module
 from uxsim.order_control_baseline_snapshot import (
     apply_snapshot_fixed_visit_registration_plan,
     prepare_snapshot_fixed_visit_registration_plan,
@@ -1954,6 +1956,55 @@ def test_zero_visit_result_includes_empty_inlink_physical_orders():
     assert result.inlink_physical_orders == ()
 
 
+def test_generic_api_passes_false_and_result_collector_mode_is_false():
+    W = _build_two_time_value_nodes_world(name="generic_mode_false")
+    W.T = 15
+    seen_modes = []
+    original_prepare = baseline_driver_module._prepare_baseline_fork
+
+    def spy(
+        real_W,
+        *,
+        target_node_names,
+        baseline_horizon_steps,
+        apply_copied_tvt_confirmed_ranks,
+    ):
+        seen_modes.append(apply_copied_tvt_confirmed_ranks)
+        return original_prepare(
+            real_W,
+            target_node_names=target_node_names,
+            baseline_horizon_steps=baseline_horizon_steps,
+            apply_copied_tvt_confirmed_ranks=apply_copied_tvt_confirmed_ranks,
+        )
+
+    with patch.object(baseline_driver_module, "_prepare_baseline_fork", spy):
+        result = run_snapshot_fixed_baseline_fork(
+            W,
+            target_node_names=_two_node_target_names(),
+            baseline_horizon_steps=50,
+        )
+    assert seen_modes == [False]
+    assert result.collector.apply_copied_tvt_confirmed_ranks is False
+
+
+def test_prepare_baseline_fork_rejects_non_bool_mode():
+    W = _build_time_value_junction_world(name="prepare_mode_type")
+    W.T = 9
+    for bad_value in (1, 0, None, "false"):
+        try:
+            _prepare_baseline_fork(
+                W,
+                target_node_names=["junction"],
+                baseline_horizon_steps=1,
+                apply_copied_tvt_confirmed_ranks=bad_value,
+            )
+        except ValueError as error:
+            assert "apply_copied_tvt_confirmed_ranks" in str(error)
+        else:
+            raise AssertionError(f"Expected ValueError for {bad_value!r}")
+    assert W._order_control_baseline_collector is None
+
+
 def test_inlink_physical_orders_unchanged_after_baseline_forward():
     W = _build_time_value_junction_world(tmax=300)
     snapshot_T = 60
@@ -2061,6 +2112,8 @@ TESTS = [
     test_completed_result_fields,
     test_general_driver_result_includes_inlink_physical_orders,
     test_zero_visit_result_includes_empty_inlink_physical_orders,
+    test_generic_api_passes_false_and_result_collector_mode_is_false,
+    test_prepare_baseline_fork_rejects_non_bool_mode,
     test_inlink_physical_orders_unchanged_after_baseline_forward,
 ]
 

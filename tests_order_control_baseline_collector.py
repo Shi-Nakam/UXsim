@@ -622,6 +622,31 @@ def test_record_baseline_arrival_checks_a_duplicate_before_new_arrival_validatio
         assert "baseline_arrival_timestep" not in str(exc)
 
 
+def test_apply_copied_tvt_confirmed_ranks_defaults_to_false_and_keeps_explicit_bools():
+    default_collector = OrderControlBaselineCollector()
+    assert default_collector.apply_copied_tvt_confirmed_ranks is False
+    true_collector = OrderControlBaselineCollector(
+        apply_copied_tvt_confirmed_ranks=True,
+    )
+    false_collector = OrderControlBaselineCollector(
+        apply_copied_tvt_confirmed_ranks=False,
+    )
+    assert true_collector.apply_copied_tvt_confirmed_ranks is True
+    assert false_collector.apply_copied_tvt_confirmed_ranks is False
+
+
+def test_apply_copied_tvt_confirmed_ranks_rejects_non_bool():
+    for bad_value in (1, 0, None, "false", "True"):
+        try:
+            OrderControlBaselineCollector(
+                apply_copied_tvt_confirmed_ranks=bad_value,
+            )
+        except ValueError as error:
+            assert "apply_copied_tvt_confirmed_ranks" in str(error)
+        else:
+            raise AssertionError(f"Expected ValueError for {bad_value!r}")
+
+
 def test_prepare_baseline_passage_recording_returns_none_outside_fixed_set_without_validating_payload():
     collector = _new_collector()
     _register_arrived_a(collector)
@@ -666,6 +691,8 @@ TESTS = [
     test_record_baseline_arrival_ignores_outside_fixed_set_without_validating_arrival_payload,
     test_record_baseline_arrival_checks_node_mismatch_before_new_arrival_validation_for_b,
     test_record_baseline_arrival_checks_a_duplicate_before_new_arrival_validation,
+    test_apply_copied_tvt_confirmed_ranks_defaults_to_false_and_keeps_explicit_bools,
+    test_apply_copied_tvt_confirmed_ranks_rejects_non_bool,
     test_prepare_baseline_passage_recording_returns_none_outside_fixed_set_without_validating_payload,
 ]
 

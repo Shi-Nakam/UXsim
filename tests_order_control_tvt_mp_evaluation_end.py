@@ -475,7 +475,8 @@ def test_completed_and_incomplete_vehicles_keep_existing_basic_counts():
 def test_node_transfer_does_not_use_tvt_rank():
     source = inspect.getsource(Node.transfer)
     assert "run_tvt_mp_driver" not in source
-    assert "order_control_tvt" not in source
+    assert "time_value" in source
+    assert "transfer_tvt_mp_passage_attempts" in source
 
 
 def test_tests_registry_matches_defined_functions():

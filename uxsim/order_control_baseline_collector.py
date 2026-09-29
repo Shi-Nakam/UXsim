@@ -81,7 +81,20 @@ class OrderControlBaselineCollector:
     Does not hold a reference back to the fork World.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, apply_copied_tvt_confirmed_ranks: bool = False) -> None:
+        """
+        Create one fork collector.
+
+        apply_copied_tvt_confirmed_ranks is False for a generic baseline fork
+        and True when the fork should apply TVT ranks copied from before this
+        decision. Only a Python bool is accepted.
+        """
+        if not isinstance(apply_copied_tvt_confirmed_ranks, bool):
+            raise ValueError(
+                "apply_copied_tvt_confirmed_ranks must be a bool, "
+                f"got {apply_copied_tvt_confirmed_ranks!r}."
+            )
+        self.apply_copied_tvt_confirmed_ranks = apply_copied_tvt_confirmed_ranks
         self._visit_records_by_primary_key: dict[
             tuple[str, int], OrderControlBaselineVisitRecord
         ] = {}

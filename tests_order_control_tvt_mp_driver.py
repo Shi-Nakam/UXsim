@@ -687,8 +687,8 @@ def test_exec_simulation_connects_driver_but_node_transfer_does_not():
     assert "run_tvt_mp_driver" in simulation_source
     assert "order_control_tvt_mp_driver" in simulation_source
     assert "run_tvt_mp_driver" not in transfer_source
-    assert "order_control_tvt" not in transfer_source
-    assert "time_value" not in transfer_source
+    assert "time_value" in transfer_source
+    assert "transfer_tvt_mp_passage_attempts" in transfer_source
 
 
 def _prepare_links(world):

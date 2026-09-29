@@ -2183,6 +2183,8 @@ TVT-MP の確定順位は、実際の通過結果を保証しない。
 
 参加・非参加では分けない。非参加 Vehicle も登録・確定され、順位に従って通過を試す。
 
+実 World の識別は、`_order_control_baseline_collector is None` である。Node 別順位台帳を要求する。必要な Node 別順位台帳の欠如は `RuntimeError` である。台帳が有るか無いかから、baseline fork の種別を推測しない。
+
 ## 5. 台帳外・未確定Vehicleの独立確認
 
 到着済み研究対象 Vehicle は snapshot 計画へ入り、順位台帳へ登録される。参加・非参加による登録除外はない。到着済み Visit の情報不整合は、黙って未確定へ残さず、driver を `ValueError` 等で失敗させる。
@@ -2190,6 +2192,8 @@ TVT-MP の確定順位は、実際の通過結果を保証しない。
 したがって、driver 正常成功後の実 World では、`Node.transfer` 直前の通過可能な研究対象 Vehicle は全件確定済みである。
 
 正常成功後の台帳外・未確定 Vehicle による追越しや永久待機は発生しない。この現象への特別な fallback や待機規則は追加しない。
+
+この全件確定は、実 World で driver が正常成功したあとの契約である。汎用 baseline fork は、TVT 確定群と通常 baseline 群への分類へ入らない。汎用 baseline fork に Node 別順位台帳が無いことは、未確定の重大不整合ではない。
 
 ## 6. VisitKeyとassigned_rank
 
@@ -2275,11 +2279,38 @@ order_control_eligible is True
 
 ## 11. baselineの意味
 
-時刻 T の baseline は、次の交通である。
+baseline には、性格の異なる 2 種類がある。どちらも同じ `_order_control_baseline_collector` を fork へ接続する。collector の有無だけでは、この 2 種類を区別できない。fork 側の順位台帳が空であることだけでも、区別できない。
 
-- T-1 以前に確定した TVT 順位を維持する。
-- T では新しい TVT 順位を追加しない。
+1. TVT-MP の判断に使う baseline
+
+`run_snapshot_fixed_baseline_fork_with_tvt_rank_ledger_registration()` が作る。TVT 順位台帳を明示的に受け取る。
+
+- T-1 までに決まった TVT 順位を引き継ぐ。
+- 過去に順位確定済みの Vehicle を、その順位順で先に試す。
+- その後に、順位未確定の通常 baseline Vehicle を処理する。
+- 時刻 T の新しい TVT 順位は混ぜない。
 - 過去の TVT も解除した完全通常交通には戻さない。
+
+2. 交通予測や baseline 機能単独の検証に使う汎用 baseline
+
+`run_snapshot_fixed_baseline_fork()` が作る。順位台帳を受け取らない正式な汎用 baseline API である。
+
+- TVT 順位の物理適用を目的としない。
+- baseline 交通の収集と、固定 horizon の前進を行う。
+- `time_value` Node であっても、従来の通常合流で前進する。
+- Node 別順位台帳を要求しない。
+
+TVT 順位の物理適用は、TVT 順位台帳登録付き baseline API で作った fork だけで行う。汎用 baseline API は、従来の通常合流を維持する。
+
+区別は、baseline を作成した公開 API 自身が collector へ明示する mode である。正式な属性名は `apply_copied_tvt_confirmed_ranks` である。`True` が TVT 順位適用 baseline fork、`False` が汎用 baseline fork である。既定値は `False` であり、既存の引数なし constructor は汎用 collector として従来どおり動く。
+
+次は採用しない。
+
+- Node 別順位台帳が無いなら汎用 baseline fork だと推測する。
+- Node 別順位台帳があるなら TVT 順位適用 baseline fork だと推測する。
+- 台帳が無い場合は、通常合流へ黙って fallback する。
+
+TVT 順位適用 baseline fork でも、`World.copy()` は時刻 T の未確定登録より前である。そのため、copy 直後には Node 別順位台帳が存在しないことがある。台帳の有無は、fork 種別の印ではない。`World.copy()` だけでは、実 World 属性と別 object の引数 mapping は fork へ入らない。TVT 用 baseline API は、登録前にその mapping を独立複製して fork へ明示接続する。詳細は §12 である。
 
 ## 12. fork copy時点の凍結順位台帳
 
@@ -2297,19 +2328,45 @@ order_control_eligible is True
 10. final rank
 11. atomic apply
 
-fork 側の順位台帳は T 開始時点の凍結である。fork 側で `is_confirmed()` が真の Visit は、T-1 以前に確定した Visit である。fork 作成後の実 World 台帳の変更は、fork 側へ伝播しない。
+正常な TVT-MP driver 経路では、baseline API へ渡す `rank_states_by_node_name` は、実 World の `order_control_tvt_rank_states_by_node_name` そのものである。driver は Node 別台帳を準備してから baseline 処理へ進む。したがって `World.copy()` は、実 World 属性の台帳を fork へ独立複製する。
 
-`confirmed_at_timestep` 等の追加 field は不要である。fork 作成時点の複製が、T の確定が始まる前の境界である。
+TVT baseline API は、実 World 属性とは別 object の mapping を引数として受け取ることも正式に許している。この既存契約は削除しない。その場合、`World.copy()` が複製するのは実 World 属性であり、引数 mapping ではない。引数 mapping を fork へ接続しなければ、fork の `order_control_tvt_rank_states_by_node_name` は copy された空 dict のままであり、到着候補がある `Node.transfer` は `RuntimeError: Node junction: TVT rank ledger is missing.` になる。この不足は、fork alignment 回帰で判明した。既存テストの期待値は変更していない。
+
+TVT 用 baseline API の正式な処理順は、`run_snapshot_fixed_baseline_fork_with_tvt_rank_ledger_registration()` の中で次とする。
+
+1. `_prepare_baseline_fork(..., apply_copied_tvt_confirmed_ranks=True)` で fork World を作る。
+2. snapshot 登録計画を作る。
+3. 呼出し側 `rank_states_by_node_name` について、対象 Node の欠如、型、`node_name` 不一致を、既存の登録前検査で確認する。
+4. 時刻 T の未確定 Visit を登録する前の mapping を、標準ライブラリの `copy.deepcopy` で独立複製する。
+5. 複製を `prepared.fork_W.order_control_tvt_rank_states_by_node_name` へ接続する。
+6. `register_undetermined_visits_from_snapshot_plan` は、元の呼出し側 mapping だけへ適用する。
+7. collector へ snapshot 計画を適用する。
+8. baseline forward を行う。
+
+時刻 T の未確定 Visit は、元の呼出し側台帳だけへ登録する。fork 側の独立複製には、時刻 T の新規未確定 Visit を追加しない。fork は、複製時点の T-1 以前の確定順位だけを物理適用する。fork 側で `is_confirmed()` が真の Visit は、T-1 以前に確定した Visit である。
+
+fork 側の mapping と元の mapping は、同じ object ではない。各 Node の `OrderControlTvtNodeRankState` も、同じ object ではない。fork 側の処理が順位台帳を変更しても、元の呼出し側台帳へ伝播しない。元台帳の後続変更も fork へ伝播しない。正常な driver 経路と、baseline API 単独経路は、この同じ契約にする。
+
+`OrderControlTvtNodeRankState` が保持するのは、Node 名の文字列、VisitKey の tuple、confirmed 順序の list、`assigned_rank` の dict、formal route 名の dict、未確定 VisitKey の set だけである。Vehicle、Node、Link、World 等の live object 参照は保持しない。`World.copy()` は pickle による独立複製である。順位台帳群は、安全に独立複製できる。
+
+不正な mapping を複製したあとで曖昧な例外を出さない。対象 Node の欠如、型、`node_name` 不一致は、複製より前に、既存の登録前検査を再利用するか、責務が重複しない小さな検査 helper で確認する。登録時に保証済みの内容を、物理通過時に過剰に重複検査しない。物理通過が到着候補について行う既存の Node 別台帳検査は維持する。
+
+`confirmed_at_timestep` 等の追加 field は不要である。登録前の独立複製が、T の新規未確定登録が fork へ混ざる前の境界である。
+
+Node 別順位台帳の有無から、汎用 baseline fork と TVT 順位適用 baseline fork を推測しない。到着候補がある実 World または TVT 順位適用 baseline fork で、必要な Node 別順位台帳が欠けていれば `RuntimeError` である。通常合流へ黙って戻さない。到着列が 0 件なら、通過候補も確認すべき順位もなく、台帳を要求せず正常 return する。汎用 baseline fork は、この複製接続を行わず、順位台帳を要求しない。
 
 ## 13. baseline forkの候補2群
 
-baseline fork の `Node.transfer` 開始時点の `incoming_vehicles` を、開始時 snapshot として次の 2 群へ分ける。同じ Vehicle を両群へ入れない。
+この 2 群は、TVT 順位適用 baseline fork だけに使う。識別は `collector.apply_copied_tvt_confirmed_ranks is True` である。汎用 baseline fork は、TVT 確定群と通常 baseline 群へ分類しない。
+
+TVT 順位適用 baseline fork の `Node.transfer` 開始時点の `incoming_vehicles` を、開始時 snapshot として次の 2 群へ分ける。同じ Vehicle を両群へ入れない。
 
 過去確定群:
 
-- fork 側順位台帳で `is_confirmed()` が真
+- fork へ接続した登録前の独立複製で `is_confirmed()` が真
 - T-1 以前に確定済み
 - `assigned_rank` 順に先に通過を試す
+- 時刻 T の新規未確定 Visit は、この複製に入っていない
 
 通常 baseline 群:
 
@@ -2323,7 +2380,9 @@ baseline fork の `Node.transfer` 開始時点の `incoming_vehicles` を、開�
 
 ## 14. baseline forkの共存処理
 
-baseline fork では次の順に処理する。
+次の順は、TVT 順位適用 baseline fork だけである。汎用 baseline fork は、この分類と順位試行へ入らず、従来の通常合流で前進する。
+
+TVT 順位適用 baseline fork では次の順に処理する。
 
 1. 過去確定群を `assigned_rank` 順に一度ずつ試す。
 2. 物理先頭、容量、入口空間不足なら一時スキップする。
@@ -2358,7 +2417,8 @@ Node._transfer_normal_merge(
 - 一時スキップした過去確定 Vehicle を `merge_priority` や乱数の対象へ戻さない。
 - 過去確定群が消費した最新容量を使う。
 - 通常合流の `merge_priority`、hard deterministic、信号条件を維持する。
-- baseline fork の通常 baseline 群では `enforce_order_control_clearance=True` とする。選択順は通常合流のままである。clearance だけを、order-control 対象 Node の物理制約として適用する。
+- TVT 順位適用 baseline fork の通常 baseline 群では `enforce_order_control_clearance=True` とする。選択順は通常合流のままである。clearance だけを、order-control 対象 Node の物理制約として適用する。
+- 汎用 baseline fork は、許可集合を省略した `node._transfer_normal_merge()` を呼ぶ。`enforce_order_control_clearance` の既定値 `False` を用いる。order-control clearance は適用しない。通常の信号交差点の安全上の clearance は、従来どおり信号設定上の全赤時間が担う。
 
 TVT 専用の信号判定は追加しない。`time_value` Node は無信号なので、通常 helper 内の既存信号条件は通過を止めない。TVT の安全時間は order-control clearance が担う。
 
@@ -2413,7 +2473,13 @@ TVT 処理も最後に次を行う。
 
 ## 18. baseline collector
 
-baseline fork では、過去確定群と通常 baseline 群の双方について、通過成功時だけ次を 1 回行う。
+baseline fork の種別は、collector の明示 mode で区別する。正式な属性は `collector.apply_copied_tvt_confirmed_ranks` である。外部から読める通常属性とし、property や setter は追加しない。実装後に変更されることを前提としない設定値として扱う。
+
+`False` は汎用 baseline fork である。コピー済み TVT 確定順位を物理適用しない。順位台帳の独立複製も行わない。`True` は TVT 順位台帳登録付き baseline fork である。TVT 用 baseline API が登録前に独立複製して fork へ接続した台帳の、T-1 以前の確定順位を物理適用する。既定値は `False` である。既存の引数なし constructor は、汎用 collector のままである。mode は順位台帳 object を保持しない。台帳の接続は、collector の mode 設定とは別の手順である。
+
+collector の有無だけでは、2 種類の fork を区別しない。Node 別順位台帳の有無からも推測しない。
+
+汎用 baseline fork でも、TVT 順位適用 baseline fork でも、通過成功時の到着・通過記録は維持する。TVT 順位適用 baseline fork では、過去確定群と通常 baseline 群の双方について、通過成功時だけ次を 1 回行う。汎用 baseline fork では、通常合流と 1 台移動 helper が同じ記録を維持する。mode は記録を止めない。
 
 - `prepare_baseline_passage_recording`
 - `apply_baseline_passage_timestep`
@@ -2445,13 +2511,21 @@ TVT helper、通常合流 helper、1 台移動 helper から observer を直接�
 
 重大不整合として `RuntimeError` にするのは、現在 Visit が無い場合、現在 Visit の Node や inlink が `Vehicle.link` と一致しない場合、および正常な TVT 通過候補で `route_next_link is None` の場合である。`None` は次時刻に自然解消する容量待ちではない。formal route との差、信号、台帳外、eligible の途中変更は、この例外にしない。目的地到着の trip 終了待ち、outlink が無い trip abort、taxi、`specified_route`、局所仮想計算の World 全体 copy で `route_next_link is None` を許容する確認は、今から対象 Node を通過する研究対象 Vehicle の契約ではない。
 
+到着候補があるときの Node 別順位台帳の欠如は、実 World と TVT 順位適用 baseline fork では `RuntimeError` である。到着列が 0 件なら、台帳を要求せず正常 return する。汎用 baseline fork では要求しない。台帳が無いことは、汎用 baseline fork では正常である。引数 mapping が実 World 属性と別 object であること自体は、重大不整合ではない。TVT 用 API が登録前複製を fork へ接続する前に forward し、到着候補から台帳を読めないことが重大不整合である。`collector.apply_copied_tvt_confirmed_ranks` が `bool` でない場合も `RuntimeError` である。これは、台帳が無いことを見て通常合流へ戻す暗黙の fallback ではない。
+
 ## 22. 実装構造の基本方針
 
 `Node.transfer` は、FCFS と BATCH の早期 return を維持する。`time_value` かつ `order_control_eligible is True` のときだけ、TVT 物理通過へ入って return する。それ以外は、許可集合を省略した通常合流 helper である。
 
-TVT 物理通過では、開始時 snapshot を過去確定群と通常 baseline 群へ分ける。過去確定群を `assigned_rank` 順に試す。過去確定群の order-control clearance で終了していなければ、通常 baseline 群だけを許可集合とし、`enforce_order_control_clearance=True` で通常合流 helper を呼ぶ。通常群の選択順は通常合流のままである。通常群自身の order-control clearance が未充足なら、その時刻の通常群処理を終える。終了処理は 1 回である。
+TVT 物理通過は、順位台帳を取得する前に、次の 3 種類へ分ける。
 
-実 World と baseline fork で関数は分けない。見る順位台帳が、実 World では T の driver 完了後の最新台帳、fork では copy 時点の凍結台帳である。局所仮想計算の拘束順位走査は呼ばない。formal route 不一致を例外にする契約と、通過済み集合を使う契約が、今回の実 World 方式と違うためである。
+1. collector が `None` なら実 World である。最新の確定順位を使い、Node 別順位台帳を要求する。開始時 snapshot の研究対象 Vehicle が未確定なら `RuntimeError` であり、通常 baseline 群へ fallback しない。
+2. collector が `None` でなく、`apply_copied_tvt_confirmed_ranks is True` なら、TVT 順位適用 baseline fork である。凍結台帳の T-1 以前の確定順位を使う。Node 別順位台帳を要求する。過去確定群を `assigned_rank` 順に試し、clearance で終了していなければ、開始時の通常 baseline 群を `enforce_order_control_clearance=True` で通常合流する。
+3. collector が `None` でなく、`apply_copied_tvt_confirmed_ranks is False` なら、汎用 baseline fork である。TVT 順位台帳を読まない。確定群と通常 baseline 群へ分類しない。`node._transfer_normal_merge()` を、既定の `enforce_order_control_clearance=False` で呼び、正常 return する。
+
+終了処理は、どの正常経路でも `Node.transfer` が 1 回だけ行う。実 World と 2 種類の baseline fork で、`Node.transfer` の入口関数は分けない。見る順位台帳が違う。実 World は T の driver 完了後の最新台帳、TVT 順位適用 baseline fork は登録前に独立複製して fork へ接続した台帳である。汎用 baseline fork は順位台帳を見ない。局所仮想計算の拘束順位走査は呼ばない。formal route 不一致を例外にする契約と、通過済み集合を使う契約が、今回の実 World 方式と違うためである。
+
+TVT 用 baseline API の台帳接続は、物理通過 module では行わない。`run_snapshot_fixed_baseline_fork_with_tvt_rank_ledger_registration()` が、登録前に `copy.deepcopy` して fork World へ接続する。公開 signature は変えない。
 
 新規 module に TVT 側の候補分けと順位試行を置くかは、完全実装前仕様で正式名とともに確定する。`uxsim.py` 先頭での import により循環 import を作らない。
 
@@ -2475,7 +2549,19 @@ TVT 物理通過では、開始時 snapshot を過去確定群と通常 baseline
 - 同一 inlink には、方向切替の order-control clearance を要求しない。
 - 通常の信号交差点では、明示した全赤時間を使う。
 - 既存名に `no_clearance` を含む比較・回帰確認用関数は、名称を理由に clearance 設定値0と同一視しない。関数名と実装は今回変更しない。
-- baseline fork は、T-1 以前の確定順位を copy し、copy 後の実 World の新確定を混ぜない。
+- baseline fork には、汎用 baseline fork と TVT 順位適用 baseline fork の 2 種類がある。
+- collector の明示 mode `apply_copied_tvt_confirmed_ranks` で区別する。collector の有無だけでは区別しない。
+- Node 別順位台帳の有無から fork 種別を推測しない。
+- 汎用 baseline fork は、`time_value` Node でも TVT 順位台帳を要求せず、通常合流で前進する。
+- TVT 順位適用 baseline fork だけが、コピー済みの T-1 以前の確定順位を物理適用する。
+- TVT 順位適用 baseline fork で必要な Node 別順位台帳が欠けていれば `RuntimeError` である。
+- 汎用 baseline fork で台帳が無いことは正常である。
+- 既存の引数なし collector constructor は、既定値 `False` の汎用 collector として残す。
+- TVT 順位適用 baseline fork は、登録前の独立複製にある T-1 以前の確定順位を使い、時刻 T の新規未確定 Visit を混ぜない。
+- 正常な driver 経路では、`World.copy()` が実 World 属性の台帳を複製する。baseline API 単独利用では、引数 mapping が実 World 属性と別 object でもよい。
+- TVT 用 baseline API は、その引数 mapping を登録前に独立複製し、fork World へ明示接続する。時刻 T の未確定登録は元台帳だけへ適用する。
+- fork 側台帳と元台帳は、mapping も各 Node の rank state も object を共有しない。一方の後続変更は、他方へ伝播しない。
+- この独立性は、専用テスト 34 件へ入れない。`tests_order_control_tvt_baseline_driver_registration.py` の `test_tvt_rank_applying_fork_uses_independent_pre_registration_rank_snapshot` で固定する。
 - 過去確定群を先に試し、一時スキップした過去確定 Vehicle を通常群へ混ぜない。
 - 通常群は既存の `merge_priority` と hard deterministic を維持し、過去確定群が消費した容量を見る。
 - 通常 baseline 群にも order-control clearance を適用する。
@@ -2551,6 +2637,17 @@ field 名、型名、status 名は今回決めない。
 - clearance 設定値0を、同一 timestep 内の別 inlink 通過を許す「clearanceなし」と解釈する。
 - clearance 設定値1を、直後の次 timestep で通過可能と解釈する。
 - 通常の信号交差点の全赤時間と、order-control clearance 設定値を、同じ内部機構として扱う。
+- collector が存在する baseline fork を、すべて TVT 順位適用 fork とみなす。
+- Node 別順位台帳が無いことを理由に、fork 種別を推測する。
+- TVT 順位適用 fork の台帳欠如を、通常合流への暗黙 fallback で隠す。
+- 汎用 baseline fork へ T-1 以前の TVT 順位を強制する。
+- 既存 baseline 回帰の期待値を、失敗を隠すために変更する。
+- 引数 mapping を fork World へそのまま代入して共有する。
+- fork 側と元側で同じ `OrderControlTvtNodeRankState` object を共有する。
+- 時刻 T の新規未確定 Visit を fork 側台帳へ混ぜる。
+- 引数 mapping が実 World 属性と同一 object であることを必須にする。
+- 実 World 属性と別 mapping を渡せる既存 baseline API 契約を削除する。
+- 時刻 T の未確定登録のあとで台帳を複製する。
 
 ## 26. 以前の誤った中間整理と訂正
 
@@ -2564,11 +2661,13 @@ field 名、型名、status 名は今回決めない。
 
 訂正:
 
-- baseline fork は T-1 以前の確定 TVT 順位を維持する。
-- T の新しい TVT 順位は baseline へ混ぜない。
-- fork copy 時点の順位台帳複製で両者を区別する。
+- TVT 順位適用 baseline fork は、T-1 以前の確定 TVT 順位を維持する。
+- T の新しい TVT 順位は、その fork へ混ぜない。
+- fork copy 時点の順位台帳複製は、T-1 以前の確定と、時刻 T の新しい確定を分ける。fork 種別の識別には使わない。
 - 過去確定群を先に順位順で試し、その後に通常 baseline 群を処理する。
 - 過去確定順位は通過保証や排他的予約ではなく、先に試行機会を与える順位である。
+- 汎用 baseline fork は、この順位適用の対象ではない。従来の通常合流を維持する。
+- 2 種類の fork は、collector の明示 mode で区別する。台帳の有無から推測しない。
 
 ## 27. 完全実装前仕様へ持ち越す事項
 
@@ -2586,26 +2685,33 @@ field 名、型名、status 名は今回決めない。
 
 現時点では残っていない。
 
-通過試行機会の意味、実 World の候補、実進路、一時スキップ、order-control clearance、信号設定上の全赤時間、eligible、baseline の意味、fork の凍結台帳、過去確定群と通常 baseline 群の順、許可集合と clearance 適用有無を分けた通常合流、到着列の終了処理、collector と observer の一回性、通過済み集合を作らないことは、本節で確定した。通常 baseline 群へ order-control clearance を適用する訂正は、既存の局所仮想計算との整合であり、新しい制度判断ではない。clearance 設定値0と clearance 設定値1の時系列は、既存の strict greater-than を文書化する訂正であり、新しい制度判断ではない。正常な TVT 通過候補で `route_next_link is None` を `RuntimeError` にする訂正は、正常系では `route_next_link` が存在するという確認に基づく防御であり、新しい制度判断ではない。
+これは制度変更ではない。既存の汎用 baseline API と、TVT 順位台帳登録付き baseline API を、安全に共存させるための技術的識別である。
+
+通過試行機会の意味、実 World の候補、実進路、一時スキップ、order-control clearance、信号設定上の全赤時間、eligible、baseline の意味、fork の凍結台帳、過去確定群と通常 baseline 群の順、許可集合と clearance 適用有無を分けた通常合流、到着列の終了処理、collector と observer の一回性、通過済み集合を作らないことは、本節で確定した。通常 baseline 群へ order-control clearance を適用する訂正は、既存の局所仮想計算との整合であり、新しい制度判断ではない。clearance 設定値0と clearance 設定値1の時系列は、既存の strict greater-than を文書化する訂正であり、新しい制度判断ではない。正常な TVT 通過候補で `route_next_link is None` を `RuntimeError` にする訂正は、正常系では `route_next_link` が存在するという確認に基づく防御であり、新しい制度判断ではない。汎用 baseline fork と TVT 順位適用 baseline fork を `apply_copied_tvt_confirmed_ranks` で区別する訂正も、新しい制度判断ではない。呼出し側の順位台帳を、時刻 T の未確定登録前に独立複製して fork へ接続する訂正も、新しい制度判断ではない。
+
+fork 種別の識別不足は、TVT-MP 物理通過の実装後に、既存 baseline 回帰が失敗して判明した。代表例外は `RuntimeError: Node junction: TVT rank ledger is missing.` である。失敗した既存回帰は、`tests_order_control_baseline_driver.py`、`tests_order_control_tvt_baseline_fork_alignment.py`、`tests_order_control_tvt_mp_evaluation_end.py` の一部である。原因は、collector の存在だけで TVT 用 baseline fork と判断し、Node 別順位台帳が無い汎用 baseline fork を重大不整合として止めたことである。明示 mode と、到着列が空のときの台帳非要求は、未保存の Python へ入っている。汎用 baseline driver と evaluation end の当該失敗は、その未保存実装で解消している。
+
+その後も、fork alignment の一部は同じ代表例外で失敗する。原因は、TVT baseline API が実 World 属性とは別の mapping を受け取れるのに、その mapping を登録前に fork へ独立複製して接続していないことである。既存テストの期待値は変更していない。既存 baseline テストが誤っているのではなく、登録前凍結コピーの明示接続が不足していた。利用者判断は残っていない。
 
 ## 29. 次の再開地点
 
-1. 第4巻と進捗第3巻を Terminal で分割確認する。
-2. `git diff --check` と変更ファイルを確認する。
-3. 文書 2 ファイルを commit する。
-4. commit 名に `document` を含める。
-5. commit 名に `complete` を使用しない。
-6. commit と push を分離する。
-7. 保存後、この設計判断を基に完全実装前仕様を作成する。
-8. 完全実装前仕様を保存してから Python と専用テストを実装する。
-9. 実装後は本番コード、専用テスト、差分、回帰結果を独立確認する。
-10. その後、actual passage・actual outcome の設計へ進む。
+1. 今回の文書修正を Terminal で限定確認する。
+2. Python とテストの作業開始前からの未保存差分が、今回の文書作業で変化していないことを確認する。
+3. `run_snapshot_fixed_baseline_fork_with_tvt_rank_ledger_registration()` で、対象 Node 検査のあと、登録前に `copy.deepcopy` し、fork World へ接続する。
+4. 時刻 T の未確定登録は、元の呼出し側 mapping だけへ適用する。
+5. `tests_order_control_tvt_baseline_driver_registration.py` へ `test_tvt_rank_applying_fork_uses_independent_pre_registration_rank_snapshot` を追加する。専用テスト 34 件には含めない。
+6. fork alignment と baseline driver registration を再実行する。既存期待値は、失敗を隠すために変えない。
+7. 専用テスト 34 件、FCFS、BATCH、正式サンプルを再実行する。
+8. 実装結果を第4巻と進捗第3巻へ記録する。
+9. 差分と回帰結果を独立確認してから commit する。
+
+上記の再開地点は履歴として残す。実装、独立確認、回帰結果は、同じ第4巻の「TVT-MP確定順位の物理通過接続 実装・独立確認・検証結果」を参照する。
 
 # TVT-MP確定順位の物理通過接続 完全実装前仕様
 
 記録日: 2026-09-29
 
-本節は完全実装前仕様である。正式な入力は、同じ第4巻の「TVT-MP確定順位の物理通過接続 設計判断」である。その節の制度判断は、本節で別の方式へ戻さない。Python と専用テストは未着手である。
+本節は完全実装前仕様である。正式な入力は、同じ第4巻の「TVT-MP確定順位の物理通過接続 設計判断」である。その節の制度判断は、本節で別の方式へ戻さない。TVT 物理通過、明示 mode、空の到着列で台帳を要求しない処理は、Python と専用テストとして作業中であり、まだ保存していない。本訂正は、TVT 順位適用 baseline API が、呼出し側の順位台帳を時刻 T の未確定登録前に独立複製して fork World へ明示接続する契約を記録する。この接続の Python 実装は、まだ行っていない。
 
 ## 1. 目的
 
@@ -2616,8 +2722,11 @@ TVT-MP は順位、支払、補償、成立時履歴を確定できる。`Node.t
 ## 2. 正式な実装範囲
 
 - `time_value` かつ `order_control_eligible is True` の Node で、`Node.transfer` が TVT 物理通過を使う。
+- 実 World、TVT 順位適用 baseline fork、汎用 baseline fork を、順位台帳を読む前に 3 分類する。
 - 実 World は、その時刻の driver 完了後の最新順位台帳を使う。
-- baseline fork は、`World.copy()` 時点の凍結順位台帳を使う。
+- TVT 順位適用 baseline fork は、時刻 T の未確定登録前に独立複製して fork へ接続した順位台帳の、T-1 以前の確定順位を使う。正常な driver 経路では、その内容は、`World.copy()` が実 World 属性から複製する時点の台帳と同じである。
+- 汎用 baseline fork は、コピー済み TVT 確定順位を物理適用せず、従来の通常合流で前進する。
+- 区別は `collector.apply_copied_tvt_confirmed_ranks` である。collector の有無や、Node 別順位台帳の有無から推測しない。
 - 候補は、その時点の `incoming_vehicles` だけである。
 - 確定群は `assigned_rank` 順に一度ずつ試す。
 - 実進路は `Vehicle.route_next_link` である。
@@ -2686,13 +2795,13 @@ from uxsim.order_control_tvt_mp_physical_transfer import (
 )
 ```
 
-物理通過 module の先頭では `uxsim.uxsim` を import しない。Node、Vehicle、Link は引数の object として使う。順位台帳型は `uxsim.order_control_tvt_node_rank_state` から import してよい。この module は `uxsim.py` を import しないので、循環 import にしない。
+物理通過 module の先頭では `uxsim.uxsim` を import しない。Node、Vehicle、Link は引数の object として使う。順位台帳型は `uxsim.order_control_tvt_node_rank_state` から import してよい。この module は `uxsim.py` を import しないので、循環 import にしない。登録前台帳の独立複製は、この module では行わない。`uxsim/order_control_baseline_driver.py` が、標準ライブラリの `copy.deepcopy` を使う。
 
 ## 8. 正式な新規module
 
 正式ファイル名は `uxsim/order_control_tvt_mp_physical_transfer.py` である。
 
-既存の `order_control_tvt_mp_` 接頭辞に合わせる。局所仮想計算の `order_control_tvt_mp_candidate_binding_transfer.py` とは別名である。中に置くのは、候補分類、順位順の試行、clearance による終了、通常 baseline 群を通常合流 helper へ渡す処理だけである。
+既存の `order_control_tvt_mp_` 接頭辞に合わせる。局所仮想計算の `order_control_tvt_mp_candidate_binding_transfer.py` とは別名である。中に置くのは、実 World と 2 種類の baseline fork の 3 分類、TVT 順位を適用する側の候補分類、順位順の試行、clearance による終了、TVT 順位適用 baseline fork の通常 baseline 群を通常合流 helper へ渡す処理である。汎用 baseline fork では、順位台帳を読まず、`node._transfer_normal_merge()` を既定引数で呼んで正常 return する。終了処理の本体は持たない。
 
 ## 9. 正式な関数一覧
 
@@ -2702,18 +2811,24 @@ from uxsim.order_control_tvt_mp_physical_transfer import (
 | `Node` | `_transfer_one_vehicle_between_links(self, vehicle, inlink, outlink)` | `None` |
 | `Node` | `_transfer_normal_merge(self, allowed_vehicles=None, enforce_order_control_clearance=False)` | `None` |
 | `Node` | `_finish_node_transfer(self)` | `None` |
+| `OrderControlBaselineCollector` | `__init__(self, apply_copied_tvt_confirmed_ranks=False)` | `None` |
+| baseline driver | `_prepare_baseline_fork(real_W, *, target_node_names, baseline_horizon_steps, apply_copied_tvt_confirmed_ranks)` | `_BaselineForkPrepared` |
 
 clearance で終了したことは、戻り値では返さない。`transfer_tvt_mp_passage_attempts` の内部で通常 baseline 群を呼ばなければ足りる。呼出し側の `Node.transfer` は、正常 return のあと必ず終了処理を 1 回行う。
 
+`run_snapshot_fixed_baseline_fork()` と `run_snapshot_fixed_baseline_fork_with_tvt_rank_ledger_registration()` の公開引数は変更しない。内部で、上の `_prepare_baseline_fork` へ明示 mode を渡す。TVT 用 API は、その後に登録前台帳を `copy.deepcopy` して fork World へ接続する。新しい公開関数は追加しない。対象 Node 検査は、既存の登録前検査を再利用するか、責務が重複しない小さな helper に限る。
+
 ## 10. 各関数の責務
 
-`transfer_tvt_mp_passage_attempts` は、開始時 snapshot の分類、確定群の順位順試行、一時スキップ、clearance 終了、fork の通常 baseline 群の呼出しを行う。1 台移動、通常合流の選択、終了処理の本体は持たない。
+`transfer_tvt_mp_passage_attempts` は、順位台帳を取得する前に、実 World、TVT 順位適用 baseline fork、汎用 baseline fork を分類する。実 World と TVT 順位適用 baseline fork では、開始時 snapshot の分類、確定群の順位順試行、一時スキップ、clearance 終了、TVT 順位適用 fork の通常 baseline 群の呼出しを行う。汎用 baseline fork では、順位台帳を読まず、確定群と通常 baseline 群へ分類せず、`node._transfer_normal_merge()` を既定の `enforce_order_control_clearance=False` で呼んで正常 return する。1 台移動、通常合流の選択、終了処理の本体は持たない。終了処理は、その正常 return のあと `Node.transfer` が 1 回だけ行う。
 
 `_transfer_one_vehicle_between_links` は、呼出し側が通過可能と判断した 1 台を、指定した inlink から指定した outlink へ移す。順位、clearance、通過可否、`merge_priority`、経路選択、formal route、observer は扱わない。
 
 `_transfer_normal_merge` は、現行の通常合流の outlink 試行と車両選択を行う。終了処理は行わない。`enforce_order_control_clearance=True` のときは、選んだ Vehicle を通す前に order-control clearance を検査する。未充足なら、その helper 全体を正常 return する。通過成功後は order-control clearance 履歴を更新する。`False` のときは order-control clearance を検査せず、その履歴も更新しない。`False` は、安全のための clearance が不要という意味ではない。通常の信号交差点では、信号設定上の全赤時間がその役割を担う。
 
 `_finish_node_transfer` は、各 inlink 先頭の trip 終了待ちを既存どおり終了し、`incoming_vehicles` を空にする。
+
+`run_snapshot_fixed_baseline_fork_with_tvt_rank_ledger_registration` は、fork 作成と snapshot 計画のあと、登録前に呼出し側 mapping を独立複製して `prepared.fork_W.order_control_tvt_rank_states_by_node_name` へ接続する。時刻 T の未確定登録は、元の呼出し側 mapping だけへ適用する。fork 側の複製には、時刻 T の新規未確定 Visit を追加しない。汎用 API は、この複製接続を行わない。
 
 ## 11. 各関数の引数
 
@@ -2725,29 +2840,83 @@ clearance で終了したことは、戻り値では返さない。`transfer_tvt
 
 `_finish_node_transfer(self)` は引数を増やさない。
 
+`OrderControlBaselineCollector.__init__(self, apply_copied_tvt_confirmed_ranks=False)` の既定値は `False` である。引数が Python の `bool` であることを検査する。`bool` 以外なら `ValueError` とする。`True` と `False` だけを受け付ける。`1`、`0`、`None`、文字列等を暗黙に `bool` へ変換しない。読取り属性名は `collector.apply_copied_tvt_confirmed_ranks` である。外部から読める通常属性とし、property や setter は追加しない。実装後に変更されることを前提としない設定値として扱う。既存の引数なし constructor は、汎用 collector として従来どおり動く。
+
+`_prepare_baseline_fork(real_W, *, target_node_names, baseline_horizon_steps, apply_copied_tvt_confirmed_ranks)` の `apply_copied_tvt_confirmed_ranks` には既定値を付けない。引数が Python の `bool` であることを検査する。`bool` 以外なら `ValueError` とする。暗黙変換はしない。collector 作成は次である。fork へ接続する前に mode を確定する。順位台帳の独立複製は、この関数の引数にしない。TVT 用公開 API が、この関数の戻りを受け取ったあとで行う。
+
+```text
+collector = OrderControlBaselineCollector(
+    apply_copied_tvt_confirmed_ranks=apply_copied_tvt_confirmed_ranks,
+)
+```
+
 ## 12. 各関数の戻り値
 
-4 関数とも `None` である。成功した台数や clearance 終了フラグは返さない。過去確定群の clearance 終了は、通常 baseline 群を呼ばないことで表現する。通常 baseline 群の clearance 終了は、`enforce_order_control_clearance=True` の helper が残りを処理せず正常 return することで表現する。どちらのあとでも、`Node.transfer` は終了処理を 1 回行う。
+`transfer_tvt_mp_passage_attempts`、`_transfer_one_vehicle_between_links`、`_transfer_normal_merge`、`_finish_node_transfer`、`OrderControlBaselineCollector.__init__` は `None` である。`_prepare_baseline_fork` は、既存の `_BaselineForkPrepared` を返す。成功した台数や clearance 終了フラグは返さない。過去確定群の clearance 終了は、通常 baseline 群を呼ばないことで表現する。通常 baseline 群の clearance 終了は、`enforce_order_control_clearance=True` の helper が残りを処理せず正常 return することで表現する。汎用 baseline fork は、`_transfer_normal_merge()` の正常 return で表す。どの正常経路のあとでも、`Node.transfer` は終了処理を 1 回行う。
 
 ## 13. 実Worldとbaseline forkの識別
 
-識別は `node.W._order_control_baseline_collector` である。
+`transfer_tvt_mp_passage_attempts(node)` は、順位台帳を取得する前に、次の 3 種類を明示的に分類する。これは、台帳が無ければ通常合流へ戻る暗黙の fallback ではない。公開 baseline API が明示した fork 種別に基づく分岐である。
 
-- `None` なら実 World 規則である。
-- `None` でなければ baseline fork 規則である。
+1. 実 World
 
-collector があることを理由に、TVT 順位を無効化しない。fork でも、凍結台帳で confirmed の Visit は確定群として試す。実 World の研究実行では、この属性は `None` のままである。baseline driver が fork へ collector を付ける既存契約を使う。新しい識別 flag は作らない。
+`collector is None` である。
+
+- TVT 順位を物理適用する。
+- Node 別順位台帳を要求する。
+- Node 別順位台帳の欠如は `RuntimeError` である。
+- driver 正常成功後の最新確定順位を使う。
+- snapshot 内の研究対象 Vehicle が未確定なら `RuntimeError` である。
+- 通常 baseline 群へ fallback しない。
+
+2. TVT 順位適用 baseline fork
+
+`collector is not None` かつ `collector.apply_copied_tvt_confirmed_ranks is True` である。
+
+- fork World へ明示接続した、登録前の独立複製を使う。
+- T-1 以前の確定順位を物理適用する。
+- 時刻 T の新規未確定 Visit は、この複製に入っていない。
+- Node 別順位台帳を要求する。
+- Node 別順位台帳の欠如は `RuntimeError` である。
+- 過去確定群を `assigned_rank` 順に先に試す。
+- 過去確定群の後に通常 baseline 群を処理する。
+- 通常 baseline 群にも order-control clearance を適用する。
+
+3. 汎用 baseline fork
+
+`collector is not None` かつ `collector.apply_copied_tvt_confirmed_ranks is False` である。
+
+- TVT 順位台帳を読まない。
+- Node 別順位台帳を要求しない。
+- TVT 確定群と通常 baseline 群への分類を行わない。
+- `node._transfer_normal_merge()` を呼ぶ。
+- `enforce_order_control_clearance` の既定値 `False` を用いる。
+- order-control clearance を適用しない。
+- 通常の信号交差点の安全上の clearance は、従来どおり信号設定上の全赤時間が担う。
+- collector の到着・通過記録は、通常合流と 1 台移動 helper が維持する。
+- `transfer_tvt_mp_passage_attempts(node)` は正常 return する。
+- その後の `_finish_node_transfer()` は、`Node.transfer` 側が 1 回だけ行う。
+
+`collector.apply_copied_tvt_confirmed_ranks` が `bool` でない場合は `RuntimeError` とする。`1`、`0`、`None`、文字列等を暗黙に `bool` へ変換しない。
+
+collector の有無だけでは、2 種類の baseline fork を区別しない。Node 別順位台帳の有無からも推測しない。`World.copy()` だけでは、実 World 属性と別 object の引数 mapping は fork へ入らない。TVT 用 API が登録前複製を接続したあとの fork 属性が、物理通過の読む台帳である。台帳が無いことを、汎用 baseline fork の印にしない。
+
+実 World の研究実行では、`_order_control_baseline_collector` は `None` のままである。baseline driver が fork へ collector を付ける既存契約は維持する。公開 API の引数は増やさない。mode は、その API が `_prepare_baseline_fork` へ渡す。
 
 ## 14. 順位台帳取得
 
-`node.W.order_control_tvt_rank_states_by_node_name` を読む。次は `RuntimeError` である。
+順位台帳を読むのは、実 World と TVT 順位適用 baseline fork だけである。汎用 baseline fork は、この取得へ入らない。Node 別順位台帳を要求しない。台帳が無いことは、汎用 baseline fork では正常である。
+
+到着列が 0 件のときは、通過候補も確認すべき順位もない。実 World と TVT 順位適用 baseline fork は、Node 別順位台帳を要求せず正常 return する。到着が 1 件以上あるときだけ、次を行う。
+
+実 World と TVT 順位適用 baseline fork では、`node.W.order_control_tvt_rank_states_by_node_name` を読む。TVT 順位適用 fork のこの属性は、呼出し側 mapping そのものではなく、登録前の独立複製である。物理通過関数は、ここで台帳を複製しない。次は `RuntimeError` である。
 
 - この属性の型が `dict` でない。
 - `node.name` の台帳が無い。
 - 台帳の型が `OrderControlTvtNodeRankState` でない。
 - `rank_state.node_name` が `node.name` と違う。
 
-台帳を複製しない。確定も削除もしない。
+物理通過関数は台帳を複製しない。確定も削除もしない。登録時に保証済みの mapping 型、Node 別型、`node_name` 一致を、ここで別契約として増やさない。到着候補があるときの欠如検査は維持する。TVT 順位適用 baseline fork の台帳欠如を、通常合流への暗黙 fallback で隠さない。
 
 ## 15. current Visit検査
 
@@ -2800,22 +2969,26 @@ visit_key = (vehicle.name, current_visit["visit_id"])
 
 ## 20. 実Worldの候補分類
 
-collector が `None` のとき、開始時 snapshot の研究対象 Vehicle は全件確定群である。`is_confirmed(visit_key)` が偽なら `RuntimeError` である。通常 baseline 群へ fallback しない。分類時点で `route_next_link is None` なら、確定群へ入れる前に `RuntimeError` である。
+collector が `None` のとき、開始時 snapshot の研究対象 Vehicle は全件確定群である。`is_confirmed(visit_key)` が偽なら `RuntimeError` である。通常 baseline 群へ fallback しない。分類時点で `route_next_link is None` なら、確定群へ入れる前に `RuntimeError` である。この分類は、汎用 baseline fork には適用しない。汎用 baseline fork は §13 の通常合流へ入る。
 
 driver 正常成功後は、到着中の研究対象 Vehicle は確定済みである。この例外は、その契約が壊れたときだけ起きる。
 
 ## 21. baseline forkの候補2群
 
-collector が `None` でないとき、開始時 snapshot を次へ分ける。同じ Vehicle は片方だけである。
+この 2 群は、`collector is not None` かつ `collector.apply_copied_tvt_confirmed_ranks is True` のときだけ作る。汎用 baseline fork は、開始時 snapshot をこの 2 群へ分けない。
 
-- `is_confirmed(visit_key)` が真なら過去確定群である。T-1 以前の確定である。
+TVT 順位適用 baseline fork では、開始時 snapshot を次へ分ける。同じ Vehicle は片方だけである。
+
+- fork へ接続した登録前複製で `is_confirmed(visit_key)` が真なら過去確定群である。T-1 以前の確定である。時刻 T の新規未確定 Visit は、この複製に無い。
 - それ以外は通常 baseline 群である。未確定、台帳外、T で初めて到着したもの、fork 前進中に到着したものがここへ入る。
 
 通常 baseline 群は、開始時の tuple のまま保持する。過去確定群の後に `incoming_vehicles` から作り直さない。T で新しく到着した研究対象 Visit と、fork 前進中に到着した研究対象 Visit も、正常なら `route_next_link` を持つ。分類時点で current Visit と `route_next_link` を検査し、`None` なら通常群へ入れず `RuntimeError` である。
 
 ## 22. 候補snapshot
 
-`Node.transfer` に入った直後、`transfer_tvt_mp_passage_attempts` が `list(node.incoming_vehicles)` を 1 回作る。以後の分類と試行は、この list を使う。
+この snapshot は、実 World と TVT 順位適用 baseline fork だけで作る。汎用 baseline fork は、TVT 用の分類 snapshot を作らず、順位台帳も読まない。
+
+実 World と TVT 順位適用 baseline fork では、`transfer_tvt_mp_passage_attempts` が 3 分類のあと `list(node.incoming_vehicles)` を 1 回作る。0 件なら、順位台帳を読まず正常 return する。1 件以上のときだけ順位台帳を読み、以後の分類と試行はこの list を使う。TVT 順位適用 fork が読む台帳は、登録前に fork World へ接続した独立複製である。
 
 同じ Vehicle object が list に 2 回あれば、2 回目は無視する。例外にはしない。
 
@@ -2916,7 +3089,9 @@ TVT 確定群と、baseline fork の通常 baseline 群は、通過成功後に 
 
 ## 29. 通常baseline群
 
-fork で過去確定群の clearance 終了がなければ、開始時 tuple の通常 baseline 群を次で渡す。tuple が空なら呼ばない。
+この呼出しは、TVT 順位適用 baseline fork だけである。汎用 baseline fork は、この許可集合を作らない。汎用 baseline fork の正式呼出しは `node._transfer_normal_merge()` であり、`enforce_order_control_clearance` は既定の `False` である。
+
+TVT 順位適用 baseline fork で過去確定群の clearance 終了がなければ、開始時 tuple の通常 baseline 群を次で渡す。tuple が空なら呼ばない。
 
 ```text
 node._transfer_normal_merge(
@@ -2947,7 +3122,7 @@ tuple のときは、その tuple に含まれる Vehicle だけから outlink �
 
 `enforce_order_control_clearance=True` のときは、選ばれた Vehicle の通過前に §26 の order-control clearance を確認する。同一 inlink、または `last_order_control_inlink is None` なら、order-control clearance 上は通過できる。別 inlink で未充足なら、helper は正常 return し、残りの許可集合を処理しない。通過成功後は、移動前 inlink と現在の `W.T` で clearance 履歴を更新する。その後の別 inlink は、同じ時刻にはこの条件を満たさない。同じ inlink の後続は、容量等を満たせば、order-control clearance 上の追加待機は不要である。履歴の片側だけが `None` なら `RuntimeError` である。
 
-標準 UXsim の通常合流からの正式呼出しは `node._transfer_normal_merge()` である。既定の `False` では、order-control clearance を検査せず、その履歴も更新しない。`allowed_vehicles=None` のときは、現行どおり `route_next_link is None` の Vehicle を outlink 候補から除外する。通常合流 helper のこの一般契約は変えない。
+標準 UXsim の通常合流と、汎用 baseline fork からの正式呼出しは `node._transfer_normal_merge()` である。既定の `False` では、order-control clearance を検査せず、その履歴も更新しない。汎用 baseline fork で台帳が無いことは、この呼出しを選ぶ理由ではない。mode が `False` だから、この呼出しを選ぶ。`allowed_vehicles=None` のときは、現行どおり `route_next_link is None` の Vehicle を outlink 候補から除外する。通常合流 helper のこの一般契約は変えない。
 
 `allowed_vehicles=ordinary_baseline_vehicles` で呼ぶときは、呼出し前に TVT 物理通過関数が、その tuple の `route_next_link` が全件有効であることを保証している。helper 内で `None` を容量待ちへ変えない。
 
@@ -3000,7 +3175,7 @@ FCFS と BATCH も、途中終了のあと到着列を空にする。リンク�
 
 ## 34. baseline collector
 
-collector は baseline fork だけで `None` でない。通過成功時だけ、1 台移動 helper が prepare と apply を 1 回行う。容量不足や入口不足では prepare しない。
+collector は、汎用 baseline fork と TVT 順位適用 baseline fork の両方で `None` でない。mode は `apply_copied_tvt_confirmed_ranks` で区別する。mode は順位台帳を保持しない。TVT 用 API が登録前複製を fork World へ接続する。通過成功時だけ、1 台移動 helper が prepare と apply を 1 回行う。容量不足や入口不足では prepare しない。汎用 baseline fork の通常合流でも、この記録は維持する。mode は記録を止めない。
 
 prepare の `visit_id` は、`begin_order_control_visit_on_link_entry` より前の current Visit ID である。現在 Visit が無ければ、現行の通常合流と同じく `visit_id=None` を渡す。
 
@@ -3025,7 +3200,8 @@ prepare の `visit_id` は、`begin_order_control_visit_on_link_entry` より前
 
 `RuntimeError` にするのは、次だけである。
 
-- 順位台帳の型、欠如、`node_name` 不一致。
+- 到着候補がある実 World または TVT 順位適用 baseline fork で、順位台帳の型、欠如、`node_name` 不一致。到着列が 0 件のときは、ここへ入れない。汎用 baseline fork の台帳欠如は、ここへ入れない。
+- `collector.apply_copied_tvt_confirmed_ranks` が `bool` でない。暗黙変換しない。
 - 現在 Visit が無い。
 - 現在 Visit の Node または inlink が、その Vehicle の現在 link と一致しない。
 - `state` が `"run"` でない。ただし trip 終了待ちは §15 のとおり候補外であり、例外にしない。
@@ -3040,7 +3216,9 @@ prepare の `visit_id` は、`begin_order_control_visit_on_link_entry` より前
 
 ## 38. 例外型
 
-本仕様が新しく出す例外は `RuntimeError` だけである。メッセージには `node.name` を含める。Vehicle が分かっているときは `vehicle.name` も含める。`route_next_link is None` のメッセージには、加えて `route_next_link=None` と、正常な TVT 通過候補には有効な outlink が必要であることを含める。collector が既に出す `ValueError` や `RuntimeError` は、そのまま伝播する。
+TVT 物理通過が新しく出す例外は `RuntimeError` である。メッセージには `node.name` を含める。Vehicle が分かっているときは `vehicle.name` も含める。`route_next_link is None` のメッセージには、加えて `route_next_link=None` と、正常な TVT 通過候補には有効な outlink が必要であることを含める。`apply_copied_tvt_confirmed_ranks` が `bool` でないときも `RuntimeError` である。
+
+`OrderControlBaselineCollector.__init__` と `_prepare_baseline_fork` は、`apply_copied_tvt_confirmed_ranks` が Python の `bool` でなければ `ValueError` とする。`1`、`0`、`None`、文字列等は変換しない。collector が既に出す `ValueError` や `RuntimeError` は、そのまま伝播する。
 
 ## 39. 例外時の変更状態
 
@@ -3056,7 +3234,7 @@ prepare の `visit_id` は、`begin_order_control_visit_on_link_entry` より前
 
 - 確定順位は、通過できなくても削除しない。
 - 過去の確定を解除しない。
-- T の新しい確定を fork の台帳へ書かない。本実装は fork 台帳へ書かない。
+- T の新しい確定も、T の新規未確定 Visit も、fork の台帳へ書かない。fork 側台帳は登録前の独立複製であり、元台帳と object を共有しない。
 - formal route を実進路へ上書きしない。
 - `route_next_link is None` を formal route で補完しない。
 - `route_next_link` を物理接続処理で選び直さない。
@@ -3065,6 +3243,11 @@ prepare の `visit_id` は、`begin_order_control_visit_on_link_entry` より前
 - FCFS と BATCH の関数本体を編集しない。
 - `order_control_type="none"` の通常合流で、order-control clearance 履歴を更新しない。
 - 通常の信号交差点の全赤時間を、UXsim の自動付与へ移さない。明示した信号設定のままとする。
+- collector の有無だけで、2 種類の baseline fork を同一視しない。
+- Node 別順位台帳の有無から、fork 種別を推測しない。
+- 汎用 baseline fork へ、T-1 以前の TVT 順位を強制しない。
+- TVT 順位適用 baseline fork の台帳欠如を、通常合流へ黙って戻さない。
+- 既存 baseline 回帰の期待値を、失敗を隠すために変更しない。
 
 ## 42. driverとの関係
 
@@ -3074,9 +3257,27 @@ driver、atomic apply、支払、final rank、順位台帳型は変更しない�
 
 ## 43. baseline forkとの関係
 
-fork は、T の未確定登録と確定より前に copy される。既存の baseline driver はこの順を維持する。本実装は、その copy を変更しない。
+fork は、T の未確定登録と確定より前に copy される。既存の baseline driver はこの順を維持する。copy 直後の fork 属性は、実 World 属性の pickle 複製である。引数 mapping が実 World 属性と別 object なら、その pickle 複製には引数 mapping の台帳が入らない。その有無で fork 種別を決めない。
 
-fork 前進中の `Node.transfer` は、fork に付いている凍結台帳と collector を使う。T で実 World に追加された確定は、fork へ伝播しない。登録 Visit が 0 件のとき forward しない既存契約は維持する。horizon 全量と、fork で終了集計を呼ばない契約も維持する。
+`_prepare_baseline_fork` の呼出し元は、次の 2 か所だけである。両方とも同じ `_prepare_baseline_fork` を使う。公開引数は変えない。
+
+- `run_snapshot_fixed_baseline_fork()` は、`apply_copied_tvt_confirmed_ranks=False` を明示的に渡す。順位台帳の独立複製は行わない。
+- `run_snapshot_fixed_baseline_fork_with_tvt_rank_ledger_registration()` は、`apply_copied_tvt_confirmed_ranks=True` を明示的に渡す。
+
+TVT 用 API の正式な内部順は次である。公開 signature は変えない。
+
+1. `prepared = _prepare_baseline_fork(..., apply_copied_tvt_confirmed_ranks=True)`。
+2. `plan = prepare_snapshot_fixed_visit_registration_plan(...)`。
+3. `rank_states_by_node_name` の対象 Node 検査。欠如、型、`node_name` 不一致は、複製より前に既存の登録前検査で確認する。
+4. 登録前台帳の独立複製。`frozen_rank_states_by_node_name = copy.deepcopy(dict(rank_states_by_node_name))`。
+5. `prepared.fork_W.order_control_tvt_rank_states_by_node_name = frozen_rank_states_by_node_name`。
+6. `register_undetermined_visits_from_snapshot_plan(plan, rank_states_by_node_name)`。元の呼出し側 mapping だけへ適用する。
+7. `apply_snapshot_fixed_visit_registration_plan(plan, prepared.collector)`。
+8. baseline forward。
+
+時刻 T の未確定 Visit は、元の呼出し側台帳だけへ登録する。fork 側の独立複製には追加しない。fork 側 mapping と元 mapping は同じ object ではない。各 Node の rank state も同じ object ではない。fork 側の変更は元台帳へ伝播せず、元台帳の後続変更も fork へ伝播しない。正常な driver 経路と、baseline API 単独経路は、この同じ契約にする。
+
+汎用 baseline fork の前進は、従来の通常合流である。TVT 順位台帳を読まない。TVT 順位適用 baseline fork の前進は、上の独立複製と、mode が `True` の collector を使う。T で元台帳へ追加された未確定 Visit と、その後の確定は、fork へ伝播しない。登録 Visit が 0 件のとき forward しない既存契約は維持する。horizon 全量と、fork で終了集計を呼ばない契約も維持する。
 
 ## 44. 局所仮想計算との関係
 
@@ -3099,11 +3300,21 @@ fork 前進中の `Node.transfer` は、fork に付いている凍結台帳と c
 変更する。
 
 - `uxsim/uxsim.py`。`Node.transfer` の分岐、3 つの private method だけである。FCFS と BATCH の関数本体は変更しない。
+- `uxsim/order_control_baseline_collector.py`。`apply_copied_tvt_confirmed_ranks` の constructor 引数、型検査、読取り属性を追加する。既存の引数なし constructor は残す。
+- `uxsim/order_control_baseline_driver.py`。`_prepare_baseline_fork` へ既定値のない `apply_copied_tvt_confirmed_ranks` を追加する。2 つの公開 API の引数は変えない。汎用 API は `False`、TVT 順位台帳登録付き API は `True` を明示的に渡す。TVT 用 API は、さらに登録前の `copy.deepcopy` を fork World へ接続し、未確定登録は元 mapping だけへ適用する。
 
 新規作成する。
 
 - `uxsim/order_control_tvt_mp_physical_transfer.py`
 - `tests_order_control_tvt_mp_physical_transfer.py`
+
+既存テストへ mode 契約を追加する。今回の文書作業では、これらのテストファイルは変更しない。
+
+- `tests_order_control_baseline_collector.py`
+- `tests_order_control_baseline_driver.py`
+- `tests_order_control_tvt_baseline_driver_registration.py`。ここに `test_tvt_rank_applying_fork_uses_independent_pre_registration_rank_snapshot` を追加する。登録前複製の独立性は、物理通過の専用テストではなく、TVT 用 baseline API の責務としてこのファイルで固定する。
+
+必要な場合は、既存の baseline fork alignment テストに mode 確認を追加してよい。その追加も、専用テスト件数には含めない。fork alignment の既存期待値は、この接続を実装するまで変更しない。
 
 既存テストは、次の 2 件だけ期待を更新する。どちらも、`Node.transfer` のソースに TVT 物理通過が無いことを検査している。実装後は、その検査が偽になる。
 
@@ -3112,13 +3323,13 @@ fork 前進中の `Node.transfer` は、fork に付いている凍結台帳と c
 
 更新後の契約は、`Node.transfer` が `run_tvt_mp_driver` を呼ばないこと、`transfer_tvt_mp_passage_attempts` を `time_value` 分岐から呼ぶこと、である。driver を `Node.transfer` へ移す期待にはしない。
 
-順位台帳、driver、atomic apply、支払、baseline driver、局所仮想計算は変更しない。
+TVT-MP driver、atomic apply、支払、順位台帳型、局所仮想計算は変更しない。baseline collector と baseline driver は、上の明示 mode だけを変更する。既存の公開 baseline API は削除しない。
 
 ## 48. 新規専用テスト
 
 正式ファイル名は `tests_order_control_tvt_mp_physical_transfer.py` である。
 
-直接実行と pytest の両方で動かす。テスト数は 30 である。1 テストに複数の独立シナリオを詰め込まない。同じ通過を別テストで繰り返さないため、容量不足の種類は 1 テストの中の明示的な case 列とする。order-control clearance の別契約は、別の test 関数に分ける。clearance 設定値0と clearance 設定値1の off-by-one は、同じ test へまとめない。
+直接実行と pytest の両方で動かす。専用テスト件数は、このファイルの 34 件だけを指す。33 件へ空の到着列の 1 件を加えた件数である。collector、baseline driver、登録前複製の独立性は、関係回帰として別に記録し、この 34 件へ含めない。1 テストに複数の独立シナリオを詰め込まない。同じ通過を別テストで繰り返さないため、容量不足の種類は 1 テストの中の明示的な case 列とする。order-control clearance の別契約は、別の test 関数に分ける。clearance 設定値0と clearance 設定値1の off-by-one は、同じ test へまとめない。汎用 baseline fork と TVT 順位適用 baseline fork の契約も、別の test 関数に分ける。
 
 ## 49. test関数一覧
 
@@ -3151,7 +3362,11 @@ fork 前進中の `Node.transfer` は、fork に付いている凍結台帳と c
 27. `test_ordinary_node_merge_is_unchanged`
 28. `test_fcfs_and_batch_return_before_tvt`
 29. `test_route_next_link_none_is_runtime_error_for_tvt_candidate`
-30. `test_registry_matches_defined_functions`
+30. `test_generic_baseline_fork_uses_ordinary_merge_without_rank_ledger`
+31. `test_tvt_rank_applying_baseline_fork_applies_copied_confirmed_ranks`
+32. `test_tvt_rank_applying_baseline_fork_missing_node_ledger_is_runtime_error`
+33. `test_empty_incoming_vehicles_do_not_require_rank_ledger`
+34. `test_registry_matches_defined_functions`
 
 `test_temporary_skip_tries_the_next_rank` は、物理先頭でない、Node 流量不足、inlink 流出不足、outlink 流入不足、入口空間不足を、別々の小さな case としてこの関数の中で確認する。それぞれで後続順位を試す。`route_next_link is None` はこの関数へ入れない。
 
@@ -3175,13 +3390,34 @@ fork 前進中の `Node.transfer` は、fork に付いている凍結台帳と c
 
 `test_ordinary_signal_node_does_not_update_order_control_clearance_history` は、`order_control_type="none"` の通常合流が order-control clearance 履歴を更新しないことを確認する。全赤時間を UXsim が自動で足すことは確認しない。明示した信号設定が、既存の信号判定のまま残ることを確認する。
 
+`test_generic_baseline_fork_uses_ordinary_merge_without_rank_ledger` は、`apply_copied_tvt_confirmed_ranks is False` の汎用 baseline fork が、`time_value` Node でも TVT 順位台帳を要求せず、通常合流で前進することを確認する。Node 別順位台帳が無いことは正常である。
+
+`test_tvt_rank_applying_baseline_fork_applies_copied_confirmed_ranks` は、`apply_copied_tvt_confirmed_ranks is True` の TVT 順位適用 baseline fork が、コピー済み確定順位を物理適用することを確認する。過去確定群を通常 baseline 群より先に試す。
+
+`test_tvt_rank_applying_baseline_fork_missing_node_ledger_is_runtime_error` は、到着候補がある TVT 順位適用 baseline fork で必要な Node 別順位台帳が欠けていれば `RuntimeError` であることを確認する。通常合流へ黙って戻さない。
+
+`test_empty_incoming_vehicles_do_not_require_rank_ledger` は、到着列が 0 件なら、実 World と TVT 順位適用 baseline fork が Node 別順位台帳を要求せず正常 return することを確認する。汎用 baseline fork の mode `False` も維持する。交通状態、順位台帳、collector 記録は変えない。`Node.transfer` 経由では `_finish_node_transfer` が 1 回だけ動く。
+
+`test_tvt_rank_applying_fork_uses_independent_pre_registration_rank_snapshot` は、この 34 件へ入れない。置くファイルは `tests_order_control_tvt_baseline_driver_registration.py` である。確認するのは、元台帳に T-1 以前の確定順位があること、TVT 用 baseline API を呼ぶこと、fork 側はその確定順位を使うこと、時刻 T の未確定 Visit は元台帳へ登録されること、fork 側には T の新規未確定 Visit が入らないこと、fork 側台帳と元台帳が別 mapping object であること、各 Node の rank state も別 object であること、元台帳の後続変更が fork へ伝播しないこと、fork 側の変更も元台帳へ伝播しないことである。
+
 ## 50. TESTS登録
 
-`tests_order_control_tvt_mp_driver.py` と同じ方式にする。`test_` で始まる関数を定義順に `TESTS` tuple へ集める。`test_registry_matches_defined_functions` が、定義と `TESTS` の一致を確認する。`__main__` では `TESTS` を順に実行する。
+`tests_order_control_tvt_mp_driver.py` と同じ方式にする。`test_` で始まる関数を定義順に `TESTS` tuple へ集める。件数は §49 の 34 件である。最後は `test_registry_matches_defined_functions` であり、定義と `TESTS` の一致を確認する。`__main__` では `TESTS` を順に実行する。collector、baseline driver、登録前複製の独立性は、この `TESTS` へ入れない。
 
 ## 51. 関係回帰
 
-新規 30 件に加え、実装後に次を実行する。
+関係回帰として、既存ファイルへ次の mode 契約を追加する。この契約は、専用テスト 34 件へ含めない。
+
+- `tests_order_control_baseline_collector.py` で、`apply_copied_tvt_confirmed_ranks` の既定値が `False` であることを確認する。
+- 同じ collector テストで、constructor へ `bool` 以外を渡せば `ValueError` であることを確認する。暗黙変換しない。
+- `tests_order_control_baseline_driver.py` で、`run_snapshot_fixed_baseline_fork()` が `_prepare_baseline_fork()` へ `False` を明示的に渡すことを確認する。
+- `tests_order_control_tvt_baseline_driver_registration.py` で、`run_snapshot_fixed_baseline_fork_with_tvt_rank_ledger_registration()` が `_prepare_baseline_fork()` へ `True` を明示的に渡すことを確認する。
+
+`_prepare_baseline_fork` が `bool` 以外を `ValueError` にすることも、baseline driver 側の関係回帰で確認する。専用テスト 34 件へは含めない。
+
+`tests_order_control_tvt_baseline_driver_registration.py` の `test_tvt_rank_applying_fork_uses_independent_pre_registration_rank_snapshot` も、専用テスト 34 件へ含めない。登録前複製の独立性を、このファイルで確認する。
+
+実装後に次を実行する。
 
 - `tests_order_control_tvt_mp_physical_transfer.py`
 - `tests_order_control_tvt_mp_driver.py`
@@ -3193,6 +3429,8 @@ fork 前進中の `Node.transfer` は、fork に付いている凍結台帳と c
 
 §47 の 2 テストは、更新後のソース契約で成功させる。それ以外の既存アサーションは、失敗したら本番を合わせて黙って期待値を変えない。失敗内容を報告して止まる。
 
+TVT 物理通過の作業中実装では、`tests_order_control_baseline_driver.py`、`tests_order_control_tvt_baseline_fork_alignment.py`、`tests_order_control_tvt_mp_evaluation_end.py` の一部が、`RuntimeError: Node junction: TVT rank ledger is missing.` で失敗した。既存テストの期待値は変更していない。汎用 fork と空の到着列については、未保存の明示 mode と空 snapshot の正常 return で、baseline driver と evaluation end は成功している。fork alignment の残りは、呼出し側 mapping が実 World 属性と別 object のとき、登録前複製が fork へ接続されていないことが原因である。対処は、本節の登録前 `copy.deepcopy` である。失敗を隠すための期待値変更ではない。接続の実装後に、fork alignment と baseline driver registration を再実行する。
+
 ## 52. 正式サンプル回帰
 
 `demos_and_examples/example_00en_simple.py` を実行する。評価終了時刻は未設定のままである。completed trips、average speed、旅行時間、delay、走行距離が、保存済みの従来結果と一致することを確認する。このサンプルの信号設定を、全赤時間の自動追加へ変更しない。研究評価で信号交差点を使うときは、青と次の青の間の全赤時間を信号設定として明示する。
@@ -3203,8 +3441,15 @@ fork 前進中の `Node.transfer` は、fork に付いている凍結台帳と c
 
 - `uxsim/uxsim.py`
 - `uxsim/order_control_tvt_mp_physical_transfer.py`
+- `uxsim/order_control_baseline_collector.py`
+- `uxsim/order_control_baseline_driver.py`
 - `tests_order_control_tvt_mp_physical_transfer.py`
+- `tests_order_control_baseline_collector.py`
+- `tests_order_control_baseline_driver.py`
+- `tests_order_control_tvt_baseline_driver_registration.py`
 - §47 で期待を更新した 2 つの既存テスト
+
+登録前複製を足したあとも、上の `order_control_baseline_driver.py` と `tests_order_control_tvt_baseline_driver_registration.py` を `py_compile` する。物理通過 module へ `copy` を足すことは、この契約の実装ではない。
 
 ## 54. git diff --check
 
@@ -3212,11 +3457,17 @@ fork 前進中の `Node.transfer` は、fork に付いている凍結台帳と c
 
 ## 55. 実装順序
 
+物理通過、明示 mode、空の到着列の正常 return は、未保存のまま残っている。次の登録前複製は、その差分を消さずに足す。
+
 1. `Node.transfer` の通常合流を、`_transfer_one_vehicle_between_links`、`_transfer_normal_merge`、`_finish_node_transfer` へ移す。この時点では `time_value` 分岐を足さない。通常 Node の結果が変わらないことを確認する。
 2. `time_value` 分岐と `transfer_tvt_mp_passage_attempts` を足す。
-3. 新規専用テスト 30 件を足す。
-4. §47 の 2 テストだけを、新しいソース契約へ更新する。
-5. §51 から §54 を実行する。
+3. collector へ `apply_copied_tvt_confirmed_ranks=False` を追加する。`_prepare_baseline_fork` には既定値のない同じ引数を追加する。汎用 API は `False`、TVT 順位台帳登録付き API は `True` を明示的に渡す。
+4. `transfer_tvt_mp_passage_attempts` は、順位台帳を読む前に §13 の 3 分類を行う。到着列が 0 件なら、その後の台帳要求の前に正常 return する。
+5. 新規専用テスト 34 件を足す。mode の関係回帰は、§51 の既存テストファイルへ別に足す。
+6. §47 の 2 テストだけを、新しいソース契約へ更新する。既存 baseline 回帰の期待値は、失敗を隠すために変えない。
+7. `run_snapshot_fixed_baseline_fork_with_tvt_rank_ledger_registration()` へ、§43 の登録前 `copy.deepcopy` と fork への明示接続を足す。
+8. `tests_order_control_tvt_baseline_driver_registration.py` へ独立性テストを足す。専用テスト 34 件には入れない。
+9. fork alignment と baseline driver registration を再実行し、その後 §51 から §54 を実行する。
 
 ## 56. 独立確認手順
 
@@ -3226,12 +3477,16 @@ fork 前進中の `Node.transfer` は、fork に付いている凍結台帳と c
 - FCFS と BATCH の関数本体の diff が空である。
 - 物理通過 module が formal route を通過先に使っていない。
 - 通過済み集合の属性を追加していない。
-- collector が `None` でない fork でも、confirmed を確定群として試している。
+- `apply_copied_tvt_confirmed_ranks is True` の fork だけが、confirmed を確定群として試している。
+- `apply_copied_tvt_confirmed_ranks is False` の fork は、順位台帳を読まず、通常合流で前進している。
 - `_finish_node_transfer` が `Node.transfer` の正常経路で 1 回だけ呼ばれる。
-- 専用テスト 30 件、関係回帰、正式サンプル、`py_compile`、`git diff --check` の結果。
+- 専用テスト 34 件、§51 の関係回帰、正式サンプル、`py_compile`、`git diff --check` の結果。
+- TVT 用 API が、未確定登録より前に `copy.deepcopy` し、その複製だけを fork World へ接続していること。
+- 時刻 T の未確定 Visit が元台帳だけにあり、fork 側の mapping と各 Node の rank state が元と別 object であること。
 - 正常な TVT 通過候補の `route_next_link is None` が、一時スキップではなく `RuntimeError` であること。
 - clearance 設定値0は次の timestep、clearance 設定値1は次の次の timestep で、別 inlink が通過できること。
-- baseline fork の通常 baseline 群が、通常合流の選択順のまま order-control clearance を適用していること。
+- TVT 順位適用 baseline fork の通常 baseline 群が、通常合流の選択順のまま order-control clearance を適用していること。
+- 汎用 baseline fork は order-control clearance を適用せず、Node 別順位台帳を要求しないこと。
 
 ## 57. 採用しない方向
 
@@ -3257,20 +3512,35 @@ fork 前進中の `Node.transfer` は、fork に付いている凍結台帳と c
 - `route_next_link is None` を、次時刻に自然解消する一時的な容量待ちとして扱う。
 - `route_next_link is None` の Vehicle を永久にスキップし続ける。
 - formal route を `route_next_link` の代替として強制する。
+- collector が存在する baseline fork を、すべて TVT 順位適用 fork とみなす。
+- Node 別順位台帳が無いことを理由に、fork 種別を推測する。
+- TVT 順位適用 fork の台帳欠如を、通常合流への暗黙 fallback で隠す。
+- 汎用 baseline fork へ T-1 以前の TVT 順位を強制する。
+- 既存 baseline 回帰の期待値を、失敗を隠すために変更する。
+- 引数 mapping を fork World へそのまま代入して共有する。
+- fork 側と元側で同じ `OrderControlTvtNodeRankState` object を共有する。
+- 時刻 T の新規未確定 Visit を fork 側台帳へ混ぜる。
+- 引数 mapping が実 World 属性と同一 object であることを必須にする。
+- 実 World 属性と別 mapping を渡せる既存 baseline API 契約を削除する。
+- 時刻 T の未確定登録のあとで台帳を複製する。
 
 ## 58. 未確定事項
 
 現時点では残っていない。
 
-関数名、module 名、引数、戻り値、終了処理の位置、例外型、テスト名は本節で確定した。通常 baseline 群へ order-control clearance を適用する訂正は、既存の局所仮想計算との整合であり、新しい利用者判断ではない。clearance 設定値0と clearance 設定値1の時系列は、既存の strict greater-than を文書化する訂正であり、新しい利用者判断ではない。正常な TVT 通過候補で `route_next_link is None` を `RuntimeError` にする訂正は、正常系では `route_next_link` が存在するという確認に基づく防御であり、新しい利用者判断ではない。制度判断は、入力にした設計判断節から変更していない。
+これは制度変更ではない。既存の汎用 baseline API と、TVT 順位台帳登録付き baseline API を、安全に共存させるための技術的識別である。
+
+関数名、module 名、引数、戻り値、終了処理の位置、例外型、テスト名は本節で確定した。通常 baseline 群へ order-control clearance を適用する訂正は、既存の局所仮想計算との整合であり、新しい利用者判断ではない。clearance 設定値0と clearance 設定値1の時系列は、既存の strict greater-than を文書化する訂正であり、新しい利用者判断ではない。正常な TVT 通過候補で `route_next_link is None` を `RuntimeError` にする訂正は、正常系では `route_next_link` が存在するという確認に基づく防御であり、新しい利用者判断ではない。`apply_copied_tvt_confirmed_ranks` による fork 種別の識別も、新しい利用者判断ではない。呼出し側の順位台帳を登録前に独立複製して fork へ接続することも、新しい利用者判断ではない。制度判断は、入力にした設計判断節から変更していない。利用者判断は残っていない。
 
 ## 59. 完了条件
 
 実装が完了したと言えるのは、次が全部真のときである。
 
 - §6 の分岐で、対象 Node だけが TVT 物理通過を使う。
-- 実 World は最新の確定順位だけを使い、未確定を通常群へ落とさない。
-- baseline fork は凍結台帳の過去確定群を先に試し、clearance で終了しなければ開始時の通常群だけを通常合流する。
+- 実 World は最新の確定順位だけを使い、未確定を通常群へ落とさない。Node 別順位台帳の欠如は `RuntimeError` である。
+- TVT 順位適用 baseline fork は、登録前の独立複製にある過去確定群を先に試し、clearance で終了しなければ開始時の通常群だけを、order-control clearance 付きで通常合流する。到着候補があり、必要な Node 別順位台帳が欠けていれば `RuntimeError` である。
+- 汎用 baseline fork は、TVT 順位台帳を要求せず、従来の通常合流で前進する。
+- 2 種類の baseline fork は `apply_copied_tvt_confirmed_ranks` で区別し、Node 別順位台帳の有無から推測しない。
 - 一時スキップした過去確定 Vehicle が通常群に入らない。
 - 実進路は `route_next_link` であり、formal route は強制されない。
 - 正常な TVT 通過候補で `route_next_link is None` なら `RuntimeError` であり、一時スキップでも formal route による補完でもない。
@@ -3279,22 +3549,608 @@ fork 前進中の `Node.transfer` は、fork に付いている凍結台帳と c
 - collector は通過 1 回につき prepare と apply が 1 回である。
 - observer は `Node.transfer` の外の既存 1 回のままである。
 - 通常 Node、FCFS、BATCH、正式サンプルの結果が現行と一致する。
-- baseline fork の通常 baseline 群が、通常合流の選択順のまま order-control clearance を適用し、未充足でその時刻の通常群を終え、通過成功後に clearance 履歴を更新する。
+- TVT 順位適用 baseline fork の通常 baseline 群が、通常合流の選択順のまま order-control clearance を適用し、未充足でその時刻の通常群を終え、通過成功後に clearance 履歴を更新する。
 - `order_control_type="none"` の通常合流は、order-control clearance 履歴を更新しない。
 - clearance 設定値0では、別 inlink は直前通過と同じ timestep に通れず、次の timestep で通れる。
 - clearance 設定値1では、別 inlink は次の timestep に通れず、次の次の timestep で通れる。間の 1 timestep を空ける。
 - この off-by-one を、`test_clearance_zero_allows_different_inlink_only_from_next_timestep` と `test_clearance_one_requires_one_full_empty_timestep` で固定する。
-- §48 の 30 件と §51 の関係回帰が成功する。
+- §48 の専用テスト 34 件と §51 の関係回帰が成功する。関係回帰には、collector の既定値と型検査、2 つの公開 API が渡す mode、`test_tvt_rank_applying_fork_uses_independent_pre_registration_rank_snapshot` を含める。これらは 34 件へ含めない。
+- TVT 用 API が、登録前複製を fork へ接続し、時刻 T の未確定登録を元台帳だけへ適用し、fork と元台帳の object を共有しない。
 - actual passage と actual outcome は未実装のままである。
 
 ## 60. 次の再開地点
 
-1. 第4巻と進捗第3巻の追加本文を Terminal で分割確認する。
-2. `git diff --check` と変更ファイルを確認する。
-3. 文書 2 ファイルを commit する。
-4. commit 名に `document` を含める。
-5. commit 名に `complete` を使用しない。
-6. commit と push を分離する。
-7. 保存後、本仕様どおり Python と専用テストを実装する。
-8. 実装後は本番コード、専用テスト、差分、回帰結果を独立確認する。
-9. その後、actual passage・actual outcome の設計へ進む。
+1. 今回の文書修正を Terminal で限定確認する。
+2. Python とテストの作業開始前からの未保存差分が、今回の文書作業で変化していないことを確認する。
+3. `run_snapshot_fixed_baseline_fork_with_tvt_rank_ledger_registration()` で、対象 Node 検査のあと、登録前に `copy.deepcopy` し、fork World へ接続する。
+4. 時刻 T の未確定登録は、元の呼出し側 mapping だけへ適用する。
+5. `tests_order_control_tvt_baseline_driver_registration.py` へ `test_tvt_rank_applying_fork_uses_independent_pre_registration_rank_snapshot` を追加する。専用テスト 34 件には含めない。
+6. fork alignment と baseline driver registration を再実行する。既存期待値は、失敗を隠すために変えない。
+7. 専用テスト 34 件、FCFS、BATCH、正式サンプルを再実行する。
+8. 実装結果を第4巻と進捗第3巻へ記録する。
+9. 差分と回帰結果を独立確認してから commit する。
+
+上記の再開地点は履歴として残す。実装、独立確認、回帰結果は、同じ第4巻の「TVT-MP確定順位の物理通過接続 実装・独立確認・検証結果」を参照する。
+
+# TVT-MP確定順位の物理通過接続 実装・独立確認・検証結果
+
+記録日: 2026-09-29
+
+本節は、直前の「TVT-MP確定順位の物理通過接続 完全実装前仕様」を実装し、Terminal で独立確認し、回帰を実行した結果である。設計判断節と完全実装前仕様節は、実装前の記録として残す。削除も短縮もしない。
+
+最新の保存済み・push 済みコミットは `cc0cafa` である。HEAD と `origin/feature/intersection-order-control` は一致している。本節が記録する本番、テスト、仕様補足は、まだ Git 保存していない。`diagnostics/order_control.zip` は未追跡のままである。
+
+完全実装前仕様どおり実装した。実装中に判明した仕様不足は、明示 mode、空の incoming snapshot、登録前凍結コピー、テスト fixture の直接配置で解消した。既存の期待値や assert は、失敗を回避するために変更していない。実装後の未解決失敗はない。仕様衝突はない。actual passage と actual outcome は未実装である。利用者判断が必要な事項は残っていない。
+
+## 1. 実装概要
+
+`time_value` かつ `order_control_eligible is True` の Node で、確定順位を物理通過の試行順へ接続した。`assigned_rank` は通過保証ではなく、通過を試す機会の順位である。
+
+実装中に、次の不足が判明した。
+
+- 汎用 baseline fork と TVT 順位適用 baseline fork を、collector の有無だけでは識別できなかった。明示 mode `apply_copied_tvt_confirmed_ranks` で解決した。
+- 空の incoming snapshot でも Node 別順位台帳を要求していた。到着候補が無いときは台帳を要求せず、正常 return するようにした。
+- TVT 用 baseline API を単独で呼ぶ経路では、呼出し側の順位台帳が fork World へ接続されなかった。登録前に `copy.deepcopy` した独立複製を、fork World へ明示接続した。
+- テスト準備が、順位台帳の無い time_value 実 World の `junction_a` を実際に通過させていた。本番の `RuntimeError` は正しく、本番コードは緩めなかった。fixture だけを、整合した直接配置へ修正した。
+
+## 2. 変更・新規作成ファイル
+
+変更した本番ファイル:
+
+- `uxsim/uxsim.py`
+- `uxsim/order_control_baseline_collector.py`
+- `uxsim/order_control_baseline_driver.py`
+
+新規の本番 module:
+
+- `uxsim/order_control_tvt_mp_physical_transfer.py`
+
+変更したテスト:
+
+- `tests_order_control_baseline_collector.py`
+- `tests_order_control_baseline_driver.py`
+- `tests_order_control_tvt_baseline_driver_registration.py`
+- `tests_order_control_tvt_baseline_fork_alignment.py`
+- `tests_order_control_tvt_mp_driver.py`
+- `tests_order_control_tvt_mp_evaluation_end.py`
+
+新規の専用テスト:
+
+- `tests_order_control_tvt_mp_physical_transfer.py`
+
+公開関数は `transfer_tvt_mp_passage_attempts(node)` である。TVT module は、`Node.transfer` の time_value 分岐の中で局所 import する。`uxsim.py` のファイル先頭では import しない。
+
+## 3. Node.transferの分岐
+
+`Node.transfer` の正式な順序は次である。
+
+1. eligible かつ fcfs なら、`transfer_fcfs_clearance()` を呼び、return する。
+2. eligible かつ batch なら、`transfer_batch()` を呼び、return する。
+3. eligible が True かつ time_value なら、局所 import のあと `transfer_tvt_mp_passage_attempts(self)` を呼び、`_finish_node_transfer()` を呼び、return する。
+4. その他は、`_transfer_normal_merge()` を呼び、`_finish_node_transfer()` を呼ぶ。
+
+FCFS と BATCH は、既存の早期 return を維持した。FCFS と BATCH の関数本体は変更していない。
+
+終了処理は、正常経路で 1 回だけである。TVT 処理が例外を出した場合は、終了処理へ到達しない。
+
+## 4. Node private helper
+
+`uxsim/uxsim.py` へ、次を追加した。
+
+- `Node._transfer_one_vehicle_between_links`
+- `Node._order_control_clearance_blocks_passage`
+- `Node._transfer_normal_merge`
+- `Node._finish_node_transfer`
+
+1 台の物理移動、clearance 判定、通常合流、到着列の終了処理を分けた。候補順位、経路選択、observer、actual passage、actual outcome は、これらの helper へ混ぜていない。
+
+## 5. 1台物理移動
+
+`Node._transfer_one_vehicle_between_links` が担当するもの:
+
+- baseline collector の prepare
+- 累積台数
+- `traveltime_actual`
+- `link_arrival_time`
+- inlink 流出容量
+- outlink 流入容量
+- Node 流量容量
+- inlink からの削除
+- outlink への追加
+- `Vehicle.link`
+- `begin_order_control_visit_on_link_entry`
+- `x`
+- leader
+- follower
+- lane
+- `move_remain`
+- `v`
+- 移動後の inlink 先頭の trip 終了待ち
+- `incoming_vehicles` からの削除
+- baseline collector の apply
+
+担当しないもの:
+
+- 候補順位
+- `assigned_rank`
+- clearance 判定
+- clearance 履歴更新
+- `merge_priority`
+- 経路選択
+- formal route
+- observer
+- actual passage
+- actual outcome
+
+通常合流と TVT 確定群が、この helper を共有する。FCFS と BATCH は共有しない。
+
+## 6. 通常合流
+
+正式 signature:
+
+```text
+Node._transfer_normal_merge(
+    self,
+    allowed_vehicles=None,
+    enforce_order_control_clearance=False,
+)
+```
+
+確認済みの内容:
+
+- `allowed_vehicles=None` は、現在の `incoming_vehicles` 全体である。
+- tuple 指定時は、許可 Vehicle だけを候補にする。
+- outlink 候補も、許可 Vehicle だけから作る。
+- outlink の初出順を維持する。
+- `number_of_lanes` 分を試す。
+- 非 hard deterministic のときは `W.rng.shuffle` する。
+- signal 条件を維持する。
+- `merge_priority` を維持する。
+- priority 合計が 0 のときは一様化する。
+- hard deterministic のときは、既存の選択を維持する。
+- live な入口空間と容量を使う。
+- clearance 未充足なら、helper 全体を正常 return する。
+- 通過成功後だけ、clearance 履歴を更新する。
+- 終了処理は行わない。終了処理は `Node.transfer` が呼ぶ。
+
+## 7. order-control clearance
+
+共通 helper は `Node._order_control_clearance_blocks_passage(vehicle, inlink)` である。
+
+契約:
+
+- clearance 履歴の片側だけが None なら `RuntimeError` である。
+- `last_order_control_inlink` が None なら、待機は不要である。
+- 同じ inlink なら、待機は不要である。
+- 別 inlink では strict greater-than である。
+
+条件:
+
+```text
+W.T - last_order_control_entry_timestep
+> order_control_clearance_timesteps
+```
+
+設定値 0:
+
+- 同一 timestep 内の別 inlink 通過は不可である。
+- 最短で次の timestep に通過できる。
+
+設定値 1:
+
+- 次の timestep では不可である。
+- 最短で次の次の timestep に通過できる。
+- 間の 1 timestep を確実に空ける。
+
+TVT 確定群と、TVT 順位適用 fork の通常 baseline 群は、通過成功後に clearance 履歴を更新する。
+
+汎用 baseline fork と、`order_control_type="none"` の通常合流では、order-control clearance 履歴を更新しない。
+
+通常の信号交差点では、信号設定として明示した全赤時間が、安全上の clearance を担う。UXsim の自動付与には依存しない。
+
+## 8. 実World
+
+識別:
+
+- collector は None である。
+- 最新の確定順位を使う。
+- 到着候補が 1 台以上あれば、Node 別順位台帳を要求する。
+- 未確定は、通常群へ fallback しない。未確定のまま通過候補になる状態は `RuntimeError` である。
+- 台帳の欠如を、通常合流へ暗黙に戻して隠さない。
+
+## 9. TVT順位適用baseline fork
+
+識別:
+
+- collector は None ではない。
+- `apply_copied_tvt_confirmed_ranks` は True である。
+
+使用する順位は、登録前凍結コピーにある T-1 以前の確定順位である。過去確定群を先に試す。clearance で終了していなければ、その後に通常 baseline 群を処理する。通常 baseline 群にも order-control clearance を適用する。
+
+到着候補が 1 台以上あり、必要な Node 別順位台帳が欠けていれば `RuntimeError` である。通常合流への暗黙 fallback はしない。
+
+## 10. 汎用baseline fork
+
+識別:
+
+- collector は None ではない。
+- `apply_copied_tvt_confirmed_ranks` は False である。
+
+順位台帳を読まない。Node 別順位台帳を要求しない。従来の通常合流で前進する。order-control clearance は適用しない。order-control clearance 履歴も更新しない。
+
+fork 種別は、collector の有無や Node 別順位台帳の有無から推測しない。非 bool の mode は `RuntimeError` である。
+
+## 11. 空のincoming snapshot
+
+3 分類のあと、generic fork の早期 return のあとで、incoming を snapshot する。長さが 0 なら、実 World でも TVT 順位適用 fork でも、順位台帳を要求せず正常 return する。
+
+到着候補が 1 台以上あれば、実 World と TVT 順位適用 fork は Node 別台帳を要求する。空の到着列は、到着候補があるときの台帳欠如を許す理由にしない。
+
+## 12. 順位台帳
+
+`OrderControlTvtNodeRankState` は、Node 名、VisitKey、確定順、`assigned_rank`、formal route 名、未確定 VisitKey を持つ。live な Vehicle、Node、Link、World への参照は持たない。
+
+実 World は、その時刻の driver 完了後の最新台帳を使う。TVT 順位適用 fork は、登録前に凍結した T-1 以前の確定順位を使う。時刻 T の新規未確定 Visit は fork の台帳へ入れない。
+
+確定群は `assigned_rank` 順に一度ずつ試す。順位台帳、支払、補償、成立時履歴は、物理通過の中で変更しない。
+
+## 13. 登録前凍結コピー
+
+TVT 順位適用 baseline API の正式な処理順:
+
+1. mode を True にして fork を作る。
+2. snapshot 登録計画を作る。
+3. 呼出し側の順位台帳を、登録前に検査する。
+4. `copy.deepcopy(dict(rank_states_by_node_name))` で独立複製する。
+5. 複製を fork World の `order_control_tvt_rank_states_by_node_name` へ接続する。
+6. 元台帳だけへ、時刻 T の未確定 Visit を登録する。
+7. collector へ snapshot 計画を登録する。
+8. baseline forward する。
+
+確認済み:
+
+- fork 側 mapping は、元 mapping と別 object である。
+- 各 Node の rank state も、別 object である。
+- T-1 以前の confirmed 順位と formal route を複製する。
+- 時刻 T の新規未確定 Visit は fork へ入らない。
+- 元側の後続変更は fork へ伝播しない。
+- fork 側の変更は元側へ伝播しない。
+- 正常な driver 経路と、baseline API 単独経路を、同じ契約にした。
+- 引数 mapping を fork へそのまま代入して共有しない。
+- 時刻 T の未確定登録のあとで複製しない。
+
+この不足は、fork alignment の回帰で判明した。代表例外は `RuntimeError: Node junction: TVT rank ledger is missing.` である。原因は、実 World 属性とは別の mapping を受け取れる API が、その mapping を登録前に fork へ複製して接続していなかったことである。既存テストの期待値は変更していない。
+
+検査 helper は `_validate_rank_states_for_frozen_fork_copy` である。読取り専用である。mapping でないこと、対象 Node の欠如、型不一致、key と `node_name` の不一致は、登録 module と同じ `ValueError` である。不正な台帳は、`deepcopy` の前に拒否する。
+
+既存の 2 つの公開 API の signature は変更していない。汎用 API は mode False を明示し、台帳を複製しない。TVT 用 API だけが mode True と、この凍結コピーを行う。
+
+## 14. baseline collector mode
+
+正式 constructor:
+
+```text
+OrderControlBaselineCollector(
+    apply_copied_tvt_confirmed_ranks=False,
+)
+```
+
+- 既定値は False である。
+- bool だけを許容する。
+- 非 bool は `ValueError` である。
+- 通常の外部読取り可能属性として保存する。property や setter にはしない。
+- 既存の引数なし constructor との後方互換を維持する。
+
+`_prepare_baseline_fork` の `apply_copied_tvt_confirmed_ranks` は、既定値のない必須 keyword である。非 bool は `ValueError` である。汎用 baseline API は False を明示する。TVT 順位台帳登録付き API は True を明示する。
+
+## 15. 候補snapshot
+
+候補は、その時点の `incoming_vehicles` だけである。確定群を試す前に、通常 baseline 群を固定 snapshot として保持する。その後の incoming の変化で、通常群の対象を増やさない。
+
+通過済みの Visit や、まだ到着していない Visit は再試行しない。通過済み VisitKey 集合は作らない。
+
+## 16. assigned_rank
+
+確定群は `assigned_rank` 順に一度ずつ試す。`assigned_rank` は通過保証ではない。正常な物理制約で通れなければ、順位も台帳も消さず、その時刻の後続を試す。次の timestep で再評価する。
+
+baseline の選択順を、確定群の試行順には使わない。通常 baseline 群の選択順は、既存の通常合流のままである。
+
+## 17. 実進路
+
+実進路は `Vehicle.route_next_link` である。物理通過は、この live な次リンクを使う。台帳上の経路名で進路を書き換えない。
+
+## 18. formal route
+
+formal route は強制しない。`route_next_link` の代替にも使わない。順位、支払、補償の再計算もしない。
+
+正常な TVT 通過候補で `route_next_link is None` なら `RuntimeError` である。一時スキップではない。次時刻まで待って自然解消する状態としても扱わない。目的地到着、trip abort、局所仮想計算の下流境界とは契約を分ける。
+
+## 19. 一時スキップ
+
+次は一時スキップである。順位も台帳も消さず、その時刻の後続を試す。
+
+- 物理先頭ではない。
+- 容量が足りない。
+- 入口空間が足りない。
+
+一時スキップした過去確定 Vehicle は、同じ時刻の通常 baseline 群へ入れない。
+
+## 20. clearance終了
+
+clearance 未充足だけ、その時刻の後続処理を終了する。TVT 確定群で clearance 未充足なら、通常 baseline 群も処理しない。通常 baseline 群の中で clearance 未充足なら、その時刻の通常群処理を終える。
+
+物理制約による一時スキップと、clearance による時刻終了を分けた。重大な不整合は `RuntimeError` であり、一時スキップへ落とさない。
+
+## 21. 通常baseline群
+
+TVT 順位適用 fork では、過去確定群のあと、開始時に固定した通常 baseline 群を通常合流する。選択順は既存の通常合流のままである。order-control clearance を適用する。未充足なら、その時刻の通常群を終える。通過成功後に clearance 履歴を更新する。
+
+過去確定群で先に通過した分の容量と入口空間を、通常群は live に見る。
+
+汎用 baseline fork の通常合流は、この通常 baseline 群ではない。汎用 fork は台帳を読まず、order-control clearance も適用しない。
+
+## 22. incoming_vehicles終了処理
+
+`Node._finish_node_transfer` が、到着列の終了処理を担当する。`Node.transfer` の正常経路で 1 回だけ呼ぶ。
+
+1 台移動 helper は、通過した Vehicle を `incoming_vehicles` から削除する。終了処理そのものは helper の中で行わない。TVT 処理が例外を出した場合は、終了処理へ到達しない。
+
+`incoming_vehicles` を許可集合だけへ差し替えない。
+
+## 23. collector
+
+通過 1 回につき、prepare と apply を 1 回行う。prepare は移動の前、apply は移動の後である。1 台移動 helper がこの対を担当する。
+
+通過しなかった一時スキップでは、prepare と apply を行わない。
+
+## 24. downstream boundary observer
+
+物理通過 module と `Node.transfer` の TVT 分岐は、downstream boundary observer を直接呼ばない。observer は `Node.transfer` の外にある既存の 1 回のままである。`capture_before_transfer` と `commit_after_transfer` の既存位置を、今回の helper へ移していない。
+
+## 25. actual passage・actual outcome
+
+actual passage と actual outcome は実装していない。実績価値、満足度、welfare、buyer 回数、seller 回数も、この接続では実装していない。field も先に作っていない。
+
+## 26. 重大不整合
+
+次は一時スキップではなく、`RuntimeError` である。
+
+- 到着候補がある実 World で、Node 別順位台帳が無い。
+- 到着候補がある TVT 順位適用 fork で、Node 別順位台帳が無い。
+- 実 World の到着候補が未確定のままである。
+- 正常な TVT 通過候補で `route_next_link is None` である。
+- clearance 履歴の片側だけが None である。
+- mode が bool ではない。
+
+代表例外は `RuntimeError: Node junction: TVT rank ledger is missing.` と、`RuntimeError: Node junction_a: TVT rank ledger is missing.` である。前者は fork へ台帳が接続されていないときの回帰で出た。後者は、テスト準備が未準備の time_value 実 World を通過させたときに出た。どちらも本番の停止が正しい。
+
+汎用 baseline fork は、台帳が無くてもこの例外にしない。順位台帳を読まず、通常合流する。
+
+## 27. 例外時の状態
+
+TVT 処理が例外を出した場合、`_finish_node_transfer` へ到達しない。例外を捕捉して通常合流へ戻さない。警告や別例外へ変換しない。
+
+順位台帳、支払、補償、成立時履歴は、例外の前にも変更しない。登録前凍結コピーの検査に失敗した場合は、`deepcopy` も未確定登録も行わない。
+
+fixture 修正後も、alignment 失敗時に実 World を変えないこと、未確定登録を残すこと、front registration を残すこと、apply や exec を呼ばない失敗境界は、既存 assert のままである。
+
+## 28. テストfixture修正
+
+次の 2 ファイルで、`vehicle_b` を `junction_a` へ実際に通過させず、`in_b` 上の整合した未到着状態を直接作るようにした。
+
+- `tests_order_control_tvt_baseline_fork_alignment.py`
+- `tests_order_control_tvt_baseline_driver_registration.py`
+
+追加 helper:
+
+```text
+_place_vehicle_on_inlink_with_new_order_control_visit
+```
+
+契約:
+
+- 旧 Link の `vehicles` から削除する。
+- leader と follower の相互参照を解除する。
+- `in_b` へ追加する。
+- `route_next_link` を `out_b` へ設定する。
+- `begin_order_control_visit_on_link_entry()` で、`junction_b` 向け Visit を生成する。
+- `junction_a` と `junction_b` の `incoming_vehicles` から除外する。
+- `vehicle_b` は `junction_b` へ未到着である。
+- current Visit は `junction_b` と `in_b` を指す。
+- Visit を手書きしない。
+- Visit ID を巻き戻さない。
+
+`vehicle_a` を `in_a` へ進める間だけ、`vehicle_b` を `x=0` へ退避した。`x=180` のまま実 World を進めると、`junction_b` の到着候補になり、台帳の無い実 World が正しく停止するためである。その後、既存 helper で `x=180` へ戻した。current Visit object と Visit ID が変化しないことを assert した。
+
+`vehicle_a` は、`in_a` の終端へ到着済みで、current Visit は `junction_a`、`junction_a.incoming_vehicles` へ登録済みである。
+
+既存テストの assert、期待値、失敗境界は、削除も緩和もしていない。alignment の Node 順、collector の export 回数、未登録 VisitKey の検出、後続 Node を処理しないこと、partial result を返さないことは、そのままである。
+
+## 29. 専用テスト34件
+
+専用テストは `tests_order_control_tvt_mp_physical_transfer.py` の 34 件である。
+
+主な追加契約:
+
+- 時刻 T の最新確定順位
+- T-1 以前の fork 確定順位
+- 汎用 baseline fork の通常合流
+- 過去確定群と通常 baseline 群
+- 一時スキップ
+- clearance 終了
+- clearance 設定値 0 と 1
+- 通常 baseline 群の clearance
+- `route_next_link`
+- formal route の非強制
+- `route_next_link is None` の `RuntimeError`
+- collector の prepare と apply
+- observer の非呼出し
+- 空の incoming snapshot では台帳不要
+- FCFS と BATCH の早期 return
+- 通常 Node 回帰
+- `TESTS` 登録一致
+
+直接実行は `34 tests passed` である。pytest は 34 件成功である。空の到着列の 1 件と、登録一致の 1 件を含む。mode の関係テストと、登録前凍結コピーの独立性テストは、この 34 件に含めない。
+
+## 30. mode関係テスト
+
+baseline collector:
+
+- 既定値 False
+- 明示 True と False
+- 非 bool を `ValueError`
+
+baseline driver:
+
+- 汎用 API が False を明示する。
+- `_prepare_baseline_fork` の非 bool を `ValueError` にする。
+- 汎用 fork の collector mode が False である。
+
+TVT baseline registration:
+
+- TVT 用 API が True を明示する。
+- collector mode が True である。
+- 不正な順位台帳を、`deepcopy` の前に拒否する。
+- 登録前凍結コピーは独立である。
+- 時刻 T の新規未確定 Visit を fork へ混ぜない。
+- fork 前進で、T-1 以前の確定順位を実際に使用する。
+
+独立性テストは `test_tvt_rank_applying_fork_uses_independent_pre_registration_rank_snapshot` である。不正台帳を複製前に拒否するテストは `test_invalid_rank_states_raise_before_frozen_copy` である。どちらも `tests_order_control_tvt_baseline_driver_registration.py` にあり、専用テスト 34 件には含めない。
+
+## 31. 中核回帰253件
+
+次の 7 ファイルをまとめて実行した。
+
+- `tests_order_control_tvt_mp_physical_transfer.py`
+- `tests_order_control_baseline_collector.py`
+- `tests_order_control_baseline_driver.py`
+- `tests_order_control_tvt_baseline_driver_registration.py`
+- `tests_order_control_tvt_baseline_fork_alignment.py`
+- `tests_order_control_tvt_mp_driver.py`
+- `tests_order_control_tvt_mp_evaluation_end.py`
+
+結果は `253 passed in 19.69s` である。
+
+内訳:
+
+- 物理通過専用: 34
+- baseline collector: 35
+- baseline driver: 71
+- TVT baseline registration: 35
+- fork alignment: 25
+- TVT-MP driver: 31
+- evaluation end: 22
+
+合計 253 件である。未解決の失敗はない。
+
+## 32. FCFS回帰
+
+FCFS 関係は 73 件成功である。FCFS の関数本体は変更していない。`Node.transfer` では、eligible かつ fcfs の早期 return を維持している。
+
+## 33. BATCH回帰
+
+BATCH の残り単体は 293 件成功である。BATCH の関数本体は変更していない。`Node.transfer` では、eligible かつ batch の早期 return を維持している。
+
+## 34. 正式サンプル
+
+正式サンプルは、保存済みの数値と一致した。
+
+- completed trips: 735 / 810
+- average speed: 11.7 m/s
+- total travel time: 119475.0 s
+- average travel time: 162.6 s
+- average delay: 62.6 s
+- delay ratio: 0.385
+- total distance traveled: 1632250.0 m
+
+## 35. py_compile
+
+変更・新規作成した本番とテストの 11 ファイルについて、`py_compile` は成功した。対象は §2 の 4 本番ファイルと 7 テストファイルである。
+
+## 36. git diff --check
+
+`git diff --check` は成功した。空白の誤りは出ていない。この確認は読取り専用である。commit や stage は、本節の記録時点では行っていない。
+
+## 37. 独立確認結果
+
+Terminal で、次の本番コードを直接確認した。
+
+- `Node._transfer_one_vehicle_between_links`
+- `Node._order_control_clearance_blocks_passage`
+- `Node._transfer_normal_merge`
+- `Node._finish_node_transfer`
+- `Node.transfer`
+- `transfer_tvt_mp_passage_attempts`
+- `OrderControlBaselineCollector` の mode
+- `_prepare_baseline_fork`
+- TVT 用 baseline API の登録前凍結コピー
+
+確認結果:
+
+- 完全実装前仕様と一致した。
+- FCFS と BATCH の本体に、意図しない変更はなかった。
+- downstream boundary observer を直接呼ばない。
+- actual passage と actual outcome を実装していない。
+- 通常合流の信号判定、`merge_priority`、乱数順、hard deterministic を維持した。
+- 重大不整合と、正常な一時スキップを分離した。
+- 利用者判断が必要な事項はなかった。
+
+## 38. 仕様との差
+
+残る仕様との差はない。仕様衝突もない。
+
+実装中に判明し、完全実装前仕様へ戻したうえで実装した事項は、次である。
+
+- 汎用 fork と TVT 順位適用 fork の識別不足。明示 mode で解決した。
+- 空の incoming snapshot に対する不要な台帳検査。到着候補が無いときは正常 return するようにした。
+- baseline API 単独経路で、順位台帳が fork へ接続されない不足。登録前凍結コピーを明示接続した。
+- テスト準備が、未準備の time_value 実 World を通過させる問題。本番は緩めず、fixture だけを直接配置へ修正した。
+
+これらは新しい制度判断ではない。既存期待値を、失敗を隠すために変更してもいない。
+
+## 39. 未実装範囲
+
+この接続の次の段階として、未実装のままであるもの:
+
+- actual passage
+- actual outcome
+- 実績評価、満足評価、welfare
+- Vehicle 単位の buyer 回数、seller 回数、比率、価値の合算
+- 非参加 Vehicle の外部効果集計
+
+完全実装前仕様の非実装範囲も、この接続では実装していない。signal 統合、複数車線への一般化、`taxi`、`specified_route`、trip 終了 Vehicle の TVT 参加、対象外 Node の順位台帳削除、確定時刻 field、通過済み VisitKey 集合、formal route の強制、FCFS と BATCH の移動処理の共通化、局所仮想計算の拘束順位走査の変更は、未実装のままである。
+
+## 40. 利用者判断が必要な事項
+
+現時点では残っていない。
+
+明示 mode、空の到着列、登録前凍結コピー、fixture の直接配置は、制度変更ではない。既存の汎用 baseline API と TVT 用 baseline API を共存させ、呼出し側台帳を fork と共有せず、未準備の time_value 実 World をテスト準備で通過させないための技術的修正である。
+
+## 41. 完了条件
+
+完全実装前仕様の完了条件は、今回の実装と回帰で満たした。
+
+- 対象 Node だけが TVT 物理通過を使う。
+- 実 World は最新の確定順位を使い、未確定を通常群へ落とさない。
+- TVT 順位適用 fork は、登録前複製の過去確定群を先に試し、その後の通常群に order-control clearance を適用する。
+- 汎用 fork は台帳を要求せず、従来の通常合流で前進する。
+- 2 種類の fork は `apply_copied_tvt_confirmed_ranks` で区別する。
+- 空の incoming snapshot は台帳を要求しない。到着候補があれば要求する。
+- 実進路は `route_next_link` であり、formal route は強制しない。
+- `route_next_link is None` は `RuntimeError` である。
+- collector は通過 1 回につき prepare と apply が 1 回である。
+- observer は `Node.transfer` の外のままである。
+- 専用テスト 34 件、中核回帰 253 件、FCFS 73 件、BATCH 293 件、正式サンプルが成功した。
+- actual passage と actual outcome は未実装のままである。
+
+## 42. 次の再開地点
+
+1. 第4巻と進捗第3巻の実装結果記録を Terminal で分割確認する。
+2. 本番・テスト・文書の最終差分を確認する。
+3. 関係回帰結果と変更ファイルを最終確認する。
+4. 文書 2 ファイルを含む全実装対象を stage する。
+5. `diagnostics/order_control.zip` は stage しない。
+6. `git diff --cached --check` と `git diff --cached --stat` を確認する。
+7. commit 名に document は必須ではない。今回は実装コミットである。
+8. commit と push を分離する。
+9. 保存後、actual passage・actual outcome の設計へ進む。
