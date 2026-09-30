@@ -4154,3 +4154,312 @@ Terminal で、次の本番コードを直接確認した。
 7. commit 名に document は必須ではない。今回は実装コミットである。
 8. commit と push を分離する。
 9. 保存後、actual passage・actual outcome の設計へ進む。
+
+# TVT-MP単一decision timestep診断・通常ケースと境界ケースの比較（2026-09-30）
+
+本節は、2026-09-30 に完成した独立診断の記録である。本番仕様の変更ではない。局所仮想計算の追加継続方式（方式 A・B・C と呼ばれる候補）の採否は、本節では決めない。
+
+過去の第4巻各節は、その時点の正式記録として残す。TVT-MP 単一 decision timestep の実交通診断については、本節を最新参照先とする。
+
+## A. 診断ファイル
+
+- 診断ファイル: `diagnostics/order_control/tvt_mp_single_decision_baseline_diagnostic.py`
+- 本番コード、既存テスト、既存設計文書を変更せずに作成した独立診断である。
+- 2026-09-30 時点では Git 未追跡ファイルである。
+- `diagnostics/order_control.zip` は既存の未追跡ファイルであり、本診断作業では触れていない。
+- 診断スクリプトの `py_compile` は成功した。
+- Stage 1〜3 の全 assert は成功した。
+
+## B. Stage 1
+
+Stage 1 は generic baseline fork の実交通確認である。
+
+通常ケースの構成:
+
+- snapshot `T=10`
+- baseline horizon `=25`
+- 1 つの time_value Node
+- 4 本の approach inlink
+- 1 本の outlink
+- Vehicle A、B、C、D の 4 台
+- current visit は通常走行によって自然生成する
+- snapshot では 4 台とも not-yet-arrived
+- baseline arrival:
+  - A=11
+  - B=12
+  - C=13
+  - D=14
+- 初期の単純 baseline passage は A=12、B=13、C=14、D=15 だった。
+- その後、P−1 候補集合に A〜D を全て含める診断条件として、診断用 outlink gate を設けた。
+- 通常ケースで使用する baseline passage:
+  - A=15
+  - B=16
+  - C=17
+  - D=18
+- `registered_visit_count=4`
+- real World は baseline fork で変更されない。
+
+性能の注意:
+
+- generic baseline fork 自体は、利用者 Terminal では約 0.01 秒台だった。
+- 利用者環境では `finalize_scenario` が約 18 秒かかったが、これは World 準備の環境依存時間であり、baseline fork 時間でも TVT-MP driver 時間でもない。
+- Cursor 側環境では `finalize_scenario` は約 0.01 秒台だった。
+- 性能比較では `finalize_scenario` を driver 時間へ含めない。
+
+outlink gate:
+
+- 到着順、candidate、rank、economic result を手動作成したものではない。
+- junction 下流を一時的に塞ぎ、baseline passage を物理的に遅らせた診断用交通条件である。
+- A〜D 全員が RoE passage `P` の P−1 候補集合へ入る状態を作る目的である。
+- gate Vehicle は real World に置かれ、baseline fork および Stage 2 driver 内部のコピーにも存在する。
+- release timestep は 15 である。
+- 通常ケースで candidate local calculation が不必要に長期化していないことを、`final_offset` と `simulated_timestep_count` から確認した。
+
+## C. Stage 2 通常ケース
+
+Stage 2 は、同じ real World から本物の `run_tvt_mp_driver` を 1 回実行する。
+
+設定:
+
+- snapshot `T=10`
+- baseline horizon `=25`
+- max candidate Visit 数 `=4`
+- evaluation end `=None`
+- Node 数 `=1`
+- candidate visits `=A、B、C、D`
+- RoE `=A`
+- A、B、D は参加、C は不参加
+
+concrete candidates:
+
+- `("B",)`
+- `("D",)`
+- `("B","D")`
+
+3 候補すべて FIFO True。
+
+role:
+
+- `("B",)`: buyer B、seller A、nonparticipating なし
+- `("D",)`: buyer D、sellers A・B、nonparticipating C
+- `("B","D")`: buyers B・D、seller A、nonparticipating C
+
+通常ケースの local result:
+
+- `("B",)`: resolved=True、`final_offset=3`、`simulated_timestep_count=3`
+- `("D",)`: resolved=True、`final_offset=5`、`simulated_timestep_count=5`
+- `("B","D")`: resolved=True、`final_offset=5`、`simulated_timestep_count=5`
+
+通常ケースでは、nonparticipating C が offset 4、virtual timestep 14 に binding 通過し、最後の required buyer D が offset 5、virtual timestep 15 に通過した。
+
+したがって、通常ケースだけを見れば C passage は現行停止前に観測できるが、これは一般保証ではない。
+
+economic:
+
+- 3 候補すべて economically feasible
+- selected `=("B","D")`
+- payment `=CALCULATED`
+- final rank `=SELECTED_CANDIDATE_RANKS`
+- validation 成功
+- atomic apply 成功
+
+## D. 境界ケース Stage 3
+
+Stage 3 は独立 World で構築した。
+
+目的:
+
+- nonparticipating C が binding 未通過のまま
+- required buyer・seller の passage が全て揃い
+- local calculation が resolved し
+- economic evaluation から atomic apply まで進む
+
+ことを実交通状態で実証する。
+
+ネットワーク:
+
+- 1 time_value Node
+- 4 approach inlink
+- 3 outlink（D→`out_d`、A・C→`out_c`、B→`out_b`）
+- 全 link 単車線
+
+到着:
+
+- A=11、B=12、C=13、D=14
+
+baseline passage（flow hold release timestep=16 の条件下）:
+
+- A=16、B=16、C=17、D=16
+
+diagnostic traffic conditions:
+
+- Stage 3 専用 flow hold release timestep `=16`
+- approach inlink `capacity_out=0.2`
+- approach inlink `capacity_in=10000.0`
+- snapshot 時点の `capacity_out_remain=0`
+- `out_c` の jam density `=0.05`（inlink capacity 待機中に `move_remain` が蓄積し、同一 scan で C が誤通過しないための診断用 link 条件）
+- Node flow は candidate local で十分開放
+- clearance 待ちは使用しない（junction clearance を診断上満たす設定）
+
+`capacity_out=0.2` の因果:
+
+- candidate local の virtual time 更新で、各 offset ごとに `capacity_out_remain` が 0.2 ずつ補充される（`remain < DELTAN` のとき `+ capacity_out * DELTAT`）。
+- offset 2〜4 では残量が 1 未満なので、到着済み Vehicle は `INLINK_OUTFLOW_CAPACITY_UNAVAILABLE` で一時 skip される。
+- offset 5 では残量が 1 となり、D、A、C、B を同じ binding scan で試せる。
+- このため 4 台を同一 scan へ揃えた。
+
+candidate `("D",)` の complete binding sequence: D、A、C、B。
+
+offset 5 / virtual timestep 15:
+
+1. D が `out_d` へ通過
+2. A が `out_c` へ通過
+3. C は A が同一 scan で `out_c` へ入ったため、`OUTLINK_ENTRY_SPACE_UNAVAILABLE` で一時 skip
+4. B が `out_b` へ通過
+5. D、A、B の required passage を記録
+6. required complete=True
+7. resolved=True
+8. calculation finished=True
+9. C は同一 scan で再評価されず、binding passage 未観測のまま終了
+
+C について:
+
+- 全 timestep の binding passage 出現回数 `=0`
+- required passage 対象外
+- `newly_recorded_required_passage_visit_keys` へ一度も入らない
+- 最終 skip reason `=OUTLINK_ENTRY_SPACE_UNAVAILABLE`
+
+candidate `("D",)` の結果:
+
+- resolved=True、stop_reason=RESOLVED、`final_offset=5`、`simulated_timestep_count=5`
+- required candidate passage: D=15、A=15、B=15
+
+economic（candidate `("D",)`）:
+
+- D baseline=16、candidate=15 → expected saving=1 timestep
+- declared VOT=100 → `G_b=100`
+- seller A・B は candidate passage が baseline より遅くない（A・B は baseline=16、candidate=15）
+- seller compensation `R=0`（待ち増加が 0 のため。A の申告 VOT=0 でも、今回の条件では `expected_waiting_increase_timesteps=0` なので `R_s=0` となる）
+- total `G=100`、total `R=0`、surplus=100、economically feasible=True
+
+Stage 3 では 3 候補すべて feasible。selected `=("B","D")`、surplus=101。
+
+後段:
+
+- payment=CALCULATED
+- final rank=SELECTED_CANDIDATE_RANKS
+- validation 成功
+- atomic apply 成功
+
+この結果の意味:
+
+- 本番コードの不具合を示すものではない。
+- 現行仕様どおり、buyer・seller の required passage が揃えば正常終了する。
+- trade_scope 内 nonparticipating の candidate passage は成功条件ではない。
+- nonparticipating が未通過のままでも、取引成立から atomic apply まで進めることを実交通状態で確認した（境界ケースを再現した）。
+- この境界ケースは、方式 A・B・C による追加計算の必要性と負荷を検討するための基礎となる。
+
+## E. 保存済み処理量の比較
+
+診断 §38「Stage 2 versus Stage 3 workload comparison」は、保存済み `DriverPipelineTrace` から集計した。
+
+Stage 2 と Stage 3 で同じ Node 件数・候補件数:
+
+- target Node 数=1
+- candidate Visit 数=4
+- concrete candidate 数=3
+- general trade rank 候補数=3
+- FIFO inspection 候補数=3
+- FIFO True 候補数=3
+- local virtual 候補数=3
+- resolved=3、unresolved=0
+- economic 候補数=3、feasible 候補数=3
+- selected `=("B","D")`
+- expected candidate local World copy 数=3
+
+World copy 数:
+
+- FIFO True 候補ごとに candidate local World を 1 つ作る契約からの期待値である。
+- 直接 timing counter で測った値ではない。
+- 表記: `expected from one local World per FIFO-True candidate; not directly timed`
+
+候補別（`buyers_sorted` で対応）:
+
+- `("B",)`: Stage 2 simulated=3、timestep results=4、skip=13 / Stage 3 simulated=5、timestep results=6、skip=21
+- `("D",)`: Stage 2 simulated=5、timestep results=6、binding transfer 成功=4、skip=14 / Stage 3 simulated=5、timestep results=6、binding transfer 成功=3、skip=21
+- `("B","D")`: Stage 2 simulated=5、timestep results=6、skip=14 / Stage 3 simulated=6、timestep results=7、skip=21
+
+合計:
+
+Stage 2:
+
+- total `simulated_timestep_count=13`
+- total `timestep_result_count=16`
+- binding transfer 成功=10
+- temporary skip=41（理由は `NOT_ARRIVED_AT_TARGET_NODE` のみ）
+- total horizon step ratio=0.1733
+
+Stage 3:
+
+- total `simulated_timestep_count=16`
+- total `timestep_result_count=19`
+- binding transfer 成功=10
+- temporary skip=63（`NOT_ARRIVED=42`、`INLINK_OUTFLOW_CAPACITY_UNAVAILABLE=18`、`OUTLINK_ENTRY_SPACE_UNAVAILABLE=3`）
+- total horizon step ratio=0.2133
+
+重要な result 契約（保存済み result から確認）:
+
+- `timestep_results` 数 `= final_offset + 1`
+- `simulated_timestep_count = final_offset`
+- 両者は同じではない。offset 0 も `timestep_results` に含まれることが差の原因である。
+
+## F. 壁時計
+
+利用者 Terminal で 5 回測定した `run_tvt_mp_driver` 時間（`world_prepare` 内の `finalize_scenario` は含めない）:
+
+Stage 2:
+
+- 0.0333、0.0325、0.0327、0.0323、0.0325 秒
+- 平均 0.03266 秒、中央値 0.0325 秒、範囲 0.0323〜0.0333 秒
+
+Stage 3:
+
+- 0.0699、0.0532、0.0591、0.0597、0.0516 秒
+- 平均 0.05870 秒、中央値 0.0591 秒、範囲 0.0516〜0.0699 秒
+
+平均差: 0.02604 秒。Stage 3 / Stage 2 の平均比は約 1.80 である。
+
+別の独立実行（利用者 Terminal）では Stage 2=0.0340 秒、Stage 3=0.0511 秒、比率は約 1.50 である。
+
+診断スクリプトの 1 回実行（Cursor 環境）では、Stage 2 driver≈0.0507 秒、Stage 3 driver≈0.0462 秒となり、Stage 3 がやや短かった。これは利用者 Terminal の 5 回測定と混同しない。
+
+整理:
+
+- Stage 2 時間は比較的安定する。
+- Stage 3 時間は変動が大きい。
+- Stage 3 は保存済み処理件数（simulated step、skip 等）が多い。
+- ただし driver 時間は処理件数へ単調比例しない。
+- Stage 2 と Stage 3 は交通状態と outlink 構成が異なる。
+- 時間差を C 未通過だけへ帰属できない。
+- 保存済み result には stage 別内部時間と World.copy 単体時間がない。
+- 現時点で比較できるのは whole-driver 時間と保存済み処理件数だけである。
+- 方式 A・B・C の追加負荷はまだ測定していない。
+
+## G. 今後の検討事項（未確定）
+
+局所仮想計算の追加継続方式を検討する際の未確定事項:
+
+1. nonparticipating 未通過時に、追加計算をどこまで継続するか
+2. 方式 A・B・C の正確な定義
+3. 各方式で得る値
+4. 方式ごとの追加 virtual timestep 数
+5. 追加 binding scan 数
+6. 追加 World copy の要否
+7. driver 全体時間への追加負荷
+8. 方式間で比較条件をそろえる方法
+9. stage 別 timing または World.copy 単体 timing を取得する診断方法
+10. 本番コードへの instrumentation が必要か、診断側だけで測れるか
+11. 通常ケースで追加継続が不要な候補を早期終了する扱い
+12. horizon まで C が通過しない場合の未観測表現
+
+方式 A・B・C の推奨や採否は、本節では行わない。

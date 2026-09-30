@@ -459,3 +459,29 @@
 7. commit 名に document は必須ではない。今回は実装コミットである。
 8. commit と push を分離する。
 9. 保存後、actual passage・actual outcome の設計へ進む。
+
+上記は 2026-09-29 時点の履歴である。TVT-MP 単一 decision timestep 診断の最新進捗は、本巻末尾の「TVT-MP単一decision timestep診断（2026-09-30）」と、詳細設計第4巻「TVT-MP単一decision timestep診断・通常ケースと境界ケースの比較（2026-09-30）」を参照する。
+
+## TVT-MP単一decision timestep診断（2026-09-30）
+
+詳細は、詳細設計第4巻「TVT-MP単一decision timestep診断・通常ケースと境界ケースの比較（2026-09-30）」を参照する。本節は作業再開用の要約である。
+
+- 診断ファイル `diagnostics/order_control/tvt_mp_single_decision_baseline_diagnostic.py` を作成済みである。2026-09-30 時点では Git 未追跡である。
+- 診断作成時点では、本番コード・既存テスト・既存設計文書は変更していない。今回の文書反映で第4巻と進捗第3巻のみ更新する。
+- Stage 1〜3 の全 assert は成功した。本物の `run_tvt_mp_driver` を入口から atomic apply まで確認した。
+- **通常ケース（Stage 2）**: nonparticipating C は required 完了前に binding 通過した（offset 4 / vt 14）。これは一般保証ではない。
+- **境界ケース（Stage 3）**: C は binding 未通過（出現回数 0、最終 skip `OUTLINK_ENTRY_SPACE_UNAVAILABLE`）。D・A・B の required 完了で resolved。economic feasible、selection、payment、final rank、validation、atomic apply まで成功。現行仕様どおりの正常終了である。
+- Stage 2 と Stage 3 の保存済み処理件数比較（診断 §38）を完了した。Node・候補件数は同じでも、Stage 3 は total simulated step が +3、temporary skip が +22 多い。
+- 利用者 Terminal で driver 壁時計を 5 回測定済み（Stage 2 平均 0.03266 秒、Stage 3 平均 0.05870 秒、平均比約 1.80）。別実行では比約 1.50。時間差を C 未通過だけへ帰属できない。
+- 方式 A・B・C の追加負荷は未測定である。採否は未決定である。
+- 次の作業: 方式 A・B・C を比較可能な形で定義し、追加計算部分だけを診断すること。stage 別 timing または World.copy 単体 timing の取得方法も未確定である。
+
+## 最新の再開地点（2026-09-30）
+
+1. 詳細設計第4巻「TVT-MP単一decision timestep診断・通常ケースと境界ケースの比較（2026-09-30）」を確認する。
+2. 本巻「TVT-MP単一decision timestep診断（2026-09-30）」を確認する。
+3. 診断スクリプト `diagnostics/order_control/tvt_mp_single_decision_baseline_diagnostic.py` を実行し、§38 の集計を再確認する（未追跡のままである）。
+4. 方式 A・B・C の定義と、追加 virtual timestep・binding scan・World copy の見積もり方を設計する（本番実装はまだ行わない）。
+5. `diagnostics/order_control.zip` は stage しない。
+6. 文書 2 ファイルを commit する場合は `document` を commit 名に含める。
+7. commit と push を分離する。
