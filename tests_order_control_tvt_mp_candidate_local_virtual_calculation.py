@@ -19,6 +19,8 @@ from uxsim.order_control_baseline_downstream_boundary import (
 from uxsim.order_control_tvt_mp_candidate_binding_transfer import (
     OrderControlTvtMpBindingTransferScanResult,
     OrderControlTvtMpBindingTransferStopReason,
+    OrderControlTvtMpBindingVisitTemporarySkip,
+    OrderControlTvtMpBindingVisitTemporarySkipReason,
 )
 from uxsim.order_control_tvt_mp_candidate_local_state import (
     build_tvt_mp_candidate_local_state,
@@ -2586,14 +2588,6 @@ def test_one_timestep_binding_updates_public_order_and_map_share_updated_records
         _buyer_seller_np_staggered_passage_state(horizon=2)
     )
     public_before = state.traffic_observation_records_in_public_order
-    untouched_objects = {
-        seller_visit.visit_key: state.traffic_observation_record_for_visit_key(
-            seller_visit.visit_key
-        ),
-        np_visit.visit_key: state.traffic_observation_record_for_visit_key(
-            np_visit.visit_key
-        ),
-    }
     run_tvt_mp_candidate_local_virtual_calculation_one_timestep(state)
     updated = state.traffic_observation_record_for_visit_key(buyer_visit.visit_key)
     for index, record in enumerate(state.traffic_observation_records_in_public_order):
@@ -2603,8 +2597,11 @@ def test_one_timestep_binding_updates_public_order_and_map_share_updated_records
             assert state._traffic_observation_record_by_visit_key[
                 buyer_visit.visit_key
             ] is updated
-        else:
-            assert record is untouched_objects[record.visit_key]
+    np_traffic = state.traffic_observation_record_for_visit_key(np_visit.visit_key)
+    assert np_traffic.candidate_passage_timestep is None
+    for record in state.traffic_observation_records_in_public_order:
+        if record.visit_key == np_visit.visit_key:
+            assert record is np_traffic
 
 
 def test_one_timestep_binding_updates_do_not_apply_required_when_traffic_propose_fails():
@@ -2960,6 +2957,380 @@ def test_binding_apply_updates_both_passage_and_traffic_with_shared_frozen_recor
             assert state._traffic_observation_record_by_visit_key[
                 buyer_visit.visit_key
             ] is traffic
+
+
+def _binding_scan_result(state):
+    return orch_mod.scan_and_transfer_tvt_mp_binding_visits_at_current_timestep(
+        state.binding_transfer_state
+    )
+
+
+def _apply_traffic_observation_skip_and_clearance_updates(
+    state,
+    binding_result,
+    *,
+    offset=0,
+    virtual_timestep=BASELINE_T,
+):
+    orch_mod._apply_binding_transfer_traffic_observation_skip_and_clearance_updates(
+        state,
+        binding_result,
+        offset,
+        virtual_timestep,
+    )
+
+
+def _traffic_metadata_snapshot(state, visit_key):
+    record = state.traffic_observation_record_for_visit_key(visit_key)
+    return (
+        record.candidate_passage_timestep,
+        record.observed_offset,
+        record.observed_virtual_timestep,
+        record.predicted_time_difference_timesteps,
+        record.predicted_time_difference_seconds,
+        record.predicted_signed_time_value_change,
+        record.true_vot_per_second,
+        record.baseline_passage_timestep,
+        record.last_checked_offset,
+        record.last_checked_virtual_timestep,
+        record.last_temporary_skip_reason,
+        record.last_temporary_skip_offset,
+        record.latest_clearance_stop_context,
+    )
+
+
+def test_traffic_observation_temporary_skip_records_buyer_seller_and_nonparticipating():
+    _world, _local, _collector, state, visits = _buyer_ready_case(
+        horizon=1,
+        incoming=False,
+    )
+    buyer_visit = visits[0]
+    binding_result = _binding_scan_result(state)
+    assert binding_result.temporarily_skipped_visits
+    before = _traffic_metadata_snapshot(state, buyer_visit.visit_key)
+    _apply_traffic_observation_skip_and_clearance_updates(state, binding_result)
+    after = state.traffic_observation_record_for_visit_key(buyer_visit.visit_key)
+    assert after.last_checked_offset == 0
+    assert after.last_checked_virtual_timestep == BASELINE_T
+    assert after.last_temporary_skip_offset == 0
+    assert (
+        after.last_temporary_skip_reason
+        is OrderControlTvtMpBindingVisitTemporarySkipReason.NOT_ARRIVED_AT_TARGET_NODE
+    )
+    assert before[0] == after.candidate_passage_timestep
+    assert before[6] == after.true_vot_per_second
+    assert before[7] == after.baseline_passage_timestep
+
+    _world2, _local2, state2, _buyer2, seller_visit, _np2 = (
+        _buyer_seller_np_staggered_passage_state(horizon=1)
+    )
+    binding2 = _binding_scan_result(state2)
+    seller_skip = None
+    for skip in binding2.temporarily_skipped_visits:
+        if skip.binding_visit_key == seller_visit.visit_key:
+            seller_skip = skip
+            break
+    assert seller_skip is not None
+    _apply_traffic_observation_skip_and_clearance_updates(state2, binding2)
+    seller_traffic = state2.traffic_observation_record_for_visit_key(
+        seller_visit.visit_key
+    )
+    assert seller_traffic.last_temporary_skip_reason == seller_skip.skip_reason
+    assert seller_traffic.last_checked_offset == 0
+
+    _world3, _local3, state3, _buyer3, _seller3, np_visit = (
+        _buyer_seller_np_staggered_passage_state(horizon=1)
+    )
+    template3 = _binding_transfer_scan_template(state3)
+    np_skip = OrderControlTvtMpBindingVisitTemporarySkip(
+        binding_visit_key=np_visit.visit_key,
+        vehicle_name="np_veh",
+        skip_reason=(
+            OrderControlTvtMpBindingVisitTemporarySkipReason.NOT_ARRIVED_AT_TARGET_NODE
+        ),
+    )
+    binding3 = dataclasses.replace(
+        template3,
+        transferred_binding_visit_keys=(),
+        temporarily_skipped_visits=(np_skip,),
+        stop_reason=OrderControlTvtMpBindingTransferStopReason.BINDING_SEQUENCE_COMPLETED,
+        stopped_binding_visit_key=None,
+    )
+    _apply_traffic_observation_skip_and_clearance_updates(state3, binding3)
+    np_traffic = state3.traffic_observation_record_for_visit_key(np_visit.visit_key)
+    assert np_traffic.last_temporary_skip_reason == np_skip.skip_reason
+
+
+def test_traffic_observation_temporary_skip_ignores_outside_trade_scope():
+    _world, _local, state, buyer_visit, _seller, _np = (
+        _traffic_observation_three_role_state()
+    )
+    outside_key = ("outside_veh", 99)
+    template = _binding_transfer_scan_template(state)
+    outside_skip = OrderControlTvtMpBindingVisitTemporarySkip(
+        binding_visit_key=outside_key,
+        vehicle_name="outside_veh",
+        skip_reason=(
+            OrderControlTvtMpBindingVisitTemporarySkipReason.NOT_INLINK_PHYSICAL_HEAD
+        ),
+    )
+    binding_result = dataclasses.replace(
+        template,
+        temporarily_skipped_visits=(outside_skip,),
+    )
+    before = _traffic_metadata_snapshot(state, buyer_visit.visit_key)
+    _apply_traffic_observation_skip_and_clearance_updates(state, binding_result)
+    assert _traffic_metadata_snapshot(state, buyer_visit.visit_key) == before
+
+
+def test_traffic_observation_temporary_skip_rejects_duplicate_and_transfer_overlap():
+    _world, _local, state, buyer_visit, _seller, _np = (
+        _traffic_observation_three_role_state()
+    )
+    template = _binding_transfer_scan_template(state)
+    skip = OrderControlTvtMpBindingVisitTemporarySkip(
+        binding_visit_key=buyer_visit.visit_key,
+        vehicle_name="buyer_veh",
+        skip_reason=(
+            OrderControlTvtMpBindingVisitTemporarySkipReason.NOT_INLINK_PHYSICAL_HEAD
+        ),
+    )
+    duplicate_binding = dataclasses.replace(
+        template,
+        transferred_binding_visit_keys=(),
+        temporarily_skipped_visits=(skip, skip),
+        stop_reason=OrderControlTvtMpBindingTransferStopReason.BINDING_SEQUENCE_COMPLETED,
+        stopped_binding_visit_key=None,
+    )
+    try:
+        _apply_traffic_observation_skip_and_clearance_updates(state, duplicate_binding)
+        raise AssertionError("expected RuntimeError for duplicate temporary skip")
+    except RuntimeError as error:
+        assert "twice" in str(error)
+
+    overlap_binding = dataclasses.replace(
+        template,
+        transferred_binding_visit_keys=(buyer_visit.visit_key,),
+        temporarily_skipped_visits=(skip,),
+        stop_reason=OrderControlTvtMpBindingTransferStopReason.BINDING_SEQUENCE_COMPLETED,
+        stopped_binding_visit_key=None,
+    )
+    before = _traffic_metadata_snapshot(state, buyer_visit.visit_key)
+    try:
+        _apply_traffic_observation_skip_and_clearance_updates(state, overlap_binding)
+        raise AssertionError("expected RuntimeError for transfer and skip overlap")
+    except RuntimeError as error:
+        assert "temporarily_skipped_visits" in str(error)
+    assert _traffic_metadata_snapshot(state, buyer_visit.visit_key) == before
+
+
+def test_traffic_observation_temporary_skip_rejects_observed_visit():
+    _world, _local, state, buyer_visit, _seller, _np = (
+        _traffic_observation_three_role_state()
+    )
+    binding_passage = _buyer_only_binding_result(state, buyer_visit)
+    orch_mod._apply_binding_transfer_required_passage_and_traffic_observation_updates(
+        state,
+        binding_passage,
+        0,
+        BASELINE_T,
+    )
+    template = _binding_transfer_scan_template(state)
+    skip = OrderControlTvtMpBindingVisitTemporarySkip(
+        binding_visit_key=buyer_visit.visit_key,
+        vehicle_name="buyer_veh",
+        skip_reason=(
+            OrderControlTvtMpBindingVisitTemporarySkipReason.NOT_INLINK_PHYSICAL_HEAD
+        ),
+    )
+    binding_skip = dataclasses.replace(
+        template,
+        temporarily_skipped_visits=(skip,),
+    )
+    metadata_before = _traffic_metadata_snapshot(state, buyer_visit.visit_key)
+    try:
+        _apply_traffic_observation_skip_and_clearance_updates(state, binding_skip)
+        raise AssertionError("expected RuntimeError for skip on observed visit")
+    except RuntimeError as error:
+        assert "new temporary skip" in str(error)
+    assert _traffic_metadata_snapshot(state, buyer_visit.visit_key) == metadata_before
+
+
+def test_traffic_observation_clearance_records_context_and_preserves_skip_fields():
+    _world, local_state, _collector, state, visits = _buyer_ready_case(horizon=1)
+    buyer_visit = visits[0]
+    _block_clearance_from_other_inlink(local_state)
+    binding_result = _binding_scan_result(state)
+    assert binding_result.stop_reason is (
+        OrderControlTvtMpBindingTransferStopReason.CLEARANCE_NOT_SATISFIED
+    )
+    skip_binding = dataclasses.replace(
+        binding_result,
+        stop_reason=OrderControlTvtMpBindingTransferStopReason.BINDING_SEQUENCE_COMPLETED,
+        stopped_binding_visit_key=None,
+        temporarily_skipped_visits=(
+            OrderControlTvtMpBindingVisitTemporarySkip(
+                binding_visit_key=buyer_visit.visit_key,
+                vehicle_name="buyer_veh",
+                skip_reason=(
+                    OrderControlTvtMpBindingVisitTemporarySkipReason.NOT_ARRIVED_AT_TARGET_NODE
+                ),
+            ),
+        ),
+    )
+    _apply_traffic_observation_skip_and_clearance_updates(state, skip_binding)
+    traffic_with_skip = state.traffic_observation_record_for_visit_key(
+        buyer_visit.visit_key
+    )
+    assert traffic_with_skip.last_temporary_skip_offset == 0
+    _apply_traffic_observation_skip_and_clearance_updates(state, binding_result)
+    traffic = state.traffic_observation_record_for_visit_key(buyer_visit.visit_key)
+    assert traffic.last_checked_offset == 0
+    assert traffic.last_checked_virtual_timestep == BASELINE_T
+    assert traffic.last_temporary_skip_offset == 0
+    assert (
+        traffic.last_temporary_skip_reason
+        is OrderControlTvtMpBindingVisitTemporarySkipReason.NOT_ARRIVED_AT_TARGET_NODE
+    )
+    context = traffic.latest_clearance_stop_context
+    assert context is not None
+    assert context.offset == 0
+    assert context.virtual_timestep == BASELINE_T
+    assert context.stopped_binding_visit_key == buyer_visit.visit_key
+
+
+def test_traffic_observation_clearance_does_not_update_rear_unreached_visit():
+    _world, _local, _collector, state, visits = (
+        _forward_visit_clearance_stops_before_rear_required_buyer_case(horizon=1)
+    )
+    rear_visit = visits[1]
+    binding_result = _binding_scan_result(state)
+    _apply_traffic_observation_skip_and_clearance_updates(state, binding_result)
+    rear_traffic = state.traffic_observation_record_for_visit_key(rear_visit.visit_key)
+    assert rear_traffic.last_checked_offset is None
+    assert rear_traffic.latest_clearance_stop_context is None
+
+
+def test_traffic_observation_clearance_ignores_outside_trade_scope_stop_target():
+    _world, _local, state, buyer_visit, _seller, _np = (
+        _traffic_observation_three_role_state()
+    )
+    outside_key = ("outside_veh", 99)
+    template = _binding_transfer_scan_template(state)
+    binding_result = dataclasses.replace(
+        template,
+        stop_reason=OrderControlTvtMpBindingTransferStopReason.CLEARANCE_NOT_SATISFIED,
+        stopped_binding_visit_key=outside_key,
+    )
+    before = _traffic_metadata_snapshot(state, buyer_visit.visit_key)
+    _apply_traffic_observation_skip_and_clearance_updates(state, binding_result)
+    assert _traffic_metadata_snapshot(state, buyer_visit.visit_key) == before
+
+
+def test_traffic_observation_clearance_rejects_missing_stopped_key_and_duplicates():
+    _world, local_state, _collector, state, visits = _buyer_ready_case(horizon=1)
+    buyer_visit = visits[0]
+    _block_clearance_from_other_inlink(local_state)
+    binding_result = _binding_scan_result(state)
+    broken_binding = dataclasses.replace(
+        binding_result,
+        stopped_binding_visit_key=None,
+    )
+    before = _traffic_metadata_snapshot(state, buyer_visit.visit_key)
+    try:
+        _apply_traffic_observation_skip_and_clearance_updates(state, broken_binding)
+        raise AssertionError("expected RuntimeError for missing stopped visit key")
+    except RuntimeError as error:
+        assert "stopped_binding_visit_key is missing" in str(error)
+    assert _traffic_metadata_snapshot(state, buyer_visit.visit_key) == before
+
+    _apply_traffic_observation_skip_and_clearance_updates(state, binding_result)
+    try:
+        _apply_traffic_observation_skip_and_clearance_updates(state, binding_result)
+        raise AssertionError("expected RuntimeError for duplicate clearance context")
+    except RuntimeError as error:
+        assert "clearance stop context at offset" in str(error)
+
+
+def test_traffic_observation_clearance_rejects_observed_visit():
+    _world, _local, state, buyer_visit, _seller, _np = (
+        _traffic_observation_three_role_state()
+    )
+    binding_passage = _buyer_only_binding_result(state, buyer_visit)
+    orch_mod._apply_binding_transfer_required_passage_and_traffic_observation_updates(
+        state,
+        binding_passage,
+        0,
+        BASELINE_T,
+    )
+    template = _binding_transfer_scan_template(state)
+    binding_clearance = dataclasses.replace(
+        template,
+        stop_reason=OrderControlTvtMpBindingTransferStopReason.CLEARANCE_NOT_SATISFIED,
+        stopped_binding_visit_key=buyer_visit.visit_key,
+    )
+    metadata_before = _traffic_metadata_snapshot(state, buyer_visit.visit_key)
+    try:
+        _apply_traffic_observation_skip_and_clearance_updates(state, binding_clearance)
+        raise AssertionError("expected RuntimeError for clearance on observed visit")
+    except RuntimeError as error:
+        assert "stopped for clearance" in str(error)
+    assert _traffic_metadata_snapshot(state, buyer_visit.visit_key) == metadata_before
+
+
+def test_traffic_observation_skip_and_clearance_map_and_public_order_share_record():
+    _world, _local, _collector, state, visits = _buyer_ready_case(
+        horizon=1,
+        incoming=False,
+    )
+    buyer_visit = visits[0]
+    binding_result = _binding_scan_result(state)
+    _apply_traffic_observation_skip_and_clearance_updates(state, binding_result)
+    updated = state.traffic_observation_record_for_visit_key(buyer_visit.visit_key)
+    for record in state.traffic_observation_records_in_public_order:
+        if record.visit_key == buyer_visit.visit_key:
+            assert record is updated
+            assert state._traffic_observation_record_by_visit_key[
+                buyer_visit.visit_key
+            ] is updated
+
+
+def test_traffic_observation_skip_apply_failure_does_not_partially_update_records():
+    _world, _local, _collector, state, visits = _buyer_ready_case(
+        horizon=1,
+        incoming=False,
+    )
+    buyer_visit = visits[0]
+    binding_result = _binding_scan_result(state)
+    snapshots = {}
+    for record in state.traffic_observation_records_in_public_order:
+        snapshots[record.visit_key] = _traffic_metadata_snapshot(state, record.visit_key)
+    filtered = []
+    for record in state._traffic_observation_records_in_public_order:
+        if record.visit_key != buyer_visit.visit_key:
+            filtered.append(record)
+    state._traffic_observation_records_in_public_order[:] = filtered
+    try:
+        _apply_traffic_observation_skip_and_clearance_updates(state, binding_result)
+        raise AssertionError("expected RuntimeError for missing public order entry")
+    except RuntimeError:
+        pass
+    for visit_key, snapshot in snapshots.items():
+        assert _traffic_metadata_snapshot(state, visit_key) == snapshot
+
+
+def test_traffic_observation_skip_and_clearance_one_timestep_keeps_finished_and_resolved():
+    _world, _local, _collector, state, _visits = _buyer_ready_case(horizon=1)
+    result = run_tvt_mp_candidate_local_virtual_calculation(state)
+    assert result.resolved is True
+    assert result.stop_reason is (
+        OrderControlTvtMpCandidateLocalVirtualCalculationStopReason.RESOLVED
+    )
+    traffic = state.traffic_observation_record_for_visit_key(
+        state.required_buyer_visit_keys[0]
+    )
+    assert traffic.candidate_passage_timestep == BASELINE_T
+    assert traffic.last_checked_offset == 0
 
 
 def test_economic_required_completion_timestamps_recorded_once_at_first_completion():

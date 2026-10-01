@@ -622,6 +622,12 @@ def run_tvt_mp_candidate_local_virtual_calculation_one_timestep(
             virtual_timestep,
         )
     )
+    _apply_binding_transfer_traffic_observation_skip_and_clearance_updates(
+        state,
+        binding_transfer_result,
+        offset,
+        virtual_timestep,
+    )
     _raise_if_unpassed_required_vehicle_passed_unbound(
         state,
         unbound_fcfs_result,
@@ -1485,6 +1491,314 @@ def _apply_binding_transfer_required_passage_and_traffic_observation_updates(
         newly_recorded_keys,
     )
     return newly_recorded_keys
+
+
+def _apply_binding_transfer_traffic_observation_skip_and_clearance_updates(
+    state: OrderControlTvtMpCandidateLocalVirtualCalculationState,
+    binding_transfer_result: OrderControlTvtMpBindingTransferScanResult,
+    offset: int,
+    virtual_timestep: int,
+) -> None:
+    _raise_if_binding_transfer_has_transfer_and_temporary_skip_overlap(
+        state,
+        binding_transfer_result,
+    )
+    proposed_temporary_skip_records = (
+        _propose_traffic_observation_temporary_skip_updates_from_binding_transfer(
+            state,
+            binding_transfer_result,
+            offset,
+            virtual_timestep,
+        )
+    )
+    proposed_clearance_records = (
+        _propose_traffic_observation_clearance_updates_from_binding_transfer(
+            state,
+            binding_transfer_result,
+            offset,
+            virtual_timestep,
+        )
+    )
+    proposed_metadata_records = _merge_traffic_observation_metadata_update_proposals(
+        state,
+        proposed_temporary_skip_records,
+        proposed_clearance_records,
+    )
+    if not proposed_metadata_records:
+        return
+    metadata_apply_plan = (
+        _build_traffic_observation_apply_plan_after_pre_apply_validation(
+            state,
+            proposed_metadata_records,
+        )
+    )
+    _apply_traffic_observation_apply_plan_to_state(
+        state,
+        metadata_apply_plan,
+    )
+
+
+def _raise_if_binding_transfer_has_transfer_and_temporary_skip_overlap(
+    state: OrderControlTvtMpCandidateLocalVirtualCalculationState,
+    binding_transfer_result: OrderControlTvtMpBindingTransferScanResult,
+) -> None:
+    node_name = state.candidate_local_state.target_node_name
+    transferred_keys = set(binding_transfer_result.transferred_binding_visit_keys)
+    for skip_record in binding_transfer_result.temporarily_skipped_visits:
+        visit_key = skip_record.binding_visit_key
+        if visit_key in transferred_keys:
+            raise RuntimeError(
+                f"Node {node_name!r}: VisitKey {visit_key!r} appears in both "
+                "transferred_binding_visit_keys and temporarily_skipped_visits "
+                "in one binding transfer result."
+            )
+
+
+def _propose_traffic_observation_temporary_skip_updates_from_binding_transfer(
+    state: OrderControlTvtMpCandidateLocalVirtualCalculationState,
+    binding_transfer_result: OrderControlTvtMpBindingTransferScanResult,
+    offset: int,
+    virtual_timestep: int,
+) -> tuple[OrderControlTvtMpCandidateTrafficObservationRecord, ...]:
+    node_name = state.candidate_local_state.target_node_name
+    offset_value = _require_traffic_observation_update_offset(offset, node_name=node_name)
+    virtual_timestep_value = _require_traffic_observation_update_virtual_timestep(
+        virtual_timestep,
+        node_name=node_name,
+    )
+    trade_scope_visit_keys = _trade_scope_visit_keys_for_traffic_observation(state)
+    proposed_records: list[OrderControlTvtMpCandidateTrafficObservationRecord] = []
+    seen_trade_scope_skip_keys: set[OrderControlTvtVisitKey] = set()
+    for skip_record in binding_transfer_result.temporarily_skipped_visits:
+        visit_key = skip_record.binding_visit_key
+        if visit_key not in trade_scope_visit_keys:
+            continue
+        if visit_key in seen_trade_scope_skip_keys:
+            raise RuntimeError(
+                f"Node {node_name!r}: trade-scope VisitKey {visit_key!r} was "
+                "temporarily skipped twice in one binding transfer result."
+            )
+        seen_trade_scope_skip_keys.add(visit_key)
+        existing_record = state._traffic_observation_record_by_visit_key.get(visit_key)
+        if existing_record is None:
+            raise RuntimeError(
+                f"Node {node_name!r}: trade-scope VisitKey {visit_key!r} was "
+                "temporarily skipped by binding but has no traffic observation "
+                "record."
+            )
+        if type(existing_record.candidate_passage_timestep) is int:
+            raise RuntimeError(
+                f"Node {node_name!r}: trade-scope VisitKey {visit_key!r} already "
+                "has candidate passage timestep "
+                f"{existing_record.candidate_passage_timestep} but received a "
+                "new temporary skip."
+            )
+        if existing_record.last_temporary_skip_offset == offset_value:
+            raise RuntimeError(
+                f"Node {node_name!r}: trade-scope VisitKey {visit_key!r} already "
+                f"has temporary skip information at offset {offset_value}."
+            )
+        previous_skip_offset = existing_record.last_temporary_skip_offset
+        if (
+            previous_skip_offset is not None
+            and offset_value < previous_skip_offset
+        ):
+            raise RuntimeError(
+                f"Node {node_name!r}: trade-scope VisitKey {visit_key!r} "
+                f"temporary skip offset {offset_value} is earlier than the "
+                f"stored skip offset {previous_skip_offset}."
+            )
+        proposed_records.append(
+            _traffic_observation_record_with_temporary_skip_update(
+                existing_record,
+                offset_value=offset_value,
+                virtual_timestep_value=virtual_timestep_value,
+                skip_reason=skip_record.skip_reason,
+            )
+        )
+    return tuple(proposed_records)
+
+
+def _propose_traffic_observation_clearance_updates_from_binding_transfer(
+    state: OrderControlTvtMpCandidateLocalVirtualCalculationState,
+    binding_transfer_result: OrderControlTvtMpBindingTransferScanResult,
+    offset: int,
+    virtual_timestep: int,
+) -> tuple[OrderControlTvtMpCandidateTrafficObservationRecord, ...]:
+    if (
+        binding_transfer_result.stop_reason
+        is not OrderControlTvtMpBindingTransferStopReason.CLEARANCE_NOT_SATISFIED
+    ):
+        return ()
+    node_name = state.candidate_local_state.target_node_name
+    stopped_visit_key = binding_transfer_result.stopped_binding_visit_key
+    if stopped_visit_key is None:
+        raise RuntimeError(
+            f"Node {node_name!r}: binding transfer stop reason is "
+            "CLEARANCE_NOT_SATISFIED but stopped_binding_visit_key is missing."
+        )
+    trade_scope_visit_keys = _trade_scope_visit_keys_for_traffic_observation(state)
+    if stopped_visit_key not in trade_scope_visit_keys:
+        return ()
+    offset_value = _require_traffic_observation_update_offset(offset, node_name=node_name)
+    virtual_timestep_value = _require_traffic_observation_update_virtual_timestep(
+        virtual_timestep,
+        node_name=node_name,
+    )
+    existing_record = state._traffic_observation_record_by_visit_key.get(
+        stopped_visit_key
+    )
+    if existing_record is None:
+        raise RuntimeError(
+            f"Node {node_name!r}: trade-scope VisitKey {stopped_visit_key!r} "
+            "stopped for clearance but has no traffic observation record."
+        )
+    if type(existing_record.candidate_passage_timestep) is int:
+        raise RuntimeError(
+            f"Node {node_name!r}: trade-scope VisitKey {stopped_visit_key!r} "
+            "already has candidate passage timestep "
+            f"{existing_record.candidate_passage_timestep} but was stopped for "
+            "clearance."
+        )
+    previous_clearance_context = existing_record.latest_clearance_stop_context
+    if previous_clearance_context is not None:
+        if previous_clearance_context.offset == offset_value:
+            raise RuntimeError(
+                f"Node {node_name!r}: trade-scope VisitKey {stopped_visit_key!r} "
+                f"already has clearance stop context at offset {offset_value}."
+            )
+    clearance_context = OrderControlTvtMpCandidateClearanceScanStopContext(
+        virtual_timestep=virtual_timestep_value,
+        offset=offset_value,
+        stopped_binding_visit_key=stopped_visit_key,
+    )
+    return (
+        _traffic_observation_record_with_clearance_stop_update(
+            existing_record,
+            offset_value=offset_value,
+            virtual_timestep_value=virtual_timestep_value,
+            clearance_context=clearance_context,
+        ),
+    )
+
+
+def _merge_traffic_observation_metadata_update_proposals(
+    state: OrderControlTvtMpCandidateLocalVirtualCalculationState,
+    proposed_temporary_skip_records: tuple[
+        OrderControlTvtMpCandidateTrafficObservationRecord,
+        ...,
+    ],
+    proposed_clearance_records: tuple[
+        OrderControlTvtMpCandidateTrafficObservationRecord,
+        ...,
+    ],
+) -> tuple[OrderControlTvtMpCandidateTrafficObservationRecord, ...]:
+    node_name = state.candidate_local_state.target_node_name
+    merged: list[OrderControlTvtMpCandidateTrafficObservationRecord] = []
+    seen_visit_keys: set[OrderControlTvtVisitKey] = set()
+    for record in proposed_temporary_skip_records:
+        visit_key = record.visit_key
+        if visit_key in seen_visit_keys:
+            raise RuntimeError(
+                f"Node {node_name!r}: traffic observation metadata update for "
+                f"VisitKey {visit_key!r} appears more than once."
+            )
+        seen_visit_keys.add(visit_key)
+        merged.append(record)
+    for record in proposed_clearance_records:
+        visit_key = record.visit_key
+        if visit_key in seen_visit_keys:
+            raise RuntimeError(
+                f"Node {node_name!r}: traffic observation metadata update for "
+                f"VisitKey {visit_key!r} appears more than once."
+            )
+        seen_visit_keys.add(visit_key)
+        merged.append(record)
+    return tuple(merged)
+
+
+def _traffic_observation_record_with_temporary_skip_update(
+    existing_record: OrderControlTvtMpCandidateTrafficObservationRecord,
+    *,
+    offset_value: int,
+    virtual_timestep_value: int,
+    skip_reason: OrderControlTvtMpBindingVisitTemporarySkipReason,
+) -> OrderControlTvtMpCandidateTrafficObservationRecord:
+    return OrderControlTvtMpCandidateTrafficObservationRecord(
+        visit_key=existing_record.visit_key,
+        vehicle_name=existing_record.vehicle_name,
+        vehicle_id=existing_record.vehicle_id,
+        trade_role=existing_record.trade_role,
+        binding_partition=existing_record.binding_partition,
+        binding_rank=existing_record.binding_rank,
+        trade_scope_rank=existing_record.trade_scope_rank,
+        inlink_name=existing_record.inlink_name,
+        route_next_link_name=existing_record.route_next_link_name,
+        true_vot_per_second=existing_record.true_vot_per_second,
+        baseline_passage_timestep=existing_record.baseline_passage_timestep,
+        candidate_passage_timestep=existing_record.candidate_passage_timestep,
+        passage_observation_status=existing_record.passage_observation_status,
+        observed_offset=existing_record.observed_offset,
+        observed_virtual_timestep=existing_record.observed_virtual_timestep,
+        predicted_time_difference_timesteps=(
+            existing_record.predicted_time_difference_timesteps
+        ),
+        predicted_time_difference_seconds=(
+            existing_record.predicted_time_difference_seconds
+        ),
+        predicted_signed_time_value_change=(
+            existing_record.predicted_signed_time_value_change
+        ),
+        last_checked_offset=offset_value,
+        last_checked_virtual_timestep=virtual_timestep_value,
+        last_temporary_skip_reason=skip_reason,
+        last_temporary_skip_offset=offset_value,
+        latest_clearance_stop_context=existing_record.latest_clearance_stop_context,
+        horizon_exhausted=existing_record.horizon_exhausted,
+        observation_complete=existing_record.observation_complete,
+    )
+
+
+def _traffic_observation_record_with_clearance_stop_update(
+    existing_record: OrderControlTvtMpCandidateTrafficObservationRecord,
+    *,
+    offset_value: int,
+    virtual_timestep_value: int,
+    clearance_context: OrderControlTvtMpCandidateClearanceScanStopContext,
+) -> OrderControlTvtMpCandidateTrafficObservationRecord:
+    return OrderControlTvtMpCandidateTrafficObservationRecord(
+        visit_key=existing_record.visit_key,
+        vehicle_name=existing_record.vehicle_name,
+        vehicle_id=existing_record.vehicle_id,
+        trade_role=existing_record.trade_role,
+        binding_partition=existing_record.binding_partition,
+        binding_rank=existing_record.binding_rank,
+        trade_scope_rank=existing_record.trade_scope_rank,
+        inlink_name=existing_record.inlink_name,
+        route_next_link_name=existing_record.route_next_link_name,
+        true_vot_per_second=existing_record.true_vot_per_second,
+        baseline_passage_timestep=existing_record.baseline_passage_timestep,
+        candidate_passage_timestep=existing_record.candidate_passage_timestep,
+        passage_observation_status=existing_record.passage_observation_status,
+        observed_offset=existing_record.observed_offset,
+        observed_virtual_timestep=existing_record.observed_virtual_timestep,
+        predicted_time_difference_timesteps=(
+            existing_record.predicted_time_difference_timesteps
+        ),
+        predicted_time_difference_seconds=(
+            existing_record.predicted_time_difference_seconds
+        ),
+        predicted_signed_time_value_change=(
+            existing_record.predicted_signed_time_value_change
+        ),
+        last_checked_offset=offset_value,
+        last_checked_virtual_timestep=virtual_timestep_value,
+        last_temporary_skip_reason=existing_record.last_temporary_skip_reason,
+        last_temporary_skip_offset=existing_record.last_temporary_skip_offset,
+        latest_clearance_stop_context=clearance_context,
+        horizon_exhausted=existing_record.horizon_exhausted,
+        observation_complete=existing_record.observation_complete,
+    )
 
 
 def _propose_required_passage_updates_from_binding_transfer(
