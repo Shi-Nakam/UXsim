@@ -460,23 +460,26 @@
 8. commit と push を分離する。
 9. 保存後、actual passage・actual outcome の設計へ進む。
 
-上記は 2026-09-29 時点の履歴である。TVT-MP 単一 decision timestep 診断の最新進捗は、本巻末尾の「TVT-MP単一decision timestep診断（2026-09-30）」と、詳細設計第4巻「TVT-MP単一decision timestep診断・通常ケースと境界ケースの比較（2026-09-30）」を参照する。
+上記は 2026-09-29 時点の履歴である。2026-09-30 の診断結果は、本巻「TVT-MP単一decision timestep診断（2026-09-30）」と、詳細設計第4巻「TVT-MP単一decision timestep診断・通常ケースと境界ケースの比較（2026-09-30）」を参照する。trade_scope 全 Visit の観測と nonparticipating の予測・実績の最新仕様は、詳細設計第4巻「TVT-MP trade_scope全Visitのcandidate passage観測とnonparticipating予測・実績時間価値 完全実装前仕様（2026-09-30）」と、本巻末尾の最新再開地点を参照する。
 
 ## TVT-MP単一decision timestep診断（2026-09-30）
 
 詳細は、詳細設計第4巻「TVT-MP単一decision timestep診断・通常ケースと境界ケースの比較（2026-09-30）」を参照する。本節は作業再開用の要約である。
 
 - 診断ファイル `diagnostics/order_control/tvt_mp_single_decision_baseline_diagnostic.py` を作成済みである。2026-09-30 時点では Git 未追跡である。
+- **診断ファイルの Git 状態（最新）**: 上記「2026-09-30 時点では Git 未追跡」は、診断作成直後の過去状態である。診断ファイル `diagnostics/order_control/tvt_mp_single_decision_baseline_diagnostic.py` は、その後コミット `f8d4529` に含めて保存済みである。同コミットはリモートブランチ `feature/intersection-order-control` へ push 済みである。最新の再開地点では、診断ファイルを未追跡ファイルとして扱わない。`diagnostics/order_control.zip` だけは、引き続き既存の未追跡ファイルであり stage しない。
 - 診断作成時点では、本番コード・既存テスト・既存設計文書は変更していない。今回の文書反映で第4巻と進捗第3巻のみ更新する。
 - Stage 1〜3 の全 assert は成功した。本物の `run_tvt_mp_driver` を入口から atomic apply まで確認した。
 - **通常ケース（Stage 2）**: nonparticipating C は required 完了前に binding 通過した（offset 4 / vt 14）。これは一般保証ではない。
 - **境界ケース（Stage 3）**: C は binding 未通過（出現回数 0、最終 skip `OUTLINK_ENTRY_SPACE_UNAVAILABLE`）。D・A・B の required 完了で resolved。economic feasible、selection、payment、final rank、validation、atomic apply まで成功。現行仕様どおりの正常終了である。
 - Stage 2 と Stage 3 の保存済み処理件数比較（診断 §38）を完了した。Node・候補件数は同じでも、Stage 3 は total simulated step が +3、temporary skip が +22 多い。
 - 利用者 Terminal で driver 壁時計を 5 回測定済み（Stage 2 平均 0.03266 秒、Stage 3 平均 0.05870 秒、平均比約 1.80）。別実行では比約 1.50。時間差を C 未通過だけへ帰属できない。
-- 方式 A・B・C の追加負荷は未測定である。採否は未決定である。
-- 次の作業: 方式 A・B・C を比較可能な形で定義し、追加計算部分だけを診断すること。stage 別 timing または World.copy 単体 timing の取得方法も未確定である。
+- 方式 A・B・C の追加負荷は未測定である。採否は未決定である。この2行は診断完了時点の過去記録である。方式 A・B・C は正式名称として採用しない。
+- 次の作業: 方式 A・B・C を比較可能な形で定義し、追加計算部分だけを診断すること。stage 別 timing または World.copy 単体 timing の取得方法も未確定である。この次作業は、後続の完全実装前仕様によって置き換わった過去の再開項目である。
 
 ## 最新の再開地点（2026-09-30）
+
+この再開地点は、診断完了直後の過去の再開地点である。当時は追加継続方式が未確定だった。選択候補だけの追加計算や、方式 A・B・C の定義は、ここで予定されていた未確定作業であり、第一実装の採用方針ではない。
 
 1. 詳細設計第4巻「TVT-MP単一decision timestep診断・通常ケースと境界ケースの比較（2026-09-30）」を確認する。
 2. 本巻「TVT-MP単一decision timestep診断（2026-09-30）」を確認する。
@@ -485,3 +488,35 @@
 5. `diagnostics/order_control.zip` は stage しない。
 6. 文書 2 ファイルを commit する場合は `document` を commit 名に含める。
 7. commit と push を分離する。
+
+上記 3. の「未追跡のままである」は、診断完了直後の当時の再開項目である。診断ファイルの最新 Git 状態は、直前の「TVT-MP単一decision timestep診断（2026-09-30）」節の「診断ファイルの Git 状態（最新）」を参照する。
+
+最新の採用方針と再開地点は、本巻末尾の「trade_scope全Visit観測の完全実装前仕様（2026-09-30）」を参照する。
+
+## trade_scope全Visit観測の完全実装前仕様（2026-09-30）
+
+詳細は、詳細設計第4巻「TVT-MP trade_scope全Visitのcandidate passage観測とnonparticipating予測・実績時間価値 完全実装前仕様（2026-09-30）」である。本節はその再開用要約である。本番実装はまだ行っていない。
+
+- 直前の「方式 A・B・C の定義」と「選択候補だけの追加計算」は、診断完了時点の未確定な再開地点である。正式名称ではない。
+- 再計算方式は第一実装では採用しない。選択候補の決定後に、decision timestep T から新しい local World を copy して選択候補だけをやり直す方式である。重複計算が生じるためである。
+- selection 後の live state 再開方式も第一実装では採用しない。FIFO True 候補ごとの live World を selection まで保持すると、大規模実験でピーク RAM が増えるためである。
+- 採用方針は、各 FIFO True candidate の最初の candidate local loop を、trade_scope 内の buyer・seller・nonparticipating 全員の candidate passage が観測されるか、既存 horizon 末尾まで、同じ local World と同じ state のまま続けることである。追加 World copy は作らない。
+- economic required は buyer・seller の `required_passage_records` のままである。traffic observation は別 record である。`resolved` は buyer・seller 完了の意味のままである。`finished` は全員観測または horizon 末尾である。
+- nonparticipating の予測価値は、`(baseline passage - candidate passage) × DELTAT × true VOT` である。正は短縮、負は遅延である。未観測なら金額は `None` である。支払・補償・選択には入れない。
+- actual outcome は buyer・seller・nonparticipating 共通の frozen record とし、成立時 record とは別に `order_exchange_log` へ追加する。actual passage 基盤は未実装である。
+- buyer・seller の事後評価は、同じ取引の buyer・seller の actual passage が揃った時点で始める。nonparticipating の actual passage は待たない。未観測でも正式支払・正式補償は変えない。
+- Stage 2 では追加 timestep は無い。C が buyer・seller 完了前に通過しているか、nonparticipating がいないためである。
+- Stage 3 では、buyer・seller 完了の offset 5 のあと、C が未通過なら offset 6 以降を同じ local World で続ける。C の candidate passage は未実行のため未確定である。
+
+## 最新の再開地点
+
+診断ファイル `diagnostics/order_control/tvt_mp_single_decision_baseline_diagnostic.py` はコミット `f8d4529` に含めて保存済みであり、リモートブランチ `feature/intersection-order-control` へ push 済みである。本再開地点では、診断ファイルを未追跡ファイルとして扱わない。`diagnostics/order_control.zip` だけは、引き続き既存の未追跡ファイルであり stage しない。
+
+1. 詳細設計第4巻「TVT-MP trade_scope全Visitのcandidate passage観測とnonparticipating予測・実績時間価値 完全実装前仕様（2026-09-30）」を確認する。
+2. 本巻「trade_scope全Visit観測の完全実装前仕様（2026-09-30）」を確認する。
+3. 診断節は過去記録として残っていることを確認する。方式 A・B・C は正式名称ではない。
+4. 次作業は、完全実装前仕様に対する反証レビューと、Stage 3 の offset 6 以降を見る診断拡張である。
+5. 本番実装はまだ行わない。
+6. `diagnostics/order_control.zip` は stage しない。
+7. 文書を commit する場合は commit 名に `document` を含める。実装前仕様を表すために `complete` は使わない。
+8. commit と push を分離する。

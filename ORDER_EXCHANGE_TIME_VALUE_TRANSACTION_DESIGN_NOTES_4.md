@@ -4159,7 +4159,9 @@ Terminal で、次の本番コードを直接確認した。
 
 本節は、2026-09-30 に完成した独立診断の記録である。本番仕様の変更ではない。局所仮想計算の追加継続方式（方式 A・B・C と呼ばれる候補）の採否は、本節では決めない。
 
-過去の第4巻各節は、その時点の正式記録として残す。TVT-MP 単一 decision timestep の実交通診断については、本節を最新参照先とする。
+この節は診断完了時点の記録である。追加継続方式は当時未確定だった。方式 A・B・C という呼び方は、当時の未確定な検討名であり、追加継続設計の正式名称としては採用しない。第4巻の別節にある評価期間の方式A・方式Bとは別問題である。後続設計で、trade_scope 内の buyer・seller・nonparticipating 全員の candidate passage を、同じ candidate local loop で観測する方式が第一実装の採用方針となった。最新仕様は、本巻末尾の「TVT-MP trade_scope全Visitのcandidate passage観測とnonparticipating予測・実績時間価値 完全実装前仕様（2026-09-30）」を参照する。
+
+過去の第4巻各節は、その時点の正式記録として残す。TVT-MP 単一 decision timestep の実交通診断については、本節を診断結果の参照先とする。終了条件と予測・実績の最新仕様は、上記の完全実装前仕様である。
 
 ## A. 診断ファイル
 
@@ -4463,3 +4465,224 @@ Stage 3:
 12. horizon まで C が通過しない場合の未観測表現
 
 方式 A・B・C の推奨や採否は、本節では行わない。
+
+上記 §G は、2026-09-30 の診断完了時点で未確定だった検討リストである。削除しない。当時の制約では、nonparticipating 未通過でも buyer・seller 完了で正常終了することまでが確認済みであり、追加継続の中身はまだ決まっていなかった。
+
+後続検討で比較し、第一実装では不採用とした方式は次の二つである。いずれも本診断節の本文には採用方針としては書かれていない。診断後の設計比較で検討した案である。
+
+- selected candidate 決定後に、decision timestep T から新しい local World を copy し、選択候補だけを再計算する方式。
+- 各 candidate の buyer・seller 完了時点の live local World と mutable state を selection 完了まで保持し、選択候補だけ後から再開する方式。
+
+不採用の理由と、同じ local loop を trade_scope 全 Visit の観測まで続ける採用方針は、本巻末尾の完全実装前仕様を参照する。
+
+# TVT-MP trade_scope全Visitのcandidate passage観測とnonparticipating予測・実績時間価値 完全実装前仕様（2026-09-30）
+
+本節は完全実装前仕様である。Python と専用テストは未着手である。実装済みではない。
+
+この論点の最新参照先は本節である。診断結果の過去記録は、同じ第4巻の「TVT-MP単一decision timestep診断・通常ケースと境界ケースの比較（2026-09-30）」である。buyer・seller の事後評価と成立時 record の分離は、詳細設計第3巻「13. 成立時recordとactual outcomeの分離」を維持する。本節は第3巻の buyer・seller 事後評価を削除も簡略化もしない。
+
+進捗第3巻の対応節は「trade_scope全Visit観測の完全実装前仕様（2026-09-30）」である。
+
+## 1. 現行契約と、本節が変える終了だけ
+
+現行の candidate local virtual calculation は、buyer・seller の required candidate passage が全て記録されると、同じ virtual timestep の終了時に resolved かつ finished になる。
+
+終了判定は次である。
+
+- `resolved_after_timestep_end` は、buyer・seller の required passage 完了である。
+- `calculation_finished_after_timestep_end` は、その完了、または最後の許容 offset への到達である。
+
+`required_passage_records` は buyer・seller だけである。economic evaluation はこれを読み、buyer・seller 以外の role が入ると不整合として扱う。したがって nonparticipating をこの record へ入れない。
+
+`resolved=True` の意味は変えない。buyer・seller の economic required passage が揃ったことである。nonparticipating 未観測だけを理由に `resolved=False` にしない。
+
+`finished` の意味は変える。traffic observation 対象の全員を観測したとき、または既存 horizon の末尾に達したときだけ `finished=True` とする。buyer・seller が先に揃っても、trade_scope 内 nonparticipating が未観測なら finished にしない。
+
+## 2. 第一実装で不採用とした比較案
+
+診断節の方式 A・B・C は、当時未定義の検討名である。正式名称にはしない。評価期間の方式A・方式Bとも混同しない。
+
+診断後に比較し、第一実装では不採用とした方式は次である。当時の制約下での検討案であり、記録上の誤りとして消さない。
+
+再計算方式。selected candidate 決定後に、decision timestep T から新しい local World を copy し、選択候補だけを再計算する。
+
+- decision timestep T から、元の buyer・seller 完了地点まで重複計算が必要になる。
+- 実装は比較的単純だが、不要な再計算時間が生じる。
+- nonparticipating が元の停止地点の直後に通過するとき、純粋な追加観測に対して再計算区間の割合が大きくなる。
+- 例として、元の buyer・seller 完了 offset が 5 で、nonparticipating が offset 6 で通過する場合、純粋な追加観測は 1 offset でも、再計算方式では offset 0 からやり直す。
+
+live state 保持方式。各 candidate の buyer・seller 完了時点の live local World と mutable state を selection 完了まで保持し、選択候補だけ後から再開する。
+
+- 重複計算は避けられる。
+- FIFO True candidate 数に応じて、複数の大規模 World を selection 完了まで同時保持する。
+- 52 Node、10,000 Vehicle 等へ拡大すると、ピーク RAM が候補数に応じて増え、RAM 上限を超えるリスクがある。
+- RAM 超過は計算時間の増加と違い、シミュレーション自体を完了できなくする。
+- state の所有、selection 後の再開、不採用 candidate の破棄、例外時の後始末が複雑になる。
+- final result へ live World や mutable state を残さない現行方針より、実装責務が増える。
+
+採用方式。各 FIFO True candidate について、最初の candidate local calculation を必要なところまで同じ local World と同じ各種 state のまま続ける。
+
+- decision timestep T からの再計算をしない。
+- 追加 World copy を作らない。
+- selection 完了待ちの live state 保持をしない。
+- buyer・seller・nonparticipating の candidate passage を同じ local World 上で観測する。
+- 同じ candidate local loop で完結する。
+
+将来、この継続方式でも計算時間が重大なボトルネックになった場合は、live state 保持等の性能最適化を改めて検討できる。第一実装では採用しない。
+
+## 3. economic required と traffic observation
+
+economic required passage は buyer と seller だけである。既存の `required_passage_records` を使う。economic evaluation は引き続きこの record だけを読む。nonparticipating は入れない。
+
+candidate traffic observation は、trade_scope 内の buyer、seller、nonparticipating である。partition 4 は観測対象に含めない。終了判定はこの集合を使う。保存は economic required とは別の frozen record 列である。
+
+nonparticipating が 0 件なら、buyer・seller 完了が traffic observation 完了でもある。現行と同じ時点で終わる。
+
+nonparticipating が buyer・seller より先に通過済みなら、最後の buyer・seller が通過した時点で全体完了になる。物理通過では一時 skip により後順位が先に通過し得る。nonparticipating が必ず先に通過する保証はない。trade_scope の最終 baseline 順位は trailing buyer であり、成立後の post-trade 順位では末尾側に seller が置かれる。nonparticipating は baseline local rank を維持し、割当順位上 trade_scope の末尾にはならない。
+
+## 4. 終了条件
+
+優先順位は次である。
+
+1. trade_scope 内の traffic observation 対象全員の candidate passage を観測する。
+2. `configured_horizon_steps` の最後の許容 offset へ到達する。許容 offset は 0 から `configured_horizon_steps - 1` である。buyer・seller 完了後に新しい horizon は足さない。decision timestep T から数えた既存 horizon を共有する。
+3. 重大不整合は status ではなく例外にする。
+
+horizon 到達時を分ける。
+
+buyer・seller が完了し、nonparticipating の一部または全部が未観測のとき。`resolved=True` のまま economic evaluation へ進める。traffic observation は部分完了または未完了である。正常結果である。nonparticipating 未観測だけを理由に candidate を unresolved にしない。
+
+buyer・seller が未完了のとき。現行どおり unresolved であり、economic 成立計算へ進めない。
+
+別々に保存する。
+
+- `economic_required_passages_complete_offset`
+- `economic_required_passages_complete_virtual_timestep`
+- `all_trade_scope_passages_complete_offset`
+- `all_trade_scope_passages_complete_virtual_timestep`
+
+trade_scope 全員が揃わないまま horizon へ到達した場合、後者二つは `None` である。buyer・seller 完了と全員完了が同じ virtual timestep なら、両方へ同じ offset と virtual timestep を入れる。
+
+既存契約は維持する。`timestep_results` 数は `final_offset + 1` である。`simulated_timestep_count` は `final_offset` である。offset 0 も `timestep_results` に含むため、両者は一致しない。
+
+## 5. 通過処理
+
+拘束順位列は既存の `visits_in_binding_order` である。Node 連続順位を反映した列であり、candidate 内の局所順位だけではない。buyer・seller・nonparticipating を交通計算上は同列に試す。
+
+一時 skip は変更しない。`NOT_ARRIVED_AT_TARGET_NODE`、`NOT_INLINK_PHYSICAL_HEAD`、`INLINK_OUTFLOW_CAPACITY_UNAVAILABLE`、`OUTLINK_INFLOW_CAPACITY_UNAVAILABLE`、`NODE_FLOW_CAPACITY_UNAVAILABLE`、`OUTLINK_ENTRY_SPACE_UNAVAILABLE` である。skip した Visit は列から削除しない。同じ virtual timestep では後続を試し、次の virtual timestep では列の先頭から再評価する。
+
+clearance 未充足だけ、その virtual timestep の対象 Node binding scan を終える。`CLEARANCE_NOT_SATISFIED` と `stopped_binding_visit_key` は scan stop context として残す。一時 skip enum へ混ぜない。
+
+binding、unbound FCFS、required passage 記録、Vehicle advance、downstream boundary、capacity 更新、clearance の既存順は維持する。
+
+final result へ live World、candidate local state、mutable transfer state は入れない。必要な情報は名前と数値の frozen record である。
+
+## 6. 予測 traffic observation
+
+概念名は `OrderControlTvtMpCandidateTrafficObservationRecord` である。buyer・seller・nonparticipating を同じ型で保存し、`trade_role` で区別する。candidate local result へこの record 列を追加する。
+
+識別 field は、`visit_key`、`vehicle_name`、`vehicle_id`、`node_name`、`trade_role`、`binding_rank`、trade_scope 内順位、`inlink_name`、`route_next_link_name` である。
+
+価値 field は、`true_vot_per_second`、`baseline_passage_timestep`、`candidate_passage_timestep`、`passage_observation_status`、`observed_offset`、`observed_virtual_timestep`、`predicted_time_difference_timesteps`、`predicted_time_difference_seconds`、`predicted_signed_time_value_change` である。
+
+未観測と原因の field は、`last_checked_offset`、`last_checked_virtual_timestep`、`last_temporary_skip_reason`、`last_temporary_skip_offset`、`latest_clearance_stop_context`、`horizon_exhausted`、`observation_complete` である。
+
+観測 status は `OBSERVED` と `UNOBSERVED_AT_HORIZON` である。同じ candidate local calculation の中なので、元計算と追加計算では分けない。
+
+観測できたときの時間差は次である。
+
+`predicted_time_difference_timesteps = baseline_passage_timestep - candidate_passage_timestep`
+
+正は candidate で短縮、負は遅延、0 は同時刻である。
+
+`predicted_time_difference_seconds = predicted_time_difference_timesteps × DELTAT`
+
+nonparticipating の予測上の符号付き価値は次である。
+
+`predicted_signed_time_value_change = predicted_time_difference_seconds × true_vot_per_second`
+
+正は予測上の便益、負は予測上の損失、0 は予測上の変化なしである。`DELTAT` は秒、VOT は秒あたりである。buyer の `G_b` も秒と申告 VOT の積なので、時間単位は同じである。使う VOT が違う。当事者の economic evaluation は申告 VOT のままである。共通 record に true VOT を保存しても、申告 VOT の計算は置き換えない。
+
+nonparticipating は支払・補償の対象ではない。`total_buyer_value_G`、`total_required_compensation_R`、surplus、`economically_feasible`、`infeasibility_reasons`、candidate selection、buyer payment、seller compensation には入れない。予測上の外部効果として別記録する。
+
+未観測のときは、`candidate_passage_timestep`、時間差、秒、符号付き価値を `None` にする。status は `UNOBSERVED_AT_HORIZON` である。horizon 末尾時刻も 0 も代入しない。失敗扱いしない。
+
+最後の一時 skip 理由は、その Visit が binding scan で最後に一時 skip された理由である。以前の offset の理由しか無いときは、その理由と offset を残す。最終 timestep で clearance により対象 Visit まで scan が届かなかったときは、一時 skip 理由を書き換えず、clearance の scan stop context を別 field に残す。両方残り得る。
+
+真の VOT が 0 かどうかは、既存方針を維持する。今後採用する論文・統計に基づく分布が 0 を取り得るなら許容し、取り得ないなら許容しない。一律に常に有効とは書かない。
+
+## 7. actual outcome
+
+actual passage と actual outcome は未実装である。成立時 record は後から書き換えない。actual 用 field を成立時 record へ `None` で予約しない。actual outcome は、成立時 record とは別の frozen record として `order_exchange_log` へ追加する。これは第3巻の既存方針である。
+
+概念名は `OrderControlTvtMpActualOutcomeRecord` である。role で buyer、seller、nonparticipating を区別する。追跡対象は selected candidate だけである。識別は Vehicle 名だけではなく VisitKey を使う。同じ Vehicle が同じ Node を再訪するためである。
+
+取引単位の識別は、`tvt_decision_timestep`、`node_name`、`buyers_sorted` である。同じ取引の同じ Visit は、これに `visit_key` を加える。
+
+record に含めるものは、上の識別、`vehicle_name`、`vehicle_id`、`trade_role`、Node 連続順位、formal route、actual route、`baseline_passage_timestep`、`predicted_candidate_passage_timestep`、`actual_passage_timestep`、`true_vot_per_second`、actual outcome status、actual の時間差、秒、符号付き価値、candidate passage の予測誤差、符号付き価値の予測誤差である。buyer・seller に必要な申告 VOT、正式支払、正式補償、参考金額、実績利得は、第3巻の既存 actual outcome 仕様に合わせて追加する。本節はそれを削らない。
+
+status は `WAITING_FOR_ACTUAL_PASSAGE`、`ACTUAL_PASSAGE_OBSERVED`、`ACTUAL_PASSAGE_UNOBSERVED_AT_EVALUATION_END` である。
+
+記録時点は、実 World で対象 Visit が対象 Node を通過した直後である。`Node.transfer` の TVT 通過成功の後である。observer は記録だけを行い、実 World の交通は変えない。baseline collector の prepare と apply を actual outcome の正本にはしない。
+
+`actual_time_difference_timesteps = baseline_passage_timestep - actual_passage_timestep`
+
+`actual_time_difference_seconds = actual_time_difference_timesteps × DELTAT`
+
+nonparticipating の実績上の符号付き価値は次である。
+
+`actual_signed_time_value_change = actual_time_difference_seconds × true_vot_per_second`
+
+正は実績上の時間短縮、負は実績上の遅延、0 は変化なしである。未観測なら actual passage、時間差、秒、符号付き価値、予測誤差は `None` である。
+
+評価終了まで actual passage が無ければ、status を `ACTUAL_PASSAGE_UNOBSERVED_AT_EVALUATION_END` にして凍結する。その後 record は書き換えない。実 World を評価終了後へ進めない。この評価終了は candidate horizon の終了ではない。
+
+実通過の順序が予測順位と違っても、実測時刻をそのまま記録する。nonparticipating の actual value は支払・補償へ入れない。
+
+予測誤差は次である。
+
+`candidate_passage_prediction_error_timesteps = actual_passage_timestep - predicted_candidate_passage_timestep`
+
+`signed_value_prediction_error = actual_signed_time_value_change - predicted_signed_time_value_change`
+
+未観測なら `None` である。正の価値誤差は、実績が予測より短縮側である。
+
+## 8. buyer・seller の事後評価との分離
+
+第3巻どおり、同じ取引の buyer・seller の actual passage が全て揃った時点で、buyer・seller の事後評価を始める。nonparticipating の actual passage 完了は待たない。
+
+nonparticipating が未観測でも、buyer・seller の事後評価、実績ベース参考金額、正式支払、正式補償は保留も変更もしない。参考金額は buyer・seller だけである。nonparticipating の actual value は、事後評価上の成立・不成立にも、参考支払、参考補償、正式支払、正式補償にも入れない。正式支払と正式補償は成立時点で確定済みであり、actual passage では変えない。
+
+nonparticipating の実績は、通過した時点で外部効果として別に記録する。評価終了まで通過しなければ、その Visit だけ未観測とする。buyer・seller の事後評価結果は、それによって変えない。
+
+## 9. 経済処理・順位・適用
+
+変えないものは、`total_buyer_value_G`、`total_required_compensation_R`、surplus、`economically_feasible`、`infeasibility_reasons`、selected candidate、buyer payment、seller compensation、final rank の決定、final consistency validation、atomic apply の成立条件である。
+
+buyer・seller 未観測は現行どおり economic unresolved である。nonparticipating だけ未観測なら unresolved にしない。
+
+外部効果は別集計できる。candidate ごとの予測外部効果、selected candidate の正式な予測外部効果、selected candidate の実績外部効果、予測対実績の誤差である。候補選択には使わない。全 FIFO True candidate の local result に予測 record を残すことと矛盾しない。
+
+## 10. Stage 2 と Stage 3
+
+Stage 2 の通常ケースでは、新終了条件による追加 timestep は発生しない。原因は、nonparticipating が buyer・seller 完了前に既に通過しているか、nonparticipating がいないことである。
+
+`("B",)` は nonparticipating が 0 件である。buyer・seller 完了も traffic observation 完了も offset 3 である。`final_offset` は変わらない。
+
+`("D",)` では C が offset 4 で通過し、buyer・seller 完了は offset 5 である。traffic observation 完了も offset 5 である。`final_offset` は変わらない。
+
+`("B","D")` も C が offset 4 で通過し、buyer・seller 完了と traffic observation 完了は offset 5 である。`final_offset` は変わらない。
+
+Stage 3 の境界ケースは、追加終了条件の根拠である。現行仕様では C 未通過のまま buyer・seller 完了で正常終了した。これは不具合ではない。
+
+`("D",)` では buyer・seller 完了が offset 5 であり、その時点の C は未通過である。新仕様では finished にしない。offset 6 以降も同じ local World で続ける。終了は C の通過、または offset 24 である。horizon は 25 なので許容 offset は 0 から 24 である。C の candidate passage は未実行のため未確定である。horizon 末尾まで未通過なら `UNOBSERVED_AT_HORIZON` である。
+
+`("B","D")` は selected candidate であり、C は trade_scope 内 nonparticipating である。同じ終了条件を適用する。economic、selection、payment、final rank、validation、atomic apply の意味は変えない。
+
+診断を拡張するときの assert 候補は次である。nonparticipating が未通過かつ horizon 未到達なら `finished=False` である。buyer・seller 完了後も local loop が続く。C の通過時または horizon 末尾で `finished=True` である。economic required の完了時刻と、traffic observation の完了時刻を保存する。C は candidate passage または `UNOBSERVED_AT_HORIZON` である。予測符号付き価値は数値または `None` である。既存の economic、selection、payment、final rank、validation、atomic apply は不変である。`timestep_results` 数は `final_offset + 1`、`simulated_timestep_count` は `final_offset` である。
+
+## 11. 未実装と再開
+
+未実装は、本節の終了条件変更、traffic observation record、actual passage の捕捉、actual outcome record、nonparticipating の外部効果集計である。診断スクリプトもまだ新終了条件を assert していない。
+
+再開時は本節と、進捗第3巻「trade_scope全Visit観測の完全実装前仕様（2026-09-30）」を最初に確認する。次作業は、本仕様に対する反証レビューと、Stage 3 の offset 6 以降を見る診断拡張である。本番実装はまだ行わない。
