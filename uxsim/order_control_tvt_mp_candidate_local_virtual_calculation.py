@@ -8,6 +8,7 @@ economics, write the rank ledger, or change the real World.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from enum import Enum
 
@@ -99,6 +100,70 @@ class OrderControlTvtMpCandidateFinalLinkRole(Enum):
 
     TARGET_INLINK = "target_inlink"
     TARGET_OUTLINK = "target_outlink"
+
+
+class OrderControlTvtMpCandidatePassageObservationStatus(Enum):
+    """Whether one trade-scope visit's candidate passage was observed.
+
+    Initialization leaves the record status as None. A later final-result
+    build chooses OBSERVED or UNOBSERVED_AT_HORIZON. This slice does not
+    choose it.
+    """
+
+    OBSERVED = "observed"
+    UNOBSERVED_AT_HORIZON = "unobserved_at_horizon"
+
+
+@dataclass(frozen=True)
+class OrderControlTvtMpCandidateClearanceScanStopContext:
+    """One binding scan that stopped for unmet clearance.
+
+    Clearance is not a per-visit temporary skip. This record is the type a
+    later timestep update will store. This slice only defines it.
+    """
+
+    virtual_timestep: int
+    offset: int
+    stopped_binding_visit_key: OrderControlTvtVisitKey
+
+
+@dataclass(frozen=True)
+class OrderControlTvtMpCandidateTrafficObservationRecord:
+    """One trade-scope visit prepared for later candidate-passage observation.
+
+    Buyer, seller, and nonparticipating visits use this same frozen record.
+    Partition 1, partition 2, and outside-trade-scope visits are not stored.
+    """
+
+    visit_key: OrderControlTvtVisitKey
+    vehicle_name: str
+    vehicle_id: int
+    trade_role: OrderControlTvtMpLocalBindingTradeRole
+    binding_partition: OrderControlTvtMpLocalBindingPartition
+    binding_rank: int
+    trade_scope_rank: int
+    inlink_name: str
+    route_next_link_name: str
+    true_vot_per_second: float
+    baseline_passage_timestep: int | None
+    candidate_passage_timestep: int | None
+    passage_observation_status: (
+        OrderControlTvtMpCandidatePassageObservationStatus | None
+    )
+    observed_offset: int | None
+    observed_virtual_timestep: int | None
+    predicted_time_difference_timesteps: int | None
+    predicted_time_difference_seconds: int | float | None
+    predicted_signed_time_value_change: int | float | None
+    last_checked_offset: int | None
+    last_checked_virtual_timestep: int | None
+    last_temporary_skip_reason: OrderControlTvtMpBindingVisitTemporarySkipReason | None
+    last_temporary_skip_offset: int | None
+    latest_clearance_stop_context: (
+        OrderControlTvtMpCandidateClearanceScanStopContext | None
+    )
+    horizon_exhausted: bool | None
+    observation_complete: bool | None
 
 
 # Binding skips that count as ordinary capacity or physical inability.
@@ -244,6 +309,9 @@ class OrderControlTvtMpCandidateLocalVirtualCalculationState:
         required_buyer_visit_keys: tuple[OrderControlTvtVisitKey, ...],
         required_seller_visit_keys: tuple[OrderControlTvtVisitKey, ...],
         passage_records_in_public_order: list[OrderControlTvtMpCandidatePassageRecord],
+        traffic_observation_records_in_public_order: list[
+            OrderControlTvtMpCandidateTrafficObservationRecord
+        ],
     ) -> None:
         self._candidate_local_state = candidate_local_state
         self._virtual_time_state = virtual_time_state
@@ -261,6 +329,19 @@ class OrderControlTvtMpCandidateLocalVirtualCalculationState:
         ] = {}
         for record in passage_records_in_public_order:
             self._passage_record_by_visit_key[record.visit_key] = record
+        self._traffic_observation_records_in_public_order = (
+            traffic_observation_records_in_public_order
+        )
+        self._traffic_observation_record_by_visit_key: dict[
+            OrderControlTvtVisitKey,
+            OrderControlTvtMpCandidateTrafficObservationRecord,
+        ] = {}
+        for record in traffic_observation_records_in_public_order:
+            self._traffic_observation_record_by_visit_key[record.visit_key] = record
+        self._economic_required_passages_complete_offset: int | None = None
+        self._economic_required_passages_complete_virtual_timestep: int | None = None
+        self._all_trade_scope_passages_complete_offset: int | None = None
+        self._all_trade_scope_passages_complete_virtual_timestep: int | None = None
         self._completed_virtual_timesteps: list[int] = []
         self._timestep_results: list[OrderControlTvtMpCandidateVirtualTimestepResult] = []
         self._finished = False
@@ -334,6 +415,55 @@ class OrderControlTvtMpCandidateLocalVirtualCalculationState:
     ) -> OrderControlTvtMpCandidateLocalVirtualCalculationResult | None:
         return self._final_result
 
+    @property
+    def traffic_observation_records_in_public_order(
+        self,
+    ) -> tuple[OrderControlTvtMpCandidateTrafficObservationRecord, ...]:
+        return tuple(self._traffic_observation_records_in_public_order)
+
+    @property
+    def traffic_observation_record_by_visit_key(
+        self,
+    ) -> tuple[
+        tuple[OrderControlTvtVisitKey, OrderControlTvtMpCandidateTrafficObservationRecord],
+        ...,
+    ]:
+        """VisitKey pairs in public order. The internal dict is not returned."""
+        pairs: list[
+            tuple[OrderControlTvtVisitKey, OrderControlTvtMpCandidateTrafficObservationRecord]
+        ] = []
+        for record in self._traffic_observation_records_in_public_order:
+            pairs.append((record.visit_key, record))
+        return tuple(pairs)
+
+    def traffic_observation_record_for_visit_key(
+        self,
+        visit_key: OrderControlTvtVisitKey,
+    ) -> OrderControlTvtMpCandidateTrafficObservationRecord:
+        record = self._traffic_observation_record_by_visit_key.get(visit_key)
+        if record is None:
+            raise RuntimeError(
+                f"Node {self.candidate_local_state.target_node_name!r}: "
+                f"VisitKey {visit_key!r} has no traffic observation record."
+            )
+        return record
+
+    @property
+    def economic_required_passages_complete_offset(self) -> int | None:
+        return self._economic_required_passages_complete_offset
+
+    @property
+    def economic_required_passages_complete_virtual_timestep(self) -> int | None:
+        return self._economic_required_passages_complete_virtual_timestep
+
+    @property
+    def all_trade_scope_passages_complete_offset(self) -> int | None:
+        return self._all_trade_scope_passages_complete_offset
+
+    @property
+    def all_trade_scope_passages_complete_virtual_timestep(self) -> int | None:
+        return self._all_trade_scope_passages_complete_virtual_timestep
+
 
 def initialize_tvt_mp_candidate_local_virtual_calculation_state(
     candidate_local_state,
@@ -394,6 +524,11 @@ def initialize_tvt_mp_candidate_local_virtual_calculation_state(
         required_seller_visit_keys=required_seller_visit_keys,
         visit_by_key=visit_by_key,
     )
+    traffic_observation_records = _initial_traffic_observation_records(
+        candidate_local_state=candidate_local_state,
+        baseline_collector=baseline_collector,
+        node_name=node_name,
+    )
 
     virtual_time_state = initialize_tvt_mp_candidate_virtual_time_state(
         candidate_local_state
@@ -427,6 +562,7 @@ def initialize_tvt_mp_candidate_local_virtual_calculation_state(
         required_buyer_visit_keys=required_buyer_visit_keys,
         required_seller_visit_keys=required_seller_visit_keys,
         passage_records_in_public_order=passage_records,
+        traffic_observation_records_in_public_order=traffic_observation_records,
     )
 
 
@@ -898,6 +1034,197 @@ def _initial_passage_records(
                 route_next_link_name=visit.route_next_link_name,
                 route_origin=visit.route_origin,
                 inlink_name=visit.inlink_name,
+            )
+        )
+    return records
+
+
+_TRAFFIC_OBSERVATION_TRADE_ROLES = (
+    OrderControlTvtMpLocalBindingTradeRole.BUYER,
+    OrderControlTvtMpLocalBindingTradeRole.SELLER,
+    OrderControlTvtMpLocalBindingTradeRole.NONPARTICIPATING,
+)
+
+
+def _require_true_vot_for_traffic_observation(
+    value: object,
+    *,
+    node_name: str,
+    vehicle_name: str,
+) -> float:
+    """Freeze decision-time vot_true. Reject missing, bool, non-finite, and negative."""
+    if value is None or isinstance(value, bool) or type(value) not in (int, float):
+        raise RuntimeError(
+            f"Node {node_name!r}: Vehicle {vehicle_name!r} vot_true must be "
+            "a Python int or float, not bool or None; got "
+            f"type {type(value).__name__} with value {value!r}."
+        )
+    if not math.isfinite(value) or value < 0:
+        raise RuntimeError(
+            f"Node {node_name!r}: Vehicle {vehicle_name!r} vot_true must be "
+            f"finite and >= 0; got {value!r}."
+        )
+    return float(value)
+
+
+def _baseline_passage_for_traffic_observation(
+    baseline_collector: OrderControlBaselineCollector,
+    *,
+    node_name: str,
+    visit_key: OrderControlTvtVisitKey,
+) -> int:
+    """Read the candidate-visit baseline passage stored on the collector snapshot.
+
+    Candidate visit construction copies this same collector field. The formal
+    initialization path requires an int. The frozen record type still allows
+    None for a later unobserved or incomplete representation.
+    """
+    vehicle_name, visit_id = visit_key
+    snapshot = baseline_collector.get_baseline_visit_snapshot(vehicle_name, visit_id)
+    if snapshot is None:
+        raise RuntimeError(
+            f"Node {node_name!r}: trade-scope VisitKey {visit_key!r} has no "
+            "collector snapshot for baseline passage."
+        )
+    baseline_passage_timestep = snapshot.get("baseline_passage_timestep")
+    if (
+        isinstance(baseline_passage_timestep, bool)
+        or type(baseline_passage_timestep) is not int
+        or baseline_passage_timestep < 0
+    ):
+        raise RuntimeError(
+            f"Node {node_name!r}: trade-scope VisitKey {visit_key!r} baseline "
+            "passage must be a Python int >= 0; got "
+            f"{baseline_passage_timestep!r}."
+        )
+    return baseline_passage_timestep
+
+
+def _require_non_empty_text(value: object, *, node_name: str, field_name: str) -> str:
+    if not isinstance(value, str) or value == "":
+        raise RuntimeError(
+            f"Node {node_name!r}: traffic observation {field_name} must be a "
+            f"non-empty str; got {value!r}."
+        )
+    return value
+
+
+def _initial_traffic_observation_records(
+    *,
+    candidate_local_state: OrderControlTvtMpCandidateLocalState,
+    baseline_collector: OrderControlBaselineCollector,
+    node_name: str,
+) -> list[OrderControlTvtMpCandidateTrafficObservationRecord]:
+    """One initial record per trade_scope visit, in that tuple's order."""
+    sequence = candidate_local_state.binding_rank_sequence
+    trade_scope_visits = sequence.trade_scope_of_this_candidate_visits
+    records: list[OrderControlTvtMpCandidateTrafficObservationRecord] = []
+    seen_visit_keys: set[OrderControlTvtVisitKey] = set()
+    for index, visit in enumerate(trade_scope_visits):
+        trade_scope_rank = index + 1
+        visit_key = visit.visit_key
+        if visit_key in seen_visit_keys:
+            raise RuntimeError(
+                f"Node {node_name!r}: trade-scope VisitKey {visit_key!r} is "
+                "duplicated."
+            )
+        seen_visit_keys.add(visit_key)
+        if (
+            visit.binding_partition
+            is not OrderControlTvtMpLocalBindingPartition.TRADE_SCOPE_OF_THIS_CANDIDATE
+        ):
+            raise RuntimeError(
+                f"Node {node_name!r}: VisitKey {visit_key!r} is in "
+                "trade_scope_of_this_candidate_visits but binding partition "
+                f"is {visit.binding_partition!r}."
+            )
+        if visit.trade_role not in _TRAFFIC_OBSERVATION_TRADE_ROLES:
+            raise RuntimeError(
+                f"Node {node_name!r}: VisitKey {visit_key!r} has trade role "
+                f"{visit.trade_role!r}. Traffic observation accepts only "
+                "buyer, seller, and nonparticipating."
+            )
+        if type(visit.binding_rank) is not int or visit.binding_rank < 1:
+            raise RuntimeError(
+                f"Node {node_name!r}: VisitKey {visit_key!r} binding_rank "
+                f"must be a Python int >= 1; got {visit.binding_rank!r}."
+            )
+        vehicle_name = _require_non_empty_text(
+            visit_key[0],
+            node_name=node_name,
+            field_name="vehicle_name",
+        )
+        inlink_name = _require_non_empty_text(
+            visit.inlink_name,
+            node_name=node_name,
+            field_name="inlink_name",
+        )
+        route_next_link_name = _require_non_empty_text(
+            visit.route_next_link_name,
+            node_name=node_name,
+            field_name="route_next_link_name",
+        )
+        local_vehicle = candidate_local_state.local_vehicle_by_real_vehicle_name.get(
+            vehicle_name
+        )
+        if local_vehicle is None:
+            raise RuntimeError(
+                f"Node {node_name!r}: trade-scope Vehicle {vehicle_name!r} "
+                "has no local Vehicle."
+            )
+        if local_vehicle.name != vehicle_name:
+            raise RuntimeError(
+                f"Node {node_name!r}: local Vehicle name {local_vehicle.name!r} "
+                f"does not match VisitKey {visit_key!r}."
+            )
+        vehicle_id = local_vehicle.id
+        if isinstance(vehicle_id, bool) or type(vehicle_id) is not int:
+            raise RuntimeError(
+                f"Node {node_name!r}: Vehicle {vehicle_name!r} id must be a "
+                f"Python int; got {vehicle_id!r}."
+            )
+        if vehicle_id != visit.vehicle_id:
+            raise RuntimeError(
+                f"Node {node_name!r}: Vehicle {vehicle_name!r} id {vehicle_id!r} "
+                f"does not match binding vehicle_id {visit.vehicle_id!r}."
+            )
+        true_vot_per_second = _require_true_vot_for_traffic_observation(
+            local_vehicle.vot_true,
+            node_name=node_name,
+            vehicle_name=vehicle_name,
+        )
+        baseline_passage_timestep = _baseline_passage_for_traffic_observation(
+            baseline_collector,
+            node_name=node_name,
+            visit_key=visit_key,
+        )
+        records.append(
+            OrderControlTvtMpCandidateTrafficObservationRecord(
+                visit_key=visit_key,
+                vehicle_name=vehicle_name,
+                vehicle_id=vehicle_id,
+                trade_role=visit.trade_role,
+                binding_partition=visit.binding_partition,
+                binding_rank=visit.binding_rank,
+                trade_scope_rank=trade_scope_rank,
+                inlink_name=inlink_name,
+                route_next_link_name=route_next_link_name,
+                true_vot_per_second=true_vot_per_second,
+                baseline_passage_timestep=baseline_passage_timestep,
+                candidate_passage_timestep=None,
+                passage_observation_status=None,
+                observed_offset=None,
+                observed_virtual_timestep=None,
+                predicted_time_difference_timesteps=None,
+                predicted_time_difference_seconds=None,
+                predicted_signed_time_value_change=None,
+                last_checked_offset=None,
+                last_checked_virtual_timestep=None,
+                last_temporary_skip_reason=None,
+                last_temporary_skip_offset=None,
+                latest_clearance_stop_context=None,
+                horizon_exhausted=None,
+                observation_complete=None,
             )
         )
     return records

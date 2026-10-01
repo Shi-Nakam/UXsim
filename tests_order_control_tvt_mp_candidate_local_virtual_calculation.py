@@ -32,7 +32,10 @@ from uxsim.order_control_tvt_mp_candidate_local_virtual_calculation import (
     OrderControlTvtMpCandidateLocalVirtualCalculationResult,
     OrderControlTvtMpCandidateLocalVirtualCalculationState,
     OrderControlTvtMpCandidateLocalVirtualCalculationStopReason,
+    OrderControlTvtMpCandidatePassageObservationStatus,
     OrderControlTvtMpCandidatePassageRecord,
+    OrderControlTvtMpCandidateClearanceScanStopContext,
+    OrderControlTvtMpCandidateTrafficObservationRecord,
     OrderControlTvtMpCandidateUnresolvedReason,
     OrderControlTvtMpCandidateVirtualTimestepResult,
     initialize_tvt_mp_candidate_local_virtual_calculation_state,
@@ -282,6 +285,10 @@ def _prepare_world_with_vehicles(vehicle_specs, buyers_sorted=None):
         route = world.get_link(spec["route"])
         _place(world, vehicle, inlink, route)
         vehicle.begin_order_control_visit_on_link_entry()
+        if "vot_true" in spec:
+            vehicle.vot_true = spec["vot_true"]
+        else:
+            vehicle.vot_true = 1.0
         if spec.get("incoming", True):
             vehicle.order_control_current_visit["arrival_time"] = spec.get(
                 "arrival", 1.0
@@ -293,12 +300,18 @@ def _prepare_world_with_vehicles(vehicle_specs, buyers_sorted=None):
         if spec.get("incoming", True):
             merge.incoming_vehicles.append(vehicle)
         if spec.get("register", True):
+            if "baseline_passage" in spec:
+                baseline_passage_timestep = spec["baseline_passage"]
+            elif spec.get("binding", True) and spec.get("arrived", True):
+                baseline_passage_timestep = BASELINE_T
+            else:
+                baseline_passage_timestep = None
             _register_snapshot(
                 collector,
                 vehicle,
                 route_name=spec.get("collector_route", spec["route"]),
                 arrived=spec.get("arrived", True),
-                baseline_passage_timestep=spec.get("baseline_passage"),
+                baseline_passage_timestep=baseline_passage_timestep,
             )
         if spec.get("binding", True):
             role = spec.get(
@@ -506,6 +519,11 @@ def test_public_enums_members_and_values():
     assert (
         OrderControlTvtMpCandidateFinalLinkRole.TARGET_OUTLINK.value == "target_outlink"
     )
+    assert OrderControlTvtMpCandidatePassageObservationStatus.OBSERVED.value == "observed"
+    assert (
+        OrderControlTvtMpCandidatePassageObservationStatus.UNOBSERVED_AT_HORIZON.value
+        == "unobserved_at_horizon"
+    )
 
 
 def test_public_frozen_types_field_order_and_forbidden_fields():
@@ -591,6 +609,38 @@ def test_public_frozen_types_field_order_and_forbidden_fields():
         "final_node_record",
         "final_boundary_records",
     )
+    assert _field_names(OrderControlTvtMpCandidateClearanceScanStopContext) == (
+        "virtual_timestep",
+        "offset",
+        "stopped_binding_visit_key",
+    )
+    assert _field_names(OrderControlTvtMpCandidateTrafficObservationRecord) == (
+        "visit_key",
+        "vehicle_name",
+        "vehicle_id",
+        "trade_role",
+        "binding_partition",
+        "binding_rank",
+        "trade_scope_rank",
+        "inlink_name",
+        "route_next_link_name",
+        "true_vot_per_second",
+        "baseline_passage_timestep",
+        "candidate_passage_timestep",
+        "passage_observation_status",
+        "observed_offset",
+        "observed_virtual_timestep",
+        "predicted_time_difference_timesteps",
+        "predicted_time_difference_seconds",
+        "predicted_signed_time_value_change",
+        "last_checked_offset",
+        "last_checked_virtual_timestep",
+        "last_temporary_skip_reason",
+        "last_temporary_skip_offset",
+        "latest_clearance_stop_context",
+        "horizon_exhausted",
+        "observation_complete",
+    )
     for cls in (
         OrderControlTvtMpCandidatePassageRecord,
         OrderControlTvtMpCandidateVirtualTimestepResult,
@@ -599,6 +649,8 @@ def test_public_frozen_types_field_order_and_forbidden_fields():
         OrderControlTvtMpCandidateFinalNodeRecord,
         OrderControlTvtMpCandidateFinalOutlinkBoundaryRecord,
         OrderControlTvtMpCandidateLocalVirtualCalculationResult,
+        OrderControlTvtMpCandidateClearanceScanStopContext,
+        OrderControlTvtMpCandidateTrafficObservationRecord,
     ):
         for field_name in _field_names(cls):
             assert field_name not in _FORBIDDEN_RESULT_FIELD_NAMES
@@ -1783,6 +1835,311 @@ def test_same_name_different_vehicle_object_is_rejected():
         orch_mod._build_final_vehicle_records = original_build
     assert state.finished is False
     assert state.final_result is None
+
+
+def test_traffic_observation_initialization_keeps_trade_scope_only():
+    world, _unused_local_state, collector, visits = _prepare_world_with_vehicles(
+        [
+            {
+                "name": "before_veh",
+                "origin": "orig_a",
+                "dest": "dest",
+                "inlink": "in_a",
+                "route": "out",
+                "role": OrderControlTvtMpLocalBindingTradeRole.OUTSIDE_TRADE_SCOPE,
+                "vot_true": 9.0,
+                "baseline_passage": 20,
+            },
+            {
+                "name": "pre_veh",
+                "origin": "orig_b",
+                "dest": "dest_b",
+                "inlink": "in_b",
+                "route": "side",
+                "role": OrderControlTvtMpLocalBindingTradeRole.OUTSIDE_TRADE_SCOPE,
+                "vot_true": 7.0,
+                "baseline_passage": 19,
+            },
+            {
+                "name": "buyer_veh",
+                "origin": "orig_c",
+                "dest": "dest",
+                "inlink": "in_c",
+                "route": "out",
+                "role": OrderControlTvtMpLocalBindingTradeRole.BUYER,
+                "vot_true": 2,
+                "baseline_passage": 12,
+            },
+            {
+                "name": "seller_veh",
+                "origin": "orig_a",
+                "dest": "dest",
+                "inlink": "in_a",
+                "route": "out",
+                "role": OrderControlTvtMpLocalBindingTradeRole.SELLER,
+                "vot_true": 3.5,
+                "baseline_passage": 13,
+            },
+            {
+                "name": "np_veh",
+                "origin": "orig_b",
+                "dest": "dest",
+                "inlink": "in_b",
+                "route": "out",
+                "role": OrderControlTvtMpLocalBindingTradeRole.NONPARTICIPATING,
+                "vot_true": 4,
+                "baseline_passage": 14,
+            },
+            {
+                "name": "after_veh",
+                "origin": "orig_c",
+                "dest": "dest_b",
+                "inlink": "in_c",
+                "route": "side",
+                "role": OrderControlTvtMpLocalBindingTradeRole.OUTSIDE_TRADE_SCOPE,
+                "vot_true": 8.0,
+                "baseline_passage": 21,
+            },
+        ]
+    )
+    before_visit, pre_visit, buyer_visit, seller_visit, np_visit, after_visit = visits
+    before_fixed = dataclasses.replace(
+        before_visit,
+        binding_partition=(
+            OrderControlTvtMpLocalBindingPartition.CONFIRMED_BEFORE_THIS_BASELINE
+        ),
+        binding_rank=1,
+        trade_role=OrderControlTvtMpLocalBindingTradeRole.OUTSIDE_TRADE_SCOPE,
+    )
+    pre_fixed = dataclasses.replace(
+        pre_visit,
+        binding_partition=(
+            OrderControlTvtMpLocalBindingPartition.PRECONFIRMED_BY_THIS_BASELINE
+        ),
+        binding_rank=2,
+        trade_role=OrderControlTvtMpLocalBindingTradeRole.OUTSIDE_TRADE_SCOPE,
+    )
+    buyer_fixed = dataclasses.replace(buyer_visit, binding_rank=3)
+    seller_fixed = dataclasses.replace(seller_visit, binding_rank=4)
+    np_fixed = dataclasses.replace(np_visit, binding_rank=5)
+    outside_fixed = dataclasses.replace(
+        after_visit,
+        binding_partition=(
+            OrderControlTvtMpLocalBindingPartition.OUTSIDE_TRADE_SCOPE_INSIDE_K_FIXED
+        ),
+        binding_rank=6,
+        trade_role=OrderControlTvtMpLocalBindingTradeRole.OUTSIDE_TRADE_SCOPE,
+    )
+    trade_scope = (buyer_fixed, seller_fixed, np_fixed)
+    sequence = OrderControlTvtMpLocalBindingRankSequence(
+        node_name="merge",
+        baseline_timestep_T=BASELINE_T,
+        concrete_buyer_candidate_set=OrderControlTvtMpConcreteBuyerCandidateSet(
+            buyers_sorted=(buyer_fixed.visit_key,),
+        ),
+        confirmed_before_this_baseline_visits=(before_fixed,),
+        preconfirmed_by_this_baseline_visits=(pre_fixed,),
+        trade_scope_of_this_candidate_visits=trade_scope,
+        outside_trade_scope_inside_k_fixed_visits=(outside_fixed,),
+        visits_in_binding_order=(
+            before_fixed,
+            pre_fixed,
+            buyer_fixed,
+            seller_fixed,
+            np_fixed,
+            outside_fixed,
+        ),
+        k_last_buyer=4,
+        k_decision_window=6,
+        k_fixed=6,
+    )
+    local_state = build_tvt_mp_candidate_local_state(world, sequence)
+    _open_capacities(local_state)
+    state = _init_state(local_state, collector, horizon=2)
+    records = state.traffic_observation_records_in_public_order
+    assert isinstance(records, tuple)
+    assert len(records) == 3
+    assert [record.vehicle_name for record in records] == [
+        "buyer_veh",
+        "seller_veh",
+        "np_veh",
+    ]
+    assert [record.trade_scope_rank for record in records] == [1, 2, 3]
+    assert [record.binding_rank for record in records] == [3, 4, 5]
+    assert [record.trade_role for record in records] == [
+        OrderControlTvtMpLocalBindingTradeRole.BUYER,
+        OrderControlTvtMpLocalBindingTradeRole.SELLER,
+        OrderControlTvtMpLocalBindingTradeRole.NONPARTICIPATING,
+    ]
+    for record in records:
+        assert (
+            record.binding_partition
+            is OrderControlTvtMpLocalBindingPartition.TRADE_SCOPE_OF_THIS_CANDIDATE
+        )
+    stored_names = [record.vehicle_name for record in records]
+    assert "before_veh" not in stored_names
+    assert "pre_veh" not in stored_names
+    assert "after_veh" not in stored_names
+    buyer_record = records[0]
+    assert buyer_record.true_vot_per_second == 2.0
+    assert type(buyer_record.true_vot_per_second) is float
+    assert buyer_record.baseline_passage_timestep == 12
+    assert records[1].baseline_passage_timestep == 13
+    assert records[1].true_vot_per_second == 3.5
+    assert records[2].baseline_passage_timestep == 14
+    assert records[2].true_vot_per_second == 4.0
+    for record in records:
+        assert record.candidate_passage_timestep is None
+        assert record.passage_observation_status is None
+        assert record.observed_offset is None
+        assert record.observed_virtual_timestep is None
+        assert record.predicted_time_difference_timesteps is None
+        assert record.predicted_time_difference_seconds is None
+        assert record.predicted_signed_time_value_change is None
+        assert record.last_checked_offset is None
+        assert record.last_checked_virtual_timestep is None
+        assert record.last_temporary_skip_reason is None
+        assert record.last_temporary_skip_offset is None
+        assert record.latest_clearance_stop_context is None
+        assert record.horizon_exhausted is None
+        assert record.observation_complete is None
+        _assert_frozen(record)
+    assert state.economic_required_passages_complete_offset is None
+    assert state.economic_required_passages_complete_virtual_timestep is None
+    assert state.all_trade_scope_passages_complete_offset is None
+    assert state.all_trade_scope_passages_complete_virtual_timestep is None
+    pairs = state.traffic_observation_record_by_visit_key
+    assert isinstance(pairs, tuple)
+    assert len(pairs) == 3
+    for record, pair in zip(records, pairs):
+        assert pair[0] == record.visit_key
+        assert pair[1] is record
+        assert state.traffic_observation_record_for_visit_key(record.visit_key) is record
+    _assert_frozen(
+        OrderControlTvtMpCandidateClearanceScanStopContext(
+            virtual_timestep=15,
+            offset=5,
+            stopped_binding_visit_key=buyer_record.visit_key,
+        )
+    )
+    required_names = [
+        record.vehicle_name for record in state.required_passage_records
+    ]
+    assert "np_veh" not in required_names
+
+
+def test_traffic_observation_accepts_true_vot_zero_and_rejects_invalid_values():
+    _world, local_state, collector, _visits = _prepare_world_with_vehicles(
+        [
+            {
+                "name": "buyer_veh",
+                "origin": "orig_a",
+                "dest": "dest",
+                "inlink": "in_a",
+                "route": "out",
+                "vot_true": 0,
+            }
+        ]
+    )
+    state = _init_state(local_state, collector, horizon=1)
+    record = state.traffic_observation_records_in_public_order[0]
+    assert record.true_vot_per_second == 0.0
+    invalid_values = [None, True, False, "high", float("nan"), float("inf"), -1]
+    for invalid_value in invalid_values:
+        prepared = _prepare_world_with_vehicles(
+            [
+                {
+                    "name": "buyer_veh",
+                    "origin": "orig_a",
+                    "dest": "dest",
+                    "inlink": "in_a",
+                    "route": "out",
+                    "vot_true": invalid_value,
+                }
+            ]
+        )
+        try:
+            _init_state(prepared[1], prepared[2], horizon=1)
+            raise AssertionError(f"expected RuntimeError for vot_true={invalid_value!r}")
+        except RuntimeError as error:
+            assert "vot_true" in str(error)
+
+
+def test_traffic_observation_rejects_missing_baseline_bad_role_and_duplicate_visit():
+    _world, local_state, collector, _visits = _prepare_world_with_vehicles(
+        [
+            {
+                "name": "buyer_veh",
+                "origin": "orig_a",
+                "dest": "dest",
+                "inlink": "in_a",
+                "route": "out",
+                "baseline_passage": None,
+            }
+        ]
+    )
+    try:
+        _init_state(local_state, collector, horizon=1)
+        raise AssertionError("expected RuntimeError for missing baseline passage")
+    except RuntimeError as error:
+        assert "baseline" in str(error)
+
+    prepared = _prepare_world_with_vehicles(
+        [
+            {
+                "name": "buyer_veh",
+                "origin": "orig_a",
+                "dest": "dest",
+                "inlink": "in_a",
+                "route": "out",
+            },
+            {
+                "name": "np_veh",
+                "origin": "orig_b",
+                "dest": "dest_b",
+                "inlink": "in_b",
+                "route": "side",
+                "role": OrderControlTvtMpLocalBindingTradeRole.NONPARTICIPATING,
+            },
+        ]
+    )
+    world = prepared[0]
+    collector = prepared[2]
+    buyer_visit, np_visit = prepared[3]
+    outside_visit = dataclasses.replace(
+        np_visit,
+        binding_partition=(
+            OrderControlTvtMpLocalBindingPartition.OUTSIDE_TRADE_SCOPE_INSIDE_K_FIXED
+        ),
+        trade_role=OrderControlTvtMpLocalBindingTradeRole.OUTSIDE_TRADE_SCOPE,
+    )
+    sequence = _build_sequence(
+        (buyer_visit, outside_visit),
+        (buyer_visit.visit_key,),
+    )
+    rebuilt = build_tvt_mp_candidate_local_state(world, sequence)
+    _open_capacities(rebuilt)
+    try:
+        _init_state(rebuilt, collector, horizon=1)
+        raise AssertionError("expected RuntimeError for outside trade scope")
+    except RuntimeError as error:
+        assert "trade role" in str(error) or "binding partition" in str(error)
+
+    duplicate_scope = _build_sequence(
+        (buyer_visit,),
+        (buyer_visit.visit_key,),
+    )
+    duplicate_scope = dataclasses.replace(
+        duplicate_scope,
+        trade_scope_of_this_candidate_visits=(buyer_visit, buyer_visit),
+    )
+    rebuilt_duplicate = build_tvt_mp_candidate_local_state(world, duplicate_scope)
+    _open_capacities(rebuilt_duplicate)
+    try:
+        _init_state(rebuilt_duplicate, collector, horizon=1)
+        raise AssertionError("expected RuntimeError for duplicated VisitKey")
+    except RuntimeError as error:
+        assert "duplicated" in str(error)
 
 
 def test_run_to_completion_from_partial_one_timestep_state():
