@@ -2157,7 +2157,7 @@ def _binding_transfer_with_transferred_keys(state, visit_keys):
     )
 
 
-def _traffic_observation_three_role_state():
+def _traffic_observation_three_role_state(horizon=2):
     world, _local, collector, visits = _prepare_world_with_vehicles(
         [
             {
@@ -2196,7 +2196,7 @@ def _traffic_observation_three_role_state():
     sequence = _build_sequence(visits, (buyer_visit.visit_key,))
     local_state = build_tvt_mp_candidate_local_state(world, sequence)
     _open_capacities(local_state)
-    state = _init_state(local_state, collector, horizon=2)
+    state = _init_state(local_state, collector, horizon=horizon)
     return world, local_state, state, buyer_visit, seller_visit, np_visit
 
 
@@ -2464,6 +2464,575 @@ def test_propose_traffic_observation_binding_transfer_rejects_duplicate_transfer
         raise AssertionError("expected RuntimeError for duplicated transferred keys")
     except RuntimeError as error:
         assert "twice" in str(error)
+
+
+def test_one_timestep_binding_updates_buyer_required_and_traffic_timesteps_match():
+    _world, _local, state, buyer_visit, _seller, _np = (
+        _traffic_observation_three_role_state()
+    )
+    run_tvt_mp_candidate_local_virtual_calculation_one_timestep(state)
+    required = state._passage_record_by_visit_key[buyer_visit.visit_key]
+    traffic = state.traffic_observation_record_for_visit_key(buyer_visit.visit_key)
+    assert type(required.candidate_passage_timestep) is int
+    assert required.candidate_passage_timestep == traffic.candidate_passage_timestep
+    assert required.candidate_passage_timestep == BASELINE_T
+
+
+def test_one_timestep_binding_updates_seller_required_and_traffic_timesteps_match():
+    _world, _local, _collector, state, visits = _buyer_and_seller_same_inlink_case(
+        horizon=1
+    )
+    seller_visit = visits[1]
+    run_tvt_mp_candidate_local_virtual_calculation_one_timestep(state)
+    required = state._passage_record_by_visit_key[seller_visit.visit_key]
+    traffic = state.traffic_observation_record_for_visit_key(seller_visit.visit_key)
+    assert type(required.candidate_passage_timestep) is int
+    assert required.candidate_passage_timestep == traffic.candidate_passage_timestep
+
+
+def test_one_timestep_binding_updates_nonparticipating_traffic_only():
+    _world, local_state, collector, visits = _prepare_world_with_vehicles(
+        [
+            {
+                "name": "buyer_veh",
+                "origin": "orig_a",
+                "dest": "dest",
+                "inlink": "in_a",
+                "route": "out",
+                "role": OrderControlTvtMpLocalBindingTradeRole.BUYER,
+                "incoming": False,
+            },
+            {
+                "name": "np_veh",
+                "origin": "orig_b",
+                "dest": "dest",
+                "inlink": "in_b",
+                "route": "out",
+                "role": OrderControlTvtMpLocalBindingTradeRole.NONPARTICIPATING,
+            },
+        ]
+    )
+    np_visit = visits[1]
+    state = _init_state(local_state, collector, horizon=2)
+    original_binding = orch_mod.scan_and_transfer_tvt_mp_binding_visits_at_current_timestep
+
+    def only_np(binding_state):
+        result = original_binding(binding_state)
+        return dataclasses.replace(
+            result,
+            transferred_binding_visit_keys=(np_visit.visit_key,),
+        )
+
+    orch_mod.scan_and_transfer_tvt_mp_binding_visits_at_current_timestep = only_np
+    try:
+        run_tvt_mp_candidate_local_virtual_calculation_one_timestep(state)
+    finally:
+        orch_mod.scan_and_transfer_tvt_mp_binding_visits_at_current_timestep = (
+            original_binding
+        )
+    assert np_visit.visit_key not in state._passage_record_by_visit_key
+    traffic = state.traffic_observation_record_for_visit_key(np_visit.visit_key)
+    assert type(traffic.candidate_passage_timestep) is int
+    buyer_key = visits[0].visit_key
+    assert state._passage_record_by_visit_key[buyer_key].candidate_passage_timestep is None
+
+
+def _buyer_seller_np_staggered_passage_state(*, horizon: int):
+    world, local_state, collector, visits = _prepare_world_with_vehicles(
+        [
+            {
+                "name": "buyer_veh",
+                "origin": "orig_a",
+                "dest": "dest",
+                "inlink": "in_a",
+                "route": "out",
+                "role": OrderControlTvtMpLocalBindingTradeRole.BUYER,
+            },
+            {
+                "name": "seller_veh",
+                "origin": "orig_a",
+                "dest": "dest_b",
+                "inlink": "in_a",
+                "route": "side",
+                "role": OrderControlTvtMpLocalBindingTradeRole.SELLER,
+                "incoming": False,
+            },
+            {
+                "name": "np_veh",
+                "origin": "orig_b",
+                "dest": "dest",
+                "inlink": "in_b",
+                "route": "out",
+                "role": OrderControlTvtMpLocalBindingTradeRole.NONPARTICIPATING,
+                "incoming": False,
+            },
+        ]
+    )
+    buyer_visit, seller_visit, np_visit = visits
+    in_a = local_state.local_world.get_link("in_a")
+    buyer = _local_vehicle(local_state, "buyer_veh")
+    seller = _local_vehicle(local_state, "seller_veh")
+    in_a.vehicles.clear()
+    in_a.vehicles.append(buyer)
+    in_a.vehicles.append(seller)
+    seller.leader = buyer
+    buyer.follower = seller
+    state = _init_state(local_state, collector, horizon=horizon)
+    return world, local_state, state, buyer_visit, seller_visit, np_visit
+
+
+def test_one_timestep_binding_updates_public_order_and_map_share_updated_records():
+    _world, _local, state, buyer_visit, seller_visit, np_visit = (
+        _buyer_seller_np_staggered_passage_state(horizon=2)
+    )
+    public_before = state.traffic_observation_records_in_public_order
+    untouched_objects = {
+        seller_visit.visit_key: state.traffic_observation_record_for_visit_key(
+            seller_visit.visit_key
+        ),
+        np_visit.visit_key: state.traffic_observation_record_for_visit_key(
+            np_visit.visit_key
+        ),
+    }
+    run_tvt_mp_candidate_local_virtual_calculation_one_timestep(state)
+    updated = state.traffic_observation_record_for_visit_key(buyer_visit.visit_key)
+    for index, record in enumerate(state.traffic_observation_records_in_public_order):
+        assert public_before[index].visit_key == record.visit_key
+        if record.visit_key == buyer_visit.visit_key:
+            assert record is updated
+            assert state._traffic_observation_record_by_visit_key[
+                buyer_visit.visit_key
+            ] is updated
+        else:
+            assert record is untouched_objects[record.visit_key]
+
+
+def test_one_timestep_binding_updates_do_not_apply_required_when_traffic_propose_fails():
+    _world, _local, state, buyer_visit, _seller, _np = (
+        _traffic_observation_three_role_state()
+    )
+    passage_before = copy.deepcopy(state.required_passage_records)
+    traffic_before = copy.deepcopy(state.traffic_observation_records_in_public_order)
+    original_propose = (
+        orch_mod._propose_tvt_mp_candidate_traffic_observation_updates_from_binding_transfer
+    )
+
+    def fail_traffic_propose(*args, **kwargs):
+        raise RuntimeError("traffic observation propose failed for test")
+
+    orch_mod._propose_tvt_mp_candidate_traffic_observation_updates_from_binding_transfer = (
+        fail_traffic_propose
+    )
+    original_binding = orch_mod.scan_and_transfer_tvt_mp_binding_visits_at_current_timestep
+
+    def only_buyer(binding_state):
+        result = original_binding(binding_state)
+        return dataclasses.replace(
+            result,
+            transferred_binding_visit_keys=(buyer_visit.visit_key,),
+        )
+
+    orch_mod.scan_and_transfer_tvt_mp_binding_visits_at_current_timestep = only_buyer
+    try:
+        try:
+            run_tvt_mp_candidate_local_virtual_calculation_one_timestep(state)
+            raise AssertionError("expected RuntimeError from traffic propose failure")
+        except RuntimeError as error:
+            assert "traffic observation propose failed" in str(error)
+    finally:
+        orch_mod._propose_tvt_mp_candidate_traffic_observation_updates_from_binding_transfer = (
+            original_propose
+        )
+        orch_mod.scan_and_transfer_tvt_mp_binding_visits_at_current_timestep = (
+            original_binding
+        )
+    assert state.required_passage_records == passage_before
+    assert state.traffic_observation_records_in_public_order == traffic_before
+
+
+def test_one_timestep_binding_updates_reject_buyer_seller_timestep_mismatch():
+    _world, _local, state, buyer_visit, _seller, _np = (
+        _traffic_observation_three_role_state()
+    )
+    original_apply_traffic = orch_mod._apply_traffic_observation_apply_plan_to_state
+
+    def apply_wrong_timestep(calculation_state, apply_plan):
+        broken_plan = []
+        for visit_key, public_index, record in apply_plan:
+            broken_plan.append(
+                (
+                    visit_key,
+                    public_index,
+                    OrderControlTvtMpCandidateTrafficObservationRecord(
+                        visit_key=record.visit_key,
+                        vehicle_name=record.vehicle_name,
+                        vehicle_id=record.vehicle_id,
+                        trade_role=record.trade_role,
+                        binding_partition=record.binding_partition,
+                        binding_rank=record.binding_rank,
+                        trade_scope_rank=record.trade_scope_rank,
+                        inlink_name=record.inlink_name,
+                        route_next_link_name=record.route_next_link_name,
+                        true_vot_per_second=record.true_vot_per_second,
+                        baseline_passage_timestep=record.baseline_passage_timestep,
+                        candidate_passage_timestep=record.candidate_passage_timestep + 1,
+                        passage_observation_status=record.passage_observation_status,
+                        observed_offset=record.observed_offset,
+                        observed_virtual_timestep=record.observed_virtual_timestep + 1,
+                        predicted_time_difference_timesteps=(
+                            record.predicted_time_difference_timesteps
+                        ),
+                        predicted_time_difference_seconds=(
+                            record.predicted_time_difference_seconds
+                        ),
+                        predicted_signed_time_value_change=(
+                            record.predicted_signed_time_value_change
+                        ),
+                        last_checked_offset=record.last_checked_offset,
+                        last_checked_virtual_timestep=(
+                            record.last_checked_virtual_timestep + 1
+                        ),
+                        last_temporary_skip_reason=record.last_temporary_skip_reason,
+                        last_temporary_skip_offset=record.last_temporary_skip_offset,
+                        latest_clearance_stop_context=record.latest_clearance_stop_context,
+                        horizon_exhausted=record.horizon_exhausted,
+                        observation_complete=record.observation_complete,
+                    ),
+                )
+            )
+        original_apply_traffic(calculation_state, tuple(broken_plan))
+
+    orch_mod._apply_traffic_observation_apply_plan_to_state = apply_wrong_timestep
+    original_binding = orch_mod.scan_and_transfer_tvt_mp_binding_visits_at_current_timestep
+
+    def only_buyer(binding_state):
+        result = original_binding(binding_state)
+        return dataclasses.replace(
+            result,
+            transferred_binding_visit_keys=(buyer_visit.visit_key,),
+        )
+
+    orch_mod.scan_and_transfer_tvt_mp_binding_visits_at_current_timestep = only_buyer
+    try:
+        try:
+            run_tvt_mp_candidate_local_virtual_calculation_one_timestep(state)
+            raise AssertionError("expected RuntimeError for timestep mismatch")
+        except RuntimeError as error:
+            assert "does not match traffic observation" in str(error)
+    finally:
+        orch_mod._apply_traffic_observation_apply_plan_to_state = (
+            original_apply_traffic
+        )
+        orch_mod.scan_and_transfer_tvt_mp_binding_visits_at_current_timestep = (
+            original_binding
+        )
+
+
+def _passage_and_traffic_snapshot(state):
+    return (
+        copy.deepcopy(state.required_passage_records),
+        copy.deepcopy(state.traffic_observation_records_in_public_order),
+    )
+
+
+def _candidate_passage_timesteps_unchanged(state, buyer_visit, seller_visit):
+    buyer_required = state._passage_record_by_visit_key.get(buyer_visit.visit_key)
+    seller_required = state._passage_record_by_visit_key.get(seller_visit.visit_key)
+    if buyer_required is not None:
+        assert buyer_required.candidate_passage_timestep is None
+    if seller_required is not None:
+        assert seller_required.candidate_passage_timestep is None
+    buyer_traffic = state._traffic_observation_record_by_visit_key.get(
+        buyer_visit.visit_key
+    )
+    seller_traffic = state._traffic_observation_record_by_visit_key.get(
+        seller_visit.visit_key
+    )
+    if buyer_traffic is not None:
+        assert buyer_traffic.candidate_passage_timestep is None
+    if seller_traffic is not None:
+        assert seller_traffic.candidate_passage_timestep is None
+
+
+def _buyer_only_binding_result(state, buyer_visit):
+    return _binding_transfer_with_transferred_keys(
+        state,
+        (buyer_visit.visit_key,),
+    )
+
+
+def test_binding_apply_rejects_missing_traffic_map_key_without_partial_update():
+    _world, _local, state, buyer_visit, _seller, _np = (
+        _traffic_observation_three_role_state()
+    )
+    binding_result = _buyer_only_binding_result(state, buyer_visit)
+    passage_before, traffic_before = _passage_and_traffic_snapshot(state)
+    del state._traffic_observation_record_by_visit_key[buyer_visit.visit_key]
+    try:
+        orch_mod._apply_binding_transfer_required_passage_and_traffic_observation_updates(
+            state,
+            binding_result,
+            0,
+            BASELINE_T,
+        )
+        raise AssertionError("expected RuntimeError for missing traffic map key")
+    except RuntimeError:
+        pass
+    assert state.required_passage_records == passage_before
+    assert state.traffic_observation_records_in_public_order == traffic_before
+
+
+def test_binding_apply_rejects_missing_traffic_public_order_without_partial_update():
+    _world, _local, state, buyer_visit, seller_visit, _np = (
+        _traffic_observation_three_role_state()
+    )
+    binding_result = _buyer_only_binding_result(state, buyer_visit)
+    filtered = []
+    for record in state._traffic_observation_records_in_public_order:
+        if record.visit_key != buyer_visit.visit_key:
+            filtered.append(record)
+    state._traffic_observation_records_in_public_order[:] = filtered
+    try:
+        orch_mod._apply_binding_transfer_required_passage_and_traffic_observation_updates(
+            state,
+            binding_result,
+            0,
+            BASELINE_T,
+        )
+        raise AssertionError(
+            "expected RuntimeError for missing traffic public order entry"
+        )
+    except RuntimeError:
+        pass
+    _candidate_passage_timesteps_unchanged(state, buyer_visit, seller_visit)
+
+
+def test_binding_apply_rejects_missing_required_passage_map_key_without_partial_update():
+    _world, _local, state, buyer_visit, seller_visit, _np = (
+        _traffic_observation_three_role_state()
+    )
+    binding_result = _buyer_only_binding_result(state, buyer_visit)
+    del state._passage_record_by_visit_key[buyer_visit.visit_key]
+    try:
+        orch_mod._apply_binding_transfer_required_passage_and_traffic_observation_updates(
+            state,
+            binding_result,
+            0,
+            BASELINE_T,
+        )
+        raise AssertionError("expected RuntimeError for missing required map key")
+    except RuntimeError:
+        pass
+    _candidate_passage_timesteps_unchanged(state, buyer_visit, seller_visit)
+
+
+def test_binding_apply_rejects_missing_required_public_order_without_partial_update():
+    _world, _local, state, buyer_visit, seller_visit, _np = (
+        _traffic_observation_three_role_state()
+    )
+    binding_result = _buyer_only_binding_result(state, buyer_visit)
+    filtered = []
+    for record in state._passage_records_in_public_order:
+        if record.visit_key != buyer_visit.visit_key:
+            filtered.append(record)
+    state._passage_records_in_public_order[:] = filtered
+    try:
+        orch_mod._apply_binding_transfer_required_passage_and_traffic_observation_updates(
+            state,
+            binding_result,
+            0,
+            BASELINE_T,
+        )
+        raise AssertionError(
+            "expected RuntimeError for missing required public order entry"
+        )
+    except RuntimeError:
+        pass
+    _candidate_passage_timesteps_unchanged(state, buyer_visit, seller_visit)
+
+
+def test_binding_apply_rejects_duplicate_proposed_visit_keys_without_partial_update():
+    _world, _local, state, buyer_visit, _seller, _np = (
+        _traffic_observation_three_role_state()
+    )
+    binding_result = _buyer_only_binding_result(state, buyer_visit)
+    passage_before, traffic_before = _passage_and_traffic_snapshot(state)
+    original_propose_required = (
+        orch_mod._propose_required_passage_updates_from_binding_transfer
+    )
+
+    def duplicate_required_propose(calculation_state, transfer_result, virtual_timestep):
+        keys, records = original_propose_required(
+            calculation_state,
+            transfer_result,
+            virtual_timestep,
+        )
+        if not records:
+            return keys, records
+        duplicated = (records[0], records[0])
+        duplicated_keys = (keys[0], keys[0])
+        return duplicated_keys, duplicated
+
+    orch_mod._propose_required_passage_updates_from_binding_transfer = (
+        duplicate_required_propose
+    )
+    try:
+        try:
+            orch_mod._apply_binding_transfer_required_passage_and_traffic_observation_updates(
+                state,
+                binding_result,
+                0,
+                BASELINE_T,
+            )
+            raise AssertionError("expected RuntimeError for duplicate VisitKey")
+        except RuntimeError as error:
+            assert "more than once" in str(error)
+    finally:
+        orch_mod._propose_required_passage_updates_from_binding_transfer = (
+            original_propose_required
+        )
+    assert state.required_passage_records == passage_before
+    assert state.traffic_observation_records_in_public_order == traffic_before
+
+
+def test_binding_apply_rejects_missing_trade_scope_nonparticipating_traffic_record():
+    _world, _local, state, buyer_visit, seller_visit, np_visit = (
+        _traffic_observation_three_role_state()
+    )
+    binding_result = _binding_transfer_with_transferred_keys(
+        state,
+        (np_visit.visit_key,),
+    )
+    del state._traffic_observation_record_by_visit_key[np_visit.visit_key]
+    try:
+        orch_mod._apply_binding_transfer_required_passage_and_traffic_observation_updates(
+            state,
+            binding_result,
+            0,
+            BASELINE_T,
+        )
+        raise AssertionError(
+            "expected RuntimeError for missing trade-scope traffic record"
+        )
+    except RuntimeError as error:
+        assert "no traffic observation record" in str(error)
+    _candidate_passage_timesteps_unchanged(state, buyer_visit, seller_visit)
+
+
+def test_binding_apply_ignores_outside_trade_scope_transferred_visit_key():
+    _world, _local, state, buyer_visit, _seller, _np = (
+        _traffic_observation_three_role_state()
+    )
+    outside_key = ("outside_veh", 99)
+    binding_result = _binding_transfer_with_transferred_keys(
+        state,
+        (outside_key,),
+    )
+    passage_before, traffic_before = _passage_and_traffic_snapshot(state)
+    orch_mod._apply_binding_transfer_required_passage_and_traffic_observation_updates(
+        state,
+        binding_result,
+        0,
+        BASELINE_T,
+    )
+    assert state.required_passage_records == passage_before
+    assert state.traffic_observation_records_in_public_order == traffic_before
+
+
+def test_binding_apply_updates_both_passage_and_traffic_with_shared_frozen_records():
+    _world, _local, state, buyer_visit, _seller, _np = (
+        _traffic_observation_three_role_state()
+    )
+    binding_result = _buyer_only_binding_result(state, buyer_visit)
+    orch_mod._apply_binding_transfer_required_passage_and_traffic_observation_updates(
+        state,
+        binding_result,
+        0,
+        BASELINE_T,
+    )
+    required = state._passage_record_by_visit_key[buyer_visit.visit_key]
+    traffic = state.traffic_observation_record_for_visit_key(buyer_visit.visit_key)
+    assert type(required.candidate_passage_timestep) is int
+    assert required.candidate_passage_timestep == traffic.candidate_passage_timestep
+    for record in state._traffic_observation_records_in_public_order:
+        if record.visit_key == buyer_visit.visit_key:
+            assert record is traffic
+            assert state._traffic_observation_record_by_visit_key[
+                buyer_visit.visit_key
+            ] is traffic
+
+
+def test_economic_required_completion_timestamps_recorded_once_at_first_completion():
+    _world, _local, state, _buyer, _seller, _np = (
+        _buyer_seller_np_staggered_passage_state(horizon=4)
+    )
+    run_tvt_mp_candidate_local_virtual_calculation_one_timestep(state)
+    assert state.economic_required_passages_complete_offset is None
+    run_tvt_mp_candidate_local_virtual_calculation_one_timestep(state)
+    assert state.economic_required_passages_complete_offset == 1
+    assert state.economic_required_passages_complete_virtual_timestep == BASELINE_T + 1
+    orch_mod._record_first_passage_completion_timestamps_if_needed(state, 99, 999)
+    assert state.economic_required_passages_complete_offset == 1
+    assert state.economic_required_passages_complete_virtual_timestep == BASELINE_T + 1
+
+
+def test_all_trade_scope_completion_timestamps_recorded_once_at_first_completion():
+    _world, _local, _collector, state, _visits = _buyer_and_seller_same_inlink_case(
+        horizon=1
+    )
+    run_tvt_mp_candidate_local_virtual_calculation_one_timestep(state)
+    assert state.all_trade_scope_passages_complete_offset == 0
+    assert state.all_trade_scope_passages_complete_virtual_timestep == BASELINE_T
+    orch_mod._record_first_passage_completion_timestamps_if_needed(state, 99, 999)
+    assert state.all_trade_scope_passages_complete_offset == 0
+    assert state.all_trade_scope_passages_complete_virtual_timestep == BASELINE_T
+
+
+def test_zero_nonparticipating_trade_scope_sets_both_completion_timestamps_equal():
+    _world, _local, _collector, state, _visits = _buyer_and_seller_same_inlink_case(
+        horizon=1
+    )
+    run_tvt_mp_candidate_local_virtual_calculation_one_timestep(state)
+    assert state.economic_required_passages_complete_offset == 0
+    assert state.all_trade_scope_passages_complete_offset == 0
+    assert (
+        state.economic_required_passages_complete_virtual_timestep
+        == state.all_trade_scope_passages_complete_virtual_timestep
+    )
+
+
+def test_buyer_seller_complete_with_nonparticipating_unpassed_finishes_with_partial_trade_scope_completion():
+    _world, _local, state, buyer_visit, seller_visit, np_visit = (
+        _traffic_observation_three_role_state()
+    )
+    original_binding = orch_mod.scan_and_transfer_tvt_mp_binding_visits_at_current_timestep
+
+    def buyer_and_seller_only(binding_state):
+        result = original_binding(binding_state)
+        return dataclasses.replace(
+            result,
+            transferred_binding_visit_keys=(
+                buyer_visit.visit_key,
+                seller_visit.visit_key,
+            ),
+        )
+
+    orch_mod.scan_and_transfer_tvt_mp_binding_visits_at_current_timestep = (
+        buyer_and_seller_only
+    )
+    try:
+        result = run_tvt_mp_candidate_local_virtual_calculation(state)
+    finally:
+        orch_mod.scan_and_transfer_tvt_mp_binding_visits_at_current_timestep = (
+            original_binding
+        )
+    assert result.resolved is True
+    assert state.economic_required_passages_complete_offset == 0
+    assert state.economic_required_passages_complete_virtual_timestep == BASELINE_T
+    assert state.all_trade_scope_passages_complete_offset is None
+    assert state.all_trade_scope_passages_complete_virtual_timestep is None
+    np_traffic = state.traffic_observation_record_for_visit_key(np_visit.visit_key)
+    assert np_traffic.candidate_passage_timestep is None
 
 
 def test_run_to_completion_from_partial_one_timestep_state():

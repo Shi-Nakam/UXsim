@@ -614,14 +614,22 @@ def run_tvt_mp_candidate_local_virtual_calculation_one_timestep(
             binding_transfer_result,
         )
     )
-    newly_recorded_keys = _record_required_passages_from_binding(
-        state,
-        binding_transfer_result,
-        virtual_timestep,
+    newly_recorded_keys = (
+        _apply_binding_transfer_required_passage_and_traffic_observation_updates(
+            state,
+            binding_transfer_result,
+            offset,
+            virtual_timestep,
+        )
     )
     _raise_if_unpassed_required_vehicle_passed_unbound(
         state,
         unbound_fcfs_result,
+    )
+    _record_first_passage_completion_timestamps_if_needed(
+        state,
+        offset,
+        virtual_timestep,
     )
     required_passages_complete_after_node_passage = (
         _required_passages_are_complete(state)
@@ -1238,8 +1246,8 @@ def _propose_tvt_mp_candidate_traffic_observation_updates_from_binding_transfer(
 ) -> tuple[OrderControlTvtMpCandidateTrafficObservationRecord, ...]:
     """Build updated traffic observation records for binding transfers.
 
-    Does not modify calculation_state. Only trade-scope visits with an
-    existing observation record are updated. Keys outside that set are ignored.
+    Does not modify calculation_state. Trade-scope visits must have an
+    observation record. Keys outside trade scope are ignored.
     """
     state = _require_calculation_state(calculation_state)
     if not isinstance(
@@ -1262,11 +1270,17 @@ def _propose_tvt_mp_candidate_traffic_observation_updates_from_binding_transfer(
         node_name=node_name,
     )
     proposed_records: list[OrderControlTvtMpCandidateTrafficObservationRecord] = []
+    trade_scope_visit_keys = _trade_scope_visit_keys_for_traffic_observation(state)
     seen_trade_scope_visit_keys: set[OrderControlTvtVisitKey] = set()
     for visit_key in binding_transfer_result.transferred_binding_visit_keys:
+        if visit_key not in trade_scope_visit_keys:
+            continue
         existing_record = state._traffic_observation_record_by_visit_key.get(visit_key)
         if existing_record is None:
-            continue
+            raise RuntimeError(
+                f"Node {node_name!r}: trade-scope VisitKey {visit_key!r} was "
+                "transferred by binding but has no traffic observation record."
+            )
         if visit_key in seen_trade_scope_visit_keys:
             raise RuntimeError(
                 f"Node {node_name!r}: trade-scope VisitKey {visit_key!r} was "
@@ -1335,6 +1349,16 @@ def _propose_tvt_mp_candidate_traffic_observation_updates_from_binding_transfer(
             )
         )
     return tuple(proposed_records)
+
+
+def _trade_scope_visit_keys_for_traffic_observation(
+    state: OrderControlTvtMpCandidateLocalVirtualCalculationState,
+) -> set[OrderControlTvtVisitKey]:
+    visit_keys: set[OrderControlTvtVisitKey] = set()
+    sequence = state.candidate_local_state.binding_rank_sequence
+    for visit in sequence.trade_scope_of_this_candidate_visits:
+        visit_keys.add(visit.visit_key)
+    return visit_keys
 
 
 def _require_traffic_observation_update_offset(value: object, *, node_name: str) -> int:
@@ -1410,14 +1434,71 @@ def _require_frozen_true_vot_per_second_on_observation_record(
     return float(value)
 
 
-def _record_required_passages_from_binding(
+def _apply_binding_transfer_required_passage_and_traffic_observation_updates(
+    state: OrderControlTvtMpCandidateLocalVirtualCalculationState,
+    binding_transfer_result: OrderControlTvtMpBindingTransferScanResult,
+    offset: int,
+    virtual_timestep: int,
+) -> tuple[OrderControlTvtVisitKey, ...]:
+    newly_recorded_keys, proposed_passage_records = (
+        _propose_required_passage_updates_from_binding_transfer(
+            state,
+            binding_transfer_result,
+            virtual_timestep,
+        )
+    )
+    proposed_traffic_records = (
+        _propose_tvt_mp_candidate_traffic_observation_updates_from_binding_transfer(
+            state,
+            binding_transfer_result,
+            offset,
+            virtual_timestep,
+        )
+    )
+    _raise_if_buyer_seller_proposed_passage_timesteps_disagree(
+        state,
+        proposed_passage_records,
+        proposed_traffic_records,
+    )
+    required_passage_apply_plan = (
+        _build_required_passage_apply_plan_after_pre_apply_validation(
+            state,
+            proposed_passage_records,
+        )
+    )
+    traffic_observation_apply_plan = (
+        _build_traffic_observation_apply_plan_after_pre_apply_validation(
+            state,
+            proposed_traffic_records,
+        )
+    )
+    _apply_required_passage_apply_plan_to_state(
+        state,
+        required_passage_apply_plan,
+    )
+    _apply_traffic_observation_apply_plan_to_state(
+        state,
+        traffic_observation_apply_plan,
+    )
+    _raise_if_buyer_seller_passage_timesteps_disagree_after_binding_updates(
+        state,
+        newly_recorded_keys,
+    )
+    return newly_recorded_keys
+
+
+def _propose_required_passage_updates_from_binding_transfer(
     state: OrderControlTvtMpCandidateLocalVirtualCalculationState,
     binding_transfer_result: OrderControlTvtMpBindingTransferScanResult,
     virtual_timestep: int,
-) -> tuple[OrderControlTvtVisitKey, ...]:
+) -> tuple[
+    tuple[OrderControlTvtVisitKey, ...],
+    tuple[OrderControlTvtMpCandidatePassageRecord, ...],
+]:
     required_keys = set(state.required_buyer_visit_keys)
     required_keys.update(state.required_seller_visit_keys)
     newly_recorded: list[OrderControlTvtVisitKey] = []
+    proposed_records: list[OrderControlTvtMpCandidatePassageRecord] = []
     seen_in_this_timestep: set[OrderControlTvtVisitKey] = set()
     for visit_key in binding_transfer_result.transferred_binding_visit_keys:
         if visit_key not in required_keys:
@@ -1429,7 +1510,13 @@ def _record_required_passages_from_binding(
                 f"virtual timestep {virtual_timestep}."
             )
         seen_in_this_timestep.add(visit_key)
-        current_record = state._passage_record_by_visit_key[visit_key]
+        current_record = state._passage_record_by_visit_key.get(visit_key)
+        if current_record is None:
+            raise RuntimeError(
+                f"Node {state.candidate_local_state.target_node_name!r}: "
+                f"required VisitKey {visit_key!r} is missing from the required "
+                "passage record map."
+            )
         if current_record.candidate_passage_timestep is not None:
             raise RuntimeError(
                 f"Node {state.candidate_local_state.target_node_name!r}: "
@@ -1448,10 +1535,280 @@ def _record_required_passages_from_binding(
             route_origin=current_record.route_origin,
             inlink_name=current_record.inlink_name,
         )
-        state._passage_record_by_visit_key[visit_key] = updated_record
-        _replace_passage_record_in_public_order(state, updated_record)
+        proposed_records.append(updated_record)
         newly_recorded.append(visit_key)
-    return tuple(newly_recorded)
+    return tuple(newly_recorded), tuple(proposed_records)
+
+
+def _build_required_passage_apply_plan_after_pre_apply_validation(
+    state: OrderControlTvtMpCandidateLocalVirtualCalculationState,
+    proposed_passage_records: tuple[OrderControlTvtMpCandidatePassageRecord, ...],
+) -> tuple[tuple[OrderControlTvtVisitKey, int, OrderControlTvtMpCandidatePassageRecord], ...]:
+    node_name = state.candidate_local_state.target_node_name
+    public_order = state._passage_records_in_public_order
+    passage_map = state._passage_record_by_visit_key
+    apply_plan: list[
+        tuple[OrderControlTvtVisitKey, int, OrderControlTvtMpCandidatePassageRecord]
+    ] = []
+    seen_visit_keys: set[OrderControlTvtVisitKey] = set()
+    for updated_record in proposed_passage_records:
+        visit_key = updated_record.visit_key
+        if visit_key in seen_visit_keys:
+            raise RuntimeError(
+                f"Node {node_name!r}: proposed required passage update for "
+                f"VisitKey {visit_key!r} appears more than once."
+            )
+        seen_visit_keys.add(visit_key)
+        if visit_key not in passage_map:
+            raise RuntimeError(
+                f"Node {node_name!r}: proposed required passage update for "
+                f"VisitKey {visit_key!r} is missing from the required passage "
+                "record map."
+            )
+        current_map_record = passage_map[visit_key]
+        public_index = None
+        public_match_count = 0
+        for index, existing in enumerate(public_order):
+            if existing.visit_key == visit_key:
+                public_match_count += 1
+                public_index = index
+        if public_match_count != 1:
+            raise RuntimeError(
+                f"Node {node_name!r}: required passage public order must contain "
+                f"VisitKey {visit_key!r} exactly once; found "
+                f"{public_match_count} matches."
+            )
+        current_public_record = public_order[public_index]
+        if current_map_record is not current_public_record:
+            raise RuntimeError(
+                f"Node {node_name!r}: required passage map and public order "
+                f"do not reference the same record object for VisitKey "
+                f"{visit_key!r}."
+            )
+        apply_plan.append((visit_key, public_index, updated_record))
+    return tuple(apply_plan)
+
+
+def _build_traffic_observation_apply_plan_after_pre_apply_validation(
+    state: OrderControlTvtMpCandidateLocalVirtualCalculationState,
+    proposed_traffic_records: tuple[
+        OrderControlTvtMpCandidateTrafficObservationRecord,
+        ...,
+    ],
+) -> tuple[
+    tuple[
+        OrderControlTvtVisitKey,
+        int,
+        OrderControlTvtMpCandidateTrafficObservationRecord,
+    ],
+    ...,
+]:
+    node_name = state.candidate_local_state.target_node_name
+    public_order = state._traffic_observation_records_in_public_order
+    traffic_map = state._traffic_observation_record_by_visit_key
+    apply_plan: list[
+        tuple[
+            OrderControlTvtVisitKey,
+            int,
+            OrderControlTvtMpCandidateTrafficObservationRecord,
+        ]
+    ] = []
+    seen_visit_keys: set[OrderControlTvtVisitKey] = set()
+    for updated_record in proposed_traffic_records:
+        visit_key = updated_record.visit_key
+        if visit_key in seen_visit_keys:
+            raise RuntimeError(
+                f"Node {node_name!r}: proposed traffic observation update for "
+                f"VisitKey {visit_key!r} appears more than once."
+            )
+        seen_visit_keys.add(visit_key)
+        if visit_key not in traffic_map:
+            raise RuntimeError(
+                f"Node {node_name!r}: proposed traffic observation update for "
+                f"VisitKey {visit_key!r} is missing from the traffic observation "
+                "record map."
+            )
+        current_map_record = traffic_map[visit_key]
+        public_index = None
+        public_match_count = 0
+        for index, existing in enumerate(public_order):
+            if existing.visit_key == visit_key:
+                public_match_count += 1
+                public_index = index
+        if public_match_count != 1:
+            raise RuntimeError(
+                f"Node {node_name!r}: traffic observation public order must "
+                f"contain VisitKey {visit_key!r} exactly once; found "
+                f"{public_match_count} matches."
+            )
+        current_public_record = public_order[public_index]
+        if current_map_record is not current_public_record:
+            raise RuntimeError(
+                f"Node {node_name!r}: traffic observation map and public order "
+                f"do not reference the same record object for VisitKey "
+                f"{visit_key!r}."
+            )
+        apply_plan.append((visit_key, public_index, updated_record))
+    return tuple(apply_plan)
+
+
+def _apply_required_passage_apply_plan_to_state(
+    state: OrderControlTvtMpCandidateLocalVirtualCalculationState,
+    apply_plan: tuple[
+        tuple[OrderControlTvtVisitKey, int, OrderControlTvtMpCandidatePassageRecord],
+        ...,
+    ],
+) -> None:
+    public_order = state._passage_records_in_public_order
+    passage_map = state._passage_record_by_visit_key
+    for visit_key, public_index, updated_record in apply_plan:
+        passage_map[visit_key] = updated_record
+        public_order[public_index] = updated_record
+
+
+def _apply_traffic_observation_apply_plan_to_state(
+    state: OrderControlTvtMpCandidateLocalVirtualCalculationState,
+    apply_plan: tuple[
+        tuple[
+            OrderControlTvtVisitKey,
+            int,
+            OrderControlTvtMpCandidateTrafficObservationRecord,
+        ],
+        ...,
+    ],
+) -> None:
+    public_order = state._traffic_observation_records_in_public_order
+    traffic_map = state._traffic_observation_record_by_visit_key
+    for visit_key, public_index, updated_record in apply_plan:
+        traffic_map[visit_key] = updated_record
+        public_order[public_index] = updated_record
+
+
+def _replace_traffic_observation_record_in_public_order(
+    state: OrderControlTvtMpCandidateLocalVirtualCalculationState,
+    updated_record: OrderControlTvtMpCandidateTrafficObservationRecord,
+) -> None:
+    public_order = state._traffic_observation_records_in_public_order
+    for index, existing in enumerate(public_order):
+        if existing.visit_key == updated_record.visit_key:
+            public_order[index] = updated_record
+            return
+    raise RuntimeError(
+        f"Node {state.candidate_local_state.target_node_name!r}: "
+        f"trade-scope VisitKey {updated_record.visit_key!r} is missing from "
+        "the public traffic-observation-record order."
+    )
+
+
+def _raise_if_buyer_seller_proposed_passage_timesteps_disagree(
+    state: OrderControlTvtMpCandidateLocalVirtualCalculationState,
+    proposed_passage_records: tuple[OrderControlTvtMpCandidatePassageRecord, ...],
+    proposed_traffic_records: tuple[
+        OrderControlTvtMpCandidateTrafficObservationRecord,
+        ...,
+    ],
+) -> None:
+    traffic_by_key: dict[
+        OrderControlTvtVisitKey,
+        OrderControlTvtMpCandidateTrafficObservationRecord,
+    ] = {}
+    for traffic_record in proposed_traffic_records:
+        traffic_by_key[traffic_record.visit_key] = traffic_record
+    for passage_record in proposed_passage_records:
+        visit_key = passage_record.visit_key
+        traffic_record = traffic_by_key.get(visit_key)
+        if traffic_record is None:
+            raise RuntimeError(
+                f"Node {state.candidate_local_state.target_node_name!r}: "
+                f"required VisitKey {visit_key!r} has a proposed required "
+                "passage update but no matching traffic observation update."
+            )
+        _raise_if_passage_timesteps_disagree_for_visit_key(
+            state,
+            visit_key,
+            passage_record.candidate_passage_timestep,
+            traffic_record.candidate_passage_timestep,
+        )
+
+
+def _raise_if_buyer_seller_passage_timesteps_disagree_after_binding_updates(
+    state: OrderControlTvtMpCandidateLocalVirtualCalculationState,
+    newly_recorded_required_visit_keys: tuple[OrderControlTvtVisitKey, ...],
+) -> None:
+    for visit_key in newly_recorded_required_visit_keys:
+        passage_record = state._passage_record_by_visit_key[visit_key]
+        traffic_record = state._traffic_observation_record_by_visit_key[visit_key]
+        _raise_if_passage_timesteps_disagree_for_visit_key(
+            state,
+            visit_key,
+            passage_record.candidate_passage_timestep,
+            traffic_record.candidate_passage_timestep,
+        )
+
+
+def _raise_if_passage_timesteps_disagree_for_visit_key(
+    state: OrderControlTvtMpCandidateLocalVirtualCalculationState,
+    visit_key: OrderControlTvtVisitKey,
+    required_candidate_passage_timestep: int | None,
+    traffic_candidate_passage_timestep: int | None,
+) -> None:
+    node_name = state.candidate_local_state.target_node_name
+    if type(required_candidate_passage_timestep) is not int:
+        raise RuntimeError(
+            f"Node {node_name!r}: required VisitKey {visit_key!r} candidate "
+            f"passage timestep must be a Python int after binding updates; "
+            f"got {required_candidate_passage_timestep!r}."
+        )
+    if type(traffic_candidate_passage_timestep) is not int:
+        raise RuntimeError(
+            f"Node {node_name!r}: trade-scope VisitKey {visit_key!r} traffic "
+            "observation candidate passage timestep must be a Python int "
+            f"after binding updates; got {traffic_candidate_passage_timestep!r}."
+        )
+    if required_candidate_passage_timestep != traffic_candidate_passage_timestep:
+        raise RuntimeError(
+            f"Node {node_name!r}: required VisitKey {visit_key!r} candidate "
+            f"passage timestep {required_candidate_passage_timestep} does not "
+            "match traffic observation candidate passage timestep "
+            f"{traffic_candidate_passage_timestep}."
+        )
+
+
+def _record_first_passage_completion_timestamps_if_needed(
+    state: OrderControlTvtMpCandidateLocalVirtualCalculationState,
+    offset: int,
+    virtual_timestep: int,
+) -> None:
+    if state._economic_required_passages_complete_offset is None:
+        if _all_economic_required_passages_have_candidate_timestep(state):
+            state._economic_required_passages_complete_offset = offset
+            state._economic_required_passages_complete_virtual_timestep = (
+                virtual_timestep
+            )
+    if state._all_trade_scope_passages_complete_offset is None:
+        if _all_trade_scope_traffic_observations_have_candidate_timestep(state):
+            state._all_trade_scope_passages_complete_offset = offset
+            state._all_trade_scope_passages_complete_virtual_timestep = (
+                virtual_timestep
+            )
+
+
+def _all_economic_required_passages_have_candidate_timestep(
+    state: OrderControlTvtMpCandidateLocalVirtualCalculationState,
+) -> bool:
+    for record in state._passage_records_in_public_order:
+        if type(record.candidate_passage_timestep) is not int:
+            return False
+    return True
+
+
+def _all_trade_scope_traffic_observations_have_candidate_timestep(
+    state: OrderControlTvtMpCandidateLocalVirtualCalculationState,
+) -> bool:
+    for record in state._traffic_observation_records_in_public_order:
+        if type(record.candidate_passage_timestep) is not int:
+            return False
+    return True
 
 
 def _replace_passage_record_in_public_order(
