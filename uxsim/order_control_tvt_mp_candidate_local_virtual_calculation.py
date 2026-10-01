@@ -207,6 +207,9 @@ class OrderControlTvtMpCandidateVirtualTimestepResult:
     required_passages_complete_after_node_passage: bool
     calculation_finished_after_timestep_end: bool
     resolved_after_timestep_end: bool
+    traffic_observation_complete_after_node_passage: bool
+    economic_required_first_completed_at_this_timestep: bool
+    traffic_observation_first_completed_at_this_timestep: bool
 
 
 @dataclass(frozen=True)
@@ -287,6 +290,14 @@ class OrderControlTvtMpCandidateLocalVirtualCalculationResult:
         OrderControlTvtMpCandidateFinalOutlinkBoundaryRecord,
         ...,
     ]
+    traffic_observation_records: tuple[
+        OrderControlTvtMpCandidateTrafficObservationRecord,
+        ...,
+    ]
+    economic_required_passages_complete_offset: int | None
+    economic_required_passages_complete_virtual_timestep: int | None
+    all_trade_scope_passages_complete_offset: int | None
+    all_trade_scope_passages_complete_virtual_timestep: int | None
 
 
 class OrderControlTvtMpCandidateLocalVirtualCalculationState:
@@ -632,13 +643,19 @@ def run_tvt_mp_candidate_local_virtual_calculation_one_timestep(
         state,
         unbound_fcfs_result,
     )
-    _record_first_passage_completion_timestamps_if_needed(
+    (
+        economic_required_first_completed_at_this_timestep,
+        traffic_observation_first_completed_at_this_timestep,
+    ) = _record_first_passage_completion_timestamps_if_needed(
         state,
         offset,
         virtual_timestep,
     )
     required_passages_complete_after_node_passage = (
         _required_passages_are_complete(state)
+    )
+    traffic_observation_complete_after_node_passage = (
+        _all_trade_scope_traffic_observations_have_candidate_timestep(state)
     )
     local_vehicle_advance_result = (
         advance_tvt_mp_candidate_local_vehicles_and_register_new_arrivals(
@@ -656,7 +673,8 @@ def run_tvt_mp_candidate_local_virtual_calculation_one_timestep(
     resolved_after_timestep_end = required_passages_complete_after_node_passage
     last_allowed_offset = horizon_steps - 1
     calculation_finished_after_timestep_end = (
-        resolved_after_timestep_end or offset == last_allowed_offset
+        traffic_observation_complete_after_node_passage
+        or offset == last_allowed_offset
     )
     timestep_result = OrderControlTvtMpCandidateVirtualTimestepResult(
         node_name=state.candidate_local_state.target_node_name,
@@ -674,6 +692,15 @@ def run_tvt_mp_candidate_local_virtual_calculation_one_timestep(
             calculation_finished_after_timestep_end
         ),
         resolved_after_timestep_end=resolved_after_timestep_end,
+        traffic_observation_complete_after_node_passage=(
+            traffic_observation_complete_after_node_passage
+        ),
+        economic_required_first_completed_at_this_timestep=(
+            economic_required_first_completed_at_this_timestep
+        ),
+        traffic_observation_first_completed_at_this_timestep=(
+            traffic_observation_first_completed_at_this_timestep
+        ),
     )
     if calculation_finished_after_timestep_end:
         final_result = _build_final_result(state, timestep_result)
@@ -690,7 +717,7 @@ def run_tvt_mp_candidate_local_virtual_calculation_one_timestep(
 def run_tvt_mp_candidate_local_virtual_calculation(
     calculation_state,
 ) -> OrderControlTvtMpCandidateLocalVirtualCalculationResult:
-    """Repeat the one-timestep API until resolved or the last allowed offset."""
+    """Repeat the one-timestep API until trade-scope observation finishes or the horizon ends."""
     state = _require_calculation_state(calculation_state)
     if state.finished:
         if state.final_result is None:
@@ -2092,19 +2119,24 @@ def _record_first_passage_completion_timestamps_if_needed(
     state: OrderControlTvtMpCandidateLocalVirtualCalculationState,
     offset: int,
     virtual_timestep: int,
-) -> None:
+) -> tuple[bool, bool]:
+    economic_required_first_completed = False
+    traffic_observation_first_completed = False
     if state._economic_required_passages_complete_offset is None:
         if _all_economic_required_passages_have_candidate_timestep(state):
             state._economic_required_passages_complete_offset = offset
             state._economic_required_passages_complete_virtual_timestep = (
                 virtual_timestep
             )
+            economic_required_first_completed = True
     if state._all_trade_scope_passages_complete_offset is None:
         if _all_trade_scope_traffic_observations_have_candidate_timestep(state):
             state._all_trade_scope_passages_complete_offset = offset
             state._all_trade_scope_passages_complete_virtual_timestep = (
                 virtual_timestep
             )
+            traffic_observation_first_completed = True
+    return economic_required_first_completed, traffic_observation_first_completed
 
 
 def _all_economic_required_passages_have_candidate_timestep(
@@ -2197,6 +2229,21 @@ def _build_final_result(
         state,
         last_timestep_result.outlink_boundary_result,
     )
+    final_traffic_observation_records = (
+        _build_final_traffic_observation_records(state)
+    )
+    _raise_if_completion_timestamp_pair_is_inconsistent(
+        state.economic_required_passages_complete_offset,
+        state.economic_required_passages_complete_virtual_timestep,
+        label="economic required passages",
+        node_name=state.candidate_local_state.target_node_name,
+    )
+    _raise_if_completion_timestamp_pair_is_inconsistent(
+        state.all_trade_scope_passages_complete_offset,
+        state.all_trade_scope_passages_complete_virtual_timestep,
+        label="all trade-scope passages",
+        node_name=state.candidate_local_state.target_node_name,
+    )
     return OrderControlTvtMpCandidateLocalVirtualCalculationResult(
         node_name=state.candidate_local_state.target_node_name,
         concrete_buyer_candidate_set=sequence.concrete_buyer_candidate_set,
@@ -2216,6 +2263,123 @@ def _build_final_result(
         final_outlink_records=final_outlink_records,
         final_node_record=final_node_record,
         final_boundary_records=final_boundary_records,
+        traffic_observation_records=final_traffic_observation_records,
+        economic_required_passages_complete_offset=(
+            state.economic_required_passages_complete_offset
+        ),
+        economic_required_passages_complete_virtual_timestep=(
+            state.economic_required_passages_complete_virtual_timestep
+        ),
+        all_trade_scope_passages_complete_offset=(
+            state.all_trade_scope_passages_complete_offset
+        ),
+        all_trade_scope_passages_complete_virtual_timestep=(
+            state.all_trade_scope_passages_complete_virtual_timestep
+        ),
+    )
+
+
+def _raise_if_completion_timestamp_pair_is_inconsistent(
+    offset: int | None,
+    virtual_timestep: int | None,
+    *,
+    label: str,
+    node_name: str,
+) -> None:
+    offset_is_int = type(offset) is int
+    virtual_timestep_is_int = type(virtual_timestep) is int
+    if offset_is_int and virtual_timestep_is_int:
+        return
+    if offset is None and virtual_timestep is None:
+        return
+    raise RuntimeError(
+        f"Node {node_name!r}: {label} completion offset and virtual timestep "
+        "must both be Python int or both be None; got "
+        f"offset {offset!r} and virtual timestep {virtual_timestep!r}."
+    )
+
+
+def _build_final_traffic_observation_records(
+    state: OrderControlTvtMpCandidateLocalVirtualCalculationState,
+) -> tuple[OrderControlTvtMpCandidateTrafficObservationRecord, ...]:
+    finalized_records: list[OrderControlTvtMpCandidateTrafficObservationRecord] = []
+    for record in state._traffic_observation_records_in_public_order:
+        if type(record.candidate_passage_timestep) is int:
+            finalized_records.append(
+                _finalize_observed_traffic_observation_record(record)
+            )
+        else:
+            finalized_records.append(
+                _finalize_unobserved_traffic_observation_record(record)
+            )
+    return tuple(finalized_records)
+
+
+def _finalize_observed_traffic_observation_record(
+    record: OrderControlTvtMpCandidateTrafficObservationRecord,
+) -> OrderControlTvtMpCandidateTrafficObservationRecord:
+    return OrderControlTvtMpCandidateTrafficObservationRecord(
+        visit_key=record.visit_key,
+        vehicle_name=record.vehicle_name,
+        vehicle_id=record.vehicle_id,
+        trade_role=record.trade_role,
+        binding_partition=record.binding_partition,
+        binding_rank=record.binding_rank,
+        trade_scope_rank=record.trade_scope_rank,
+        inlink_name=record.inlink_name,
+        route_next_link_name=record.route_next_link_name,
+        true_vot_per_second=record.true_vot_per_second,
+        baseline_passage_timestep=record.baseline_passage_timestep,
+        candidate_passage_timestep=record.candidate_passage_timestep,
+        passage_observation_status=(
+            OrderControlTvtMpCandidatePassageObservationStatus.OBSERVED
+        ),
+        observed_offset=record.observed_offset,
+        observed_virtual_timestep=record.observed_virtual_timestep,
+        predicted_time_difference_timesteps=record.predicted_time_difference_timesteps,
+        predicted_time_difference_seconds=record.predicted_time_difference_seconds,
+        predicted_signed_time_value_change=record.predicted_signed_time_value_change,
+        last_checked_offset=record.last_checked_offset,
+        last_checked_virtual_timestep=record.last_checked_virtual_timestep,
+        last_temporary_skip_reason=record.last_temporary_skip_reason,
+        last_temporary_skip_offset=record.last_temporary_skip_offset,
+        latest_clearance_stop_context=record.latest_clearance_stop_context,
+        horizon_exhausted=False,
+        observation_complete=True,
+    )
+
+
+def _finalize_unobserved_traffic_observation_record(
+    record: OrderControlTvtMpCandidateTrafficObservationRecord,
+) -> OrderControlTvtMpCandidateTrafficObservationRecord:
+    return OrderControlTvtMpCandidateTrafficObservationRecord(
+        visit_key=record.visit_key,
+        vehicle_name=record.vehicle_name,
+        vehicle_id=record.vehicle_id,
+        trade_role=record.trade_role,
+        binding_partition=record.binding_partition,
+        binding_rank=record.binding_rank,
+        trade_scope_rank=record.trade_scope_rank,
+        inlink_name=record.inlink_name,
+        route_next_link_name=record.route_next_link_name,
+        true_vot_per_second=record.true_vot_per_second,
+        baseline_passage_timestep=record.baseline_passage_timestep,
+        candidate_passage_timestep=None,
+        passage_observation_status=(
+            OrderControlTvtMpCandidatePassageObservationStatus.UNOBSERVED_AT_HORIZON
+        ),
+        observed_offset=None,
+        observed_virtual_timestep=None,
+        predicted_time_difference_timesteps=None,
+        predicted_time_difference_seconds=None,
+        predicted_signed_time_value_change=None,
+        last_checked_offset=record.last_checked_offset,
+        last_checked_virtual_timestep=record.last_checked_virtual_timestep,
+        last_temporary_skip_reason=record.last_temporary_skip_reason,
+        last_temporary_skip_offset=record.last_temporary_skip_offset,
+        latest_clearance_stop_context=record.latest_clearance_stop_context,
+        horizon_exhausted=True,
+        observation_complete=False,
     )
 
 

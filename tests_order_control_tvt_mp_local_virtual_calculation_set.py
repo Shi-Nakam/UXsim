@@ -367,6 +367,11 @@ def _dummy_one_candidate_result(
             order_control_clearance_timesteps=0,
         ),
         final_boundary_records=(),
+        traffic_observation_records=(),
+        economic_required_passages_complete_offset=None,
+        economic_required_passages_complete_virtual_timestep=None,
+        all_trade_scope_passages_complete_offset=None,
+        all_trade_scope_passages_complete_virtual_timestep=None,
     )
 
 
@@ -788,6 +793,12 @@ def _register_snapshot(collector, vehicle, *, route_name: str, node_name: str = 
         route_next_link_name=route_name,
         baseline_passage_timestep=None,
     )
+    passage_record = collector.prepare_baseline_passage_recording(
+        vehicle_name=vehicle.name,
+        visit_id=visit["visit_id"],
+        node_name=node_name,
+    )
+    collector.apply_baseline_passage_timestep(passage_record, BASELINE_T)
 
 
 def _place_buyer(world, vehicle, *, inlink_name: str, route_name: str) -> tuple:
@@ -796,6 +807,7 @@ def _place_buyer(world, vehicle, *, inlink_name: str, route_name: str) -> tuple:
     merge = world.get_node("merge")
     _place(world, vehicle, inlink, route)
     vehicle.begin_order_control_visit_on_link_entry()
+    vehicle.vot_true = 1.0
     vehicle.order_control_current_visit["arrival_time"] = 1.0
     vehicle.order_control_current_visit["arrival_tiebreaker"] = 0.1
     inlink.vehicles.append(vehicle)

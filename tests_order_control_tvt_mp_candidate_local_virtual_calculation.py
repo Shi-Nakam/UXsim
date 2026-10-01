@@ -554,6 +554,9 @@ def test_public_frozen_types_field_order_and_forbidden_fields():
         "required_passages_complete_after_node_passage",
         "calculation_finished_after_timestep_end",
         "resolved_after_timestep_end",
+        "traffic_observation_complete_after_node_passage",
+        "economic_required_first_completed_at_this_timestep",
+        "traffic_observation_first_completed_at_this_timestep",
     )
     assert _field_names(OrderControlTvtMpCandidateFinalVehicleRecord) == (
         "vehicle_name",
@@ -611,6 +614,11 @@ def test_public_frozen_types_field_order_and_forbidden_fields():
         "final_outlink_records",
         "final_node_record",
         "final_boundary_records",
+        "traffic_observation_records",
+        "economic_required_passages_complete_offset",
+        "economic_required_passages_complete_virtual_timestep",
+        "all_trade_scope_passages_complete_offset",
+        "all_trade_scope_passages_complete_virtual_timestep",
     )
     assert _field_names(OrderControlTvtMpCandidateClearanceScanStopContext) == (
         "virtual_timestep",
@@ -3372,38 +3380,99 @@ def test_zero_nonparticipating_trade_scope_sets_both_completion_timestamps_equal
     )
 
 
-def test_buyer_seller_complete_with_nonparticipating_unpassed_finishes_with_partial_trade_scope_completion():
-    _world, _local, state, buyer_visit, seller_visit, np_visit = (
-        _traffic_observation_three_role_state()
+def test_buyer_seller_complete_with_nonparticipating_unpassed_continues_until_trade_scope_or_horizon():
+    _world, _local, state, _buyer, _seller, np_visit = (
+        _buyer_seller_np_staggered_passage_state(horizon=4)
     )
-    original_binding = orch_mod.scan_and_transfer_tvt_mp_binding_visits_at_current_timestep
-
-    def buyer_and_seller_only(binding_state):
-        result = original_binding(binding_state)
-        return dataclasses.replace(
-            result,
-            transferred_binding_visit_keys=(
-                buyer_visit.visit_key,
-                seller_visit.visit_key,
-            ),
-        )
-
-    orch_mod.scan_and_transfer_tvt_mp_binding_visits_at_current_timestep = (
-        buyer_and_seller_only
-    )
-    try:
-        result = run_tvt_mp_candidate_local_virtual_calculation(state)
-    finally:
-        orch_mod.scan_and_transfer_tvt_mp_binding_visits_at_current_timestep = (
-            original_binding
-        )
+    run_tvt_mp_candidate_local_virtual_calculation_one_timestep(state)
+    second = run_tvt_mp_candidate_local_virtual_calculation_one_timestep(state)
+    assert second.resolved_after_timestep_end is True
+    assert second.calculation_finished_after_timestep_end is False
+    assert second.traffic_observation_complete_after_node_passage is False
+    assert second.economic_required_first_completed_at_this_timestep is True
+    assert second.traffic_observation_first_completed_at_this_timestep is False
+    assert state.finished is False
+    assert state.final_result is None
+    third = run_tvt_mp_candidate_local_virtual_calculation_one_timestep(state)
+    assert third.calculation_finished_after_timestep_end is True
+    assert third.traffic_observation_first_completed_at_this_timestep is True
+    assert state.finished is True
+    result = state.final_result
+    assert result is not None
     assert result.resolved is True
-    assert state.economic_required_passages_complete_offset == 0
-    assert state.economic_required_passages_complete_virtual_timestep == BASELINE_T
-    assert state.all_trade_scope_passages_complete_offset is None
-    assert state.all_trade_scope_passages_complete_virtual_timestep is None
-    np_traffic = state.traffic_observation_record_for_visit_key(np_visit.visit_key)
-    assert np_traffic.candidate_passage_timestep is None
+    assert result.stop_reason is (
+        OrderControlTvtMpCandidateLocalVirtualCalculationStopReason.RESOLVED
+    )
+    assert result.unresolved_reasons == ()
+    for record in result.traffic_observation_records:
+        assert record.passage_observation_status is (
+            OrderControlTvtMpCandidatePassageObservationStatus.OBSERVED
+        )
+        assert record.observation_complete is True
+        assert record.horizon_exhausted is False
+    np_final = None
+    for record in result.traffic_observation_records:
+        if record.visit_key == np_visit.visit_key:
+            np_final = record
+    assert np_final is not None
+    assert type(np_final.candidate_passage_timestep) is int
+    assert len(result.timestep_results) == result.final_offset + 1
+    assert result.simulated_timestep_count == result.final_offset
+
+
+def test_horizon_with_only_nonparticipating_unobserved_stays_resolved():
+    _world, _local, state, _buyer, _seller, np_visit = (
+        _buyer_seller_np_staggered_passage_state(horizon=2)
+    )
+    result = run_tvt_mp_candidate_local_virtual_calculation(state)
+    assert result.resolved is True
+    assert result.stop_reason is (
+        OrderControlTvtMpCandidateLocalVirtualCalculationStopReason.RESOLVED
+    )
+    assert result.unresolved_reasons == ()
+    assert result.all_trade_scope_passages_complete_offset is None
+    assert result.all_trade_scope_passages_complete_virtual_timestep is None
+    assert type(result.economic_required_passages_complete_offset) is int
+    assert type(result.economic_required_passages_complete_virtual_timestep) is int
+    np_final = None
+    for record in result.traffic_observation_records:
+        if record.visit_key == np_visit.visit_key:
+            np_final = record
+    assert np_final is not None
+    assert np_final.passage_observation_status is (
+        OrderControlTvtMpCandidatePassageObservationStatus.UNOBSERVED_AT_HORIZON
+    )
+    assert np_final.candidate_passage_timestep is None
+    assert np_final.observed_offset is None
+    assert np_final.predicted_signed_time_value_change is None
+    assert np_final.horizon_exhausted is True
+    assert np_final.observation_complete is False
+    state_np = state.traffic_observation_record_for_visit_key(np_visit.visit_key)
+    assert state_np is not np_final
+    assert state_np.passage_observation_status is None
+
+
+def test_no_nonparticipating_finishes_when_buyer_and_seller_complete():
+    _world, _local, _collector, state, _visits = _buyer_and_seller_same_inlink_case(
+        horizon=2
+    )
+    result = run_tvt_mp_candidate_local_virtual_calculation(state)
+    assert result.resolved is True
+    assert result.stop_reason is (
+        OrderControlTvtMpCandidateLocalVirtualCalculationStopReason.RESOLVED
+    )
+    assert state.finished is True
+    assert result.final_offset == 0
+    assert result.economic_required_passages_complete_offset == 0
+    assert result.all_trade_scope_passages_complete_offset == 0
+    assert (
+        result.economic_required_passages_complete_virtual_timestep
+        == result.all_trade_scope_passages_complete_virtual_timestep
+    )
+    timestep = result.timestep_results[0]
+    assert timestep.economic_required_first_completed_at_this_timestep is True
+    assert timestep.traffic_observation_first_completed_at_this_timestep is True
+    assert timestep.traffic_observation_complete_after_node_passage is True
 
 
 def test_run_to_completion_from_partial_one_timestep_state():

@@ -242,6 +242,11 @@ def _candidate_local_result(
         final_outlink_records=(),
         final_node_record=_final_node_record(node_name),
         final_boundary_records=(),
+        traffic_observation_records=(),
+        economic_required_passages_complete_offset=None,
+        economic_required_passages_complete_virtual_timestep=None,
+        all_trade_scope_passages_complete_offset=None,
+        all_trade_scope_passages_complete_virtual_timestep=None,
     )
 
 

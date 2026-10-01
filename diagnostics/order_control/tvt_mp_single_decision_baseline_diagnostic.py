@@ -28,6 +28,7 @@ from uxsim.order_control_tvt_mp_candidate_binding_transfer import (
 )
 from uxsim.order_control_tvt_mp_candidate_local_virtual_calculation import (
     OrderControlTvtMpCandidateLocalVirtualCalculationStopReason,
+    OrderControlTvtMpCandidatePassageObservationStatus,
 )
 from uxsim.order_control_tvt_mp_candidate_selection import (
     OrderControlTvtMpCandidateSelectionStatus,
@@ -2056,7 +2057,30 @@ def stage3_vehicle_inlink_name(vehicle_name: str) -> str:
     raise KeyError(f"unknown Stage 3 vehicle {vehicle_name!r}")
 
 
+def stage3_timestep_result_at_offset(local_result, offset: int):
+    for timestep_result in local_result.timestep_results:
+        if timestep_result.offset == offset:
+            return timestep_result
+    raise AssertionError(
+        f"offset {offset} not found in candidate-local timestep_results"
+    )
+
+
+def stage3_traffic_observation_record_for_vehicle(local_result, vehicle_name: str):
+    for record in local_result.traffic_observation_records:
+        if record.vehicle_name == vehicle_name:
+            return record
+    raise AssertionError(
+        f"{vehicle_name}: no traffic_observation_record in candidate-local result"
+    )
+
+
 def stage3_completion_timestep_result(local_result):
+    """Timestep of C's last OUTLINK_ENTRY_SPACE_UNAVAILABLE skip (offset 5 / vt 15).
+
+    Used as the economic-required completion boundary before C's binding transfer
+    at offset 6 finishes the full trade_scope observation.
+    """
     c_skip_rows = collect_stage3_skip_rows_for_vehicle(local_result, "C")
     if len(c_skip_rows) == 0:
         raise AssertionError("C has no temporary skips in candidate-local trace")
@@ -2309,10 +2333,15 @@ def assert_stage3_counterexample(
         for record in local_d.required_passage_records
     }
     assert candidate_passage_by_name == {"D": 15, "A": 15, "B": 15}
-    assert local_d.final_offset == 5
-    assert local_d.final_virtual_timestep == 15
-    assert local_d.simulated_timestep_count == 5
-    assert count_stage3_transferred_appearances(local_d, "C") == 0
+    assert local_d.final_offset == 6
+    assert local_d.final_virtual_timestep == 16
+    assert local_d.simulated_timestep_count == 6
+    assert local_d.unresolved_reasons == ()
+    assert local_d.economic_required_passages_complete_offset == 5
+    assert local_d.economic_required_passages_complete_virtual_timestep == 15
+    assert local_d.all_trade_scope_passages_complete_offset == 6
+    assert local_d.all_trade_scope_passages_complete_virtual_timestep == 16
+    assert count_stage3_transferred_appearances(local_d, "C") == 1
 
     d_baseline_passage = visits_by_name["D"].baseline_passage_timestep
     assert d_baseline_passage > candidate_passage_by_name["D"]
@@ -2327,7 +2356,99 @@ def assert_stage3_counterexample(
         transferred_names = visit_keys_to_vehicle_names(
             timestep_result.binding_transfer_result.transferred_binding_visit_keys
         )
-        assert "C" not in transferred_names
+        if timestep_result.offset == 6:
+            assert transferred_names == ("C",)
+        else:
+            assert "C" not in transferred_names
+
+    offset_5_result = stage3_timestep_result_at_offset(local_d, 5)
+    assert offset_5_result.virtual_timestep == 15
+    assert offset_5_result.required_passages_complete_after_node_passage is True
+    assert offset_5_result.resolved_after_timestep_end is True
+    assert offset_5_result.traffic_observation_complete_after_node_passage is False
+    assert offset_5_result.economic_required_first_completed_at_this_timestep is True
+    assert offset_5_result.traffic_observation_first_completed_at_this_timestep is False
+    assert offset_5_result.calculation_finished_after_timestep_end is False
+    offset_5_transferred = visit_keys_to_vehicle_names(
+        offset_5_result.binding_transfer_result.transferred_binding_visit_keys
+    )
+    assert offset_5_transferred == ("D", "A", "B")
+    offset_5_newly_recorded = visit_keys_to_vehicle_names(
+        offset_5_result.newly_recorded_required_passage_visit_keys
+    )
+    assert set(offset_5_newly_recorded) == {"D", "A", "B"}
+
+    offset_6_result = stage3_timestep_result_at_offset(local_d, 6)
+    assert offset_6_result.virtual_timestep == 16
+    offset_6_transferred = visit_keys_to_vehicle_names(
+        offset_6_result.binding_transfer_result.transferred_binding_visit_keys
+    )
+    assert offset_6_transferred == ("C",)
+    offset_6_newly_recorded = visit_keys_to_vehicle_names(
+        offset_6_result.newly_recorded_required_passage_visit_keys
+    )
+    assert offset_6_newly_recorded == ()
+    assert offset_6_result.required_passages_complete_after_node_passage is True
+    assert offset_6_result.resolved_after_timestep_end is True
+    assert offset_6_result.traffic_observation_complete_after_node_passage is True
+    assert offset_6_result.economic_required_first_completed_at_this_timestep is False
+    assert offset_6_result.traffic_observation_first_completed_at_this_timestep is True
+    assert offset_6_result.calculation_finished_after_timestep_end is True
+
+    outlink_entry_space_reason = (
+        OrderControlTvtMpBindingVisitTemporarySkipReason.OUTLINK_ENTRY_SPACE_UNAVAILABLE
+    )
+    c_traffic_d = stage3_traffic_observation_record_for_vehicle(local_d, "C")
+    assert c_traffic_d.visit_key == ("C", 1)
+    assert (
+        c_traffic_d.trade_role
+        is OrderControlTvtMpLocalBindingTradeRole.NONPARTICIPATING
+    )
+    assert (
+        c_traffic_d.passage_observation_status
+        is OrderControlTvtMpCandidatePassageObservationStatus.OBSERVED
+    )
+    assert c_traffic_d.candidate_passage_timestep == 16
+    assert c_traffic_d.observed_offset == 6
+    assert c_traffic_d.observed_virtual_timestep == 16
+    assert c_traffic_d.baseline_passage_timestep == 17
+    assert c_traffic_d.predicted_time_difference_timesteps == 1
+    assert c_traffic_d.predicted_time_difference_seconds == world.DELTAT * 1
+    assert c_traffic_d.predicted_signed_time_value_change == (
+        world.DELTAT * 1 * STAGE3_VOT_TRUE_BY_VEHICLE["C"]
+    )
+    assert c_traffic_d.last_temporary_skip_reason is outlink_entry_space_reason
+    assert c_traffic_d.last_temporary_skip_offset == 5
+    assert c_traffic_d.horizon_exhausted is False
+    assert c_traffic_d.observation_complete is True
+
+    local_bd = find_local_virtual_result_by_buyers(node_local_result, ("B", "D"))
+    assert local_bd is not None
+    assert local_bd.final_offset == 6
+    assert local_bd.final_virtual_timestep == 16
+    assert local_bd.simulated_timestep_count == 6
+    assert local_bd.economic_required_passages_complete_offset == 6
+    assert local_bd.economic_required_passages_complete_virtual_timestep == 16
+    assert local_bd.all_trade_scope_passages_complete_offset == 6
+    assert local_bd.all_trade_scope_passages_complete_virtual_timestep == 16
+    bd_required_names = {
+        record.vehicle_name for record in local_bd.required_passage_records
+    }
+    assert bd_required_names == {"B", "D", "A"}
+    assert "C" not in bd_required_names
+    for timestep_result in local_bd.timestep_results:
+        newly_recorded_names = visit_keys_to_vehicle_names(
+            timestep_result.newly_recorded_required_passage_visit_keys
+        )
+        assert "C" not in newly_recorded_names
+    c_traffic_bd = stage3_traffic_observation_record_for_vehicle(local_bd, "C")
+    assert (
+        c_traffic_bd.passage_observation_status
+        is OrderControlTvtMpCandidatePassageObservationStatus.OBSERVED
+    )
+    assert c_traffic_bd.candidate_passage_timestep == 15
+    assert c_traffic_bd.observed_offset == 5
+    assert c_traffic_bd.observed_virtual_timestep == 15
 
     inlink_capacity_reason = (
         OrderControlTvtMpBindingVisitTemporarySkipReason.INLINK_OUTFLOW_CAPACITY_UNAVAILABLE
@@ -2335,9 +2456,11 @@ def assert_stage3_counterexample(
     not_arrived_reason = (
         OrderControlTvtMpBindingVisitTemporarySkipReason.NOT_ARRIVED_AT_TARGET_NODE
     )
-    completion_result = stage3_completion_timestep_result(local_d)
-    completion_virtual_timestep = completion_result.virtual_timestep
-    completion_offset = completion_result.offset
+    economic_required_completion_result = stage3_completion_timestep_result(local_d)
+    completion_virtual_timestep = (
+        economic_required_completion_result.virtual_timestep
+    )
+    completion_offset = economic_required_completion_result.offset
     transferred_before_completion = set()
     for timestep_result in local_d.timestep_results:
         if timestep_result.virtual_timestep >= completion_virtual_timestep:
@@ -2420,20 +2543,32 @@ def assert_stage3_counterexample(
         last_skip["skip_reason"]
         is OrderControlTvtMpBindingVisitTemporarySkipReason.OUTLINK_ENTRY_SPACE_UNAVAILABLE
     )
-    assert completion_result.virtual_timestep == last_skip["virtual_timestep"]
+    assert economic_required_completion_result.virtual_timestep == last_skip[
+        "virtual_timestep"
+    ]
     assert completion_offset == 5
     assert completion_virtual_timestep == 15
     newly_recorded_names = visit_keys_to_vehicle_names(
-        completion_result.newly_recorded_required_passage_visit_keys
+        economic_required_completion_result.newly_recorded_required_passage_visit_keys
     )
     assert set(newly_recorded_names) == {"D", "A", "B"}
-    assert completion_result.required_passages_complete_after_node_passage is True
-    assert completion_result.calculation_finished_after_timestep_end is True
-    assert completion_result.resolved_after_timestep_end is True
-    transferred_on_completion = visit_keys_to_vehicle_names(
-        completion_result.binding_transfer_result.transferred_binding_visit_keys
+    assert (
+        economic_required_completion_result.required_passages_complete_after_node_passage
+        is True
     )
-    assert transferred_on_completion == ("D", "A", "B")
+    assert (
+        economic_required_completion_result.calculation_finished_after_timestep_end
+        is False
+    )
+    assert economic_required_completion_result.resolved_after_timestep_end is True
+    assert (
+        economic_required_completion_result.traffic_observation_complete_after_node_passage
+        is False
+    )
+    transferred_on_economic_required = visit_keys_to_vehicle_names(
+        economic_required_completion_result.binding_transfer_result.transferred_binding_visit_keys
+    )
+    assert transferred_on_economic_required == ("D", "A", "B")
 
     node_economic_result = junction_node_result(
         pipeline.economic_evaluation_set_result.node_economic_evaluation_results
@@ -3439,6 +3574,7 @@ def print_stage3_report(
         pipeline.local_virtual_calculation_set_result.node_local_virtual_calculation_results
     )
     local_d = find_local_virtual_result_by_buyers(node_local_result, ("D",))
+    local_bd = find_local_virtual_result_by_buyers(node_local_result, ("B", "D"))
     trade_d = find_trade_rank_result_by_buyers(node_trade_rank_result, ("D",))
     node_economic_result = junction_node_result(
         pipeline.economic_evaluation_set_result.node_economic_evaluation_results
@@ -3683,12 +3819,83 @@ def print_stage3_report(
     )
     print()
 
-    print("33. Stage 3 required passage completion")
+    print("33. Stage 3 required passage and trade_scope observation completion")
+    print(
+        "   note: candidate ('D',) becomes resolved at offset 5 once economic "
+        "required passages complete, but calculation_finished stays False until "
+        "offset 6 when nonparticipating C binding-transfers and trade_scope "
+        "traffic observation completes."
+    )
     print(f"   resolved = {local_d.resolved}")
     print(f"   stop_reason = {local_d.stop_reason}")
     print(f"   final_offset = {local_d.final_offset}")
     print(f"   final_virtual_timestep = {local_d.final_virtual_timestep}")
     print(f"   simulated_timestep_count = {local_d.simulated_timestep_count}")
+    print(
+        "   economic_required_passages_complete_offset = "
+        f"{local_d.economic_required_passages_complete_offset}"
+    )
+    print(
+        "   economic_required_passages_complete_virtual_timestep = "
+        f"{local_d.economic_required_passages_complete_virtual_timestep}"
+    )
+    print(
+        "   all_trade_scope_passages_complete_offset = "
+        f"{local_d.all_trade_scope_passages_complete_offset}"
+    )
+    print(
+        "   all_trade_scope_passages_complete_virtual_timestep = "
+        f"{local_d.all_trade_scope_passages_complete_virtual_timestep}"
+    )
+    c_traffic_d = stage3_traffic_observation_record_for_vehicle(local_d, "C")
+    print("   candidate ('D',) C final traffic observation:")
+    print(
+        f"     passage_observation_status = "
+        f"{c_traffic_d.passage_observation_status}"
+    )
+    print(
+        f"     candidate_passage_timestep = "
+        f"{c_traffic_d.candidate_passage_timestep}"
+    )
+    print(
+        f"     predicted_time_difference_timesteps = "
+        f"{c_traffic_d.predicted_time_difference_timesteps}"
+    )
+    print(
+        f"     predicted_signed_time_value_change = "
+        f"{c_traffic_d.predicted_signed_time_value_change}"
+    )
+    print(
+        f"     last_temporary_skip_reason = "
+        f"{c_traffic_d.last_temporary_skip_reason}"
+    )
+    print(
+        f"     last_temporary_skip_offset = "
+        f"{c_traffic_d.last_temporary_skip_offset}"
+    )
+    print(
+        "   candidate ('B', 'D') economic_required_passages_complete_offset = "
+        f"{local_bd.economic_required_passages_complete_offset}"
+    )
+    print(
+        "   candidate ('B', 'D') all_trade_scope_passages_complete_offset = "
+        f"{local_bd.all_trade_scope_passages_complete_offset}"
+    )
+    c_traffic_bd = stage3_traffic_observation_record_for_vehicle(local_bd, "C")
+    print("   candidate ('B', 'D') C final traffic observation:")
+    print(
+        f"     passage_observation_status = "
+        f"{c_traffic_bd.passage_observation_status}"
+    )
+    print(
+        f"     candidate_passage_timestep = "
+        f"{c_traffic_bd.candidate_passage_timestep}"
+    )
+    print(
+        f"     observed_offset = {c_traffic_bd.observed_offset}, "
+        f"observed_virtual_timestep = "
+        f"{c_traffic_bd.observed_virtual_timestep}"
+    )
     for record in local_d.required_passage_records:
         print(
             f"   required {record.vehicle_name}: "

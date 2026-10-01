@@ -216,6 +216,11 @@ def _local_result(node_name, binding_sequence):
         final_outlink_records=(),
         final_node_record=_final_node(node_name),
         final_boundary_records=(),
+        traffic_observation_records=(),
+        economic_required_passages_complete_offset=None,
+        economic_required_passages_complete_virtual_timestep=None,
+        all_trade_scope_passages_complete_offset=None,
+        all_trade_scope_passages_complete_virtual_timestep=None,
     )
 
 
@@ -970,6 +975,19 @@ def test_branch2_infeasible_and_unresolved_candidates_still_fall_back():
         final_outlink_records=(),
         final_node_record=unresolved.final_node_record,
         final_boundary_records=(),
+        traffic_observation_records=unresolved.traffic_observation_records,
+        economic_required_passages_complete_offset=(
+            unresolved.economic_required_passages_complete_offset
+        ),
+        economic_required_passages_complete_virtual_timestep=(
+            unresolved.economic_required_passages_complete_virtual_timestep
+        ),
+        all_trade_scope_passages_complete_offset=(
+            unresolved.all_trade_scope_passages_complete_offset
+        ),
+        all_trade_scope_passages_complete_virtual_timestep=(
+            unresolved.all_trade_scope_passages_complete_virtual_timestep
+        ),
     )
     infeasible_sequence = _sequence(
         "merge",
@@ -1335,6 +1353,19 @@ def test_rejects_missing_binding_sequence_without_fallback():
         final_outlink_records=local_result.final_outlink_records,
         final_node_record=local_result.final_node_record,
         final_boundary_records=local_result.final_boundary_records,
+        traffic_observation_records=local_result.traffic_observation_records,
+        economic_required_passages_complete_offset=(
+            local_result.economic_required_passages_complete_offset
+        ),
+        economic_required_passages_complete_virtual_timestep=(
+            local_result.economic_required_passages_complete_virtual_timestep
+        ),
+        all_trade_scope_passages_complete_offset=(
+            local_result.all_trade_scope_passages_complete_offset
+        ),
+        all_trade_scope_passages_complete_virtual_timestep=(
+            local_result.all_trade_scope_passages_complete_virtual_timestep
+        ),
     )
     broken_selected = OrderControlTvtMpCandidateEconomicEvaluationResult(
         candidate_local_virtual_calculation_result=broken_local,
