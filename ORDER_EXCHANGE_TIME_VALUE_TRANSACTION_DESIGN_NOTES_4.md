@@ -4797,3 +4797,257 @@ binding、virtual time、advance、boundary を診断側で個別に呼べば、
 3. actual passage observation と取引全体 ex-post evaluation を分離し、waiting は World 側 registry で管理する。
 
 再開時は本節と、進捗第3巻「trade_scope全Visit観測の完全実装前仕様（2026-09-30）」を最初に確認する。過去の再開項目として「本仕様に対する反証レビューと、Stage 3 の offset 6 以降を見る診断拡張」は履歴に残す。反証レビューにより、診断拡張単独は本番終了条件実装前には正式検証にならないと判明した。次作業は、完全実装前仕様の残る型・state 不変条件を詰め、本番終了条件実装と診断拡張を同一実装段階で行うための計画作成である。本番実装はまだ行わない。
+
+**本節は実装前仕様の正式記録である。** 2026-10-01 に完了した candidate predicted traffic observation（trade_scope 全 Visit 観測）の実装・検証の最新参照先は、本巻末尾の「TVT-MP trade_scope全Visit観測 実装・検証結果（2026-10-01）」である。本節 §10・§10.1・§11 の「本番実装はまだ行わない」「offset 6 正式診断は未実装」等は、当時の制約下の記録として削除しない。
+
+---
+
+# TVT-MP trade_scope全Visit観測 実装・検証結果（2026-10-01）
+
+本節は、2026-10-01 時点で push 済みの実装と検証の正式記録である。**trade_scope 全 Visit の candidate passage 観測（予測時間・予測符号付き価値・temporary skip・clearance 文脈・終了条件・frozen final result）について、本節が最新参照先である。** 設計意図・actual outcome 層・研究上の未確定契約は、直前の「TVT-MP trade_scope全Visitのcandidate passage観測とnonparticipating予測・実績時間価値 完全実装前仕様（2026-09-30）」を過去の正式記録として残す。削除も短縮もしない。
+
+進捗第3巻の対応節は「TVT-MP trade_scope全Visit観測 実装完了要約（2026-10-01）」と、末尾「最新の再開地点（2026-10-01）」である。
+
+## 保存済み実装コミット（push 済み・最新 `37c1ea6`）
+
+| コミット | 内容 |
+|----------|------|
+| `c0b4484` | TVT-MP trade-scope traffic observation 型と初期化 |
+| `93fbdc9` | candidate passage 時刻・価値観測の record 提案 |
+| `f9f0f4e` | required passage と trade-scope 観測の joint state 記録、完了時刻追跡 |
+| `b0ba281` | trade-scope Visit の最終 temporary-skip 理由と clearance scan-stop context |
+| `37c1ea6` | trade-scope 観測完了・final result record・Stage 3 offset 6 診断 assert |
+
+主な本番変更ファイル: `uxsim/order_control_tvt_mp_candidate_local_virtual_calculation.py`。診断（本節の検証の一部）: `diagnostics/order_control/tvt_mp_single_decision_baseline_diagnostic.py`（コミット `37c1ea6` に含む）。
+
+## 1. 実装対象（今回の範囲）
+
+各 FIFO True candidate について、**trade_scope 内**の buyer・seller・nonparticipating 全 Visit に対し、次を candidate local virtual loop 上で記録し、final result に frozen 保存する。
+
+- candidate passage 時刻（binding transfer 成功時）
+- baseline passage との差（予測時間差）
+- decision 時点で凍結した true VOT による予測符号付き時間価値
+- temporary skip の最終理由と最終 offset
+- clearance による scan-stop context（clearance 停止対象のみ）
+- economic required（buyer・seller required passage）完了 offset / virtual timestep
+- trade_scope 全 Visit 観測完了 offset / virtual timestep
+- horizon 末尾まで未観測の確定（`UNOBSERVED_AT_HORIZON`）
+
+**今回未実装（§14）:** 実 World の actual passage、World 側 passage-wait registry、actual observation record、buyer・seller 取引全体 ex-post evaluation、Vehicle 別 role 評価、nonparticipating の actual 外部効果、評価終了時の actual 未観測確定、実験出力・集計。
+
+## 2. 観測初期化
+
+- 対象 Visit は `trade_scope_of_this_candidate_visits` のみ。binding partition 1・2・4（trade_scope 外）は **含めない**。
+- `true_vot_per_second` は candidate local World 作成時点の local `Vehicle` から **凍結** する。result 生成時や後段で live 読み直ししない。
+- `baseline_passage_timestep` は正式 baseline collector 由来の値を用いる。
+- 現行コード契約どおり **true VOT は 0 以上を許容** する（負値は拒否する既存契約は維持）。
+- 研究上の「true VOT=0 を常に許すか」最終契約は VOT 分布に依存し、**未確定のまま**（完全実装前仕様 §4.3 と同趣旨）。
+
+## 3. passage 記録（binding transfer と同期）
+
+- **required passage record** は buyer・seller のみ。
+- **traffic observation record** は buyer・seller・nonparticipating。
+- いずれも **同一 binding transfer scan 結果・同一 virtual timestep** から記録する。
+- buyer と seller の両 traffic observation で `candidate_passage_timestep` は **一致必須**。state 更新前に両方の反映可能性を検査し、required だけ、または traffic observation だけの **片側反映を防止** する。
+- binding による物理 transfer は **rollback しない**（既存 binding 契約）。
+
+## 4. 予測値（candidate local・観測済み Visit）
+
+```text
+predicted_time_difference_timesteps
+  = baseline_passage_timestep - candidate_passage_timestep
+
+predicted_time_difference_seconds
+  = predicted_time_difference_timesteps × DELTAT
+
+predicted_signed_time_value_change
+  = predicted_time_difference_seconds × true_vot_per_second（decision 時点凍結）
+```
+
+- 正: 時間短縮・便益。負: 遅延・損失。0: 変化なし。
+- 丸め、tolerance、`Decimal` は **不使用**。
+- **economic evaluation の申告 VOT 計算（`G`・`R`・surplus・feasibility）は変更していない。** 予測符号付き価値は traffic observation 側の研究用 field である。
+
+## 5. temporary skip と clearance
+
+- temporary skip 時: `last_checked_offset` / `last_checked_virtual_timestep`、**最終** `last_temporary_skip_reason` / `last_temporary_skip_offset` を更新。
+- clearance 理由は temporary skip 履歴に **混ぜない**。
+- clearance で scan が止まった対象 Visit にのみ `latest_clearance_stop_context` を保存。
+- clearance 停止位置より **後方の未走査 Visit** は last checked を更新しない。
+- 観測済み Visit への再 skip・再 clearance は **重大不整合**（テストで拒否）。
+- final frozen record では、過去に記録した最終 skip と clearance context を **保持** する。
+
+## 6. 終了条件（本番実装済み）
+
+```text
+resolved_after_timestep_end
+  ⇔ buyer・seller の required passage が全件完了
+
+calculation_finished_after_timestep_end
+  ⇔ trade_scope 全 Visit の candidate passage が全件観測済み
+  または offset == configured_horizon_steps - 1
+```
+
+- buyer・seller 完了だけでは `calculation_finished_after_timestep_end` を **True にしない**。
+- nonparticipating が未通過なら **同じ local loop・同じ local World** を継続する。horizon は **延長しない**。
+- `resolved` と `stop_reason` の既存一対一を維持: `resolved=True` → `RESOLVED`、`resolved=False` → `HORIZON_EXHAUSTED_UNRESOLVED`。
+- nonparticipating の horizon 未観測だけでは `unresolved_reasons` に **入れない**（economic unresolved とは分離）。
+
+**Stage 3 で起きたことの原因（要約）:** buyer・seller（D・A・B）は approach inlink の有限 `capacity_out` リフィル後、offset 5（vt 15）で binding transfer 完了し economic required が閉じる。nonparticipating C は同じ offset では `out_c` の **OUTLINK_ENTRY_SPACE_UNAVAILABLE**（`out_c` 上の先行車と jam 密度設計）で未通過のため `resolved=True` でも **finished=False**。offset 6（vt 16）で C が binding 通過し、trade_scope 観測が閉じて finished になる。
+
+## 7. timestep result 追加 field（必須・既定値なし）
+
+`OrderControlTvtMpCandidateVirtualTimestepResult` に追加し、**必須 field** として構築する（省略・既定値なし）。
+
+- `traffic_observation_complete_after_node_passage`
+- `economic_required_first_completed_at_this_timestep`
+- `traffic_observation_first_completed_at_this_timestep`
+
+## 8. final result 追加 field（必須・既定値なし）
+
+`OrderControlTvtMpCandidateLocalVirtualCalculationResult` に追加し、**必須 field** として構築する。
+
+- `traffic_observation_records`
+- `economic_required_passages_complete_offset`
+- `economic_required_passages_complete_virtual_timestep`
+- `all_trade_scope_passages_complete_offset`
+- `all_trade_scope_passages_complete_virtual_timestep`
+
+## 9. final traffic observation 状態
+
+**観測済み:**
+
+- `passage_observation_status = OBSERVED`
+- `horizon_exhausted = False`
+- `observation_complete = True`
+- candidate passage・observed offset/virtual timestep・時間差・符号付き価値を記録
+
+**horizon 未観測:**
+
+- `passage_observation_status = UNOBSERVED_AT_HORIZON`
+- `horizon_exhausted = True`
+- `observation_complete = False`
+- candidate passage、observed 時刻、時間差、価値は **`None`**（horizon 末尾時刻や 0 を **代入しない**）
+- last checked、最終 skip、clearance context は **保持**
+
+## 10. Stage 2 診断結果（通常ケース・原因付き）
+
+診断 World では、nonparticipating C が buyer・seller required 完了 **前** に binding 通過する（Stage 2 専用レイアウト・容量条件）。したがって **新終了条件でも追加 offset は発生しない**。
+
+| candidate | final_offset | 原因要約 |
+|-----------|--------------|----------|
+| `("B",)` | 3 | nonparticipating 0 件。required 完了と traffic observation 完了が同時。 |
+| `("D",)` | 5 | C が offset 4 前後で通過済み。offset 5 で required と trade_scope 観測が同時完了。 |
+| `("B","D")` | 5 | 同上。C 先行通過のため offset 5 で finished。 |
+
+economic evaluation、selection、payment、compensation、final rank、validation、atomic apply の意味は **維持**（§12）。
+
+## 11. Stage 3 診断結果（境界ケース・実測固定）
+
+旧仕様では buyer・seller 完了（offset 5）で local 計算が終了していた。新仕様では **offset 5 で resolved・economic required 完了、offset 6 で trade_scope 完了と finished**。
+
+### 11.1 candidate `("D",)`
+
+| 項目 | 値 | 原因・備考 |
+|------|-----|------------|
+| buyer・seller required 完了 | offset 5 / vt 15 | D・A・B が同一 scan で binding transfer |
+| `resolved_after_timestep_end` | offset 5 で True | economic required 完了 |
+| `calculation_finished_after_timestep_end` | offset 5 で **False** | C 未通過 |
+| C 最終 temporary skip | `OUTLINK_ENTRY_SPACE_UNAVAILABLE` @ offset 5 | `out_c` 入口空間不足 |
+| C binding 通過 | offset 6 / vt 16 | 同一 local World 継続後の通過 |
+| `final_offset` / `final_virtual_timestep` | 6 / 16 | trade_scope 観測完了で停止 |
+| `simulated_timestep_count` | 6 | 既存契約 `== final_offset` |
+| economic required 完了 | offset 5 / vt 15 | timestamps field |
+| trade_scope 全 Visit 完了 | offset 6 / vt 16 | timestamps field |
+| C baseline / candidate passage | 17 / 16 | 予測短縮 1 timestep |
+| C `predicted_signed_time_value_change` | 6.0 | `DELTAT=1`、凍結 true VOT=6.0 |
+| C in `required_passage_records` | **含めない** | nonparticipating |
+
+### 11.2 candidate `("B","D")`（selected・実測固定）
+
+| 項目 | 値 | 原因・備考 |
+|------|-----|------------|
+| `final_offset` / `final_virtual_timestep` | 6 / 16 | C 観測完了まで継続 |
+| `simulated_timestep_count` | 6 | |
+| economic required 完了 | offset 6 / vt 16 | A の required が offset 6 で記録 |
+| trade_scope 全 Visit 完了 | offset 6 / vt 16 | |
+| C 通過 | offset 5 / vt 15 | binding transfer で観測（`("D",)` より早い） |
+| C traffic | `OBSERVED`, candidate passage 15 | baseline 17 → 予測短縮 2 timestep、符号付き価値 12.0 |
+| C in `required_passage_records` | **含めない** | |
+| selected candidate | `("B","D")` | 変更なし |
+
+反証レビュー時点の「`("B","D")` の offset 5 時点 C 状態未確認」は、本実装・診断 assert により **解消** した。過去の未確認記述は完全実装前仕様 §10 に **履歴として残る**。
+
+## 12. downstream 不変（検証で確認）
+
+次は **変更していない**。
+
+- `total_buyer_value_G`
+- `total_required_compensation_R`
+- surplus
+- feasibility（`economically_feasible`・`infeasibility_reasons`）
+- candidate selection（Stage 3 selected は `("B","D")` のまま）
+- payment
+- compensation
+- final rank
+- final consistency validation
+- atomic apply
+
+## 13. 検証結果（保存済み・再現手順）
+
+### 13.1 関連テスト（8 ファイル・334 passed）
+
+コミット列 `c0b4484`〜`37c1ea6` に直接触れたテスト 6 ファイルと、同一 TVT-MP パイプライン回帰 2 ファイルをまとめて実行し、**334 passed**（保存済み検証結果）。
+
+1. `tests_order_control_tvt_mp_candidate_local_virtual_calculation.py`
+2. `tests_order_control_tvt_mp_local_virtual_calculation_set.py`
+3. `tests_order_control_tvt_mp_candidate_selection.py`
+4. `tests_order_control_tvt_mp_economic_evaluation.py`
+5. `tests_order_control_tvt_mp_payment_and_compensation.py`
+6. `tests_order_control_tvt_mp_final_rank.py`
+7. `tests_order_control_tvt_mp_driver.py`
+8. `tests_order_control_tvt_mp_atomic_apply.py`
+
+### 13.2 診断
+
+- `python diagnostics/order_control/tvt_mp_single_decision_baseline_diagnostic.py` → **exit 0**
+- Stage 2・Stage 3 含む全段 → **exit 0**
+- **Stage 3 counterexample asserts: PASS**（offset 6 継続・C traffic observation・`("B","D")` 実測を明示 assert）
+
+### 13.3 既存回帰
+
+- FCFS・BATCH関係: **366 passed**（保存済み検証結果）
+- UXsim 正式サンプル（保存済み数値と一致）:
+  - completed trips **735 / 810**
+  - average speed **11.7 m/s**
+  - total travel time **119475.0 s**
+  - average travel time **162.6 s**
+  - average delay **62.6 s**
+  - delay ratio **0.385**
+  - total distance traveled **1632250.0 m**
+
+### 13.4 静的検査
+
+- 変更本番・テストの `py_compile`: **成功**（保存済み）
+- `git diff --check`: **成功**（保存済み）
+
+## 14. 未実装範囲（今回の実装と混同しない）
+
+次は **今回未実装** である（完全実装前仕様 §7・§8 と同層。本節の candidate predicted 観測とは別）。
+
+- 実 World の **actual passage** 捕捉
+- World 側 **passage-wait registry**
+- **actual passage observation record**（frozen `order_exchange_log`）
+- buyer・seller の **取引全体 ex-post evaluation**
+- **Vehicle 別 role 評価**
+- nonparticipating の **actual 外部効果**
+- 評価終了時の **actual 未観測確定**
+- 実験出力と集計
+
+## 15. 再開時の読み順
+
+1. **本節**（実装・検証の最新）
+2. 完全実装前仕様（2026-09-30）（設計・actual 層・研究契約）
+3. 進捗第3巻末尾「最新の再開地点（2026-10-01）」
+
+actual passage 基盤の **詳細実装前設計** を確認してから、実 World 側実装に進む。診断のみで offset 6 を先走り検証する必要は、本実装完了により **過去の再開項目** となった（履歴は残す）。

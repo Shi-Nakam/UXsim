@@ -532,3 +532,71 @@
 7. `diagnostics/order_control.zip` は stage しない。
 8. 文書を commit する場合は commit 名に `document` を含める。実装前仕様を表すために `complete` は使わない。
 9. commit と push を分離する。
+
+上記「最新の再開地点」は、**trade_scope 全 Visit 観測の本番実装前**（2026-09-30 反証レビュー直後）の履歴である。削除しない。2026-10-01 完了分の最新参照先は、本巻末尾の「TVT-MP trade_scope全Visit観測 実装完了要約（2026-10-01）」と「最新の再開地点（2026-10-01）」、および詳細設計第4巻「TVT-MP trade_scope全Visit観測 実装・検証結果（2026-10-01）」である。
+
+## TVT-MP trade_scope全Visit観測 実装完了要約（2026-10-01）
+
+詳細は、詳細設計第4巻「TVT-MP trade_scope全Visit観測 実装・検証結果（2026-10-01）」を参照する。本節は再開用要約である。
+
+### 保存済み実装コミット（push 済み）
+
+- `c0b4484` — trade-scope traffic observation 型と初期化
+- `93fbdc9` — passage 時刻・価値の record 提案
+- `f9f0f4e` — required passage と trade-scope 観測の joint 記録、完了時刻
+- `b0ba281` — 最終 temporary-skip と clearance scan-stop context
+- `37c1ea6` — 観測完了・final result・Stage 3 offset 6 診断 assert
+
+**最新コミットは `37c1ea6` で、リモートへ push 済みである。**
+
+### 実装済み（candidate predicted）
+
+- 各 FIFO True candidate の trade_scope 内 buyer・seller・nonparticipating の **candidate passage 観測**
+- 予測時間差・凍結 true VOT による **予測符号付き価値**
+- temporary skip 最終理由・clearance scan-stop context
+- economic required 完了時刻と **trade_scope 全 Visit 完了時刻**
+- horizon 未観測 `UNOBSERVED_AT_HORIZON`
+- final result への **frozen** `traffic_observation_records` と完了 offset / vt
+- 終了条件: buyer・seller 完了で `resolved`、trade_scope 全員観測（または horizon 末尾）で `finished`
+
+### Stage 3（実測・診断 assert 済み）
+
+- candidate `("D",)`: offset 5 で resolved・economic required 完了、**finished=False**（C 未通過）。offset 6 / vt 16 で C 通過、`final_offset=6`、trade_scope 完了。
+- candidate `("B","D")`: `final_offset=6`、economic required と trade_scope 完了は **6/16**。C は offset 5 / vt 15 で `OBSERVED`。selected は **引き続き `("B","D")`**。
+- **economic 以降（selection・payment・final rank・validation・atomic apply）は不変。**
+
+### 検証（保存済み）
+
+- 関連 8 テストファイル: **334 passed**
+- Stage 2・Stage 3 診断: **exit 0**、`Stage 3 counterexample asserts: PASS`
+- FCFS・BATCH: **366 passed**
+- UXsim 正式サンプル: 保存済み数値と一致（completed trips 735/810、average speed 11.7 m/s 等。第4巻 §13.3）
+- `py_compile` 成功、`git diff --check` 成功
+
+### 未実装（actual 系）
+
+- actual passage 基盤、World 側 registry、actual observation record、ex-post evaluation、Vehicle 別評価、nonparticipating actual 外部効果、評価終了時 actual 未観測確定、実験出力・集計
+
+### 直前の再開地点との関係
+
+- 本巻「trade_scope全Visit観測の完全実装前仕様（2026-09-30）」およびその直後の「最新の再開地点」にあった **「本番実装はまだ行わない」** は、当時の正式記録として **削除しない**。
+- 上記コミット列により、**candidate predicted traffic observation と新終了条件は実装済み**である。過去の再開地点は、実装前・診断先行不可の **履歴** として残す。
+
+## 最新の再開地点（2026-10-01）
+
+**本節が、trade_scope 全 Visit candidate 観測実装後の最新再開地点である。** 2026-09-30 の「本番実装はまだ行わない」再開項目は履歴として残す（上節「直前の再開地点との関係」）。
+
+診断ファイル `diagnostics/order_control/tvt_mp_single_decision_baseline_diagnostic.py` はコミット `37c1ea6` に含めて保存済みであり、リモートへ push 済みである。`diagnostics/order_control.zip` は **未追跡のまま stage しない**。
+
+### 今回の作業（文書）
+
+1. 詳細設計第4巻「TVT-MP trade_scope全Visit観測 実装・検証結果（2026-10-01）」と、本巻本節を **差分確認して保存**する。
+2. **actual passage・World 側 registry へ直ちに本番実装へ進まない。**
+3. 文書保存後の再開地点は、**actual passage 基盤の詳細実装前設計**（第4巻完全実装前仕様 §7・進捗第3巻 actual 未実装節）を確認することから始める。
+
+### Git（文書のみ）
+
+1. 文書 2 ファイル（本巻と第4巻）を stage する。`diagnostics/order_control.zip` は stage しない。
+2. `git diff --cached --check` と `git diff --cached --stat` を確認する。
+3. commit 名に **`document` を含める**。
+4. **commit と push を分離**する。
