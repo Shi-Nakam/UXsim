@@ -508,15 +508,27 @@
 - Stage 2 では追加 timestep は無い。C が buyer・seller 完了前に通過しているか、nonparticipating がいないためである。
 - Stage 3 では、buyer・seller 完了の offset 5 のあと、C が未通過なら offset 6 以降を同じ local World で続ける。C の candidate passage は未実行のため未確定である。
 
+反証レビューと Terminal 独立確認（2026-09-30）の反映要約。詳細は詳細設計第4巻最新節を参照する。BLOCKER は無かった。
+
+- IMPORTANT 1: economic evaluation は `resolved=True` ↔ `stop_reason=RESOLVED`、`resolved=False` ↔ `HORIZON_EXHAUSTED_UNRESOLVED` を要求する。buyer・seller 完了かつ nonparticipating だけ horizon 未観測でも `resolved=True`、`stop_reason=RESOLVED`、`unresolved_reasons=()` を維持する。nonparticipating 未観測は traffic observation の `UNOBSERVED_AT_HORIZON` で表す。
+- IMPORTANT 2: traffic observation の true VOT は decision 時点の candidate local World 作成時に凍結する。result 作成時や actual 評価時に live `Vehicle.vot_true` を読み直さない。成立時 record の true VOT は現行どおり atomic apply で凍結する。
+- IMPORTANT 3: actual passage observation、取引全体 ex-post evaluation、Vehicle 別 role 評価または外部効果を分離する。`WAITING_FOR_ACTUAL_PASSAGE` は frozen `order_exchange_log` record にしない。待ちは World 側 registry。
+- offset 定義: `virtual_timestep = baseline_timestep_T + offset`（offset は 0 始まり）。Stage 3 例は第4巻 §4.1。
+- Stage 3 offset 6 の正式診断は、本番終了条件を変更しないまま現行 one-timestep API では行えない。診断拡張単独は本番変更前の正式検証にならない（第4巻 §10.1）。
+- candidate `("B","D")` について、C が nonparticipating であること以外、buyer・seller 完了 offset と offset 5 時点の C 状態は反証レビュー時点で未確認のまま残す。
+
 ## 最新の再開地点
 
 診断ファイル `diagnostics/order_control/tvt_mp_single_decision_baseline_diagnostic.py` はコミット `f8d4529` に含めて保存済みであり、リモートブランチ `feature/intersection-order-control` へ push 済みである。本再開地点では、診断ファイルを未追跡ファイルとして扱わない。`diagnostics/order_control.zip` だけは、引き続き既存の未追跡ファイルであり stage しない。
 
-1. 詳細設計第4巻「TVT-MP trade_scope全Visitのcandidate passage観測とnonparticipating予測・実績時間価値 完全実装前仕様（2026-09-30）」を確認する。
+反証レビューは完了済みである。本番実装はまだ行っていない。
+
+1. 詳細設計第4巻「TVT-MP trade_scope全Visitのcandidate passage観測とnonparticipating予測・実績時間価値 完全実装前仕様（2026-09-30）」を確認する（反証レビュー反映後の最新版）。
 2. 本巻「trade_scope全Visit観測の完全実装前仕様（2026-09-30）」を確認する。
 3. 診断節は過去記録として残っていることを確認する。方式 A・B・C は正式名称ではない。
-4. 次作業は、完全実装前仕様に対する反証レビューと、Stage 3 の offset 6 以降を見る診断拡張である。
-5. 本番実装はまだ行わない。
-6. `diagnostics/order_control.zip` は stage しない。
-7. 文書を commit する場合は commit 名に `document` を含める。実装前仕様を表すために `complete` は使わない。
-8. commit と push を分離する。
+4. 過去の再開項目として「完全実装前仕様に対する反証レビューと、Stage 3 の offset 6 以降を見る診断拡張」は履歴に残す。反証レビューにより、Stage 3 offset 6 以降の診断拡張を本番終了条件実装なしで先行することは正式検証にならないと判明した。
+5. 次作業は、完全実装前仕様の残る型・state 不変条件を詰め、本番終了条件実装と診断拡張を同一実装段階で行うための実装計画を作成する。
+6. 本番実装はまだ行わない。
+7. `diagnostics/order_control.zip` は stage しない。
+8. 文書を commit する場合は commit 名に `document` を含める。実装前仕様を表すために `complete` は使わない。
+9. commit と push を分離する。
