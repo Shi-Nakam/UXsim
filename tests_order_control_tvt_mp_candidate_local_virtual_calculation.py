@@ -39,6 +39,7 @@ from uxsim.order_control_tvt_mp_candidate_local_virtual_calculation import (
     OrderControlTvtMpCandidateUnresolvedReason,
     OrderControlTvtMpCandidateVirtualTimestepResult,
     initialize_tvt_mp_candidate_local_virtual_calculation_state,
+    _propose_tvt_mp_candidate_traffic_observation_updates_from_binding_transfer,
     run_tvt_mp_candidate_local_virtual_calculation,
     run_tvt_mp_candidate_local_virtual_calculation_one_timestep,
 )
@@ -2140,6 +2141,329 @@ def test_traffic_observation_rejects_missing_baseline_bad_role_and_duplicate_vis
         raise AssertionError("expected RuntimeError for duplicated VisitKey")
     except RuntimeError as error:
         assert "duplicated" in str(error)
+
+
+def _binding_transfer_scan_template(state):
+    return orch_mod.scan_and_transfer_tvt_mp_binding_visits_at_current_timestep(
+        state.binding_transfer_state
+    )
+
+
+def _binding_transfer_with_transferred_keys(state, visit_keys):
+    template = _binding_transfer_scan_template(state)
+    return dataclasses.replace(
+        template,
+        transferred_binding_visit_keys=tuple(visit_keys),
+    )
+
+
+def _traffic_observation_three_role_state():
+    world, _local, collector, visits = _prepare_world_with_vehicles(
+        [
+            {
+                "name": "buyer_veh",
+                "origin": "orig_a",
+                "dest": "dest",
+                "inlink": "in_a",
+                "route": "out",
+                "role": OrderControlTvtMpLocalBindingTradeRole.BUYER,
+                "vot_true": 2.0,
+                "baseline_passage": 12,
+            },
+            {
+                "name": "seller_veh",
+                "origin": "orig_a",
+                "dest": "dest_b",
+                "inlink": "in_a",
+                "route": "side",
+                "role": OrderControlTvtMpLocalBindingTradeRole.SELLER,
+                "vot_true": 3.0,
+                "baseline_passage": 13,
+            },
+            {
+                "name": "np_veh",
+                "origin": "orig_b",
+                "dest": "dest",
+                "inlink": "in_b",
+                "route": "out",
+                "role": OrderControlTvtMpLocalBindingTradeRole.NONPARTICIPATING,
+                "vot_true": 4.0,
+                "baseline_passage": 14,
+            },
+        ]
+    )
+    buyer_visit, seller_visit, np_visit = visits
+    sequence = _build_sequence(visits, (buyer_visit.visit_key,))
+    local_state = build_tvt_mp_candidate_local_state(world, sequence)
+    _open_capacities(local_state)
+    state = _init_state(local_state, collector, horizon=2)
+    return world, local_state, state, buyer_visit, seller_visit, np_visit
+
+
+def test_propose_traffic_observation_binding_transfer_buyer_update():
+    _world, _local, state, buyer_visit, _seller, _np = _traffic_observation_three_role_state()
+    binding_result = _binding_transfer_with_transferred_keys(
+        state,
+        (buyer_visit.visit_key,),
+    )
+    offset = 1
+    virtual_timestep = BASELINE_T + 1
+    proposed = _propose_tvt_mp_candidate_traffic_observation_updates_from_binding_transfer(
+        state,
+        binding_result,
+        offset,
+        virtual_timestep,
+    )
+    assert len(proposed) == 1
+    updated = proposed[0]
+    assert updated.trade_role is OrderControlTvtMpLocalBindingTradeRole.BUYER
+    assert updated.candidate_passage_timestep == virtual_timestep
+    assert updated.observed_offset == offset
+    assert updated.observed_virtual_timestep == virtual_timestep
+    assert updated.last_checked_offset == offset
+    assert updated.last_checked_virtual_timestep == virtual_timestep
+    assert updated.predicted_time_difference_timesteps == 12 - virtual_timestep
+    assert updated.predicted_time_difference_seconds == 12 - virtual_timestep
+    assert updated.predicted_signed_time_value_change == 2.0 * (12 - virtual_timestep)
+
+
+def test_propose_traffic_observation_binding_transfer_seller_update():
+    _world, _local, state, _buyer, seller_visit, _np = _traffic_observation_three_role_state()
+    binding_result = _binding_transfer_with_transferred_keys(
+        state,
+        (seller_visit.visit_key,),
+    )
+    proposed = _propose_tvt_mp_candidate_traffic_observation_updates_from_binding_transfer(
+        state,
+        binding_result,
+        0,
+        BASELINE_T,
+    )
+    assert len(proposed) == 1
+    assert proposed[0].trade_role is OrderControlTvtMpLocalBindingTradeRole.SELLER
+    assert proposed[0].vehicle_name == "seller_veh"
+    assert proposed[0].baseline_passage_timestep == 13
+    assert proposed[0].candidate_passage_timestep == BASELINE_T
+
+
+def test_propose_traffic_observation_binding_transfer_nonparticipating_update():
+    _world, _local, state, _buyer, _seller, np_visit = _traffic_observation_three_role_state()
+    binding_result = _binding_transfer_with_transferred_keys(
+        state,
+        (np_visit.visit_key,),
+    )
+    proposed = _propose_tvt_mp_candidate_traffic_observation_updates_from_binding_transfer(
+        state,
+        binding_result,
+        0,
+        BASELINE_T,
+    )
+    assert len(proposed) == 1
+    assert (
+        proposed[0].trade_role
+        is OrderControlTvtMpLocalBindingTradeRole.NONPARTICIPATING
+    )
+    assert proposed[0].vehicle_name == "np_veh"
+
+
+def test_propose_traffic_observation_binding_transfer_ignores_outside_trade_scope_key():
+    _world, _local, state, buyer_visit, _seller, _np = _traffic_observation_three_role_state()
+    outside_key = ("outside_veh", 99)
+    binding_result = _binding_transfer_with_transferred_keys(
+        state,
+        (outside_key, buyer_visit.visit_key),
+    )
+    proposed = _propose_tvt_mp_candidate_traffic_observation_updates_from_binding_transfer(
+        state,
+        binding_result,
+        0,
+        BASELINE_T,
+    )
+    assert len(proposed) == 1
+    assert proposed[0].visit_key == buyer_visit.visit_key
+
+
+def test_propose_traffic_observation_binding_transfer_positive_time_difference():
+    _world, local_state, collector, _visits = _prepare_world_with_vehicles(
+        [
+            {
+                "name": "buyer_veh",
+                "origin": "orig_a",
+                "dest": "dest",
+                "inlink": "in_a",
+                "route": "out",
+                "vot_true": 2.0,
+                "baseline_passage": 15,
+            }
+        ]
+    )
+    state = _init_state(local_state, collector, horizon=2)
+    buyer_key = state.traffic_observation_records_in_public_order[0].visit_key
+    binding_result = _binding_transfer_with_transferred_keys(state, (buyer_key,))
+    virtual_timestep = BASELINE_T
+    proposed = _propose_tvt_mp_candidate_traffic_observation_updates_from_binding_transfer(
+        state,
+        binding_result,
+        0,
+        virtual_timestep,
+    )
+    assert proposed[0].predicted_time_difference_timesteps == 5
+    assert proposed[0].predicted_time_difference_seconds == 5
+    assert proposed[0].predicted_signed_time_value_change == 10.0
+
+
+def test_propose_traffic_observation_binding_transfer_negative_time_difference():
+    _world, local_state, collector, _visits = _prepare_world_with_vehicles(
+        [
+            {
+                "name": "buyer_veh",
+                "origin": "orig_a",
+                "dest": "dest",
+                "inlink": "in_a",
+                "route": "out",
+                "vot_true": 3.0,
+                "baseline_passage": 8,
+            }
+        ]
+    )
+    state = _init_state(local_state, collector, horizon=2)
+    buyer_key = state.traffic_observation_records_in_public_order[0].visit_key
+    binding_result = _binding_transfer_with_transferred_keys(state, (buyer_key,))
+    virtual_timestep = BASELINE_T
+    proposed = _propose_tvt_mp_candidate_traffic_observation_updates_from_binding_transfer(
+        state,
+        binding_result,
+        0,
+        virtual_timestep,
+    )
+    assert proposed[0].predicted_time_difference_timesteps == -2
+    assert proposed[0].predicted_time_difference_seconds == -2
+    assert proposed[0].predicted_signed_time_value_change == -6.0
+
+
+def test_propose_traffic_observation_binding_transfer_zero_time_difference():
+    _world, local_state, collector, _visits = _prepare_world_with_vehicles(
+        [
+            {
+                "name": "buyer_veh",
+                "origin": "orig_a",
+                "dest": "dest",
+                "inlink": "in_a",
+                "route": "out",
+                "vot_true": 4.0,
+                "baseline_passage": BASELINE_T,
+            }
+        ]
+    )
+    state = _init_state(local_state, collector, horizon=1)
+    buyer_key = state.traffic_observation_records_in_public_order[0].visit_key
+    binding_result = _binding_transfer_with_transferred_keys(state, (buyer_key,))
+    proposed = _propose_tvt_mp_candidate_traffic_observation_updates_from_binding_transfer(
+        state,
+        binding_result,
+        0,
+        BASELINE_T,
+    )
+    assert proposed[0].predicted_time_difference_timesteps == 0
+    assert proposed[0].predicted_time_difference_seconds == 0
+    assert proposed[0].predicted_signed_time_value_change == 0
+
+
+def test_propose_traffic_observation_binding_transfer_uses_frozen_true_vot():
+    _world, local_state, collector, _visits = _prepare_world_with_vehicles(
+        [
+            {
+                "name": "buyer_veh",
+                "origin": "orig_a",
+                "dest": "dest",
+                "inlink": "in_a",
+                "route": "out",
+                "vot_true": 5.0,
+                "baseline_passage": 12,
+            }
+        ]
+    )
+    state = _init_state(local_state, collector, horizon=2)
+    buyer_key = state.traffic_observation_records_in_public_order[0].visit_key
+    _local_vehicle(local_state, "buyer_veh").vot_true = 100.0
+    binding_result = _binding_transfer_with_transferred_keys(state, (buyer_key,))
+    proposed = _propose_tvt_mp_candidate_traffic_observation_updates_from_binding_transfer(
+        state,
+        binding_result,
+        0,
+        BASELINE_T + 1,
+    )
+    assert proposed[0].true_vot_per_second == 5.0
+    assert proposed[0].predicted_signed_time_value_change == 5.0
+
+
+def test_propose_traffic_observation_binding_transfer_does_not_mutate_state():
+    _world, _local, state, buyer_visit, seller_visit, np_visit = (
+        _traffic_observation_three_role_state()
+    )
+    records_before = state.traffic_observation_records_in_public_order
+    pairs_before = state.traffic_observation_record_by_visit_key
+    binding_result = _binding_transfer_with_transferred_keys(
+        state,
+        (buyer_visit.visit_key, seller_visit.visit_key, np_visit.visit_key),
+    )
+    _propose_tvt_mp_candidate_traffic_observation_updates_from_binding_transfer(
+        state,
+        binding_result,
+        0,
+        BASELINE_T,
+    )
+    records_after = state.traffic_observation_records_in_public_order
+    pairs_after = state.traffic_observation_record_by_visit_key
+    assert records_after == records_before
+    assert pairs_after == pairs_before
+    for record in records_after:
+        assert record.candidate_passage_timestep is None
+
+
+def test_propose_traffic_observation_binding_transfer_rejects_duplicate_candidate_passage():
+    _world, _local, state, buyer_visit, _seller, _np = _traffic_observation_three_role_state()
+    existing = state.traffic_observation_record_for_visit_key(buyer_visit.visit_key)
+    already_passed = dataclasses.replace(
+        existing,
+        candidate_passage_timestep=BASELINE_T,
+    )
+    state._traffic_observation_record_by_visit_key[buyer_visit.visit_key] = already_passed
+    for index, record in enumerate(state._traffic_observation_records_in_public_order):
+        if record.visit_key == buyer_visit.visit_key:
+            state._traffic_observation_records_in_public_order[index] = already_passed
+    binding_result = _binding_transfer_with_transferred_keys(
+        state,
+        (buyer_visit.visit_key,),
+    )
+    try:
+        _propose_tvt_mp_candidate_traffic_observation_updates_from_binding_transfer(
+            state,
+            binding_result,
+            0,
+            BASELINE_T + 1,
+        )
+        raise AssertionError("expected RuntimeError for duplicate candidate passage")
+    except RuntimeError as error:
+        assert "already has candidate passage" in str(error)
+
+
+def test_propose_traffic_observation_binding_transfer_rejects_duplicate_transferred_keys():
+    _world, _local, state, buyer_visit, _seller, _np = _traffic_observation_three_role_state()
+    binding_result = _binding_transfer_with_transferred_keys(
+        state,
+        (buyer_visit.visit_key, buyer_visit.visit_key),
+    )
+    try:
+        _propose_tvt_mp_candidate_traffic_observation_updates_from_binding_transfer(
+            state,
+            binding_result,
+            0,
+            BASELINE_T,
+        )
+        raise AssertionError("expected RuntimeError for duplicated transferred keys")
+    except RuntimeError as error:
+        assert "twice" in str(error)
 
 
 def test_run_to_completion_from_partial_one_timestep_state():

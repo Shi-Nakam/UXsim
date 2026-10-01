@@ -1230,6 +1230,186 @@ def _initial_traffic_observation_records(
     return records
 
 
+def _propose_tvt_mp_candidate_traffic_observation_updates_from_binding_transfer(
+    calculation_state,
+    binding_transfer_result,
+    offset,
+    virtual_timestep,
+) -> tuple[OrderControlTvtMpCandidateTrafficObservationRecord, ...]:
+    """Build updated traffic observation records for binding transfers.
+
+    Does not modify calculation_state. Only trade-scope visits with an
+    existing observation record are updated. Keys outside that set are ignored.
+    """
+    state = _require_calculation_state(calculation_state)
+    if not isinstance(
+        binding_transfer_result,
+        OrderControlTvtMpBindingTransferScanResult,
+    ):
+        raise ValueError(
+            "binding_transfer_result must be "
+            "OrderControlTvtMpBindingTransferScanResult; got "
+            f"type {type(binding_transfer_result).__name__}."
+        )
+    node_name = state.candidate_local_state.target_node_name
+    offset_value = _require_traffic_observation_update_offset(offset, node_name=node_name)
+    virtual_timestep_value = _require_traffic_observation_update_virtual_timestep(
+        virtual_timestep,
+        node_name=node_name,
+    )
+    deltat = _require_traffic_observation_update_deltat(
+        state.candidate_local_state.local_world.DELTAT,
+        node_name=node_name,
+    )
+    proposed_records: list[OrderControlTvtMpCandidateTrafficObservationRecord] = []
+    seen_trade_scope_visit_keys: set[OrderControlTvtVisitKey] = set()
+    for visit_key in binding_transfer_result.transferred_binding_visit_keys:
+        existing_record = state._traffic_observation_record_by_visit_key.get(visit_key)
+        if existing_record is None:
+            continue
+        if visit_key in seen_trade_scope_visit_keys:
+            raise RuntimeError(
+                f"Node {node_name!r}: trade-scope VisitKey {visit_key!r} was "
+                "transferred twice in one binding transfer result."
+            )
+        seen_trade_scope_visit_keys.add(visit_key)
+        if existing_record.candidate_passage_timestep is not None:
+            raise RuntimeError(
+                f"Node {node_name!r}: trade-scope VisitKey {visit_key!r} already "
+                "has candidate passage timestep "
+                f"{existing_record.candidate_passage_timestep}."
+            )
+        baseline_passage_timestep = existing_record.baseline_passage_timestep
+        if (
+            isinstance(baseline_passage_timestep, bool)
+            or type(baseline_passage_timestep) is not int
+        ):
+            raise RuntimeError(
+                f"Node {node_name!r}: trade-scope VisitKey {visit_key!r} baseline "
+                "passage must be a Python int; got "
+                f"{baseline_passage_timestep!r}."
+            )
+        true_vot_per_second = _require_frozen_true_vot_per_second_on_observation_record(
+            existing_record.true_vot_per_second,
+            node_name=node_name,
+            vehicle_name=existing_record.vehicle_name,
+        )
+        predicted_time_difference_timesteps = (
+            baseline_passage_timestep - virtual_timestep_value
+        )
+        predicted_time_difference_seconds = (
+            predicted_time_difference_timesteps * deltat
+        )
+        predicted_signed_time_value_change = (
+            predicted_time_difference_seconds * true_vot_per_second
+        )
+        proposed_records.append(
+            OrderControlTvtMpCandidateTrafficObservationRecord(
+                visit_key=existing_record.visit_key,
+                vehicle_name=existing_record.vehicle_name,
+                vehicle_id=existing_record.vehicle_id,
+                trade_role=existing_record.trade_role,
+                binding_partition=existing_record.binding_partition,
+                binding_rank=existing_record.binding_rank,
+                trade_scope_rank=existing_record.trade_scope_rank,
+                inlink_name=existing_record.inlink_name,
+                route_next_link_name=existing_record.route_next_link_name,
+                true_vot_per_second=existing_record.true_vot_per_second,
+                baseline_passage_timestep=existing_record.baseline_passage_timestep,
+                candidate_passage_timestep=virtual_timestep_value,
+                passage_observation_status=existing_record.passage_observation_status,
+                observed_offset=offset_value,
+                observed_virtual_timestep=virtual_timestep_value,
+                predicted_time_difference_timesteps=predicted_time_difference_timesteps,
+                predicted_time_difference_seconds=predicted_time_difference_seconds,
+                predicted_signed_time_value_change=predicted_signed_time_value_change,
+                last_checked_offset=offset_value,
+                last_checked_virtual_timestep=virtual_timestep_value,
+                last_temporary_skip_reason=existing_record.last_temporary_skip_reason,
+                last_temporary_skip_offset=existing_record.last_temporary_skip_offset,
+                latest_clearance_stop_context=(
+                    existing_record.latest_clearance_stop_context
+                ),
+                horizon_exhausted=existing_record.horizon_exhausted,
+                observation_complete=existing_record.observation_complete,
+            )
+        )
+    return tuple(proposed_records)
+
+
+def _require_traffic_observation_update_offset(value: object, *, node_name: str) -> int:
+    if isinstance(value, bool) or type(value) is not int:
+        raise RuntimeError(
+            f"Node {node_name!r}: traffic observation update offset must be a "
+            f"Python int >= 0; got type {type(value).__name__} with value "
+            f"{value!r}."
+        )
+    if value < 0:
+        raise RuntimeError(
+            f"Node {node_name!r}: traffic observation update offset must be >= 0; "
+            f"got {value!r}."
+        )
+    return value
+
+
+def _require_traffic_observation_update_virtual_timestep(
+    value: object,
+    *,
+    node_name: str,
+) -> int:
+    if isinstance(value, bool) or type(value) is not int:
+        raise RuntimeError(
+            f"Node {node_name!r}: traffic observation update virtual_timestep "
+            f"must be a Python int >= 0; got type {type(value).__name__} with "
+            f"value {value!r}."
+        )
+    if value < 0:
+        raise RuntimeError(
+            f"Node {node_name!r}: traffic observation update virtual_timestep "
+            f"must be >= 0; got {value!r}."
+        )
+    return value
+
+
+def _require_traffic_observation_update_deltat(
+    value: object,
+    *,
+    node_name: str,
+) -> int | float:
+    if value is None or isinstance(value, bool) or type(value) not in (int, float):
+        raise RuntimeError(
+            f"Node {node_name!r}: local World DELTAT must be a Python int or "
+            f"float; got type {type(value).__name__} with value {value!r}."
+        )
+    if not math.isfinite(value) or value <= 0:
+        raise RuntimeError(
+            f"Node {node_name!r}: local World DELTAT must be finite and > 0; "
+            f"got {value!r}."
+        )
+    return value
+
+
+def _require_frozen_true_vot_per_second_on_observation_record(
+    value: object,
+    *,
+    node_name: str,
+    vehicle_name: str,
+) -> float:
+    if value is None or isinstance(value, bool) or type(value) not in (int, float):
+        raise RuntimeError(
+            f"Node {node_name!r}: traffic observation record for Vehicle "
+            f"{vehicle_name!r} true_vot_per_second must be a Python int or "
+            f"float; got type {type(value).__name__} with value {value!r}."
+        )
+    if not math.isfinite(value) or value < 0:
+        raise RuntimeError(
+            f"Node {node_name!r}: traffic observation record for Vehicle "
+            f"{vehicle_name!r} true_vot_per_second must be finite and >= 0; "
+            f"got {value!r}."
+        )
+    return float(value)
+
+
 def _record_required_passages_from_binding(
     state: OrderControlTvtMpCandidateLocalVirtualCalculationState,
     binding_transfer_result: OrderControlTvtMpBindingTransferScanResult,
