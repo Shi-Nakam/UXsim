@@ -5406,3 +5406,450 @@ implement TVT-MP actual passage observation types, wait registry, and World init
 - apply 失敗時の非反映契約
 
 実装項目2の範囲を **atomic apply 登録だけ**に限定する。Node.transfer、evaluation end、buyer・seller 完了通知、ex-post evaluation、Vehicle 別 role 評価、実験出力へ **接続しない**。
+
+# TVT-MP actual passage基盤 実装項目2 完全実装前設計（2026-10-02）
+
+**本節が、actual passage 基盤実装項目2の完全実装前設計の正式参照先である。** 実装項目1完了節（同日、直前）は当時の確定設計・実装・検証結果として残す。本節はコード実装前の仕様であり、実装結果の記録ではない。
+
+## 1. 目的と範囲
+
+実装項目2の目的は、atomic apply で成立した selected candidate について、buyer、seller、nonparticipating の actual passage 待機情報を World 側 registry へ登録することである。
+
+**今回実装するもの:**
+
+- selected candidate の trade_scope 内 buyer、seller、nonparticipating 全件の registration proposal
+- 全 proposal の事前検査
+- 成功 commit 末尾での registry 一括反映
+- apply 失敗時の registry 非反映
+- buyer、seller、nonparticipating で異なる true VOT 正本の使用
+- candidate traffic observation から predicted 情報を引き継ぐ
+- `buyers_sorted` の正式型への訂正
+- 専用テストと atomic apply 回帰
+
+**今回実装しないもの:**
+
+- Node.transfer
+- actual passage observer
+- actual passage observation record の生成
+- `Vehicle.order_exchange_log` への actual record 追加
+- evaluation end
+- 未観測確定
+- buyer・seller 完了通知
+- ex-post evaluation
+- Vehicle 別 role 評価
+- nonparticipating actual 外部効果の計算
+- 実験出力と集計
+
+## 2. 独立確認済みのatomic apply構造
+
+現在の atomic apply は、全 Node・全 Vehicle の prepare を完了してから commit する。
+
+**現在の commit 順:**
+
+1. rank state
+2. `Vehicle.payment_paid`
+3. `Vehicle.payment_received`
+4. `Vehicle.order_exchange_log`
+
+registry 登録も同じ prepare・commit 契約へ追加する。
+
+- prepare 中に live registry を書き換えない
+- 全 Node 分の proposal と既存 registry の重複を commit 開始前に検査する
+- registry 用の完成済み replacement dict を prepare する
+- 既存 4 種類の commit 完了後、return 直前に registry の 2 つの dict を一括代入する
+- commit 中に検索、照合、再検査、再計算を行わない
+- selected Node が 0 件なら registry dict を不要に置き換えない
+
+公開関数 `apply_tvt_mp_validated_result` の引数は 3 つのままである。registry は引数に増やさず、`real_W.order_control_tvt_mp_actual_passage_wait_registry` を使う。
+
+## 3. selected candidateからの情報経路
+
+正式な参照経路:
+
+```text
+selected_candidate_economic_result
+→ candidate_local_virtual_calculation_result
+→ traffic_observation_records
+```
+
+`traffic_observation_records` は、`trade_scope_of_this_candidate_visits` の順序で 1 件ずつ作られ、final result でも同じ public order で保存される。
+
+**登録対象:**
+
+- buyer
+- seller
+- nonparticipating
+
+**登録対象外:**
+
+- partition 1
+- partition 2
+- partition 4
+- trade_scope 外 Visit
+- fallback
+- `NO_VISITS_TO_CONFIRM`
+
+登録対象は final rank 列の全体ではない。fallback と `NO_VISITS_TO_CONFIRM` は registration proposal を返さない。
+
+## 4. buyers_sortedの正式型訂正
+
+actual passage 型の現在の次の型は誤りである。
+
+```text
+tuple[str, ...]
+```
+
+正式型:
+
+```text
+tuple[OrderControlTvtVisitKey, ...]
+```
+
+**訂正対象:**
+
+- `OrderControlTvtMpActualPassageObservationRecord.buyers_sorted`
+- `OrderControlTvtMpActualPassageWaitEntry.buyers_sorted`
+- `OrderControlTvtMpActualPassageTradeWait.buyers_sorted`
+- `OrderControlTvtMpActualPassageWaitRegistry` の transaction key
+
+正式な transaction key:
+
+```text
+tuple[
+    int,
+    str,
+    tuple[OrderControlTvtVisitKey, ...],
+]
+```
+
+**原因:**
+
+atomic apply の成立時 record、concrete buyer candidate、trade rank では、`buyers_sorted` は buyer 名ではなく buyer VisitKey の tuple である。同じ Vehicle が同じ Node を再訪できるため、Vehicle 名だけへ縮退させない。
+
+この訂正は新しい成果工程ではなく、実装項目1で判明した型不整合の限定修正として、実装項目2と同時に行う。実装項目1の専用テスト `tests_order_control_tvt_mp_actual_passage.py` は、文字列 tuple でこれらの field を作っているため、VisitKey tuple へ合わせる。
+
+## 5. prepare用内部型
+
+atomic apply 内へ、必要最小限の非公開 prepare 型を追加する。
+
+**推奨概念:** `_PreparedActualPassageNodeRegistration`
+
+保持するもの:
+
+- 1 selected Node 分の `WaitEntry` tuple
+- `TradeWait` 1 件
+
+全 Node 分の検査後、registry commit 用として次の概念を用意する。
+
+**推奨概念:** `_PreparedActualPassageRegistryCommit`
+
+保持するもの:
+
+- 対象 registry
+- 全 proposal 反映済みの updated entry mapping
+- 全 proposal 反映済みの updated transaction mapping
+
+live registry object は prepare 中に変更しない。registry へ method は追加しない。
+
+## 6. buyer・sellerの成立時recordとの対応
+
+buyer・seller については、prepared Vehicle update が保持する成立時 record と traffic observation record を VisitKey で一対一照合する。
+
+成立時 record を作るときに検査した同じ true VOT を registry entry でも使用する。
+
+**手順:**
+
+- `_prepare_one_money_record` で実 World `Vehicle.vot_true` を一度だけ読み、検査する
+- 検査済み `true_vot_per_second` で成立時 record を作る
+- 同じ成立時 record object を prepared Vehicle update へ保持する
+- registry proposal は、その成立時 record の `true_vot_per_second` を使用する
+- registry proposal 作成時に live `Vehicle.vot_true` を再読取しない
+
+**照合項目:**
+
+- `visit_key`
+- `vehicle_name`
+- `node_name`
+- `buyers_sorted`
+- role
+- `baseline_passage_timestep`
+- `candidate_passage_timestep`
+
+buyer observation には BUYER 成立時 record がちょうど 1 件必要である。seller observation には SELLER 成立時 record がちょうど 1 件必要である。対応しない buyer・seller 成立時 record を残さない。
+
+## 7. nonparticipatingの情報源
+
+nonparticipating には money record と成立時 record がない。
+
+nonparticipating の `WaitEntry` は candidate traffic observation record から作る。
+
+**true VOT 正本:**
+
+```text
+traffic_observation_record.true_vot_per_second
+```
+
+nonparticipating について実 World `Vehicle.vot_true` を読まない。既存 atomic apply fixture では、money 対象外 Vehicle の `vot_true` が `None` になり得る。そこを読むと、凍結済み true VOT がある nonparticipating を誤って拒否する。
+
+nonparticipating に buyer または seller の成立時 record が対応する場合は不整合として拒否する。
+
+## 8. WaitEntryへ引き継ぐ情報
+
+各 traffic observation record から次を登録する。
+
+**identity:**
+
+- `tvt_decision_timestep`
+- `node_name`
+- `buyers_sorted`
+- `visit_key`
+- `vehicle_name`
+- role
+
+**初期状態:**
+
+- `wait_status = WAITING_FOR_ACTUAL_PASSAGE`
+- `actual_passage_observation_record = None`
+
+**predicted 情報:**
+
+- `baseline_passage_timestep`
+- `candidate_passage_timestep`
+- `predicted_observation_status`
+- `predicted_route_next_link_name`（traffic observation の `route_next_link_name`。成立時 record の formal route ではない）
+
+**baseline_minus_candidate の 3 値:**
+
+```text
+baseline_minus_candidate_passage_timesteps
+= traffic observation の predicted_time_difference_timesteps
+
+baseline_minus_candidate_passage_seconds
+= traffic observation の predicted_time_difference_seconds
+
+baseline_minus_candidate_time_value
+= traffic observation の predicted_signed_time_value_change
+```
+
+atomic apply では再計算しない。`DELTAT` を読み直さない。candidate 側の `predicted_time_difference_timesteps` は、観測確定時に `baseline_passage_timestep - candidate_passage_timestep` として既に保存されている。
+
+`baseline_minus_actual_*` と `candidate_minus_actual_*` は、actual passage 前の `WaitEntry` へ保存しない。`OrderControlTvtMpActualPassageObservationRecord` は登録時に作らない。
+
+role 変換は明示的な if/elif で行う。
+
+- `LocalBindingTradeRole.BUYER` → `ActualPassageRole.BUYER`
+- `LocalBindingTradeRole.SELLER` → `ActualPassageRole.SELLER`
+- `LocalBindingTradeRole.NONPARTICIPATING` → `ActualPassageRole.NONPARTICIPATING`
+
+## 9. candidate observation status
+
+`OBSERVED` と `UNOBSERVED_AT_HORIZON` の両方を actual passage 待機 registry へ登録する。
+
+**OBSERVED:**
+
+- baseline passage は Python int
+- candidate passage は Python int
+- predicted timestep 差は baseline minus candidate と一致
+- predicted seconds と time value は数値
+- actual passage の待機を開始する
+
+**UNOBSERVED_AT_HORIZON:**
+
+- `candidate_passage_timestep` は `None`
+- `predicted_time_difference_timesteps` は `None`
+- `predicted_time_difference_seconds` は `None`
+- `predicted_signed_time_value_change` は `None`
+- `WaitEntry` の `baseline_minus_candidate` 3 値も `None`
+- baseline passage と predicted route は保持
+- actual passage の待機は開始する
+- `wait_status` は `WAITING_FOR_ACTUAL_PASSAGE`
+
+`passage_observation_status` が `None` なら、final traffic observation ではないため拒否する。horizon 末尾時刻などで `None` を補完しない。`passage_observation_status` が `None` のときは role を問わず拒否する。
+
+**role 別 status 制約（補足）:**
+
+- selected candidate として atomic apply へ到達する buyer・seller は、economic required passage が完了済みであるため、candidate traffic observation status は **`OBSERVED` 必須**である。
+- buyer または seller が `UNOBSERVED_AT_HORIZON` なら、selected candidate の成立条件と矛盾するため、prepare で `RuntimeError` として拒否する。
+- nonparticipating は `OBSERVED` または `UNOBSERVED_AT_HORIZON` のどちらでも登録する。
+- 冒頭の「`OBSERVED` と `UNOBSERVED_AT_HORIZON` の両方を actual passage 待機 registry へ登録する」とは、**全 role が両 status を取り得る**という意味ではない。registry 全体として、**buyer・seller の `OBSERVED`** と、**nonparticipating の `OBSERVED` または `UNOBSERVED_AT_HORIZON`** を扱うという意味である。
+
+## 10. TradeWait
+
+traffic observation records の順序を維持して次を作る。
+
+- `all_visit_keys`
+- `buyer_visit_keys`
+- `seller_visit_keys`
+- `nonparticipating_visit_keys`
+
+`TradeWait` には次を保存する。
+
+- `tvt_decision_timestep`
+- `node_name`
+- `buyers_sorted`
+- 上記 4 つの VisitKey tuple
+- `buyer_seller_actual_passage_completion_notified = False`
+
+nonparticipating は buyer・seller 完了条件へ含めない。今回、完了判定と通知処理は実装しない。
+
+## 11. 事前不変条件
+
+prepare で一度だけ検査する。
+
+- `traffic_observation_records` が tuple
+- `trade_scope_of_this_candidate_visits` が tuple
+- 件数、順序、VisitKey が一致
+- Vehicle 名が VisitKey 先頭要素と一致
+- VisitKey 重複なし
+- role は buyer、seller、nonparticipating のみ
+- binding visit と observation の role が一致
+- candidate observation status が `OBSERVED` または `UNOBSERVED_AT_HORIZON`
+- buyer・seller 成立時 record との一対一対応
+- buyer・seller の baseline passage と candidate passage が一致
+- nonparticipating に成立時 record がない
+- `OBSERVED` の status と値の組合せが整合
+- `UNOBSERVED_AT_HORIZON` の status と `None` 値の組合せが整合
+
+**role 別 status 制約（補足）:**
+
+- buyer・seller の traffic observation は `passage_observation_status` が **`OBSERVED` であること**（selected candidate の economic required passage 完了と整合）
+- buyer または seller が `UNOBSERVED_AT_HORIZON` のときは prepare で `RuntimeError`
+- nonparticipating は `OBSERVED` または `UNOBSERVED_AT_HORIZON` を許容
+- `passage_observation_status` が `None` のときは role を問わず拒否
+
+登録時に保証したこれらの不変条件を、毎 timestep で再検査しない。
+
+## 12. 全Node分の重複検査
+
+全 Node の既存 prepare と registration proposal 作成が完了した後、commit 開始前に検査する。
+
+**entry key:**
+
+```text
+(node_name, visit_key)
+```
+
+**transaction key:**
+
+```text
+(tvt_decision_timestep, node_name, buyers_sorted)
+```
+
+**拒否条件:**
+
+- 今回 proposal 内で entry key が重複
+- 今回 proposal 内で transaction key が重複
+- 既存 registry に entry key が存在
+- 既存 registry に transaction key が存在
+
+拒否時は次のすべてを変更しない。
+
+- rank state
+- `payment_paid`
+- `payment_received`
+- `order_exchange_log`
+- registry の entry mapping
+- registry の transaction mapping
+- registry 内部 dict object
+
+## 13. replacement mapping
+
+commit 前に既存 registry mapping をコピーする。
+
+```text
+updated_entries
+= dict(registry.entries_by_node_name_and_visit_key)
+
+updated_trades
+= dict(registry.trades_by_transaction_key)
+```
+
+検査済み proposal をコピー側へ反映する。
+
+live registry へ逐次追加しない。全 proposal 反映済みの完成した replacement mapping を prepare 結果として保持する。
+
+## 14. commit
+
+既存 commit 順を維持する。
+
+1. rank state
+2. `payment_paid`
+3. `payment_received`
+4. `order_exchange_log`
+5. actual passage wait registry の 2 つの replacement mapping
+
+registry commit は return 直前に行う。
+
+commit 中には検索、照合、検査、再計算を行わず、完成済み dict を代入するだけとする。
+
+selected Node が 0 件なら、空の replacement で既存 dict を置き換えない。registry の 2 つの dict object はそのまま残す。
+
+## 15. テスト方針
+
+`tests_order_control_tvt_mp_final_rank.py` は変更しない。`_local_result` の `traffic_observation_records=()` も維持する。
+
+`tests_order_control_tvt_mp_atomic_apply.py` 内だけで、selected local result へ traffic observation records を差し込む。既存の `dataclasses.replace` で、selected の local result の `traffic_observation_records` だけを差し替える。呼び元は、selected を実際に apply する共通経路である。fallback と no-visit には足さない。
+
+default fixture の trade scope にどの Vehicle がどの role で入るかは、今回の調査対象外である `tests_order_control_tvt_mp_final_consistency_validation.py` の構築に依存する。テストは Vehicle 名を固定せず、差し込んだ observation の role で検証する。
+
+**必要な主要確認:**
+
+- buyer、seller、nonparticipating 全件登録
+- entry key と transaction key
+- `TradeWait` の role 別 VisitKey tuple
+- 全 entry の初期 wait status
+- actual observation record が `None`
+- buyer・seller は成立時 record の検査済み true VOT
+- nonparticipating は candidate observation の凍結 true VOT
+- nonparticipating の live `Vehicle.vot_true` を読まない
+- `baseline_minus_candidate` 3 値の引継ぎ
+- `OBSERVED` と `UNOBSERVED_AT_HORIZON`（registry 全体として buyer・seller は `OBSERVED`、nonparticipating は両方のいずれか。§9 補足）
+- buyer・seller の `OBSERVED` 登録
+- buyer・seller の `UNOBSERVED_AT_HORIZON` 拒否
+- nonparticipating の `OBSERVED` 登録
+- nonparticipating の `UNOBSERVED_AT_HORIZON` 登録
+- fallback と `NO_VISITS_TO_CONFIRM` では非登録
+- proposal 内重複拒否
+- 既存 registry との重複拒否
+- prepare 失敗時の rank、money、log、registry 不変
+- registry 失敗時の内部 dict object 不変
+- 複数 Node 途中失敗時の先行 Node 非登録
+- traffic observation と trade_scope の不一致拒否
+- status と値の組合せ不整合拒否
+- `buyers_sorted` 型訂正後の専用テスト
+
+## 16. 変更予定ファイル
+
+**変更予定:**
+
+- `uxsim/order_control_tvt_mp_actual_passage.py`
+- `uxsim/order_control_tvt_mp_atomic_apply.py`
+- `tests_order_control_tvt_mp_actual_passage.py`
+- `tests_order_control_tvt_mp_atomic_apply.py`
+
+**変更しない:**
+
+- `uxsim/uxsim.py`
+- candidate local calculation
+- economic evaluation
+- final rank
+- final consistency validation
+- `tests_order_control_tvt_mp_final_rank.py`
+- diagnostics
+
+## 17. 独立確認結果
+
+Cursor 調査だけで確定せず、Terminal で次を直接確認したことを記録する。
+
+- atomic apply の prepare と commit 境界
+- commit 順
+- 成立時 record の field
+- buyer・seller true VOT の取得位置
+- selected から traffic observation への参照経路
+- traffic observation が trade scope 順で作られること
+- final result が同じ public order を保存すること
+- `OBSERVED` と `UNOBSERVED_AT_HORIZON` の finalize 契約
+- `buyers_sorted` の正式型
+- current actual passage 型の `buyers_sorted` 型不整合
+
+独立確認の結果、**BLOCKER はなく、利用者判断事項も残っていない。** 実装項目2を上記設計で一意に実装できる。

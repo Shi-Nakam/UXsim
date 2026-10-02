@@ -664,3 +664,36 @@
 - `diagnostics/order_control.zip` を **stage しない**
 
 2026-10-01 の「最新の再開地点」は trade_scope candidate 観測完了後の **履歴**として残す。actual passage の最新参照は **本節（2026-10-02）** と第4巻同日内節とする。
+
+# TVT-MP actual passage基盤 実装項目2 完全実装前設計要約（2026-10-02）
+
+**詳細設計第4巻**「TVT-MP actual passage基盤 実装項目2 完全実装前設計（2026-10-02）」を **正式参照先**とする。本節は実装前の再開用要約である。直前の「実装項目1完了要約」と「最新の再開地点（2026-10-02）」は、実装項目1完了時点の記録として残す。
+
+- 実装項目1は `4dc4862`、文書更新は `2e31227` まで push 済み
+- HEAD と origin は `2e31227` で一致
+- 実装項目2は atomic apply 成功後の registry 一括登録
+- proposal を全件 prepare し、commit 前に重複検査
+- 完成済み replacement dict を prepare
+- 既存 rank、money、log commit 後に registry を一括反映
+- buyer・seller は成立時 record の検査済み true VOT
+- nonparticipating は candidate observation の凍結 true VOT
+- live true VOT を再読取しない
+- candidate observation status: **buyer・seller は `OBSERVED` 必須**（`UNOBSERVED_AT_HORIZON` は prepare で拒否）、**nonparticipating は `OBSERVED` または `UNOBSERVED_AT_HORIZON`**（registry 全体として両 status を扱うが、全 role が両方を取り得る意味ではない）
+- `buyers_sorted` を VisitKey tuple へ訂正
+- apply 失敗時は registry を含む全状態不変
+- 実装対象 4 ファイル（`order_control_tvt_mp_actual_passage.py`、`order_control_tvt_mp_atomic_apply.py`、両専用テスト）
+- Node.transfer 以降へ接続しない
+- Cursor 調査後、Terminal 原典確認を行い **BLOCKER なし**、利用者判断事項なしと判断した
+
+## 最新の再開地点（2026-10-02・実装項目2設計確定後）
+
+**本節が、実装項目2の完全実装前設計確定後の最新再開地点である。** 同日の実装項目1完了後の再開地点は履歴として残す。
+
+- 次は第4巻の実装項目2完全実装前設計に基づくコード実装
+- 実装範囲は atomic apply registry 登録だけ
+- 変更予定 4 ファイルは上節のとおり
+- Git 操作は利用者が Terminal で行う
+- 実装後は専用テスト、atomic apply 回帰、TVT-MP 関連回帰、FCFS・BATCH 回帰、`py_compile`、`git diff --check` を順に確認
+- `diagnostics/order_control.zip` を stage しない
+- commit と push を分離する
+- 実装結果は第4巻と進捗第3巻の双方へ追記する
