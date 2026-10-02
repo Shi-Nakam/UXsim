@@ -1200,3 +1200,237 @@ Git運用:
 - 文献側の様式具体化は、seller非空契約の実装結果およびactual passage実装項目4の設計を変更しない。
 - 詳細設計第3巻・第4巻への追記は不要である。
 - 本節追加により、新しい実装フェーズまたは実装項目を設けない。
+
+# TVT-MP actual passage基盤 実装項目4 完全実装前設計要約（2026-10-03）
+
+正式参照先:
+
+- `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_4.md`
+- 「TVT-MP actual passage基盤 実装項目4 完全実装前設計（2026-10-03）」
+
+## 目的
+
+取引に参加したbuyerとsellerが全員、実際に交差点を通過した時点を検出する。
+
+全員がそろった最初の1回だけ、その取引を
+「事後評価を開始できる状態」
+として通知する。
+
+nonparticipatingの通過完了は待たない。
+
+今回は通知境界までを実装し、buyer・sellerの役割別事後評価、nonparticipatingの外部効果評価、集計、実験出力は後続項目へ残す。
+
+## 完了条件
+
+正式取引は必ず次を満たす。
+
+- buyer 1件以上
+- seller 1件以上
+
+空buyer集合または空seller集合を自動完了として扱わない。
+
+buyer_visit_keysとseller_visit_keysに含まれる全Visitについて、個別actual passage observationがcommit済みであることを完了条件とする。
+
+各対象Visitでは、次がそろっていることを要求する。
+
+- actual passage観測済み状態
+- actual passage observation record
+
+今回通過するVisitは、今回のcommit後に観測済みになるものとして判定する。
+
+nonparticipating_visit_keysは完了条件に含めない。
+
+## 通知の意味
+
+完了通知は、
+
+「buyerとsellerのactual passageが全てそろい、後続の事後評価を開始できる状態になった」
+
+ことを示す。
+
+この実装項目では事後評価計算自体を開始しない。
+
+初回完了時だけTradeWaitを後続接続可能な結果として返す。
+
+次の場合は通知しない。
+
+- buyerまたはsellerに未通過Visitが残る
+- 同一取引について既に通知済み
+
+nonparticipatingだけが未通過であっても、buyer・sellerが全員完了し、まだ通知されていなければ、初回完了通知を返す。
+
+nonparticipatingが後から通過しても再通知しない。
+
+## 処理の骨格
+
+1. 個別actual passage observationをprepareする
+2. 該当TradeWaitとbuyer・seller entryを確認する
+3. 今回の通過を反映すればbuyer・seller全員が完了するか判定する
+4. 車両の物理移動が成功する
+5. 個別actual passage observationをcommitする
+6. 初回完了の場合だけcompletion flagをTrueにする
+7. 初回完了したTradeWaitを返す
+8. 未完了または通知済みの場合は完了通知を返さない
+
+重大な不整合を物理移動後に初めて発見しないよう、完了判定に必要な確認は物理移動前に行う。
+
+prepare段階では、liveなVehicle log、WaitEntry、TradeWaitを変更しない。
+
+物理移動が失敗またはskipされた場合は、個別観測も完了通知も反映しない。
+
+## 既存基盤
+
+OrderControlTvtMpActualPassageTradeWaitには既に次がある。
+
+- buyer_visit_keys
+- seller_visit_keys
+- nonparticipating_visit_keys
+- buyer_seller_actual_passage_completion_notified
+
+取引は次の保存情報から特定する。
+
+- tvt_decision_timestep
+- node_name
+- buyers_sorted
+
+新しい逆引きregistryは追加しない。
+
+## 重複通知防止
+
+buyer_seller_actual_passage_completion_notifiedがFalseであり、今回初めてbuyer・seller全員完了となる場合だけ、Trueへ更新する。
+
+既にTrueの場合は再通知しない。
+
+同一取引のnonparticipatingが後から通過しても再通知しない。
+
+## 破損入力
+
+少なくとも次を正常状態として扱わない。
+
+- transaction keyに対応するTradeWaitがない
+- TradeWaitとWaitEntryの取引identityが一致しない
+- buyer_visit_keysが空
+- seller_visit_keysが空
+- buyerまたはsellerのWaitEntryがない
+- roleとrole別VisitKey列が一致しない
+- 同じVisitKeyが複数roleへ重複している
+- 観測済み状態なのにrecordがない
+- 未観測状態なのにrecordが存在する
+- completion flagがTrueなのにbuyer・seller全員完了ではない
+
+登録時に保証済みの不変条件を無制限に重複検証せず、今回の通知処理に必要な重大不整合だけを確認する。
+
+## 変更予定ファイル
+
+本番:
+
+- `uxsim/order_control_tvt_mp_actual_passage.py`
+- `uxsim/order_control_tvt_mp_physical_transfer.py`
+
+テスト:
+
+- `tests_order_control_tvt_mp_actual_passage.py`
+- `tests_order_control_tvt_mp_physical_transfer.py`
+
+変更しない予定:
+
+- `uxsim/uxsim.py`
+- `uxsim/order_control_tvt_mp_atomic_apply.py`
+- economic evaluation
+- candidate selection
+- payment and compensation
+- final rank
+- final consistency validation
+- seller非空契約
+- diagnostics
+
+## テスト方針
+
+正常ケース:
+
+- buyer 1件・seller 1件
+- buyer複数・seller 1件
+- buyer 1件・seller複数
+- buyer複数・seller複数
+- buyerが最後に通過
+- sellerが最後に通過
+- nonparticipatingが未通過でも通知
+- nonparticipatingが先に通過済み
+- 通知済み取引でnonparticipatingが後から通過
+- 最後の1台より前は通知しない
+- 初回通知時だけflagがTrue
+- 個別recordとcompletion flagを同じ成功commitで反映
+
+異常ケース:
+
+- 空buyer
+- 空seller
+- TradeWait欠落
+- WaitEntry欠落
+- role不一致
+- transaction identity不一致
+- 状態とrecordの不一致
+- flagの不整合
+- VisitKey重複
+- prepare失敗時のlive state不変
+
+既存の空buyerまたは空seller fixtureは、正常取引ではなく型単体または破損入力であることを明確にする。
+
+## 検証計画
+
+- actual passage専用テスト
+- physical transfer専用テスト
+- atomic apply回帰
+- final consistency validation回帰
+- final rank回帰
+- FIFO回帰
+- TVT-MP関連回帰
+- FCFS・BATCHコア回帰
+- py_compile
+- git diff --check
+
+UXsim正式サンプルは、実装規模と回帰結果を確認後に再実行要否を判断する。
+
+BLOCKERなし。
+利用者判断事項なし。
+
+## 最新の再開地点（2026-10-03・actual passage実装項目4設計確定後）
+
+**本節が、actual passage実装項目4のコード実装前における最新再開地点である。**
+
+現在の状態:
+
+- 文献調査第二段階のメモ化はコミット`5492e19`で保存・push済み
+- actual passage実装項目1〜3は実装・検証・保存済み
+- seller非空契約はコミット`c03ae41`で実装・検証・保存済み
+- 実装項目4の完全実装前設計を詳細設計第4巻へ追記済み
+- Pythonコードとテストは未変更
+- 実装項目4の事後評価計算はまだ開始しない
+- BLOCKERなし
+- 利用者判断事項なし
+
+次の作業:
+
+1. 詳細設計第4巻と進捗第3巻の差分をTerminalで独立確認する
+2. 文書2ファイルだけをstageする
+3. commit名に`document`を含めてcommitする
+4. commit結果、最新コミット、残存変更を確認する
+5. 別指示でpushする
+6. push後にHEADとoriginの一致を確認する
+7. 完全実装前設計に基づき、実装項目4のコードと専用テストを実装する
+
+Git運用:
+
+- Git操作は利用者がTerminalで行う
+- CursorにGit操作をさせない
+- commitとpushを分離する
+- `diagnostics/order_control.zip`をstageしない
+
+実装開始時の予定変更ファイル:
+
+- `uxsim/order_control_tvt_mp_actual_passage.py`
+- `uxsim/order_control_tvt_mp_physical_transfer.py`
+- `tests_order_control_tvt_mp_actual_passage.py`
+- `tests_order_control_tvt_mp_physical_transfer.py`
+
+実装開始時も、役割別事後評価、evaluation end、未観測確定、実験出力へ範囲を広げない。

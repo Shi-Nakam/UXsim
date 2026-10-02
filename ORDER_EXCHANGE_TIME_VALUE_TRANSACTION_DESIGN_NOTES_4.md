@@ -7605,3 +7605,266 @@ BLOCKERはない。
 その後、進捗第3巻へ実装・検証結果と最新再開地点を別作業で追記する。
 
 3文書の独立確認と保存・pushが完了するまで、actual passage実装項目4へ進まない。
+
+# TVT-MP actual passage基盤 実装項目4 完全実装前設計（2026-10-03）
+
+本節は、branch `feature/intersection-order-control`、HEAD `5492e19`（`origin/feature/intersection-order-control` と一致）時点のコードベースに対する、actual passage実装項目4の完全実装前設計である。文書化のみを行い、本節は実装完了記録ではない。
+
+## 12A.1 非技術的目的
+
+取引に参加した buyer と seller が全員、実際に交差点を通過した時点を検出する。
+
+全員がそろった最初の 1 回だけ、その取引を「事後評価を開始できる状態」として通知する。
+
+nonparticipating の通過完了は待たない。
+
+今回の実装対象は通知境界までとする。役割別の事後評価計算自体は後続項目へ残す。
+
+## 12A.2 確定前提（変更しない範囲）
+
+### 正式な TVT-MP 取引の形
+
+正式な TVT-MP 取引は必ず次を満たす。
+
+- buyer 1 件以上
+- seller 1 件以上
+
+したがって、空 buyer 集合または空 seller 集合を自動完了として扱わない。
+
+seller VisitKey が空の TradeWait は、正常な成立取引ではない。
+
+buyer・seller 完了条件には nonparticipating を含めない。
+
+同一取引について完了通知は 1 回だけ行う。
+
+### actual passage 実装項目 1〜3 で確定済み（本項目で変更しない）
+
+- actual passage observation
+- 3 組 9 field
+- true VOT の保存値利用
+- actual passage timestep
+- actual route
+- Vehicle log
+- WaitEntry の状態遷移
+- physical transfer 成功後の commit
+- 正式支払額
+- 正式補償額
+
+## 12A.3 既存基盤
+
+`OrderControlTvtMpActualPassageTradeWait` には既に次がある。
+
+- `buyer_visit_keys`
+- `seller_visit_keys`
+- `nonparticipating_visit_keys`
+- `buyer_seller_actual_passage_completion_notified`
+
+各 Visit の通過実績は `OrderControlTvtMpActualPassageWaitEntry` に保存される。
+
+取引は次の保存情報で特定できる。
+
+- `tvt_decision_timestep`
+- `node_name`
+- `buyers_sorted`
+
+新しい逆引き registry は追加しない。
+
+## 12A.4 実装項目 4 の正式範囲
+
+### 含めるもの
+
+1. 今回通過する Visit が属する TradeWait の特定
+2. buyer・seller 全員の actual passage 完了判定
+3. nonparticipating を待たない完了条件
+4. 同一取引の重複通知防止
+5. 初回完了時の completion flag 更新
+6. 初回完了時だけ後続処理へ渡せる完了通知
+7. 物理移動前の必要な整合確認
+8. actual passage 本番テスト
+9. physical transfer 接続テスト
+
+### 含めないもの
+
+- buyer の actual 時間短縮評価
+- seller の actual 遅延評価
+- nonparticipating の actual 外部効果評価
+- 支払額や補償額の再計算
+- ex-post 効用計算
+- evaluation end の未観測確定
+- 実験出力
+- 集計
+- グラフ
+- actual passage 実装項目 1〜3 の式変更
+
+## 12A.5 完了条件
+
+`buyer_visit_keys` と `seller_visit_keys` に含まれる全 Visit について、個別 actual passage observation が commit 済みであることを確認する。
+
+正常な完了判定では、各対象 Visit について次がそろっていることを要求する。
+
+- actual passage を観測済みであること
+- actual passage observation record が保存済みであること
+
+今回通過する Visit については、今回の commit 後に観測済みになるものとして判定する。
+
+`nonparticipating_visit_keys` は buyer・seller 完了条件へ含めない。
+
+## 12A.6 処理境界と処理骨格
+
+重大な不整合を物理移動後に初めて発見しないよう、完了判定に必要な registry、TradeWait、buyer・seller entry の整合は物理移動前に確認する。
+
+処理の骨格:
+
+1. 個別 actual passage observation を prepare する
+2. 該当 TradeWait と buyer・seller entry を確認する
+3. 今回の通過を反映すれば全員完了になるかを判定する
+4. 車両の物理移動が成功する
+5. 個別 actual passage observation を commit する
+6. 初回完了の場合だけ completion flag を True にする
+7. 初回完了した TradeWait を完了通知として返す
+8. 未完了または既通知の場合は通知しない
+
+## 12A.7 完了通知の意味
+
+実装項目 4 における完了通知は、「buyer と seller の actual passage が全てそろい、後続の事後評価を開始できる状態になった」ことを示す。
+
+この項目では、事後評価計算自体は開始しない。
+
+初回完了時だけ TradeWait を後続接続可能な結果として返す。
+
+nonparticipating だけが未通過であっても、buyer・seller が全員完了し、まだ通知されていなければ、初回完了通知を返す。
+
+次の場合は完了通知を返さない。
+
+- buyer または seller に未通過 Visit が残る
+- 同一取引について既に通知済み
+- 今回の Visit が buyer でも seller でもない（ただし、その時点で未通知の buyer・seller 完了を新たに成立させることは通常ない）
+
+## 12A.8 重複通知防止
+
+`buyer_seller_actual_passage_completion_notified` が False であり、今回初めて buyer・seller 全員完了となる場合だけ、True へ更新する。
+
+既に True の場合は、同一取引を再通知しない。
+
+nonparticipating が後から通過しても、buyer・seller 完了通知を再発生させない。
+
+## 12A.9 原子性
+
+物理移動前の prepare 段階では、live な Vehicle log、WaitEntry、TradeWait を変更しない。
+
+物理移動が成功した後の commit で、次を反映する。
+
+- Vehicle log への actual observation 追加
+- WaitEntry への actual observation 関連付け
+- WaitEntry の観測済み状態
+- 初回完了時の TradeWait completion flag
+
+移動が失敗または skip された場合は、個別観測も完了通知も反映しない。
+
+## 12A.10 破損入力（正常状態として処理しない）
+
+- transaction key に対応する TradeWait がない
+- TradeWait の node、decision timestep、`buyers_sorted` が entry と一致しない
+- `buyer_visit_keys` が空
+- `seller_visit_keys` が空
+- buyer または seller VisitKey に対応する WaitEntry がない
+- role と role 別 VisitKey 列が一致しない
+- 同じ VisitKey が複数 role へ重複している
+- 完了済み状態なのに actual observation record がない
+- 未完了状態なのに actual observation record が既にある
+- completion flag が True なのに buyer・seller 全員完了していない
+
+ただし、登録時に保証済みの条件を無制限に重複検証しない。今回通過処理で必要となる整合と、原因不明の完了通知を防ぐ重大不整合だけを確認する。
+
+## 12A.11 テスト方針
+
+### 正常ケース
+
+- buyer 1 件・seller 1 件
+- buyer 複数・seller 1 件
+- buyer 1 件・seller 複数
+- buyer 複数・seller 複数
+- buyer が最後に通過して初回通知
+- seller が最後に通過して初回通知
+- nonparticipating が未通過でも buyer・seller 完了で通知
+- nonparticipating が先に通過済みでも、最後の buyer または seller で通知
+- 通知済み取引で nonparticipating が後から通過しても再通知しない
+- 最後の 1 台より前は通知しない
+- 初回通知時だけ flag が True になる
+- 個別 actual passage record と completion flag が同じ成功 commit で反映される
+
+### 異常ケース
+
+- `buyer_visit_keys` が空
+- `seller_visit_keys` が空
+- TradeWait 欠落
+- WaitEntry 欠落
+- role 不一致
+- transaction identity 不一致
+- 完了状態と record の不一致
+- completion flag の不整合
+- 重複 VisitKey
+- 物理移動前の prepare 失敗では live state を変更しない
+
+### 既存テスト fixture の整理
+
+- 正常な TradeWait fixture は buyer 1 件以上・seller 1 件以上にする
+- 空 buyer または空 seller を使う既存単体 fixture は、正常取引ではなく型単体または破損入力であることを明確にする
+- 個別 actual passage 観測テストも、必要に応じて buyer・seller 双方を持つ正式 trade fixture へ合わせる
+- seller 空集合を正常完了とするテストは作らない
+
+## 12A.12 変更予定ファイル
+
+### 本番
+
+- `uxsim/order_control_tvt_mp_actual_passage.py`
+- `uxsim/order_control_tvt_mp_physical_transfer.py`
+
+### テスト
+
+- `tests_order_control_tvt_mp_actual_passage.py`
+- `tests_order_control_tvt_mp_physical_transfer.py`
+
+### 変更しない予定
+
+- `uxsim/uxsim.py`
+- `uxsim/order_control_tvt_mp_atomic_apply.py`
+- economic evaluation
+- candidate selection
+- payment and compensation
+- final rank
+- final consistency validation
+- seller 非空契約
+- diagnostics
+
+## 12A.13 検証計画
+
+- actual passage 専用テスト
+- physical transfer 専用テスト
+- atomic apply 回帰
+- final consistency validation 回帰
+- final rank 回帰
+- FIFO 回帰
+- TVT-MP 関連回帰
+- FCFS・BATCH コア回帰
+- `py_compile`
+- `git diff --check`
+
+UXsim 正式サンプルは、実装規模と回帰結果を確認後に再実行要否を判断する。
+
+## 12A.14 BLOCKER と利用者判断事項
+
+現時点で BLOCKER なし。
+
+完了通知を初回完了時の TradeWait 返却として表現し、事後評価計算は後続項目へ残す。
+
+追加の利用者判断事項なし。
+
+## 12A.15 本節の位置づけと次の作業
+
+- 本節は実装前仕様であり、実装完了記録ではない。
+- 次は進捗第 3 巻へ短い設計要約と最新再開地点を別作業で追記する。
+- 文書 2 ファイルの独立確認、commit、push 完了後にコード実装へ進む。
+- `diagnostics/order_control.zip` を stage しない。
+- Git 操作は利用者が Terminal で行う。
+- commit と push を分離する。
