@@ -3271,6 +3271,31 @@ buyer role の取引だけを集計する。同じ Vehicle の seller 取引の�
 予想と実績の差 = actual_passage_timestep - candidate_passage_timestep
 ```
 
+【2026-10-02 最新仕様による注記】
+
+- 上記の引き算の向きは、過去のCopilotが利用者の明示確認なしに導入した記述であり、利用者合意済みの確定仕様ではなかった。
+- 上記の向きでは、buyerがcandidate予測より早く通過して予測以上の時間節約を得た場合に負となる。
+- 新規実装では使用しない。
+- 最新仕様では、共通保存値を次とする。
+
+```text
+candidate_minus_actual_passage_timesteps
+= candidate_passage_timestep - actual_passage_timestep
+```
+
+- buyerの最新role別指標は次とする。
+
+```text
+predicted_based_actual_saving_timesteps
+= candidate_minus_actual_passage_timesteps
+```
+
+- 正は、実際の通過がcandidate予測より早く、buyerが予測以上の時間節約を得たことを表す。
+- 負は、実際の通過がcandidate予測より遅く、buyerの時間節約が予測を下回ったことを表す。
+- 最新の正式参照先は、第4巻末尾
+  「TVT-MP actual passage基盤 実装項目1の確定設計・実装・検証結果（2026-10-02）」
+  §5および§6である。
+
 正なら、実績通過が candidate 予測より遅い。負なら、実績通過が candidate 予測より早い。0なら、candidate 予測どおりである。この差も切り上げない。
 
 ## 5. sellerの時間評価
@@ -3329,6 +3354,35 @@ seller role の取引だけを集計する。同じ Vehicle の buyer 取引の�
 ```text
 予想と実績の差 = actual_passage_timestep - candidate_passage_timestep
 ```
+
+【2026-10-02 最新仕様による注記】
+
+- 上記の名称と式は、記載当時に利用者が明示確定したものではなかった。
+- ただし、2026-10-02に利用者が明示確定したsellerの最新式とは、数値上の向きが一致する。
+- 最新仕様では、曖昧な「予想と実績の差」という名称を新規実装へ使用しない。
+- 共通保存値を次とする。
+
+```text
+candidate_minus_actual_passage_timesteps
+= candidate_passage_timestep - actual_passage_timestep
+```
+
+- sellerの最新role別指標は次とする。
+
+```text
+predicted_based_actual_delay_timesteps
+= -candidate_minus_actual_passage_timesteps
+```
+
+- したがって、次と同じである。
+
+```text
+predicted_based_actual_delay_timesteps
+= actual_passage_timestep - candidate_passage_timestep
+```
+
+- 正は実績遅延がcandidate予測より大きいこと、負は実績遅延がcandidate予測より小さいことを表す。
+- 最新の正式参照先は、第4巻末尾の2026-10-02節§5および§6である。
 
 正なら、実績通過が candidate 予測より遅い。負なら、実績通過が candidate 予測より早い。この差も切り上げない。buyer の差式と展開後は同じ形になるが、役割別の意味は異なる。buyer では節約の外れ、seller では遅延の外れとして読む。集計時に混ぜない。
 

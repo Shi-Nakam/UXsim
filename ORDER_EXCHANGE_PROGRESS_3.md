@@ -600,3 +600,67 @@
 2. `git diff --cached --check` と `git diff --cached --stat` を確認する。
 3. commit 名に **`document` を含める**。
 4. **commit と push を分離**する。
+
+# TVT-MP actual passage基盤 実装項目1完了要約（2026-10-02）
+
+**詳細設計第4巻**「TVT-MP actual passage基盤 実装項目1の確定設計・実装・検証結果（2026-10-02）」を **正式参照先**とする。本節は再開用要約である。
+
+- コミット **`4dc4862`** で実装項目1を実装し **push 済み**
+- actual 用型、mutable registry、World 空 registry 初期化、専用テストを完了
+- **3 組 9 field** の共通 passage 差分を確定（`baseline_minus_candidate_*`、`baseline_minus_actual_*`、`candidate_minus_actual_*`）
+- fuzzy な prediction error 名称を避け、**引き算の向きを field 名で明示**
+- role 別指標は共通 field から **後続評価層で導出**（observation record へ重複保存しない）
+- 支払、補償、参考金額、事後成立判定は **`declared_vot_per_second`**
+- 共通 time value は **`true_vot_per_second`**（研究・観測用）
+- actual observation と role 別評価は **別層**
+- 交通動作と既存 log は **未変更**
+
+### 検証結果（保存済み）
+
+- 専用テスト: **15 passed**
+- TVT-MP 関連 9 ファイル: **349 passed**（334 + 15）
+- FCFS・BATCH: **366 passed**
+- candidate local calculation と atomic apply 限定回帰: **116 passed**（第4巻本節）
+- `py_compile` 成功
+- `git diff --check` 成功
+
+### リポジトリ状態
+
+- `diagnostics/order_control.zip` は **未追跡のまま stage しない**
+- actual 系全体の残りは、現時点の基準で **実装項目 7 つ**、**仕上げ項目 2 つ**
+
+### 直前の再開地点との関係
+
+- 本巻「未実装（actual 系）」「actual passage 基盤へ直ちに本番実装へ進まない」（2026-10-01 再開地点）は **当時の記録として削除しない**
+- candidate predicted は `e12a24c` / trade_scope 観測コミット列で完了済みの履歴として残す
+- **最新の actual passage 基盤状態**は、本節および第4巻 2026-10-02 節で上書き参照する
+
+## 最新の再開地点（2026-10-02）
+
+**本節が、actual passage 基盤実装項目1完了後の最新再開地点である。**
+
+- HEAD と `origin/feature/intersection-order-control` は **`4dc4862` で一致**
+- **次は実装項目2:**「atomic apply 成功後の registry 一括登録」
+
+### 実装開始前に読取り専用で確認する対象
+
+- atomic apply の proposal、validation、**commit 境界**
+- 成立時 log record
+- selected candidate **traffic observation**
+- buyer・seller の **true VOT 正本**
+- nonparticipating の **true VOT 正本**
+- apply 失敗時の **非反映契約**（registry へ何も残さない）
+
+### 実装項目2の範囲制限
+
+- 範囲を **atomic apply 登録だけ**に限定する
+- Node.transfer、evaluation end、buyer・seller 完了通知、ex-post evaluation、Vehicle 別 role 評価、実験出力へ **接続しない**
+
+### 作業運用
+
+- Cursor には **Git 操作をさせない**
+- **commit と push を分離**する
+- 文書コミット名には **`document` を含める**
+- `diagnostics/order_control.zip` を **stage しない**
+
+2026-10-01 の「最新の再開地点」は trade_scope candidate 観測完了後の **履歴**として残す。actual passage の最新参照は **本節（2026-10-02）** と第4巻同日内節とする。

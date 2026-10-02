@@ -4736,6 +4736,31 @@ nonparticipating の実績上の符号付き価値は次である。
 
 `signed_value_prediction_error = actual_signed_time_value_change - predicted_signed_time_value_change`
 
+【2026-10-02 最新仕様による注記】
+
+- 上記のfield名と式は、過去のCopilotが利用者の明示確認なしに導入したものである。
+- 特にcandidate_passage_prediction_error_timestepsは、共通の通過時刻残差をactual minus candidateの向きで保存する案だったが、利用者合意済みの確定仕様ではなかった。
+- prediction errorという名称は、引き算の向きと正負の意味がfield名から分からないため、新規実装では使用しない。
+- 最新仕様では、方向をfield名で明示した次の共通値を保存する。
+
+```text
+candidate_minus_actual_passage_timesteps
+= candidate_passage_timestep - actual_passage_timestep
+
+candidate_minus_actual_passage_seconds
+= candidate_minus_actual_passage_timesteps × DELTAT
+
+candidate_minus_actual_time_value
+= candidate_minus_actual_passage_seconds × true_vot_per_second
+```
+
+- 旧candidate_passage_prediction_error_timestepsは、新規実装へ引き継がない。
+- 旧signed_value_prediction_errorが表そうとしていた値は、最新仕様ではcandidate_minus_actual_time_valueとして方向を明示して保存する。
+- role別指標は、この共通値から後続評価層で導出する。
+- 最新の正式参照先は、第4巻末尾
+  「TVT-MP actual passage基盤 実装項目1の確定設計・実装・検証結果（2026-10-02）」
+  §5および§6である。
+
 未観測なら `None` である。正の価値誤差は、実績が予測より短縮側である。
 
 ## 8. buyer・seller の事後評価との分離
@@ -5051,3 +5076,333 @@ economic evaluation、selection、payment、compensation、final rank、validati
 3. 進捗第3巻末尾「最新の再開地点（2026-10-01）」
 
 actual passage 基盤の **詳細実装前設計** を確認してから、実 World 側実装に進む。診断のみで offset 6 を先走り検証する必要は、本実装完了により **過去の再開項目** となった（履歴は残す）。
+
+# TVT-MP actual passage基盤 実装項目1の確定設計・実装・検証結果（2026-10-02）
+
+**本節が、actual passage 基盤実装項目1完了後の正式参照先である。** 過去節（§14「未実装範囲」に actual passage 基盤未実装の記述、§15 再開時の読み順、進捗第3巻「未実装（actual 系）」「actual passage 基盤へ直ちに本番実装へ進まない」等）は **当時の記録として削除・改変しない**。最新状態は **本節** で上書き参照する。
+
+## 1. 現在地
+
+- candidate predicted traffic observation はコミット `e12a24c` まで実装・検証・文書化され、**push 済み**である。
+- actual passage 基盤の **実装項目1** はコミット `4dc4862` で実装され、リモートブランチへ **push 済み**である。
+- ローカル HEAD と `origin/feature/intersection-order-control` は **`4dc4862` で一致**している。
+- 既存未追跡ファイル `diagnostics/order_control.zip` だけが残り、**stage・変更・削除していない**。
+
+## 2. actual系工程管理基準
+
+現時点の actual 系工程管理基準は、**8 つの実装項目**と **2 つの仕上げ項目**である。
+
+今回完了したのは **実装項目1**:
+
+- actual 用 enum
+- frozen actual passage observation record
+- mutable Visit wait entry
+- mutable transaction wait state
+- mutable wait registry
+- World 上の空 registry 初期化
+- 専用テスト
+
+上記 10 項目（actual 系全体の 8 つの実装項目と 2 つの仕上げ項目）は、現在確認済みの基準計画である。重大な未確認依存、重大な不整合、設計矛盾が後から判明する可能性まで含めて、**追加工程なしでの完了を絶対保証するものではない**。
+
+actual 系全体の残りは、現時点で **実装項目 7 つ**、**仕上げ項目 2 つ**である。
+
+## 3. 実装した型
+
+**新規ファイル:**
+
+`uxsim/order_control_tvt_mp_actual_passage.py`
+
+**実装型:**
+
+- `OrderControlTvtMpActualPassageRole`
+- `OrderControlTvtMpActualPassageObservationStatus`
+- `OrderControlTvtMpActualPassageWaitStatus`
+- `OrderControlTvtMpActualPassageObservationRecord`
+- `OrderControlTvtMpActualPassageWaitEntry`
+- `OrderControlTvtMpActualPassageTradeWait`
+- `OrderControlTvtMpActualPassageWaitRegistry`
+
+**役割:**
+
+- `OrderControlTvtMpActualPassageObservationRecord` は **frozen**
+- `OrderControlTvtMpActualPassageWaitEntry`、`OrderControlTvtMpActualPassageTradeWait`、`OrderControlTvtMpActualPassageWaitRegistry` は **mutable**
+- live な World、Vehicle、Node、Link は **保持しない**
+- VisitKey は `OrderControlTvtVisitKey` を使用
+- 取引識別の正本は `tvt_decision_timestep`、`node_name`、`buyers_sorted`
+- entry 照合 key は `(node_name, visit_key)`
+- transaction key は `(tvt_decision_timestep, node_name, buyers_sorted)`
+
+**循環 import 回避（実装メモ）:** `OrderControlTvtMpCandidatePassageObservationStatus` は `uxsim.py` 先頭 import と TVT-MP 依存鎖の循環を避けるため、`order_control_tvt_mp_actual_passage.py` では `TYPE_CHECKING` 内 import と `from __future__ import annotations` を用いる。型注釈は維持し、モジュールロード時に candidate 側を引き込まない。
+
+## 4. status
+
+**actual passage observation status**（frozen observation record 用。`WAITING` は含めない）:
+
+- `ACTUAL_PASSAGE_OBSERVED`
+- `ACTUAL_PASSAGE_UNOBSERVED_AT_EVALUATION_END`
+
+**mutable wait status**（World 側 registry のみ）:
+
+- `WAITING_FOR_ACTUAL_PASSAGE`
+- `ACTUAL_PASSAGE_OBSERVED`
+- `ACTUAL_PASSAGE_UNOBSERVED_AT_EVALUATION_END`
+
+`WAITING_FOR_ACTUAL_PASSAGE` を frozen `order_exchange_log` record として追加しない。待機中状態は **World 側 mutable registry だけ**で管理する。
+
+## 5. 共通passage差分の確定設計
+
+buyer、seller、nonparticipating の role に依存しない通過時刻の共通基盤として、**3 組の値**を明示保存する。
+
+### baselineとcandidate
+
+```
+baseline_minus_candidate_passage_timesteps
+  = baseline_passage_timestep - candidate_passage_timestep
+
+baseline_minus_candidate_passage_seconds
+  = baseline_minus_candidate_passage_timesteps × DELTAT
+
+baseline_minus_candidate_time_value
+  = baseline_minus_candidate_passage_seconds × true_vot_per_second
+```
+
+### baselineとactual
+
+```
+baseline_minus_actual_passage_timesteps
+  = baseline_passage_timestep - actual_passage_timestep
+
+baseline_minus_actual_passage_seconds
+  = baseline_minus_actual_passage_timesteps × DELTAT
+
+baseline_minus_actual_time_value
+  = baseline_minus_actual_passage_seconds × true_vot_per_second
+```
+
+### candidateとactual
+
+```
+candidate_minus_actual_passage_timesteps
+  = candidate_passage_timestep - actual_passage_timestep
+
+candidate_minus_actual_passage_seconds
+  = candidate_minus_actual_passage_timesteps × DELTAT
+
+candidate_minus_actual_time_value
+  = candidate_minus_actual_passage_seconds × true_vot_per_second
+```
+
+- **3 組をすべて明示保存**する。数学的には一部を他の値から導出できるが、後から瞬間的に理解しやすくし、**引き算の向きを field 名だけで確認**できるようにするため、明示保存を採用した。
+- 曖昧な prediction error 名称は使用しない。field 名で引き算の向きを明示する。
+- time value は **decision 時点で確定した `true_vot_per_second`** による研究・観測用の値である。
+- **支払、補償、実績ベース参考支払、実績ベース参考補償、事後成立判定**には、成立時 record に保存した **`declared_vot_per_second`** を使用する。共通 true VOT time value を経済評価へ流用しない。
+
+**§5 補足（旧式との関係）**
+
+- 第3巻のbuyer旧式「予想時間節約 minus 実績時間節約」と、第4巻の旧candidate_passage_prediction_error_timestepsは、利用者が明示確定した式ではない。
+- これらを新規実装の参照元にしない。
+- sellerの旧式は数値上、最新のpredicted_based_actual_delay_timestepsと一致するが、最新実装では方向明示型の共通fieldとrole別名称を使用する。
+- 2026-10-02節§5・§6を、この問題に関する最新仕様の正本とする。
+
+## 6. role別指標への導出
+
+role 別指標は共通 passage 差分から導出する。これらは後続の **Vehicle 別 role 評価 record** で扱い、今回の actual passage observation record へ **重複保存しない**。
+
+### buyer
+
+```
+predicted_time_saving_timesteps
+  = baseline_minus_candidate_passage_timesteps
+
+actual_time_saving_timesteps
+  = baseline_minus_actual_passage_timesteps
+
+predicted_based_actual_saving_timesteps
+  = candidate_minus_actual_passage_timesteps
+
+predicted_saving_time_value
+  = baseline_minus_candidate_time_value
+
+actual_saving_time_value
+  = baseline_minus_actual_time_value
+
+predicted_based_actual_saving_time_value
+  = candidate_minus_actual_time_value
+```
+
+正の `predicted_based_actual_saving` は、実際の通過が candidate 予測より早く、予測以上の時間節約が得られたことを表す。
+
+### seller
+
+```
+predicted_delay_timesteps
+  = -baseline_minus_candidate_passage_timesteps
+
+actual_delay_timesteps
+  = -baseline_minus_actual_passage_timesteps
+
+predicted_based_actual_delay_timesteps
+  = -candidate_minus_actual_passage_timesteps
+
+predicted_delay_time_value
+  = -baseline_minus_candidate_time_value
+
+actual_delay_time_value
+  = -baseline_minus_actual_time_value
+
+predicted_based_actual_delay_time_value
+  = -candidate_minus_actual_time_value
+```
+
+正の `predicted_based_actual_delay` は、実績遅延が candidate 予測より大きかったことを表す。
+
+seller が baseline より早く通過した場合も **seller のまま**であり、buyer へ変更しない。時間評価では **負の遅延を保持**する。補償計算では後続仕様どおり非負遅延を使用するが、**今回の実装項目1では計算しない**。
+
+### nonparticipating
+
+```
+predicted_signed_time_difference_timesteps
+  = baseline_minus_candidate_passage_timesteps
+
+actual_signed_time_difference_timesteps
+  = baseline_minus_actual_passage_timesteps
+
+predicted_based_actual_signed_difference_timesteps
+  = candidate_minus_actual_passage_timesteps
+
+predicted_signed_time_value
+  = baseline_minus_candidate_time_value
+
+actual_signed_time_value
+  = baseline_minus_actual_time_value
+
+predicted_based_actual_signed_time_value
+  = candidate_minus_actual_time_value
+```
+
+nonparticipating は外部効果として評価し、buyer または seller へ役割変更しない。支払、補償、参考金額、事後成立判定へ **含めない**。
+
+## 7. ObservationRecordとWaitEntryの責務
+
+### ObservationRecord に保存するもの
+
+- 取引識別（`tvt_decision_timestep`、`node_name`、`buyers_sorted`）
+- Visit 識別（`visit_key`、`vehicle_name`）
+- `role`
+- `observation_status`
+- `baseline_passage_timestep`、`candidate_passage_timestep`
+- `actual_passage_timestep`、`actual_route_next_link_name`
+- `predicted_observation_status`（candidate 側）、`predicted_route_next_link_name`
+- `true_vot_per_second`
+- **3 組 9 field** の共通 passage 差分:
+  - `baseline_minus_candidate_passage_timesteps` / `_passage_seconds` / `_time_value`
+  - `baseline_minus_actual_passage_timesteps` / `_passage_seconds` / `_time_value`
+  - `candidate_minus_actual_passage_timesteps` / `_passage_seconds` / `_time_value`
+
+**未観測 record**（`ACTUAL_PASSAGE_UNOBSERVED_AT_EVALUATION_END`）では:
+
+- `baseline_minus_candidate` の 3 値は既知なので **保持できる**
+- `baseline_minus_actual` の 3 値は **None**
+- `candidate_minus_actual` の 3 値は **None**
+- `actual_passage_timestep` と `actual_route_next_link_name` は **None**
+
+実装項目1では record 生成時の **計算 helper は未実装**。型として値を保持できることのみを専用テストで確認した。
+
+### WaitEntry に保存するもの（actual passage 前に確定しているもののみ）
+
+- `baseline_passage_timestep`、`candidate_passage_timestep`
+- `baseline_minus_candidate_passage_timesteps` / `_passage_seconds` / `_time_value`
+- `true_vot_per_second`
+- `predicted_observation_status`、`predicted_route_next_link_name`
+- mutable `wait_status`
+- 後続で actual observation record を関連付ける `actual_passage_observation_record`（初期は `None` 可）
+
+`baseline_minus_actual_*` と `candidate_minus_actual_*` は、actual passage 前の WaitEntry へ **先に保存しない**。後続 observer が actual passage を観測した時点で ObservationRecord へ保存する。
+
+## 8. World初期化
+
+`uxsim/uxsim.py` の `World.__init__` に次の属性を追加した。
+
+```
+order_control_tvt_mp_actual_passage_wait_registry
+```
+
+各 World 生成時に、新しい空の `OrderControlTvtMpActualPassageWaitRegistry` を生成する。World 間で registry および内部 dict（`entries_by_node_name_and_visit_key`、`trades_by_transaction_key`）を **共有しない**。
+
+交通処理、atomic apply、Node.transfer、evaluation end、`Vehicle.order_exchange_log` には **まだ接続していない**。
+
+## 9. 実装範囲外（実装項目1）
+
+今回 **未実装**:
+
+- atomic apply 成功時の registry 登録
+- registration proposal
+- TVT 物理通過後の actual passage observer
+- `Vehicle.order_exchange_log` への actual observation record 追加
+- 評価終了時の未観測確定
+- buyer・seller 完了通知
+- ex-post evaluation
+- Vehicle 別 role 評価
+- nonparticipating actual 外部効果の計算
+- 実験出力と集計
+
+交通動作と既存 log 内容は **変わっていない**。
+
+## 10. 検証結果（保存済み）
+
+**専用テスト:** `tests_order_control_tvt_mp_actual_passage.py` — **15 passed**
+
+観測内容の例（専用テスト fixture）:
+
+- observed record: `baseline_passage_timestep=10`, `candidate_passage_timestep=8`, `actual_passage_timestep=7`, DELTAT 相当 60, `true_vot_per_second=0.5` → 9 field 整合（例: `baseline_minus_candidate_passage_timesteps=2`, `baseline_minus_actual_passage_timesteps=3`, `candidate_minus_actual_passage_timesteps=1` 等）
+- frozen 確認用 fixture は同一 baseline/candidate/DELTAT/VOT で `actual_passage_timestep=1` と整合した 6 値（9/540/270.0 と 7/420/210.0）を使用
+- 未観測 record: baseline_minus_candidate 3 値保持、actual 依存 6 値は None
+
+**TVT-MP 関連 9 テストファイル: 349 passed**
+
+- candidate predicted 側の既存 8 ファイル **334 件**
+- actual passage 専用 **15 件**
+
+**candidate local calculation と atomic apply の限定回帰: 116 passed**
+
+**FCFS・BATCH: 366 passed**（約 5 分 23 秒、保存済み）
+
+**py_compile:** 成功（`order_control_tvt_mp_actual_passage.py`、`uxsim.py`、専用テスト）
+
+**git diff --check:** 成功
+
+**UXsim 正式サンプル**は実装項目1では **再実行していない**。重要実装段階の完了時に再実行する。
+
+## 11. 保存済みコミット
+
+```
+4dc4862
+implement TVT-MP actual passage observation types, wait registry, and World initialization
+```
+
+リモートブランチへ push 済み。HEAD と `origin/feature/intersection-order-control` は一致している。
+
+## 12. 次の作業
+
+**次は実装項目2: atomic apply 成功後の registry 一括登録**（依存順を崩さない）。
+
+必要内容:
+
+- selected candidate の buyer・seller・nonparticipating **全件**を登録
+- registration proposal を先に **全件作成**
+- 登録前に **全不変条件を検査**
+- atomic apply 成功 commit の末尾で **一括反映**
+- apply 失敗時は registry へ **何も残さない**
+- buyer・seller と nonparticipating の **true VOT 正本を区別**
+- selected candidate の traffic observation から **predicted 情報を引き継ぐ**
+
+実装項目2へ進む前に、**読取り専用**で確認する対象:
+
+- atomic apply の proposal、validation、commit 境界
+- 成立時 log record
+- selected candidate traffic observation
+- buyer・seller の true VOT 正本
+- nonparticipating の true VOT 正本
+- apply 失敗時の非反映契約
+
+実装項目2の範囲を **atomic apply 登録だけ**に限定する。Node.transfer、evaluation end、buyer・seller 完了通知、ex-post evaluation、Vehicle 別 role 評価、実験出力へ **接続しない**。
