@@ -12,8 +12,17 @@ from unittest.mock import patch
 
 import numpy as np
 
+import uxsim.order_control_tvt_mp_physical_transfer as physical_transfer
 from uxsim.order_control_baseline_collector import OrderControlBaselineCollector
 from uxsim.order_control_baseline_driver import run_snapshot_fixed_baseline_fork
+from uxsim.order_control_tvt_mp_actual_passage import (
+    OrderControlTvtMpActualPassageRole,
+    OrderControlTvtMpActualPassageWaitEntry,
+    OrderControlTvtMpActualPassageWaitStatus,
+)
+from uxsim.order_control_tvt_mp_candidate_local_virtual_calculation import (
+    OrderControlTvtMpCandidatePassageObservationStatus,
+)
 from uxsim.order_control_tvt_node_rank_state import OrderControlTvtNodeRankState
 from uxsim.uxsim import Node, World
 from tests_order_control_baseline_driver import _build_time_value_junction_world
@@ -1042,6 +1051,279 @@ def test_empty_incoming_vehicles_do_not_require_rank_ledger():
             assert len(collector._visit_records_by_primary_key) == record_count_before
     assert cases[1][1].apply_copied_tvt_confirmed_ranks is True
     assert cases[2][1].apply_copied_tvt_confirmed_ranks is False
+
+
+def _waiting_passage_entry(world, vehicle, *, role):
+    visit_key = (vehicle.name, vehicle.order_control_current_visit["visit_id"])
+    entry = OrderControlTvtMpActualPassageWaitEntry(
+        tvt_decision_timestep=world.T,
+        node_name="junction",
+        buyers_sorted=((vehicle.name, 1),),
+        visit_key=visit_key,
+        vehicle_name=vehicle.name,
+        role=role,
+        wait_status=OrderControlTvtMpActualPassageWaitStatus.WAITING_FOR_ACTUAL_PASSAGE,
+        baseline_passage_timestep=15,
+        candidate_passage_timestep=11,
+        true_vot_per_second=2.0,
+        baseline_minus_candidate_passage_timesteps=100,
+        baseline_minus_candidate_passage_seconds=101,
+        baseline_minus_candidate_time_value=102,
+        predicted_observation_status=(
+            OrderControlTvtMpCandidatePassageObservationStatus.OBSERVED
+        ),
+        predicted_route_next_link_name="not-the-live-outlink",
+    )
+    registry = world.order_control_tvt_mp_actual_passage_wait_registry
+    registry.entries_by_node_name_and_visit_key[("junction", visit_key)] = entry
+    return visit_key, entry
+
+
+def _forbid_actual_prepare(calls):
+    def spy(**kwargs):
+        calls.append(kwargs["visit_key"])
+        raise AssertionError("actual passage prepare must not be called")
+
+    return patch.object(
+        physical_transfer,
+        "prepare_tvt_mp_actual_passage_observation",
+        spy,
+    )
+
+
+def test_real_world_passage_records_actual_observation_after_clearance_update():
+    world = _world("actual_on_real_passage")
+    vehicle = _place(world, "buyer_car", "in_a", visit_id=1)
+    vehicle.vot_true = None
+    vehicle.order_exchange_log = ["establishment"]
+    old_log = vehicle.order_exchange_log
+    _confirm(world, [vehicle])
+    visit_key, entry = _waiting_passage_entry(
+        world,
+        vehicle,
+        role=OrderControlTvtMpActualPassageRole.BUYER,
+    )
+    junction = _junction(world)
+    inlink = world.get_link("in_a")
+    calls = []
+    original_prepare = physical_transfer.prepare_tvt_mp_actual_passage_observation
+    original_commit = physical_transfer.commit_tvt_mp_actual_passage_observation
+
+    def prepare_spy(**kwargs):
+        assert junction.last_order_control_inlink is None
+        assert junction.last_order_control_entry_timestep is None
+        assert kwargs["visit_key"] == visit_key
+        assert kwargs["actual_outlink"] is world.get_link("out")
+        assert kwargs["actual_passage_timestep"] == world.T
+        calls.append("prepare")
+        return original_prepare(**kwargs)
+
+    def commit_spy(prepared):
+        assert vehicle.link.name == "out"
+        assert junction.last_order_control_inlink is inlink
+        assert junction.last_order_control_entry_timestep == world.T
+        calls.append("commit")
+        return original_commit(prepared)
+
+    with patch.object(
+        physical_transfer,
+        "prepare_tvt_mp_actual_passage_observation",
+        prepare_spy,
+    ):
+        with patch.object(
+            physical_transfer,
+            "commit_tvt_mp_actual_passage_observation",
+            commit_spy,
+        ):
+            junction.transfer()
+    assert calls == ["prepare", "commit"]
+    record = entry.actual_passage_observation_record
+    assert vehicle.order_exchange_log[-1] is record
+    assert vehicle.order_exchange_log is not old_log
+    assert old_log == ["establishment"]
+    assert record.actual_passage_timestep == 10
+    assert record.actual_route_next_link_name == "out"
+    assert record.true_vot_per_second == 2.0
+    assert record.baseline_minus_candidate_passage_timesteps == 100
+    assert record.baseline_minus_actual_passage_timesteps == 5
+    assert record.baseline_minus_actual_passage_seconds == 5
+    assert record.baseline_minus_actual_time_value == 10.0
+    assert record.candidate_minus_actual_passage_timesteps == 1
+    assert entry.wait_status is (
+        OrderControlTvtMpActualPassageWaitStatus.ACTUAL_PASSAGE_OBSERVED
+    )
+    registry = world.order_control_tvt_mp_actual_passage_wait_registry
+    assert registry.entries_by_node_name_and_visit_key[("junction", visit_key)] is entry
+    assert vehicle.vot_true is None
+
+
+def test_passage_without_wait_entry_does_not_record_actual_observation():
+    world = _world("actual_without_entry")
+    vehicle = _place(world, "fallback_car", "in_a", visit_id=1)
+    vehicle.order_exchange_log = ["old"]
+    _confirm(world, [vehicle])
+    _junction(world).transfer()
+    assert vehicle.link.name == "out"
+    assert vehicle.order_exchange_log == ["old"]
+    registry = world.order_control_tvt_mp_actual_passage_wait_registry
+    assert registry.entries_by_node_name_and_visit_key == {}
+    assert registry.trades_by_transaction_key == {}
+
+
+def test_temporary_skip_does_not_prepare_actual_observation():
+    world = _world("actual_skip_not_head")
+    blocked = _place(world, "blocked_actual", "in_a", visit_id=1, behind=True)
+    _confirm(world, [blocked])
+    visit_key, entry = _waiting_passage_entry(
+        world,
+        blocked,
+        role=OrderControlTvtMpActualPassageRole.NONPARTICIPATING,
+    )
+    calls = []
+    with _forbid_actual_prepare(calls):
+        _junction(world).transfer()
+    assert calls == []
+    assert blocked.link.name == "in_a"
+    assert entry.wait_status is (
+        OrderControlTvtMpActualPassageWaitStatus.WAITING_FOR_ACTUAL_PASSAGE
+    )
+    assert entry.actual_passage_observation_record is None
+    assert ("junction", visit_key) in (
+        world.order_control_tvt_mp_actual_passage_wait_registry
+        .entries_by_node_name_and_visit_key
+    )
+
+
+def test_capacity_shortage_does_not_prepare_actual_observation():
+    world = _world("actual_skip_flow", flow_capacity=1)
+    junction = _junction(world)
+    junction.flow_capacity_remain = 0
+    vehicle = _place(world, "flow_actual", "in_a", visit_id=1)
+    _confirm(world, [vehicle])
+    visit_key, entry = _waiting_passage_entry(
+        world,
+        vehicle,
+        role=OrderControlTvtMpActualPassageRole.SELLER,
+    )
+    calls = []
+    with _forbid_actual_prepare(calls):
+        junction.transfer()
+    assert calls == []
+    assert vehicle.link.name == "in_a"
+    assert entry.actual_passage_observation_record is None
+    assert ("junction", visit_key) in (
+        world.order_control_tvt_mp_actual_passage_wait_registry
+        .entries_by_node_name_and_visit_key
+    )
+
+
+def test_clearance_stop_does_not_prepare_actual_observation():
+    world = _world("actual_clearance_stop")
+    world.order_control_clearance_timesteps = 1
+    junction = _junction(world)
+    junction.order_control_clearance_timesteps = 1
+    vehicle = _place(world, "clear_actual", "in_a", visit_id=1)
+    _confirm(world, [vehicle])
+    _waiting_passage_entry(
+        world,
+        vehicle,
+        role=OrderControlTvtMpActualPassageRole.BUYER,
+    )
+    junction.last_order_control_inlink = world.get_link("side")
+    junction.last_order_control_entry_timestep = world.T
+    calls = []
+    with _forbid_actual_prepare(calls):
+        junction.transfer()
+    assert calls == []
+    assert vehicle.link.name == "in_a"
+    assert junction.last_order_control_inlink.name == "side"
+    assert junction.last_order_control_entry_timestep == world.T
+
+
+def test_baseline_fork_does_not_prepare_actual_observation():
+    world = _world("actual_not_on_fork")
+    vehicle = _place(world, "fork_car", "in_a", visit_id=1)
+    vehicle.order_exchange_log = ["old"]
+    _confirm(world, [vehicle])
+    visit_key, entry = _waiting_passage_entry(
+        world,
+        vehicle,
+        role=OrderControlTvtMpActualPassageRole.BUYER,
+    )
+    collector = _as_fork(world)
+    collector.register_snapshot_visit(
+        vehicle_name=vehicle.name,
+        vehicle_id=vehicle.id,
+        node_name="junction",
+        inlink_name="in_a",
+        visit_id=1,
+        was_arrived_at_snapshot=True,
+        baseline_arrival_timestep=10,
+        arrival_tiebreaker=0.1,
+        route_next_link_name="out",
+        baseline_passage_timestep=None,
+    )
+    calls = []
+    with _forbid_actual_prepare(calls):
+        _junction(world).transfer()
+    assert calls == []
+    assert vehicle.link.name == "out"
+    assert vehicle.order_exchange_log == ["old"]
+    assert entry.wait_status is (
+        OrderControlTvtMpActualPassageWaitStatus.WAITING_FOR_ACTUAL_PASSAGE
+    )
+    assert entry.actual_passage_observation_record is None
+    snapshot = collector.get_baseline_visit_snapshot(vehicle.name, 1)
+    assert snapshot["baseline_passage_timestep"] == world.T
+    assert ("junction", visit_key) in (
+        world.order_control_tvt_mp_actual_passage_wait_registry
+        .entries_by_node_name_and_visit_key
+    )
+
+
+def test_prepare_failure_stops_before_physical_passage():
+    world = _world("actual_prepare_stops_transfer")
+    vehicle = _place(world, "bad_log_car", "in_a", visit_id=1)
+    vehicle.order_exchange_log = ("not-a-list",)
+    _confirm(world, [vehicle])
+    visit_key, entry = _waiting_passage_entry(
+        world,
+        vehicle,
+        role=OrderControlTvtMpActualPassageRole.BUYER,
+    )
+    junction = _junction(world)
+    inlink = world.get_link("in_a")
+    outlink = world.get_link("out")
+    junction.last_order_control_inlink = inlink
+    junction.last_order_control_entry_timestep = 4
+    inlink_vehicles = list(inlink.vehicles)
+    outlink_vehicles = list(outlink.vehicles)
+    incoming_before = list(junction.incoming_vehicles)
+    capacity_out = inlink.capacity_out_remain
+    capacity_in = outlink.capacity_in_remain
+    flow_remain = junction.flow_capacity_remain
+    try:
+        junction.transfer()
+        raised = False
+    except RuntimeError:
+        raised = True
+    assert raised is True
+    assert vehicle.link is inlink
+    assert list(inlink.vehicles) == inlink_vehicles
+    assert list(outlink.vehicles) == outlink_vehicles
+    assert list(junction.incoming_vehicles) == incoming_before
+    assert inlink.capacity_out_remain == capacity_out
+    assert outlink.capacity_in_remain == capacity_in
+    assert junction.flow_capacity_remain == flow_remain
+    assert junction.last_order_control_inlink is inlink
+    assert junction.last_order_control_entry_timestep == 4
+    assert vehicle.order_exchange_log == ("not-a-list",)
+    assert entry.wait_status is (
+        OrderControlTvtMpActualPassageWaitStatus.WAITING_FOR_ACTUAL_PASSAGE
+    )
+    assert entry.actual_passage_observation_record is None
+    registry = world.order_control_tvt_mp_actual_passage_wait_registry
+    assert registry.entries_by_node_name_and_visit_key[("junction", visit_key)] is entry
 
 
 def test_registry_matches_defined_functions():
