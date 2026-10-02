@@ -825,3 +825,144 @@
 - 文献側の採用判断は、actual passage実装項目3の設計・実装結果を変更しない。
 - 詳細設計第4巻への追記は不要である。
 - 本節追加により、新しい実装フェーズまたは実装項目を設けない。
+
+# TVT-MP正式候補のseller非空契約 訂正設計要約（2026-10-03）
+
+正式参照先:
+
+- `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_3.md`
+  - 「TVT-MP正式候補のseller非空契約 訂正注記（2026-10-03）」
+- `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_4.md`
+  - 「TVT-MP正式候補のseller非空契約 完全実装前訂正設計（2026-10-03）」
+
+actual passage実装項目4の設計調査中に、過去の設計記録と一部テストがseller 0件のselected candidateを正常扱いしている誤りを発見した。
+
+最新の正式契約:
+
+- 正式TVT候補はbuyer 1件以上かつseller 1件以上
+- 正式候補には実際の順位変換がある
+- buyer 0件・seller 0件は順位変換がないため候補として生成しない
+- buyer 1件以上・seller 0件も制度上あり得ず、正式候補として生成しない
+- seller 1件以上で補償額が0となるケースは正常
+- 補償額0でもseller roleとseller recordを維持する
+
+正常な公開生成経路では、参加するright-of-entry Visitがbuyer候補から除外され、trade scope内の参加する非buyerとしてsellerになる。このため、正常な順位生成アルゴリズムはsellerを1件以上保証している。
+
+発見した問題は、`OrderControlTvtMpGeneralTradeRankResult`のconstructorが、`sellers_sorted=()`を許容していることである。
+
+本番コードの正本修正:
+
+- `uxsim/order_control_tvt_mp_general_trade_rank.py`
+- `OrderControlTvtMpGeneralTradeRankResult.__init__`
+- `sellers_sorted`を非空必須にする
+- 空の`sellers_sorted`を直接constructorへ渡した場合は`ValueError`
+
+次は変更しない。
+
+- 正常な順位生成アルゴリズム
+- concrete buyer candidate set
+- seller分類
+- FIFO検査
+- binding rank sequence
+- economic evaluation式
+- candidate selection基準
+- payment・compensation式
+- final rank
+- final consistency validation
+- atomic apply
+- actual passage実装項目1〜3
+
+economic evaluation以降へ、seller件数の同じ検査を重複追加しない。
+
+テスト訂正:
+
+- seller 0件を正常なselected candidateとして使うテストを削除または訂正
+- general trade-rank constructorの空seller受理テストを`ValueError`拒否テストへ変更
+- 他目的の正常fixtureにはsellerを1件以上追加
+- 別の異常を検査するfixtureでもsellerを追加し、本来の例外理由を維持
+- fallback、`NO_SELECTED_CANDIDATE`、`NO_VISITS_TO_CONFIRM`、空Nodeの空seller money列は維持
+- seller economic recordが存在するのにcompensation recordだけが欠ける意図的な不一致fixtureは維持
+- sellerが存在して補償額だけが0となるテストは維持
+
+変更予定:
+
+本番コード1ファイル:
+
+- `uxsim/order_control_tvt_mp_general_trade_rank.py`
+
+テスト8ファイル:
+
+- `tests_order_control_tvt_mp_general_trade_rank.py`
+- `tests_order_control_tvt_mp_local_binding_rank_sequence.py`
+- `tests_order_control_tvt_mp_local_virtual_calculation_set.py`
+- `tests_order_control_tvt_mp_economic_evaluation.py`
+- `tests_order_control_tvt_mp_candidate_selection.py`
+- `tests_order_control_tvt_mp_payment_and_compensation.py`
+- `tests_order_control_tvt_mp_final_consistency_validation.py`
+- `tests_order_control_tvt_mp_atomic_apply.py`
+
+actual passage実装項目1〜3へのコード上の影響はない。
+
+actual passage実装項目4では、次を前提にする。
+
+- `TradeWait.buyer_visit_keys`は1件以上
+- `TradeWait.seller_visit_keys`も1件以上
+- seller VisitKeyが空のTradeWaitは正常な成立取引ではない
+
+本訂正のコード、テスト、文書を保存・pushするまで、actual passage実装項目4は再開しない。
+
+Terminal独立確認済み。
+
+BLOCKERなし。
+利用者判断事項なし。
+
+## 最新の再開地点（2026-10-03・seller非空契約訂正設計確定後）
+
+**本節が、seller非空契約の完全実装前訂正設計確定後の最新再開地点である。**
+
+現在の状態:
+
+- 詳細設計第3巻へ訂正注記を追記済み
+- 詳細設計第4巻へ完全実装前訂正設計を追記済み
+- 進捗第3巻への本要約を追記中
+- Pythonコードとテストは未変更
+- actual passage実装項目4は一時停止中
+
+次の作業:
+
+1. 文書3ファイルの差分をTerminalで独立確認する
+2. 文書3ファイルだけをstageする
+3. commit名に`document`を含めてcommitする
+4. commit結果、最新コミット、残存変更を確認する
+5. 別の指示でpushする
+6. push後にHEADとoriginの一致を確認する
+7. 第4巻の完全実装前訂正設計に基づき、本番コード1ファイルとテスト8ファイルを修正する
+
+コード修正時の制約:
+
+- `sellers_sorted`を非空必須にする本番修正だけを行う
+- 後段本番部品へseller件数検査を重複追加しない
+- 正常な順位生成アルゴリズムを変更しない
+- FIFOの件数・index契約を変更しない
+- candidateを間引かない
+- 新しいstatusや除外理由fieldを追加しない
+- actual passage実装項目1〜3を変更しない
+- sellerが存在し補償額0となる正常契約を維持する
+
+実装後に確認するもの:
+
+- 変更対象の本番1ファイルとテスト8ファイル
+- general trade rankからatomic applyまでのTVT-MP関連回帰
+- actual passage実装項目1〜3の回帰
+- FIFO回帰
+- final rank回帰
+- FCFS・BATCH回帰
+- py_compile
+- git diff --check
+
+Git運用:
+
+- Git操作は利用者がTerminalで行う
+- CursorにGit操作をさせない
+- commitとpushを分離する
+- diagnostics/order_control.zipをstageしない

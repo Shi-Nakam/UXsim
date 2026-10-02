@@ -3881,3 +3881,182 @@ actual passage の捕捉場所は、物理通過接続の設計時に同時確�
 `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_4.md`
 
 第3巻の既存内容は削除・再構成せず、第4巻から必要に応じて正式参照する。
+
+# TVT-MP正式候補のseller非空契約 訂正注記（2026-10-03）
+
+## 1. 訂正理由
+
+actual passage実装項目4の設計調査中に、過去の詳細設計第3巻と一部テストが、selected candidateのseller 0件を正常扱いしていることが判明した。
+
+利用者確認とTerminal独立確認により、この扱いはTVT-MPの制度と矛盾する誤りであると確定した。
+
+## 2. 最新の正式契約
+
+正式なTVT候補は、必ず次を満たす。
+
+- buyer 1件以上
+- seller 1件以上
+- 実際の順位変換がある
+
+buyer 0件・seller 0件は順位変換が全くないため、正式候補として生成してはならない。
+
+buyer 1件以上・seller 0件も、buyerの取引相手が存在しないため、正式候補として生成してはならない。
+
+## 3. seller 0件と補償額0の区別
+
+不正:
+
+- 正式候補のseller集合が空
+- selected candidateのseller集合が空
+- buyer 1件以上・seller 0件の順位取引
+
+正常:
+
+- sellerは1件以上存在する
+- seller required compensationが0
+- seller compensation amountが0
+- total_required_compensation_Rが0
+
+補償額0になり得る例:
+
+1. candidate passageとbaseline passageが同じseller
+2. candidate passageがbaseline passageより早いseller
+3. 申告VOTが0であるseller
+
+これらのsellerはseller roleを維持する。
+補償額0を理由にseller recordを削除しない。
+
+## 4. 正常公開生成経路でsellerが保証される理由
+
+正常な公開生成経路では、次の連鎖によりsellerが1件以上存在する。
+
+1. BASELINE_INFORMATION_COMPLETEではright-of-entry Visitが必須
+2. right-of-entry Visitは参加車両でなければRuntimeError
+3. right-of-entry inlinkのVisitはbuyer候補から除外される
+4. concrete buyer candidate setはbuyer 1件以上
+5. trade_scopeはright-of-entry Visitを含む
+6. trade_scope内の参加する非buyerはsellerに分類される
+7. よってright-of-entry Visitが少なくとも1件のsellerになる
+
+順位生成アルゴリズム自体は変更しない。
+
+## 5. 発見した問題
+
+OrderControlTvtMpGeneralTradeRankResultのconstructorは、buyers_sortedを非空必須にしている一方で、sellers_sortedを空tupleでも許容している。
+
+そのため、正常公開生成経路では発生しないseller 0件の正式resultを、直接constructorやテストfixtureから生成できる。
+
+また、過去の一部テストと設計記録は、その破損resultを正常なselected candidateとして後段へ渡していた。
+
+## 6. 正本となる修正
+
+正本となる修正位置:
+
+uxsim/order_control_tvt_mp_general_trade_rank.py
+
+OrderControlTvtMpGeneralTradeRankResult.__init__
+
+修正内容:
+
+- buyers_sortedは引き続き非空必須
+- sellers_sortedも非空必須
+
+正常公開生成経路でseller 0件が発生した場合も、正式result生成時に停止する。
+
+## 7. 重複検査を追加しない
+
+economic evaluation、candidate selection、payment and compensation、final rank、final consistency validation、atomic applyへ、同じseller件数検査を重複追加しない。
+
+理由:
+
+- 正式result生成時に保証済みの不変条件である
+- 後段は正式上流resultを前提にする
+- 登録時に保証済みの不変条件を実行時に重複検証しない方針と整合する
+
+## 8. 過去記述との関係
+
+本巻にある次の趣旨の過去記述は誤りである。
+
+- selected candidateでseller economic recordsは0件でもよい
+- selected candidateでseller compensation recordsは0件でもよい
+- selected branchでseller recordsは0件以上
+- seller 0件を正常扱いする
+- atomic applyでseller 0件を正常扱いする
+
+これらは当時の記録として削除しない。
+本節を最新の正式契約として参照する。
+
+一方、次の過去記述は引き続き正しい。
+
+- fallbackではbuyer・seller money recordsが空でも正常
+- NO_SELECTED_CANDIDATEではbuyer・seller money recordsが空
+- NO_VISITS_TO_CONFIRMではbuyer・seller money recordsが空
+- 空Nodeではbuyer・seller money recordsが空
+- sellerが存在し、補償額だけが0の場合もseller recordを維持する
+
+## 9. テスト訂正方針
+
+seller 0件を正常なselected candidate fixtureとして使用しているテストは訂正する。
+
+- seller 0件の正常性を確認するテストは削除またはconstructor拒否テストへ変更
+- 他の検査目的を持つテストはsellerを1件以上追加し、本来の検査目的を維持
+- fallback、候補なし、空Nodeの空seller列は維持
+- seller economic recordが存在するのにcompensation recordだけが欠落する意図的な不一致fixtureは維持
+- sellerが存在し補償額0となる正常テストは維持
+
+## 10. actual passageへの影響
+
+actual passage実装項目1〜3のコード変更は不要である。
+
+actual passage側は、atomic applyで登録済みのroleとVisitKeyを追跡し、seller 0件候補を生成しない。
+
+次は変更しない。
+
+- actual passage observation
+- 3組9 field
+- prepare
+- physical transfer
+- clearance履歴更新
+- commit
+
+実装項目4では次を前提とする。
+
+- TradeWait.buyer_visit_keysは1件以上
+- TradeWait.seller_visit_keysも1件以上
+- seller_visit_keysが空のTradeWaitは正常な成立取引ではない
+
+## 11. 実装項目4との関係
+
+actual passage実装項目4は、本訂正のコード、テスト、文書を保存・pushした後に再開する。
+
+本訂正前に、buyer・seller完了通知のseller空集合処理を設計しない。
+
+## 12. 独立確認結果
+
+Cursor報告だけで確定していない。
+
+Terminalで少なくとも次を確認した。
+
+- seller分類の正本
+- 現constructorがseller 0件を受理すること
+- seller 0件では順位変換が起きないこと
+- right-of-entry Visitが参加車両であること
+- right-of-entry Visitがbuyer候補から除外されること
+- trade_scopeにright-of-entry Visitが含まれること
+- 正常公開生成経路ではseller 1件以上になること
+- FIFOの候補件数・index契約を変更する必要がないこと
+- 後段へ重複検査を追加する必要がないこと
+- fallback等では空seller money列が正常であること
+- sellerが存在し補償額0となるケースを維持すべきこと
+- seller 0件fixtureの影響範囲
+
+BLOCKERはない。
+利用者判断事項も残っていない。
+
+## 13. 次の再開地点
+
+次は詳細設計第4巻へ、完全実装前訂正設計を別作業で追記する。
+
+その後、進捗第3巻へ要約と最新再開地点を別作業で追記する。
+
+3文書の独立確認、commit、pushが完了するまで、コードとテストを変更しない。

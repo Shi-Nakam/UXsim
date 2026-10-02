@@ -6989,3 +6989,403 @@ UXsim正式サンプルは実装項目3では再実行していない。
 - 完了通知または後続評価起動境界
 
 コード実装前に、詳細設計第4巻と進捗第3巻の双方へ完全実装前設計を記録する。
+
+# TVT-MP正式候補のseller非空契約 完全実装前訂正設計（2026-10-03）
+
+**本節が、正式TVT候補のseller非空契約と、その防御修正に関する最新の正式参照先である。**
+
+詳細設計第3巻末尾の
+「TVT-MP正式候補のseller非空契約 訂正注記（2026-10-03）」
+を制度契約の訂正根拠として参照する。
+
+本節はコード実装前の仕様であり、実装完了記録ではない。
+
+## 1. 目的
+
+actual passage実装項目4の設計調査中に、過去の設計記録と一部テストが、seller 0件のselected candidateを正常扱いしていることが判明した。
+
+本節の目的は、次を完全実装前設計として固定することである。
+
+- 正式TVT候補のbuyer・seller件数契約
+- seller 0件と補償額0の区別
+- 正常公開生成経路でsellerが保証される理由
+- 正式result型の修正位置
+- 後段へ重複検査を追加しない範囲
+- テストfixtureの訂正方針
+- actual passage実装項目1〜3との境界
+- actual passage実装項目4の再開条件
+
+## 2. 最新の正式契約
+
+正式なTVT候補は、必ず次を満たす。
+
+- buyer 1件以上
+- seller 1件以上
+- 実際の順位変換がある
+
+次は正式候補ではない。
+
+### buyer 0件・seller 0件
+
+順位変換が全くないため、候補として生成してはならない。
+
+候補として生成した後に、経済評価で不採用にする対象でもない。
+
+候補形成前または候補形成時に、正式候補にならない状態である。
+
+### buyer 1件以上・seller 0件
+
+buyerの順位上昇に対応するsellerが存在しないため、制度上あり得ない。
+
+正式candidate resultとして生成してはならない。
+
+生成された場合は、正常な候補不採用ではなく、保存結果または実装の重大不整合である。
+
+## 3. seller 0件と補償額0の区別
+
+### 不正
+
+- 正式候補のseller集合が空
+- selected candidateのseller集合が空
+- buyer 1件以上・seller 0件の順位取引
+- seller不在のcandidateをeconomically feasibleとして扱うこと
+- seller不在のselected candidateに対してbuyer支払0、seller補償0を正常結果として作ること
+
+### 正常
+
+- sellerは1件以上存在する
+- sellerのrequired compensationが0
+- sellerのcompensation amountが0
+- total_required_compensation_Rが0
+- buyer支払額が0
+
+補償額0になり得るsellerの例:
+
+1. candidate passageとbaseline passageが同じseller
+2. candidate passageがbaseline passageより早いseller
+3. 申告VOTが0であるseller
+
+この場合も、次を維持する。
+
+- seller role
+- seller economic record
+- seller compensation record
+- 金額0の個別取引履歴
+
+補償額0を理由にsellerを削除しない。
+sellerをbuyerへ変更しない。
+
+## 4. 正常公開生成経路におけるseller保証
+
+正常な公開生成経路では、次の連鎖によってsellerが1件以上存在する。
+
+1. `BASELINE_INFORMATION_COMPLETE`ではright-of-entry Visitが必須である
+2. right-of-entry Visitは参加車両でなければ`RuntimeError`である
+3. right-of-entry inlinkのVisitはbuyer候補から除外される
+4. concrete buyer candidate setはbuyerを1件以上保持する
+5. trade scopeはbaseline先頭から末尾buyerのbaseline順位までである
+6. そのtrade scopeにはright-of-entry Visitが含まれる
+7. trade scope内の参加する非buyerはsellerに分類される
+8. よってright-of-entry Visitが少なくとも1件のsellerになる
+
+したがって、正常な公開順位生成アルゴリズムはsellerを既に保証している。
+
+次は変更しない。
+
+- right-of-entry選定
+- concrete buyer candidate set生成
+- trade scope形成
+- buyer分類
+- seller分類
+- nonparticipating分類
+- vacant rank形成
+- buyer順位割当
+- seller順位割当
+- outside trade scopeのbaseline順位維持
+- FIFO検査
+
+候補の間引きも行わない。
+
+## 5. 発見した契約上の問題
+
+`OrderControlTvtMpGeneralTradeRankResult`のconstructorは、現在次の契約になっている。
+
+- `buyers_sorted`: 非空必須
+- `sellers_sorted`: 空tupleを許容
+
+このため、正常公開生成経路では発生しないseller 0件の正式general trade-rank resultを、直接constructorまたはテストfixtureから作成できる。
+
+一部の後段テストは、この正式契約に反する破損resultを正常なselected candidateとして使用している。
+
+問題は正常公開順位生成アルゴリズムではなく、正式result型とテストfixtureの契約である。
+
+## 6. 正本となる修正位置
+
+変更対象:
+
+`uxsim/order_control_tvt_mp_general_trade_rank.py`
+
+対象:
+
+`OrderControlTvtMpGeneralTradeRankResult.__init__`
+
+現在:
+
+- `buyers_sorted`は`allow_empty=False`
+- `sellers_sorted`は`allow_empty=True`
+
+修正後:
+
+- `buyers_sorted`は引き続き`allow_empty=False`
+- `sellers_sorted`も`allow_empty=False`
+
+これにより、buyer 1件以上・seller 0件の正式general trade-rank resultを生成できなくする。
+
+正常公開生成経路でseller 0件が発生した場合も、正式result生成時に停止する。
+
+直接constructorへ空の`sellers_sorted`を渡した場合は、既存constructorの入力検査体系に従い`ValueError`とする。
+
+## 7. 後段へ重複検査を追加しない
+
+次の本番部品へ、seller件数の同一検査を追加しない。
+
+- local binding rank sequence
+- local virtual calculation
+- economic evaluation
+- candidate selection
+- payment and compensation
+- final rank
+- final consistency validation
+- atomic apply
+- actual passage registry
+- actual passage observation
+
+理由:
+
+- 正式general trade-rank result生成時に保証済みの不変条件である
+- 後段は正式な上流resultを前提にする
+- 登録時・生成時に保証済みの不変条件を、実行時に重複検証しない方針と整合する
+- seller 0件の検査を各部品へ散在させると、責務と例外原因が不明確になる
+
+ただし、既存の別目的の整合検査は維持する。
+
+例:
+
+- seller economic recordとseller compensation recordの件数一致
+- seller VisitKeyとbinding SELLER roleの対応
+- 補償額0のseller record欠落の拒否
+- buyerとsellerのVisitKey重複拒否
+- selected candidateとpayment resultのobject identity
+- fallback時のmoney record非存在
+
+## 8. テストfixtureの訂正方針
+
+constructor変更で直接失敗するテストだけでなく、後段でseller 0件を正常なselected候補fixtureとして使用しているテストも訂正する。
+
+### 正常fixture
+
+sellerを1件以上追加し、テスト本来の目的を維持する。
+
+必要に応じて次を整合させる。
+
+- baseline order
+- trade scope
+- trade order
+- trade rank
+- `last_buyer_rank`
+- binding visit
+- SELLER role
+- seller passage record
+- seller economic record
+- seller compensation record
+- final rank visit
+- candidate visit
+- Vehicle
+- rank state
+- route
+- expected件数
+
+seller名だけを追加し、関連データを不整合のままにしない。
+
+### seller 0件の正常性を検証するテスト
+
+削除するか、general trade-rank result constructorが空sellerを`ValueError`で拒否するテストへ変更する。
+
+### 別の異常を検査するテスト
+
+sellerを1件以上追加し、最初に発生する例外とエラー文言を、本来の検査対象のまま維持する。
+
+seller契約違反が先に発生して、本来の異常検査を隠さないようにする。
+
+### 空seller列を維持するテスト
+
+次はselected candidateではないため、空seller money recordが正常である。
+
+- fallback
+- `NO_SELECTED_CANDIDATE`
+- `NO_VISITS_TO_CONFIRM`
+- 空Node
+
+また、seller economic recordが存在するのにseller compensation recordだけが欠ける入力は、意図的な不一致fixtureとして維持できる。
+
+### 補償額0のseller
+
+sellerが1件以上存在し、補償額だけが0となる正常テストは維持する。
+
+## 9. 変更予定ファイル
+
+### 本番コード
+
+- `uxsim/order_control_tvt_mp_general_trade_rank.py`
+
+### テスト
+
+- `tests_order_control_tvt_mp_general_trade_rank.py`
+- `tests_order_control_tvt_mp_local_binding_rank_sequence.py`
+- `tests_order_control_tvt_mp_local_virtual_calculation_set.py`
+- `tests_order_control_tvt_mp_economic_evaluation.py`
+- `tests_order_control_tvt_mp_candidate_selection.py`
+- `tests_order_control_tvt_mp_payment_and_compensation.py`
+- `tests_order_control_tvt_mp_final_consistency_validation.py`
+- `tests_order_control_tvt_mp_atomic_apply.py`
+
+`tests_order_control_tvt_mp_fifo_inspection.py`は、正常fixtureが既にseller付きであり、今回のseller空指定一覧には該当しない。
+
+`tests_order_control_tvt_mp_final_rank.py`も、今回のseller空指定一覧には該当しない。
+
+両ファイルは回帰確認対象には含める。
+
+## 10. 変更しないもの
+
+次は変更しない。
+
+- `uxsim/order_control_tvt_mp_concrete_buyer_candidate_set.py`
+- `uxsim/order_control_tvt_mp_fifo_inspection.py`
+- `uxsim/order_control_tvt_mp_local_binding_rank_sequence.py`
+- `uxsim/order_control_tvt_mp_candidate_local_virtual_calculation.py`
+- `uxsim/order_control_tvt_mp_economic_evaluation.py`
+- `uxsim/order_control_tvt_mp_candidate_selection.py`
+- `uxsim/order_control_tvt_mp_payment_and_compensation.py`
+- `uxsim/order_control_tvt_mp_final_rank.py`
+- `uxsim/order_control_tvt_mp_final_consistency_validation.py`
+- `uxsim/order_control_tvt_mp_atomic_apply.py`
+- `uxsim/order_control_tvt_mp_actual_passage.py`
+- `uxsim/order_control_tvt_mp_physical_transfer.py`
+- `uxsim/uxsim.py`
+
+次の制度・計算も変更しない。
+
+- economic feasibilityの式
+- buyer価値
+- seller要求補償
+- surplus
+- candidate selectionの基準
+- payment式
+- compensation式
+- final rank
+- 正式支払額
+- 正式補償額
+- budget balance
+- actual passageの3組9 field
+
+## 11. 過去記述との関係
+
+本巻には、seller 0件を正常状態または正常テスト対象として挙げる過去記述がある。
+
+少なくとも次を含む。
+
+- driverの正常状態一覧にあるseller 0件
+- driverテスト一覧にあるseller 0件
+
+これらは当時の記録として削除しない。
+
+最新契約は、本節および詳細設計第3巻末尾の同日訂正注記を参照する。
+
+過去記述の「seller 0件」は、selected candidateにsellerが存在しないことを正常とする意味では採用しない。
+
+一方、fallback、候補なし、空Nodeにおける空seller money recordは正常である。
+
+## 12. actual passage実装項目1〜3への影響
+
+actual passage実装項目1〜3のコード変更は不要である。
+
+actual passage側は、atomic applyにより登録済みのroleとVisitKeyを追跡する。
+
+actual passage側はseller 0件候補を生成しない。
+
+次の実装済み処理は変更しない。
+
+- actual passage用型
+- mutable wait registry
+- World空registry初期化
+- atomic apply成功後のregistry一括登録
+- actual passage observation prepare
+- physical transfer
+- clearance履歴更新
+- actual passage observation commit
+- frozen observation record
+- 3組9 field
+- Vehicle log
+- WaitEntry状態遷移
+
+## 13. actual passage実装項目4との関係
+
+実装項目4では、次を前提とする。
+
+- `TradeWait.buyer_visit_keys`は1件以上
+- `TradeWait.seller_visit_keys`も1件以上
+- seller VisitKeyが空のTradeWaitは正常な成立取引ではない
+
+buyer・seller completion設計でseller空集合を正常完了としない。
+
+actual passage実装項目4は、本訂正のコード、テスト、文書を保存・pushした後に再開する。
+
+## 14. 検証計画
+
+最初に、変更予定の本番1ファイルとテスト8ファイルに対して専用確認を行う。
+
+その後、次を実行する。
+
+- general trade rankからatomic applyまでのTVT-MP関連回帰
+- actual passage実装項目1〜3の回帰
+- `tests_order_control_tvt_mp_fifo_inspection.py`
+- `tests_order_control_tvt_mp_final_rank.py`
+- FCFS・BATCH回帰
+- `py_compile`
+- `git diff --check`
+
+UXsim正式サンプルは、今回の小規模なresult契約訂正では必須としない。
+
+重要実装段階または最終仕上げ項目で再実行する。
+
+## 15. 独立確認結果
+
+Cursor報告だけで確定していない。
+
+Terminalで少なくとも次を直接確認した。
+
+- seller分類の正本
+- seller 0件でも現constructorが受理すること
+- seller 0件のrank resultでは順位変換が起きないこと
+- economic evaluation以降の一部fixtureがseller 0件を受け入れること
+- right-of-entry Visitが正常経路で参加車両であること
+- right-of-entry Visitがbuyer候補から除外されること
+- trade scopeがright-of-entry Visitを含むこと
+- 正常公開生成経路ではsellerが1件以上になること
+- FIFOの候補件数・index契約を変える必要がないこと
+- 候補の間引きが不要であること
+- 後段へseller件数検査を重複追加する必要がないこと
+- fallback等では空seller money recordが正常であること
+- sellerが存在し補償額0となるテストを維持すべきこと
+- seller空fixtureの影響範囲
+
+BLOCKERはない。
+利用者判断事項も残っていない。
+
+## 16. 次の作業
+
+次は進捗第3巻へ、本訂正設計の要約と最新再開地点を別作業で追記する。
+
+詳細設計第3巻、詳細設計第4巻、進捗第3巻の独立確認、commit、pushが完了するまで、コードとテストを変更しない。
+
+その後、本節に基づいて本番コード1ファイルとテスト8ファイルを修正する。
