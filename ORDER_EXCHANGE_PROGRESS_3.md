@@ -804,3 +804,24 @@
 - commitとpushを分離する
 - diagnostics/order_control.zipをstageしない
 - コード保存と文書保存が終わるまで実装項目4へ進まない
+
+## 文献ポジショニング第一段階の正式採用に関する参照注記（2026-10-02）
+
+本節は詳細な文献採点メモではない。直前の「最新の再開地点（2026-10-02・実装項目3完了後）」を変更しない。本節の後に新しい実装側の最新再開地点は作らない。新しい実装フェーズまたは実装項目は設けない。
+
+- 別系統の文献ポジショニング作業で、第一段階最終案が正式採用された。
+- 第二段階へ進める状態になった。
+- 第二段階の具体的作業はまだ未開始である。
+- 第二段階で前提条件を収集し、第三段階で構造的前提依存性を比較する。
+- 詳細参照先：
+  - `ORDER_EXCHANGE_LITERATURE_FIRST_STAGE_SCORING_AND_POSITIONING.md`
+  - `ORDER_EXCHANGE_LITERATURE_POSITIONING_FRAMEWORK.md`
+  - `ORDER_EXCHANGE_PROGRESS.md` の2026-10-02文献節
+- 直前の「最新の再開地点（2026-10-02・実装項目3完了後）」は、実装項目3のコード・文書保存前に記録された歴史的再開地点として残す。その後、実装項目3コードは `5d46781`（`implement and test TVT-MP actual passage observation after physical transfer`）で、実装項目3文書は `05d18df`（`document TVT-MP actual passage observation implementation and verification`）で、それぞれ保存・push済みとなった。現在のHEADと `origin/feature/intersection-order-control` は `05d18df` で一致している。したがって、実装項目3について追加のstage、commit、pushは不要である。
+- 現在の実装側再開作業は、今回の文献文書4ファイルの保存・push完了後にactual系実装項目4へ進むことである。実装項目4の具体的仕様は本節では新たに決めない。
+- 文献調査の再開地点と実装作業の再開地点を引き続き区別する。
+- 本節の補足によって、直前の歴史的再開節を削除・置換・改変しない。
+- actual系実装項目4は、今回の文献文書4ファイルの保存・push完了後に別チャットで再開予定である。
+- 文献側の採用判断は、actual passage実装項目3の設計・実装結果を変更しない。
+- 詳細設計第4巻への追記は不要である。
+- 本節追加により、新しい実装フェーズまたは実装項目を設けない。
