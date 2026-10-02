@@ -517,29 +517,10 @@ def test_branch1_partition_4_may_be_empty():
     assert len(result.final_rank_set_result.node_final_rank_results[0].final_rank_visits) == 2
 
 
-def test_branch1_zero_sellers_is_normal():
-    partition_3 = (
-        _binding("buyer", rank=1, partition=fx.PARTITION_3, route="route-buyer", role=BUYER),
-    )
-    remaining = (fx._visit("buyer"),)
-    final_rank_set = _selected_final_rank_set(
-        sellers=(),
-        partition_3=partition_3,
-        partition_4=(),
-        remaining=remaining,
-    )
-    result = validate_tvt_mp_final_consistency(final_rank_set)
-    payment_node = (
-        result.final_rank_set_result.payment_and_compensation_set_result
-        .node_payment_and_compensation_results[0]
-    )
-    assert payment_node.seller_compensation_records == ()
-    assert len(payment_node.buyer_payment_records) == 1
-
-
 def test_buyer_record_order_must_match_economic_order():
     first = fx._buyer_record("buyer")
     second = fx._buyer_record("buyer_b", visit_id=2)
+    seller = _seller("seller")
     partition_3 = (
         _binding("buyer", rank=1, partition=fx.PARTITION_3, route="route-buyer", role=BUYER),
         _binding(
@@ -550,12 +531,13 @@ def test_buyer_record_order_must_match_economic_order():
             route="route-buyer-b",
             role=BUYER,
         ),
+        _binding("seller", rank=3, partition=fx.PARTITION_3, route="route-seller", role=SELLER),
     )
-    remaining = (fx._visit("buyer"), fx._visit("buyer_b", 2))
-    buyer_records, seller_records = _payment_records((second, first), ())
+    remaining = (fx._visit("buyer"), fx._visit("buyer_b", 2), fx._visit("seller"))
+    buyer_records, seller_records = _payment_records((second, first), (seller,))
     final_rank_set = _selected_final_rank_set(
         buyers=(first, second),
-        sellers=(),
+        sellers=(seller,),
         partition_3=partition_3,
         partition_4=(),
         remaining=remaining,
@@ -568,6 +550,7 @@ def test_buyer_record_order_must_match_economic_order():
 def test_two_buyers_keep_saved_order_when_records_agree():
     first = fx._buyer_record("buyer")
     second = fx._buyer_record("buyer_b", visit_id=2)
+    seller = _seller("seller")
     partition_3 = (
         _binding("buyer", rank=1, partition=fx.PARTITION_3, route="route-buyer", role=BUYER),
         _binding(
@@ -578,11 +561,12 @@ def test_two_buyers_keep_saved_order_when_records_agree():
             route="route-buyer-b",
             role=BUYER,
         ),
+        _binding("seller", rank=3, partition=fx.PARTITION_3, route="route-seller", role=SELLER),
     )
-    remaining = (fx._visit("buyer"), fx._visit("buyer_b", 2))
+    remaining = (fx._visit("buyer"), fx._visit("buyer_b", 2), fx._visit("seller"))
     final_rank_set = _selected_final_rank_set(
         buyers=(first, second),
-        sellers=(),
+        sellers=(seller,),
         partition_3=partition_3,
         partition_4=(),
         remaining=remaining,
@@ -1000,28 +984,37 @@ def test_rejects_extra_buyer_payment_record():
 
 
 def test_rejects_buyer_role_that_is_not_buyer():
+    buyer = fx._buyer_record("buyer")
     watcher = fx._buyer_record("watcher")
+    seller = _seller("seller")
     partition_3 = (
+        _binding("buyer", rank=1, partition=fx.PARTITION_3, route="route-buyer", role=BUYER),
+        _binding("seller", rank=2, partition=fx.PARTITION_3, route="route-seller", role=SELLER),
         _binding(
             "watcher",
-            rank=1,
+            rank=3,
             partition=fx.PARTITION_3,
             route="route-watcher",
             role=NONPARTICIPATING,
         ),
     )
     final_rank_set = _selected_final_rank_set(
-        buyers=(watcher,),
-        sellers=(),
+        buyers=(buyer, watcher),
+        sellers=(seller,),
         partition_3=partition_3,
         partition_4=(),
-        remaining=(fx._visit("watcher"),),
+        remaining=(
+            fx._visit("buyer"),
+            fx._visit("seller"),
+            fx._visit("watcher"),
+        ),
     )
     _assert_runtime(final_rank_set, "not BUYER")
 
 
 def test_rejects_missing_payment_for_a_partition_3_buyer():
     first = fx._buyer_record("buyer")
+    seller = _seller("seller")
     partition_3 = (
         _binding("buyer", rank=1, partition=fx.PARTITION_3, route="route-buyer", role=BUYER),
         _binding(
@@ -1032,11 +1025,12 @@ def test_rejects_missing_payment_for_a_partition_3_buyer():
             route="route-buyer-b",
             role=BUYER,
         ),
+        _binding("seller", rank=3, partition=fx.PARTITION_3, route="route-seller", role=SELLER),
     )
-    remaining = (fx._visit("buyer"), fx._visit("buyer_b", 2))
+    remaining = (fx._visit("buyer"), fx._visit("buyer_b", 2), fx._visit("seller"))
     final_rank_set = _selected_final_rank_set(
         buyers=(first,),
-        sellers=(),
+        sellers=(seller,),
         partition_3=partition_3,
         partition_4=(),
         remaining=remaining,
@@ -1047,15 +1041,17 @@ def test_rejects_missing_payment_for_a_partition_3_buyer():
 def test_rejects_duplicate_buyer_visit_key():
     first = fx._buyer_record("buyer")
     duplicate = fx._buyer_record("buyer")
+    seller = _seller("seller")
     partition_3 = (
         _binding("buyer", rank=1, partition=fx.PARTITION_3, route="route-buyer", role=BUYER),
+        _binding("seller", rank=2, partition=fx.PARTITION_3, route="route-seller", role=SELLER),
     )
     final_rank_set = _selected_final_rank_set(
         buyers=(first, duplicate),
-        sellers=(),
+        sellers=(seller,),
         partition_3=partition_3,
         partition_4=(),
-        remaining=(fx._visit("buyer"),),
+        remaining=(fx._visit("buyer"), fx._visit("seller")),
     )
     _assert_runtime(final_rank_set, "duplicated")
 

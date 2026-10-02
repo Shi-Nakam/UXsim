@@ -966,3 +966,218 @@ Git運用:
 - CursorにGit操作をさせない
 - commitとpushを分離する
 - diagnostics/order_control.zipをstageしない
+
+# TVT-MP正式候補のseller非空契約 実装・検証完了要約（2026-10-03）
+
+正式参照先:
+
+- `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_3.md`
+  - 「TVT-MP正式候補のseller非空契約 訂正実装完了注記（2026-10-03）」
+
+- `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_4.md`
+  - 「TVT-MP正式候補のseller非空契約 実装・検証結果（2026-10-03）」
+
+## 正式契約
+
+正式なTVT候補は、必ず次を満たす。
+
+- buyer 1件以上
+- seller 1件以上
+- 実際の順位変換あり
+
+次は正式候補として生成しない。
+
+- buyer 0件・seller 0件
+- buyer 1件以上・seller 0件
+
+一方、sellerが1件以上存在し、補償額が0となることは正常である。
+
+補償額0でも、seller role、seller economic record、seller compensation record、金額0の個別取引履歴を維持する。
+
+## 本番実装結果
+
+変更した本番コードは次の1ファイルだけである。
+
+- `uxsim/order_control_tvt_mp_general_trade_rank.py`
+
+対象:
+
+- `OrderControlTvtMpGeneralTradeRankResult.__init__`
+
+変更:
+
+- `sellers_sorted`の`allow_empty=True`を`allow_empty=False`へ変更
+
+これにより、seller 0件の正式general trade-rank resultを生成できなくした。
+
+空の`sellers_sorted`を直接constructorへ渡した場合は`ValueError`となる。
+
+## 重複検査を追加しなかった範囲
+
+次の本番部品へseller件数検査を追加していない。
+
+- FIFO inspection
+- local binding rank sequence
+- local virtual calculation
+- economic evaluation
+- candidate selection
+- payment and compensation
+- final rank
+- final consistency validation
+- atomic apply
+- actual passage registry
+- actual passage observation
+- physical transfer
+
+正式result生成時に保証済みの不変条件を、後段で重複検証しない方針を維持した。
+
+## テスト訂正
+
+次の8テストファイルを修正した。
+
+- `tests_order_control_tvt_mp_general_trade_rank.py`
+- `tests_order_control_tvt_mp_local_binding_rank_sequence.py`
+- `tests_order_control_tvt_mp_local_virtual_calculation_set.py`
+- `tests_order_control_tvt_mp_economic_evaluation.py`
+- `tests_order_control_tvt_mp_candidate_selection.py`
+- `tests_order_control_tvt_mp_payment_and_compensation.py`
+- `tests_order_control_tvt_mp_final_consistency_validation.py`
+- `tests_order_control_tvt_mp_atomic_apply.py`
+
+主な訂正:
+
+- 空seller constructor受理テストを`ValueError`拒否テストへ変更
+- 正常fixtureをbuyer 1件以上・seller 1件以上へ変更
+- seller 0件のselected candidateを正常扱いするテストを削除
+- 別の異常を検査するfixtureへsellerを追加
+- seller件数比較を0件対2件から1件対2件へ変更
+- atomic applyのseller VisitKeyを保存済みseller economic recordから取得
+- 複数selected Nodeのfixtureにもsellerを追加
+
+削除した誤った正常テスト:
+
+- `test_zero_sellers_gives_zero_payments`
+- `test_branch1_zero_sellers_is_normal`
+- `test_zero_sellers_writes_only_the_buyer_row`
+
+## 維持した正常ケース
+
+sellerが存在し、次が0となる正常ケースは維持した。
+
+- required compensation
+- compensation amount
+- `total_required_compensation_R`
+- buyer payment
+
+次のテストも維持した。
+
+- `test_r_equals_zero_gives_zero_payments`
+- `test_zero_payment_and_zero_compensation_still_write_rows`
+
+fallback、候補なし、`NO_VISITS_TO_CONFIRM`、空Node、意図的な破損入力の空seller列も維持した。
+
+正常なselected candidateとしてseller 0件を使用するfixtureは除去済みである。
+
+## 本番順位生成の再監査
+
+atomic applyのfixture訂正中に、本番general trade-rankを再監査した。
+
+確認した契約:
+
+- trade scopeはbaseline順位の先頭から最後のbuyerまで
+- buyer、seller、nonparticipatingがtrade scopeを分割
+- nonparticipatingはbaseline順位を維持
+- sellerはbaseline順位より後退
+- trade scope外Visitはbaseline順位を維持
+- buyerは固定順位を除いた先頭側の空き順位へ配置
+- sellerは残りの空き順位へ配置
+
+本番順位交換アルゴリズムの欠陥は確認されなかった。
+
+## 検証結果
+
+- 最終状態のTVT-MP統合回帰13ファイル: 624 passed
+- FCFSコア回帰: 24 passed
+- BATCHコア回帰: 360 passed
+- 重複しない最終確認対象: 合計1,008 passed
+- 変更対象9ファイルの`py_compile`: 成功
+- `git diff --check`: 成功
+
+TVT-MP候補外FCFS transferの18件は、624件のTVT-MP統合回帰に含まれる。
+
+UXsim正式サンプルは、今回の小規模なresult constructor契約訂正では再実行していない。
+
+## actual passageへの影響
+
+actual passage実装項目1〜3の本番コードは変更していない。
+
+関連回帰は成功した。
+
+actual passage実装項目4では、次を前提とする。
+
+- `TradeWait.buyer_visit_keys`は1件以上
+- `TradeWait.seller_visit_keys`も1件以上
+- seller VisitKeyが空のTradeWaitは正常な成立取引ではない
+
+BLOCKERはない。
+利用者判断事項も残っていない。
+
+## 最新の再開地点（2026-10-03・seller非空契約実装検証完了後）
+
+**本節が、seller非空契約の実装・検証完了後の最新再開地点である。**
+
+現在の状態:
+
+- seller非空契約の本番コード修正済み
+- テストfixture訂正済み
+- TVT-MP統合回帰624件成功
+- FCFSコア24件成功
+- BATCHコア360件成功
+- 重複しない合計1,008件成功
+- py_compile成功
+- git diff --check成功
+- 詳細設計第3巻へ実装完了注記を追記済み
+- 詳細設計第4巻へ実装・検証結果を追記済み
+- actual passage実装項目4はまだ再開していない
+
+次の作業:
+
+1. 文書3ファイル、コード1ファイル、テスト8ファイルの差分をTerminalで独立確認する
+2. 変更12ファイルだけをstageする
+3. `diagnostics/order_control.zip`をstageしない
+4. 実装と文書を同一保存単位でcommitする
+5. commit結果、最新コミット、残存変更を確認する
+6. 別の指示でpushする
+7. push後にHEADとoriginの一致を確認する
+8. 新しい作業としてactual passage実装項目4へ戻る
+
+保存対象:
+
+文書3ファイル:
+
+- `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_3.md`
+- `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_4.md`
+- `ORDER_EXCHANGE_PROGRESS_3.md`
+
+本番コード1ファイル:
+
+- `uxsim/order_control_tvt_mp_general_trade_rank.py`
+
+テスト8ファイル:
+
+- `tests_order_control_tvt_mp_general_trade_rank.py`
+- `tests_order_control_tvt_mp_local_binding_rank_sequence.py`
+- `tests_order_control_tvt_mp_local_virtual_calculation_set.py`
+- `tests_order_control_tvt_mp_economic_evaluation.py`
+- `tests_order_control_tvt_mp_candidate_selection.py`
+- `tests_order_control_tvt_mp_payment_and_compensation.py`
+- `tests_order_control_tvt_mp_final_consistency_validation.py`
+- `tests_order_control_tvt_mp_atomic_apply.py`
+
+Git運用:
+
+- Git操作は利用者がTerminalで行う
+- CursorにGit操作をさせない
+- commitとpushを分離する
+- commit名に`document`を含める
+- `diagnostics/order_control.zip`をstageしない

@@ -7389,3 +7389,219 @@ BLOCKERはない。
 詳細設計第3巻、詳細設計第4巻、進捗第3巻の独立確認、commit、pushが完了するまで、コードとテストを変更しない。
 
 その後、本節に基づいて本番コード1ファイルとテスト8ファイルを修正する。
+
+# TVT-MP正式候補のseller非空契約 実装・検証結果（2026-10-03）
+
+## 1. 実装結果
+
+完全実装前訂正設計に基づく修正を完了した。
+
+本番コードの変更は次の1ファイルだけである。
+
+- `uxsim/order_control_tvt_mp_general_trade_rank.py`
+
+`OrderControlTvtMpGeneralTradeRankResult.__init__`において、`sellers_sorted`の検査を次のように変更した。
+
+変更前:
+
+- `allow_empty=True`
+
+変更後:
+
+- `allow_empty=False`
+
+これにより、buyerを1件以上持ちながらsellerが0件である正式general trade-rank resultを生成できなくした。
+
+空の`sellers_sorted`を直接constructorへ渡した場合は、既存constructor入力検査体系に従い`ValueError`となる。
+
+## 2. 変更しなかった本番部品
+
+次の本番コードにはseller件数検査を追加していない。
+
+- concrete buyer candidate set
+- FIFO inspection
+- local binding rank sequence
+- local virtual calculation
+- economic evaluation
+- candidate selection
+- payment and compensation
+- final rank
+- final consistency validation
+- atomic apply
+- actual passage registry
+- actual passage observation
+- physical transfer
+- `uxsim.py`
+
+正常な順位生成アルゴリズム、seller分類、nonparticipating順位固定、trade scope形成、FIFO接続、候補列、statusも変更していない。
+
+登録時・生成時に保証済みの不変条件を後段で重複検証しない方針を維持した。
+
+## 3. テストfixtureの訂正
+
+次の8テストファイルを正式なseller非空契約へ合わせて修正した。
+
+- `tests_order_control_tvt_mp_general_trade_rank.py`
+- `tests_order_control_tvt_mp_local_binding_rank_sequence.py`
+- `tests_order_control_tvt_mp_local_virtual_calculation_set.py`
+- `tests_order_control_tvt_mp_economic_evaluation.py`
+- `tests_order_control_tvt_mp_candidate_selection.py`
+- `tests_order_control_tvt_mp_payment_and_compensation.py`
+- `tests_order_control_tvt_mp_final_consistency_validation.py`
+- `tests_order_control_tvt_mp_atomic_apply.py`
+
+主な訂正:
+
+- general trade-rank result constructorの空seller受理テストを`ValueError`拒否テストへ変更
+- 正常fixtureをbuyer 1件以上・seller 1件以上へ変更
+- seller 0件を正常なselected candidateとして扱うテストを削除
+- 別の異常を検査するfixtureへsellerを追加し、本来の例外理由を維持
+- candidate selectionのseller件数比較を0件対2件から1件対2件へ変更
+- atomic applyのtrade-rank fixtureは、sellerを保存済みseller economic recordから取得するよう訂正
+- 複数selected Node fixtureにもsellerを追加
+
+## 4. 削除した誤った正常テスト
+
+次のseller 0件正常テストを削除した。
+
+- `test_zero_sellers_gives_zero_payments`
+- `test_branch1_zero_sellers_is_normal`
+- `test_zero_sellers_writes_only_the_buyer_row`
+
+seller 0件の正式候補を後段で正常処理することは、最新契約では認めない。
+
+## 5. 維持した補償額0契約
+
+sellerが1件以上存在し、補償額だけが0となる正常ケースは維持した。
+
+少なくとも次を含む。
+
+- candidate passageとbaseline passageが同じseller
+- candidate passageがbaseline passageより早いseller
+- 申告VOTが0であるseller
+- `total_required_compensation_R=0`
+- buyer支払額0
+- seller補償額0
+- 金額0のbuyer・seller個別取引記録
+
+`test_r_equals_zero_gives_zero_payments`および
+`test_zero_payment_and_zero_compensation_still_write_rows`
+は維持した。
+
+## 6. 意図的な空seller列の維持
+
+次の空seller列は、正式selected candidateのseller 0件を意味しないため維持した。
+
+- constructorの空seller拒否材料
+- private内部整合検査用の破損入力
+- `NO_SELECTED_CANDIDATE`
+- fallback
+- `NO_VISITS_TO_CONFIRM`
+- 空Node
+- seller economic recordが存在するのにseller compensation recordだけが欠落する破損入力
+- 追加sellerがないことを表すhelper引数
+
+正常なselected candidateとしてseller 0件を使用するfixtureは除去済みである。
+
+## 7. 本番順位生成の再監査
+
+atomic applyのテストfixture訂正中に、nonparticipating順位固定との関係を再確認した。
+
+本番general trade-rank検査は次を明示的に保証している。
+
+- trade scopeはbaseline順の先頭から最後のbuyerまで
+- buyer、seller、nonparticipatingがtrade scopeを分割
+- nonparticipatingはbaseline順位を維持
+- sellerはbaseline順位より後退
+- trade scope外Visitはbaseline順位を維持
+- buyerはnonparticipatingの固定順位を避けた先頭側の空き順位へ配置
+- sellerは残りの空き順位へbaseline相対順を維持して配置
+
+専用テストでも、trade scope内のnonparticipatingがbaseline順位を維持し、sellerが後退することを確認した。
+
+本番順位交換アルゴリズムの欠陥は確認されなかった。
+
+## 8. atomic apply fixtureの訂正
+
+atomic apply本番コードは変更していない。
+
+テスト用`_trade_result`は、sellerをbaseline位置から推測せず、selected candidateの保存済みseller economic recordsからseller VisitKeyを取得するように訂正した。
+
+- buyersはconcrete buyer candidate setから取得
+- sellersはseller economic recordsの保存順から取得
+- last buyerのbaseline位置から`last_buyer_rank`を計算
+- `trade_scope`はbaseline candidate orderのprefixとして構築
+- sellerがtrade scope外ならfixture不整合として`AssertionError`
+- trade orderとtrade rankはcandidate全体について維持
+- nonparticipatingをsellerまたはtrade scope外位置から推測しない
+
+複数buyerと複数selected Nodeのfixtureでは、baseline順をseller先行、取引後順位をbuyer先行として整合させた。
+
+## 9. 検証結果
+
+変更対象8テストファイルの専用回帰:
+
+- 428 passed
+
+直接隣接するFIFO、final rank、actual passage、physical transfer:
+
+- 178 passed
+
+FCFSコア回帰:
+
+- 24 passed
+
+BATCHコア回帰:
+
+- 360 passed
+
+TVT-MP候補外FCFS transfer:
+
+- 18 passed
+
+最終状態のTVT-MP統合回帰13ファイル:
+
+- 624 passed
+
+重複しない最終確認対象の合計:
+
+- 1,008 passed
+
+その他:
+
+- 変更対象9ファイルの`py_compile`成功
+- `git diff --check`成功
+- UXsim正式サンプルは今回の小規模result契約訂正では再実行していない
+
+## 10. actual passageへの影響
+
+actual passage実装項目1〜3の本番コードは変更していない。
+
+次の回帰は成功した。
+
+- actual passage
+- physical transfer
+- final rank
+- FIFO
+- atomic apply
+- 候補外FCFS transfer
+
+actual passage実装項目4では、引き続き次を前提とする。
+
+- `TradeWait.buyer_visit_keys`は1件以上
+- `TradeWait.seller_visit_keys`も1件以上
+- seller VisitKeyが空のTradeWaitは正常な成立取引ではない
+
+## 11. BLOCKERと利用者判断事項
+
+BLOCKERはない。
+
+利用者判断事項も残っていない。
+
+## 12. 次の作業
+
+次は詳細設計第3巻へ実装結果の短い訂正完了注記を別作業で追記する。
+
+その後、進捗第3巻へ実装・検証結果と最新再開地点を別作業で追記する。
+
+3文書の独立確認と保存・pushが完了するまで、actual passage実装項目4へ進まない。

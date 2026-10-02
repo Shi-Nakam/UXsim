@@ -276,20 +276,26 @@ def _overall_boundary(*node_results):
 def _trade_rank(
     *,
     buyers_sorted: tuple,
-    sellers_sorted: tuple = (),
+    sellers_sorted: tuple | None = None,
     nonparticipating_visits_sorted: tuple = (),
     last_buyer_rank: int | None = None,
     trade_scope: tuple | None = None,
     trade_order: tuple | None = None,
 ) -> OrderControlTvtMpGeneralTradeRankResult:
     buyers = tuple(buyers_sorted)
-    sellers = tuple(sellers_sorted)
+    if sellers_sorted is None:
+        if len(buyers) == 1:
+            sellers = ((f"{buyers[0][0]}_seller", buyers[0][1]),)
+        else:
+            sellers = (("sell", 1),)
+    else:
+        sellers = tuple(sellers_sorted)
     if trade_scope is None:
-        trade_scope = buyers + sellers + tuple(nonparticipating_visits_sorted)
+        trade_scope = sellers + buyers + tuple(nonparticipating_visits_sorted)
     if trade_order is None:
-        trade_order = trade_scope
+        trade_order = buyers + sellers + tuple(nonparticipating_visits_sorted)
     if last_buyer_rank is None:
-        last_buyer_rank = len(buyers)
+        last_buyer_rank = len(trade_scope)
     trade_rank_by_visit_key = {}
     for rank_number, visit_key in enumerate(trade_order, start=1):
         trade_rank_by_visit_key[visit_key] = rank_number
@@ -833,6 +839,13 @@ def _prepare_end_to_end_buyers(
             0,
             name=spec["name"],
         )
+        seller_name = f"{spec['name']}_seller"
+        created[seller_name] = world.addVehicle(
+            spec["origin"],
+            spec["dest"],
+            0,
+            name=seller_name,
+        )
     if not getattr(world, "finalized", 0):
         world.finalize_scenario()
     for link in world.LINKS:
@@ -851,12 +864,23 @@ def _prepare_end_to_end_buyers(
         )
         visit_keys.append(visit_key)
         _register_snapshot(collector, vehicle, route_name=spec["route"])
+        seller_vehicle = created[f"{spec['name']}_seller"]
+        seller_key = _place_buyer(
+            world,
+            seller_vehicle,
+            inlink_name=spec["inlink"],
+            route_name="side",
+        )
+        _register_snapshot(collector, seller_vehicle, route_name="side")
         fifo_flag = True
         if fifo_flags is not None:
             fifo_flag = fifo_flags[index]
         candidates.append(
             {
-                "trade_rank": _trade_rank(buyers_sorted=(visit_key,)),
+                "trade_rank": _trade_rank(
+                    buyers_sorted=(visit_key,),
+                    sellers_sorted=(seller_key,),
+                ),
                 "fifo": fifo_flag,
             }
         )
@@ -1468,14 +1492,14 @@ def test_resolved_and_unresolved_are_both_kept_and_false_is_omitted():
     assert isinstance(kept, tuple)
 
 
-def test_all_unresolved_and_empty_sellers_are_kept():
+def test_all_unresolved_candidates_are_kept():
     world = _plain_world()
-    empty_sellers = _trade_rank(buyers_sorted=(("buy", 1),), sellers_sorted=())
+    unresolved_rank = _trade_rank(buyers_sorted=(("buy", 1),))
     fifo_set = _build_fifo_chain(
         node_specs=[
             _complete_node_spec(
                 "merge",
-                [{"trade_rank": empty_sellers, "fifo": True}],
+                [{"trade_rank": unresolved_rank, "fifo": True}],
             )
         ],
         downstream_boundary_result=_overall_boundary(_constrained_sink_boundary()),
@@ -1486,7 +1510,7 @@ def test_all_unresolved_and_empty_sellers_are_kept():
     kept = result.node_local_virtual_calculation_results[0].candidate_local_virtual_calculation_results
     assert len(kept) == 1
     assert kept[0].resolved is False
-    assert empty_sellers.sellers_sorted == ()
+    assert len(unresolved_rank.sellers_sorted) >= 1
 
 
 def test_horizon_value_from_fork_is_passed_to_initialize():
@@ -2057,6 +2081,8 @@ def test_end_to_end_resolved_and_unresolved_mix_on_one_node():
     world = _new_world("tvt_mp_set_entry_mix")
     buyer_a = world.addVehicle("orig_a", "dest", 0, name="buyer_a")
     buyer_b = world.addVehicle("orig_b", "dest", 0, name="buyer_b")
+    seller_a = world.addVehicle("orig_a", "dest", 0, name="buyer_a_seller")
+    seller_b = world.addVehicle("orig_b", "dest", 0, name="buyer_b_seller")
     if not getattr(world, "finalized", 0):
         world.finalize_scenario()
     for link in world.LINKS:
@@ -2065,15 +2091,31 @@ def test_end_to_end_resolved_and_unresolved_mix_on_one_node():
     collector = OrderControlBaselineCollector()
     key_a = _place_buyer(world, buyer_a, inlink_name="in_a", route_name="out")
     key_b = _place_buyer(world, buyer_b, inlink_name="in_b", route_name="out")
+    seller_key_a = _place_buyer(world, seller_a, inlink_name="in_a", route_name="side")
+    seller_key_b = _place_buyer(world, seller_b, inlink_name="in_b", route_name="side")
     _register_snapshot(collector, buyer_a, route_name="out")
     _register_snapshot(collector, buyer_b, route_name="out")
+    _register_snapshot(collector, seller_a, route_name="side")
+    _register_snapshot(collector, seller_b, route_name="side")
     fifo_set = _build_fifo_chain(
         node_specs=[
             _complete_node_spec(
                 "merge",
                 [
-                    {"trade_rank": _trade_rank(buyers_sorted=(key_a,)), "fifo": True},
-                    {"trade_rank": _trade_rank(buyers_sorted=(key_b,)), "fifo": True},
+                    {
+                        "trade_rank": _trade_rank(
+                            buyers_sorted=(key_a,),
+                            sellers_sorted=(seller_key_a,),
+                        ),
+                        "fifo": True,
+                    },
+                    {
+                        "trade_rank": _trade_rank(
+                            buyers_sorted=(key_b,),
+                            sellers_sorted=(seller_key_b,),
+                        ),
+                        "fifo": True,
+                    },
                 ],
                 remaining_keys=(key_a,),
             )

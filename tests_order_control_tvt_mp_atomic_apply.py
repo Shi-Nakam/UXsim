@@ -113,7 +113,29 @@ def _candidate_visits(visit_keys):
     return tuple(visits)
 
 
-def _trade_result(buyers_sorted, candidate_order, rank_by_visit):
+def _trade_result(selected_candidate, candidate_order, rank_by_visit):
+    buyers_sorted = (
+        selected_candidate.candidate_local_virtual_calculation_result
+        .concrete_buyer_candidate_set.buyers_sorted
+    )
+    sellers_sorted = tuple(
+        seller_record.visit_key
+        for seller_record in selected_candidate.seller_economic_records
+    )
+    last_buyer_key = buyers_sorted[-1]
+    if last_buyer_key not in candidate_order:
+        raise AssertionError(
+            "last buyer VisitKey is missing from candidate_order baseline: "
+            f"{last_buyer_key!r} not in {candidate_order!r}"
+        )
+    last_buyer_rank = candidate_order.index(last_buyer_key) + 1
+    trade_scope = tuple(candidate_order[:last_buyer_rank])
+    for seller_key in sellers_sorted:
+        if seller_key not in trade_scope:
+            raise AssertionError(
+                "seller VisitKey from economic records is missing from trade_scope: "
+                f"{seller_key!r} not in {trade_scope!r}"
+            )
     trade_rank = {}
     for visit_key in candidate_order:
         trade_rank[visit_key] = rank_by_visit[visit_key]
@@ -124,10 +146,10 @@ def _trade_result(buyers_sorted, candidate_order, rank_by_visit):
             buyers_sorted=buyers_sorted,
         ),
         buyers_sorted=buyers_sorted,
-        sellers_sorted=(),
+        sellers_sorted=sellers_sorted,
         nonparticipating_visits_sorted=(),
-        last_buyer_rank=1,
-        trade_scope=buyers_sorted,
+        last_buyer_rank=last_buyer_rank,
+        trade_scope=trade_scope,
         trade_order=tuple(trade_order_list),
         trade_rank_by_visit_key=trade_rank,
     )
@@ -158,15 +180,11 @@ def _with_trade_history(final_rank_set, histories):
                 selected = final_rank_set.node_final_rank_results[
                     index
                 ].selected_candidate_economic_result
-                buyers_sorted = (
-                    selected.candidate_local_virtual_calculation_result
-                    .concrete_buyer_candidate_set.buyers_sorted
-                )
                 trade_nodes[index] = replace(
                     trade_nodes[index],
                     candidate_trade_rank_results=(
                         _trade_result(
-                            buyers_sorted,
+                            selected,
                             history["order"],
                             history["ranks"],
                         ),
@@ -731,7 +749,16 @@ def _custom_selected_validation(
     for visit_key in remaining:
         rank_by_visit[visit_key] = position
         position = position + 1
-    history = {"order": tuple(remaining), "ranks": rank_by_visit}
+    baseline_order = []
+    for seller_record in sellers:
+        baseline_order.append(seller_record.visit_key)
+    for buyer_visit_key in buyers_sorted:
+        baseline_order.append(buyer_visit_key)
+
+    history = {
+        "order": tuple(baseline_order),
+        "ranks": rank_by_visit,
+    }
     return _validated_from_final_rank_set(final_rank_set, (history,))
 
 
@@ -878,14 +905,17 @@ def test_two_buyers_each_keep_the_same_buyer_tuple():
     validation = _custom_selected_validation(
         "east",
         ("buyer", "buyer_b"),
-        None,
+        "east_seller",
     )
     world = _world(
-        {"east": ("route-buyer", "route-buyer_b")},
-        ("buyer", "buyer_b"),
+        {"east": ("route-buyer", "route-buyer_b", "route-east_seller")},
+        ("buyer", "buyer_b", "east_seller"),
     )
     rank_states = {
-        "east": _rank_state("east", (_visit("buyer"), _visit("buyer_b"))),
+        "east": _rank_state(
+            "east",
+            (_visit("buyer"), _visit("buyer_b"), _visit("east_seller")),
+        ),
     }
     apply_tvt_mp_validated_result(validation, world, rank_states)
     expected_buyers = (_visit("buyer"), _visit("buyer_b"))
@@ -899,36 +929,6 @@ def test_two_buyers_each_keep_the_same_buyer_tuple():
     assert second.payment_paid_in_this_transaction == 99.0
     assert world.VEHICLES["buyer"].payment_received == 20.0
     assert world.VEHICLES["buyer_b"].payment_paid == 109.0
-
-
-def test_zero_sellers_writes_only_the_buyer_row():
-    partition_3 = (
-        saved._binding(
-            "buyer",
-            rank=1,
-            partition=fx.PARTITION_3,
-            route="route-buyer",
-            role=BINDING_BUYER,
-        ),
-    )
-    final_rank_set = saved._selected_final_rank_set(
-        sellers=(),
-        partition_3=partition_3,
-        partition_4=(),
-        remaining=(_visit("buyer"),),
-    )
-    history = {
-        "order": (_visit("buyer"),),
-        "ranks": {_visit("buyer"): 1},
-    }
-    validation = _validated_from_final_rank_set(final_rank_set, (history,))
-    world = _world({"merge": ("route-buyer",)}, ("buyer", "seller"))
-    seller_before = _snapshot(world, {})
-    rank_states = {"merge": _rank_state("merge", (_visit("buyer"),))}
-    apply_tvt_mp_validated_result(validation, world, rank_states)
-    assert len(world.VEHICLES["buyer"].order_exchange_log) == 2
-    assert world.VEHICLES["seller"].order_exchange_log == ["old"]
-    assert world.VEHICLES["seller"].payment_received == seller_before[2]["seller"][1]
 
 
 def test_zero_payment_and_zero_compensation_still_write_rows():
@@ -987,7 +987,7 @@ def test_zero_payment_and_zero_compensation_still_write_rows():
 
 def test_two_selected_nodes_apply_together():
     east = _custom_selected_validation("east", ("east_buyer",), "east_seller")
-    west = _custom_selected_validation("west", ("west_buyer",), None)
+    west = _custom_selected_validation("west", ("west_buyer",), "west_seller")
     east_final = east.final_rank_set_result
     west_final = west.final_rank_set_result
     east_payment = east_final.payment_and_compensation_set_result
@@ -1017,10 +1017,10 @@ def test_two_selected_nodes_apply_together():
         "node_name": "west",
         "build_status": fx.COMPLETE,
         "selected": west_final.node_final_rank_results[0].selected_candidate_economic_result,
-        "remaining": (_visit("west_buyer"),),
+        "remaining": (_visit("west_buyer"), _visit("west_seller")),
         "leading": (),
         "buyer_records": west_payment_node.buyer_payment_records,
-        "seller_records": (),
+        "seller_records": west_payment_node.seller_compensation_records,
         "routes": {},
     }
     for visit_key in east_spec["remaining"]:
@@ -1045,12 +1045,12 @@ def test_two_selected_nodes_apply_together():
     )
     histories = (
         {
-            "order": (_visit("east_buyer"), _visit("east_seller")),
+            "order": (_visit("east_seller"), _visit("east_buyer")),
             "ranks": {_visit("east_buyer"): 1, _visit("east_seller"): 2},
         },
         {
-            "order": (_visit("west_buyer"),),
-            "ranks": {_visit("west_buyer"): 1},
+            "order": (_visit("west_seller"), _visit("west_buyer")),
+            "ranks": {_visit("west_buyer"): 1, _visit("west_seller"): 2},
         },
     )
     validation = _validated_from_final_rank_set(final_rank_set, histories)
@@ -1058,16 +1058,19 @@ def test_two_selected_nodes_apply_together():
     world = _world(
         {
             "east": ("route-east_buyer", "route-east_seller"),
-            "west": ("route-west_buyer",),
+            "west": ("route-west_buyer", "route-west_seller"),
         },
-        ("east_buyer", "east_seller", "west_buyer"),
+        ("east_buyer", "east_seller", "west_buyer", "west_seller"),
     )
     rank_states = {
         "east": _rank_state(
             "east",
             (_visit("east_buyer"), _visit("east_seller")),
         ),
-        "west": _rank_state("west", (_visit("west_buyer"),)),
+        "west": _rank_state(
+            "west",
+            (_visit("west_buyer"), _visit("west_seller")),
+        ),
     }
     result = apply_tvt_mp_validated_result(validation, world, rank_states)
     assert result.final_consistency_validation_set_result is validation
@@ -1075,7 +1078,7 @@ def test_two_selected_nodes_apply_together():
     assert _record_for(world.VEHICLES["west_buyer"]).node_name == "west"
     assert world.VEHICLES["east_seller"].payment_received == 21.0
     assert rank_states["east"].k_confirmed() == 2
-    assert rank_states["west"].k_confirmed() == 1
+    assert rank_states["west"].k_confirmed() == 2
     assert west_spec_selected is not None
 
 

@@ -624,6 +624,7 @@ def test_accepts_positive_int_positive_float_zero_and_zero_float_vot():
             {"name": "buyer_float", "vot_declared": 2.5},
             {"name": "buyer_zero", "vot_declared": 0},
             {"name": "buyer_zero_float", "vot_declared": 0.0},
+            {"name": "seller_a", "vot_declared": 1.0},
         ]
     )
     cases = (
@@ -637,7 +638,7 @@ def test_accepts_positive_int_positive_float_zero_and_zero_float_vot():
         candidates.append(
             _candidate_local_result(
                 buyer_names=(name,),
-                seller_names=(),
+                seller_passages={"seller_a": {"baseline": 10, "candidate": 10}},
                 buyer_passages={name: {"baseline": 12, "candidate": 10}},
             )
         )
@@ -669,11 +670,15 @@ def test_rejects_illegal_declared_vot_values():
         np.int64(2),
     )
     for illegal in illegal_values:
-        world = _world_with_vehicles([{"name": "buyer_a", "vot_declared": 1.0}])
+        world = _world_with_vehicles(
+            [
+                {"name": "buyer_a", "vot_declared": 1.0},
+                {"name": "seller_a", "vot_declared": 1.0},
+            ]
+        )
         world.VEHICLES["buyer_a"].vot_declared = illegal
         candidate = _candidate_local_result(
             buyer_names=("buyer_a",),
-            seller_names=(),
         )
         local_set = _set_result([_node_local_result("merge", [candidate])])
         try:
@@ -684,11 +689,15 @@ def test_rejects_illegal_declared_vot_values():
 
 
 def test_accepts_numpy_float64_declared_vot():
-    world = _world_with_vehicles([{"name": "buyer_a", "vot_declared": 1.0}])
+    world = _world_with_vehicles(
+        [
+            {"name": "buyer_a", "vot_declared": 1.0},
+            {"name": "seller_a", "vot_declared": 1.0},
+        ]
+    )
     world.VEHICLES["buyer_a"].vot_declared = np.float64(2.0)
     candidate = _candidate_local_result(
         buyer_names=("buyer_a",),
-        seller_names=(),
         buyer_passages={"buyer_a": {"baseline": 12, "candidate": 10}},
     )
     local_set = _set_result([_node_local_result("merge", [candidate])])
@@ -700,10 +709,14 @@ def test_accepts_numpy_float64_declared_vot():
 
 
 def test_missing_vehicle_and_missing_vot_declared_are_value_error():
-    world = _world_with_vehicles([{"name": "other", "vot_declared": 1.0}])
+    world = _world_with_vehicles(
+        [
+            {"name": "other", "vot_declared": 1.0},
+            {"name": "seller_a", "vot_declared": 1.0},
+        ]
+    )
     candidate = _candidate_local_result(
         buyer_names=("buyer_a",),
-        seller_names=(),
     )
     local_set = _set_result([_node_local_result("merge", [candidate])])
     try:
@@ -712,11 +725,15 @@ def test_missing_vehicle_and_missing_vot_declared_are_value_error():
     except ValueError as error:
         assert "buyer_a" in str(error)
 
-    world = _world_with_vehicles([{"name": "buyer_a", "vot_declared": 1.0}])
+    world = _world_with_vehicles(
+        [
+            {"name": "buyer_a", "vot_declared": 1.0},
+            {"name": "seller_a", "vot_declared": 1.0},
+        ]
+    )
     delattr(world.VEHICLES["buyer_a"], "vot_declared")
     candidate = _candidate_local_result(
         buyer_names=("buyer_a",),
-        seller_names=(),
     )
     local_set = _set_result([_node_local_result("merge", [candidate])])
     try:
@@ -736,16 +753,19 @@ def test_vot_zero_buyer_is_normal_economic_infeasibility_and_later_candidate_is_
         [
             {"name": "buyer_zero", "vot_declared": 0, "vot_true": 0},
             {"name": "buyer_later", "vot_declared": 2.0},
+            {"name": "seller_first", "vot_declared": 1.0},
+            {"name": "seller_later", "vot_declared": 1.0},
         ]
     )
     first = _candidate_local_result(
         buyer_names=("buyer_zero",),
-        seller_names=(),
+        seller_names=("seller_first",),
         buyer_passages={"buyer_zero": {"baseline": 14, "candidate": 11}},
+        seller_passages={"seller_first": {"baseline": 10, "candidate": 10}},
     )
     second = _candidate_local_result(
         buyer_names=("buyer_later",),
-        seller_names=(),
+        seller_names=("seller_later",),
         buyer_passages={"buyer_later": {"baseline": 12, "candidate": 10}},
     )
     local_set = _set_result([_node_local_result("merge", [first, second])])
@@ -773,6 +793,7 @@ def test_vot_zero_seller_keeps_waiting_increase_and_zero_reservation():
             {"name": "buyer_a", "vot_declared": 2.0},
             {"name": "seller_zero", "vot_declared": 0.0, "vot_true": 0.0},
             {"name": "buyer_later", "vot_declared": 1.0},
+            {"name": "seller_later", "vot_declared": 1.0},
         ]
     )
     first = _candidate_local_result(
@@ -783,8 +804,9 @@ def test_vot_zero_seller_keeps_waiting_increase_and_zero_reservation():
     )
     second = _candidate_local_result(
         buyer_names=("buyer_later",),
-        seller_names=(),
+        seller_names=("seller_later",),
         buyer_passages={"buyer_later": {"baseline": 11, "candidate": 10}},
+        seller_passages={"seller_later": {"baseline": 10, "candidate": 10}},
     )
     local_set = _set_result([_node_local_result("merge", [first, second])])
     result = _evaluate(local_set, world)
@@ -813,6 +835,7 @@ def test_nonparticipating_vehicle_is_not_evaluated_and_vot_zero_participant_is()
     world = _world_with_vehicles(
         [
             {"name": "buyer_zero", "vot_declared": 0.0},
+            {"name": "seller_participant", "vot_declared": 1.0},
             {
                 "name": "outsider",
                 "vot_declared": None,
@@ -823,15 +846,17 @@ def test_nonparticipating_vehicle_is_not_evaluated_and_vot_zero_participant_is()
     )
     candidate = _candidate_local_result(
         buyer_names=("buyer_zero",),
-        seller_names=(),
+        seller_names=("seller_participant",),
         buyer_passages={"buyer_zero": {"baseline": 12, "candidate": 10}},
+        seller_passages={"seller_participant": {"baseline": 10, "candidate": 10}},
     )
     local_set = _set_result([_node_local_result("merge", [candidate])])
     result = _evaluate(local_set, world)
     candidate_result = result.node_economic_evaluation_results[0].candidate_economic_evaluation_results[0]
     assert len(candidate_result.buyer_economic_records) == 1
     assert candidate_result.buyer_economic_records[0].vehicle_name == "buyer_zero"
-    assert candidate_result.seller_economic_records == ()
+    assert len(candidate_result.seller_economic_records) == 1
+    assert candidate_result.seller_economic_records[0].vehicle_name == "seller_participant"
     assert world.VEHICLES["outsider"].participates_in_order_exchange is False
     assert world.VEHICLES["buyer_zero"].participates_in_order_exchange is True
     assert world.VEHICLES["outsider"].vot_declared is None
@@ -848,6 +873,7 @@ def test_buyer_positive_zero_and_negative_time_saving():
             {"name": "buyer_pos", "vot_declared": 2.0},
             {"name": "buyer_zero", "vot_declared": 2.0},
             {"name": "buyer_neg", "vot_declared": 2.0},
+            {"name": "seller_a", "vot_declared": 1.0},
         ]
     )
     cases = (
@@ -860,10 +886,10 @@ def test_buyer_positive_zero_and_negative_time_saving():
         candidates.append(
             _candidate_local_result(
                 buyer_names=(name,),
-                seller_names=(),
                 buyer_passages={
                     name: {"baseline": baseline, "candidate": candidate_time}
                 },
+                seller_passages={"seller_a": {"baseline": 10, "candidate": 10}},
             )
         )
     result = _evaluate(_set_result([_node_local_result("merge", candidates)]), world)
@@ -1018,7 +1044,7 @@ def test_all_buyers_positive_g_greater_equal_and_less_than_r():
     )
 
 
-def test_one_buyer_zero_one_buyer_negative_empty_sellers_and_two_reasons():
+def test_one_buyer_zero_one_buyer_negative_zero_comp_seller_and_two_reasons():
     world = _world_with_vehicles(
         [
             {"name": "buyer_pos", "vot_declared": 2.0},
@@ -1027,9 +1053,10 @@ def test_one_buyer_zero_one_buyer_negative_empty_sellers_and_two_reasons():
             {"name": "seller_a", "vot_declared": 5.0},
         ]
     )
+    zero_comp_seller = {"seller_a": {"baseline": 10, "candidate": 10}}
     zero_buyer = _candidate_local_result(
         buyer_names=("buyer_pos", "buyer_zero"),
-        seller_names=(),
+        seller_passages=zero_comp_seller,
         buyer_passages={
             "buyer_pos": {"baseline": 12, "candidate": 10},
             "buyer_zero": {"baseline": 10, "candidate": 10},
@@ -1037,12 +1064,12 @@ def test_one_buyer_zero_one_buyer_negative_empty_sellers_and_two_reasons():
     )
     negative_buyer = _candidate_local_result(
         buyer_names=("buyer_neg",),
-        seller_names=(),
+        seller_passages=zero_comp_seller,
         buyer_passages={"buyer_neg": {"baseline": 10, "candidate": 12}},
     )
-    empty_seller_ok = _candidate_local_result(
+    feasible_zero_comp_seller = _candidate_local_result(
         buyer_names=("buyer_pos",),
-        seller_names=(),
+        seller_passages=zero_comp_seller,
         buyer_passages={"buyer_pos": {"baseline": 12, "candidate": 10}},
     )
     two_reasons = _candidate_local_result(
@@ -1056,7 +1083,7 @@ def test_one_buyer_zero_one_buyer_negative_empty_sellers_and_two_reasons():
             [
                 _node_local_result(
                     "merge",
-                    [zero_buyer, negative_buyer, empty_seller_ok, two_reasons],
+                    [zero_buyer, negative_buyer, feasible_zero_comp_seller, two_reasons],
                 )
             ]
         ),
@@ -1072,7 +1099,7 @@ def test_one_buyer_zero_one_buyer_negative_empty_sellers_and_two_reasons():
         OrderControlTvtMpCandidateEconomicInfeasibilityReason.BUYER_NONPOSITIVE_VALUE,
         OrderControlTvtMpCandidateEconomicInfeasibilityReason.TOTAL_BUYER_VALUE_BELOW_REQUIRED_COMPENSATION,
     )
-    assert evaluated[2].seller_economic_records == ()
+    assert evaluated[2].seller_economic_records[0].required_compensation_R_s == 0.0
     assert evaluated[2].total_required_compensation_R == 0.0
     assert evaluated[2].economically_feasible is True
     assert evaluated[3].infeasibility_reasons == (
@@ -1096,6 +1123,7 @@ def test_node_candidate_buyer_and_seller_order_are_preserved():
             {"name": "seller_b", "vot_declared": 1.0},
             {"name": "seller_a", "vot_declared": 1.0},
             {"name": "buyer_n2", "vot_declared": 1.0},
+            {"name": "seller_n2", "vot_declared": 1.0},
         ]
     )
     first_on_merge = _candidate_local_result(
@@ -1114,14 +1142,15 @@ def test_node_candidate_buyer_and_seller_order_are_preserved():
     second_on_merge = _candidate_local_result(
         node_name="merge",
         buyer_names=("buyer_a",),
-        seller_names=(),
         buyer_passages={"buyer_a": {"baseline": 11, "candidate": 10}},
+        seller_passages={"seller_a": {"baseline": 10, "candidate": 10}},
     )
     other_node = _candidate_local_result(
         node_name="side",
         buyer_names=("buyer_n2",),
-        seller_names=(),
+        seller_names=("seller_n2",),
         buyer_passages={"buyer_n2": {"baseline": 12, "candidate": 10}},
+        seller_passages={"seller_n2": {"baseline": 10, "candidate": 10}},
     )
     local_set = _set_result(
         [
@@ -1157,11 +1186,12 @@ def test_unresolved_is_skipped_without_reading_vot_or_building_records():
         [
             {"name": "buyer_bad", "vot_declared": None},
             {"name": "buyer_ok", "vot_declared": 2.0},
+            {"name": "seller_a", "vot_declared": 1.0},
         ]
     )
     unresolved = _candidate_local_result(
         buyer_names=("buyer_bad",),
-        seller_names=(),
+        seller_names=("seller_a",),
         resolved=False,
         force_passages=(
             _passage(
@@ -1170,11 +1200,17 @@ def test_unresolved_is_skipped_without_reading_vot_or_building_records():
                 baseline_passage_timestep=None,
                 candidate_passage_timestep=None,
             ),
+            _passage(
+                "seller_a",
+                role=OrderControlTvtMpLocalBindingTradeRole.SELLER,
+                baseline_passage_timestep=None,
+                candidate_passage_timestep=None,
+                rank=2,
+            ),
         ),
     )
     resolved = _candidate_local_result(
         buyer_names=("buyer_ok",),
-        seller_names=(),
         buyer_passages={"buyer_ok": {"baseline": 12, "candidate": 10}},
     )
     local_set = _set_result(
@@ -1211,8 +1247,14 @@ def test_resolved_with_none_or_bool_passage_is_runtime_error():
                 baseline_passage_timestep=None,
                 candidate_passage_timestep=10,
             ),
+            _passage(
+                "seller_a",
+                role=OrderControlTvtMpLocalBindingTradeRole.SELLER,
+                baseline_passage_timestep=10,
+                candidate_passage_timestep=12,
+                rank=2,
+            ),
         ),
-        seller_names=(),
     )
     local_set = _set_result([_node_local_result("merge", [none_baseline])])
     try:
@@ -1229,8 +1271,14 @@ def test_resolved_with_none_or_bool_passage_is_runtime_error():
                 baseline_passage_timestep=12,
                 candidate_passage_timestep=None,
             ),
+            _passage(
+                "seller_a",
+                role=OrderControlTvtMpLocalBindingTradeRole.SELLER,
+                baseline_passage_timestep=10,
+                candidate_passage_timestep=12,
+                rank=2,
+            ),
         ),
-        seller_names=(),
     )
     local_set = _set_result([_node_local_result("merge", [none_candidate])])
     try:
@@ -1247,8 +1295,14 @@ def test_resolved_with_none_or_bool_passage_is_runtime_error():
                 baseline_passage_timestep=True,
                 candidate_passage_timestep=10,
             ),
+            _passage(
+                "seller_a",
+                role=OrderControlTvtMpLocalBindingTradeRole.SELLER,
+                baseline_passage_timestep=10,
+                candidate_passage_timestep=12,
+                rank=2,
+            ),
         ),
-        seller_names=(),
     )
     local_set = _set_result([_node_local_result("merge", [bool_timestep])])
     try:
@@ -1288,7 +1342,6 @@ def test_empty_buyers_role_and_set_mismatches_are_runtime_error():
 
     wrong_buyer_set = _candidate_local_result(
         buyer_names=("buyer_a",),
-        seller_names=(),
         buyers_sorted=(_visit_key("someone_else"),),
     )
     try:
@@ -1302,7 +1355,6 @@ def test_empty_buyers_role_and_set_mismatches_are_runtime_error():
 
     extra_seller_passage = _candidate_local_result(
         buyer_names=("buyer_a",),
-        seller_names=(),
         extra_passages=(
             _passage(
                 "seller_a",
@@ -1324,7 +1376,6 @@ def test_empty_buyers_role_and_set_mismatches_are_runtime_error():
 
     nonparticipating_role = _candidate_local_result(
         buyer_names=("buyer_a",),
-        seller_names=(),
         extra_passages=(
             _passage(
                 "buyer_a",
@@ -1365,8 +1416,16 @@ def test_node_name_visit_key_and_stop_reason_mismatches_are_runtime_error():
     )
     mismatched_name = dataclasses.replace(mismatched_name, vehicle_name="other")
     bad_name = _candidate_local_result(
-        seller_names=(),
-        force_passages=(mismatched_name,),
+        force_passages=(
+            mismatched_name,
+            _passage(
+                "seller_a",
+                role=OrderControlTvtMpLocalBindingTradeRole.SELLER,
+                baseline_passage_timestep=10,
+                candidate_passage_timestep=12,
+                rank=2,
+            ),
+        ),
     )
     try:
         evaluate_tvt_mp_candidate_economics(
@@ -1380,7 +1439,6 @@ def test_node_name_visit_key_and_stop_reason_mismatches_are_runtime_error():
     bad_stop = _candidate_local_result(
         stop_reason=OrderControlTvtMpCandidateLocalVirtualCalculationStopReason.HORIZON_EXHAUSTED_UNRESOLVED,
         resolved=True,
-        seller_names=(),
     )
     try:
         evaluate_tvt_mp_candidate_economics(
@@ -1394,7 +1452,6 @@ def test_node_name_visit_key_and_stop_reason_mismatches_are_runtime_error():
     unresolved_with_resolved_reason = _candidate_local_result(
         stop_reason=OrderControlTvtMpCandidateLocalVirtualCalculationStopReason.RESOLVED,
         resolved=False,
-        seller_names=(),
     )
     try:
         evaluate_tvt_mp_candidate_economics(
@@ -1411,7 +1468,6 @@ def test_node_name_visit_key_and_stop_reason_mismatches_are_runtime_error():
         buyers_sorted=(_visit_key("buyer_a"),),
     )
     identity_mismatch = _candidate_local_result(
-        seller_names=(),
         sequence_buyer_set=other_buyer_set,
     )
     try:
@@ -1430,11 +1486,11 @@ def test_one_inconsistency_stops_later_candidates_and_later_nodes_without_partia
             {"name": "buyer_a", "vot_declared": 1.0},
             {"name": "buyer_later", "vot_declared": None},
             {"name": "buyer_node2", "vot_declared": None},
+            {"name": "seller_a", "vot_declared": 1.0},
         ]
     )
     bad_first = _candidate_local_result(
         buyer_names=("buyer_a",),
-        seller_names=(),
         force_passages=(
             _passage(
                 "buyer_a",
@@ -1442,17 +1498,22 @@ def test_one_inconsistency_stops_later_candidates_and_later_nodes_without_partia
                 baseline_passage_timestep=None,
                 candidate_passage_timestep=10,
             ),
+            _passage(
+                "seller_a",
+                role=OrderControlTvtMpLocalBindingTradeRole.SELLER,
+                baseline_passage_timestep=10,
+                candidate_passage_timestep=12,
+                rank=2,
+            ),
         ),
     )
     later_candidate = _candidate_local_result(
         buyer_names=("buyer_later",),
-        seller_names=(),
         buyer_passages={"buyer_later": {"baseline": 12, "candidate": 10}},
     )
     later_node = _candidate_local_result(
         node_name="side",
         buyer_names=("buyer_node2",),
-        seller_names=(),
         buyer_passages={"buyer_node2": {"baseline": 12, "candidate": 10}},
     )
     local_set = _set_result(
@@ -1593,12 +1654,12 @@ def test_feasible_result_uses_declared_vot_not_true_vot():
                 "name": "buyer_a",
                 "vot_declared": 2.0,
                 "vot_true": 99.0,
-            }
+            },
+            {"name": "seller_a", "vot_declared": 1.0},
         ]
     )
     candidate = _candidate_local_result(
         buyer_names=("buyer_a",),
-        seller_names=(),
         buyer_passages={"buyer_a": {"baseline": 12, "candidate": 10}},
     )
     result = _evaluate(_set_result([_node_local_result("merge", [candidate])]), world)

@@ -640,11 +640,12 @@ def test_duplicate_visit_across_partitions_is_runtime_error():
         leading_keys=(),
         remaining_keys=(("sell", 1),),
         trade_rank_result=_trade_rank(
-            last_buyer_rank=1,
-            sellers_sorted=(),
-            trade_scope=(("buy", 1),),
-            trade_order=(("buy", 1),),
-            trade_rank_by_visit_key={("buy", 1): 1},
+            last_buyer_rank=2,
+            buyers_sorted=(("buy", 1),),
+            sellers_sorted=(("sell", 1),),
+            trade_scope=(("buy", 1), ("sell", 1)),
+            trade_order=(("buy", 1), ("sell", 1)),
+            trade_rank_by_visit_key={("buy", 1): 1, ("sell", 1): 2},
         ),
         k_confirmed_before=0,
     )
@@ -1127,18 +1128,21 @@ def test_trade_role_overlap_is_runtime_error():
 
 def test_trade_role_missing_is_runtime_error():
     trade_rank = _trade_rank(
-        sellers_sorted=(),
-        trade_scope=(("buy", 1), ("gap", 1)),
-        trade_order=(("buy", 1), ("gap", 1)),
-        trade_rank_by_visit_key={("buy", 1): 1, ("gap", 1): 2},
+        buyers_sorted=(("buy", 1),),
+        sellers_sorted=(("sell", 1),),
+        trade_scope=(("buy", 1), ("sell", 1), ("gap", 1)),
+        trade_order=(("buy", 1), ("sell", 1), ("gap", 1)),
+        trade_rank_by_visit_key={("buy", 1): 1, ("sell", 1): 2, ("gap", 1): 3},
+        last_buyer_rank=3,
     )
     fifo_set, candidate, rank_state = _empty_ledger_case(
         trade_rank,
         {
             ("buy", 1): _record("buy", 1, vehicle_id=4, route="out", arrived=False),
+            ("sell", 1): _record("sell", 1, vehicle_id=5, route="side", arrived=False),
             ("gap", 1): _record("gap", 1, vehicle_id=8, route="out", arrived=False),
         },
-        (("buy", 1), ("gap", 1)),
+        (("buy", 1), ("sell", 1), ("gap", 1)),
     )
     _assert_builder_error(RuntimeError, fifo_set, candidate, rank_state, "('gap', 1)")
 

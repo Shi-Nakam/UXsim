@@ -108,7 +108,7 @@ class OrderControlTvtMpGeneralTradeRankResult:
         self._sellers_sorted = _validate_visit_key_sequence(
             sellers_tuple,
             field_name="sellers_sorted",
-            allow_empty=True,
+            allow_empty=False,
         )
 
         nonparticipating_tuple = _require_tuple_container(

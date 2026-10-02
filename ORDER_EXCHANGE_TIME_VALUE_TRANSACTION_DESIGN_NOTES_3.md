@@ -4060,3 +4060,82 @@ BLOCKERはない。
 その後、進捗第3巻へ要約と最新再開地点を別作業で追記する。
 
 3文書の独立確認、commit、pushが完了するまで、コードとテストを変更しない。
+
+# TVT-MP正式候補のseller非空契約 訂正実装完了注記（2026-10-03）
+
+本巻末尾の
+「TVT-MP正式候補のseller非空契約 訂正注記（2026-10-03）」
+に基づくコード・テスト修正と回帰検証が完了した。
+
+最新の実装・検証結果の正式参照先:
+
+- `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_4.md`
+- 「TVT-MP正式候補のseller非空契約 実装・検証結果（2026-10-03）」
+
+## 実装結果
+
+本番変更は次の1ファイルだけである。
+
+- `uxsim/order_control_tvt_mp_general_trade_rank.py`
+
+`OrderControlTvtMpGeneralTradeRankResult.__init__`で、
+`sellers_sorted`を非空必須にした。
+
+- 変更前: `allow_empty=True`
+- 変更後: `allow_empty=False`
+
+後段本番部品へ、同じseller件数検査を重複追加していない。
+
+## テスト訂正
+
+正式候補のテストfixtureを、buyer 1件以上かつseller 1件以上へ訂正した。
+
+seller 0件を正常なselected candidateとして扱っていた次のテストを削除した。
+
+- `test_zero_sellers_gives_zero_payments`
+- `test_branch1_zero_sellers_is_normal`
+- `test_zero_sellers_writes_only_the_buyer_row`
+
+sellerが存在して補償額だけが0となる正常テストは維持した。
+
+fallback、候補なし、空Node、および意図的な破損入力における空seller列も維持した。
+
+## 本番順位生成の再監査
+
+nonparticipating順位固定、seller後退、trade scope外Visitの順位固定、buyer・sellerの空き順位割当を再確認した。
+
+本番general trade-rankアルゴリズムの欠陥は確認されなかった。
+
+## 検証結果
+
+- 最終状態のTVT-MP統合回帰13ファイル: 624 passed
+- FCFSコア回帰: 24 passed
+- BATCHコア回帰: 360 passed
+- 重複しない最終確認対象: 合計1,008 passed
+- 変更対象9ファイルの`py_compile`: 成功
+- `git diff --check`: 成功
+
+TVT-MP候補外FCFS transferの18件は、624件のTVT-MP統合回帰に含まれる。
+
+UXsim正式サンプルは、今回の小規模なresult constructor契約訂正では再実行していない。
+
+## actual passageへの影響
+
+actual passage実装項目1〜3の本番コードは変更していない。
+
+actual passage、physical transfer、atomic apply、final rank、FIFO、候補外FCFS transferの回帰は成功した。
+
+actual passage実装項目4では、次を前提とする。
+
+- `TradeWait.buyer_visit_keys`は1件以上
+- `TradeWait.seller_visit_keys`も1件以上
+- seller VisitKeyが空のTradeWaitは正常な成立取引ではない
+
+## 現在地
+
+BLOCKERはない。
+利用者判断事項も残っていない。
+
+次は進捗第3巻へ、実装・検証結果と最新再開地点を別作業で追記する。
+
+第3巻、第4巻、進捗第3巻の独立確認と保存・pushが完了するまで、actual passage実装項目4へ進まない。

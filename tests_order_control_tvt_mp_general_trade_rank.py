@@ -255,18 +255,20 @@ def _first_rank_result(
 def _direct_rank_result(
     **overrides,
 ) -> OrderControlTvtMpGeneralTradeRankResult:
+    veh_a = ("veh_a", 1)
+    veh_b = ("veh_b", 1)
     concrete = OrderControlTvtMpConcreteBuyerCandidateSet(
-        buyers_sorted=(("veh_a", 1),),
+        buyers_sorted=(veh_b,),
     )
     kwargs = {
         "concrete_buyer_candidate_set": concrete,
-        "buyers_sorted": (("veh_a", 1),),
-        "sellers_sorted": (),
+        "buyers_sorted": (veh_b,),
+        "sellers_sorted": (veh_a,),
         "nonparticipating_visits_sorted": (),
-        "last_buyer_rank": 1,
-        "trade_scope": (("veh_a", 1),),
-        "trade_order": (("veh_a", 1),),
-        "trade_rank_by_visit_key": {("veh_a", 1): 1},
+        "last_buyer_rank": 2,
+        "trade_scope": (veh_a, veh_b),
+        "trade_order": (veh_b, veh_a),
+        "trade_rank_by_visit_key": {veh_b: 1, veh_a: 2},
     }
     kwargs.update(overrides)
     return OrderControlTvtMpGeneralTradeRankResult(**kwargs)
@@ -374,23 +376,25 @@ def test_node_and_overall_reject_field_assignment():
 
 def test_one_candidate_result_keyword_only_constructor():
     result = _direct_rank_result()
-    assert result.buyers_sorted == (("veh_a", 1),)
+    assert result.buyers_sorted == (("veh_b", 1),)
 
 
 def test_one_candidate_result_rejects_positional_constructor():
+    veh_a = ("veh_a", 1)
+    veh_b = ("veh_b", 1)
     concrete = OrderControlTvtMpConcreteBuyerCandidateSet(
-        buyers_sorted=(("veh_a", 1),),
+        buyers_sorted=(veh_b,),
     )
     try:
         OrderControlTvtMpGeneralTradeRankResult(
             concrete,
-            (("veh_a", 1),),
+            (veh_b,),
+            (veh_a,),
             (),
-            (),
-            1,
-            (("veh_a", 1),),
-            (("veh_a", 1),),
-            {("veh_a", 1): 1},
+            2,
+            (veh_a, veh_b),
+            (veh_b, veh_a),
+            {veh_b: 1, veh_a: 2},
         )
         raise AssertionError("Expected TypeError for positional args")
     except TypeError:
@@ -400,12 +404,12 @@ def test_one_candidate_result_rejects_positional_constructor():
 def test_one_candidate_result_public_properties_exist():
     result = _direct_rank_result()
     assert result.concrete_buyer_candidate_set is not None
-    assert result.buyers_sorted == (("veh_a", 1),)
-    assert result.sellers_sorted == ()
+    assert result.buyers_sorted == (("veh_b", 1),)
+    assert result.sellers_sorted == (("veh_a", 1),)
     assert result.nonparticipating_visits_sorted == ()
-    assert result.last_buyer_rank == 1
-    assert result.trade_scope == (("veh_a", 1),)
-    assert result.trade_order == (("veh_a", 1),)
+    assert result.last_buyer_rank == 2
+    assert result.trade_scope == (("veh_a", 1), ("veh_b", 1))
+    assert result.trade_order == (("veh_b", 1), ("veh_a", 1))
 
 
 def test_one_candidate_result_properties_have_no_setters():
@@ -444,7 +448,8 @@ def test_one_candidate_result_has_no_forbidden_public_methods():
 
 def test_assigned_rank_returns_rank():
     result = _direct_rank_result()
-    assert result.assigned_rank(("veh_a", 1)) == 1
+    assert result.assigned_rank(("veh_b", 1)) == 1
+    assert result.assigned_rank(("veh_a", 1)) == 2
 
 
 def test_assigned_rank_rejects_invalid_visit_key():
@@ -467,7 +472,7 @@ def test_assigned_rank_rejects_missing_visit_key():
 
 def test_assigned_rank_does_not_return_none():
     result = _direct_rank_result()
-    rank_value = result.assigned_rank(("veh_a", 1))
+    rank_value = result.assigned_rank(("veh_b", 1))
     assert rank_value is not None
     assert type(rank_value) is int
     assert rank_value >= 1
@@ -499,10 +504,11 @@ def test_trade_rank_items_does_not_return_internal_dict():
 
 
 def test_result_defensive_copy_of_rank_dict():
-    source_rank_dict = {("veh_a", 1): 1}
+    veh_b = ("veh_b", 1)
+    source_rank_dict = {veh_b: 1, ("veh_a", 1): 2}
     result = _direct_rank_result(trade_rank_by_visit_key=source_rank_dict)
-    source_rank_dict[("veh_a", 1)] = 99
-    assert result.assigned_rank(("veh_a", 1)) == 1
+    source_rank_dict[veh_b] = 99
+    assert result.assigned_rank(veh_b) == 1
 
 
 def test_constructor_rejects_non_concrete_set():
@@ -537,18 +543,15 @@ def test_constructor_rejects_duplicate_buyers():
         pass
 
 
-# Result-class-only minimum constructor contract: empty sellers and
-# non-participants tuples are accepted. This does not mean a normal
-# TVT-MP public build path can produce zero sellers. In valid upstream
-# results, the right-of-entry visit is a participating seller when it
-# lies inside trade_scope.
-def test_constructor_accepts_empty_sellers_and_nonparticipants():
-    result = _direct_rank_result(
-        sellers_sorted=(),
-        nonparticipating_visits_sorted=(),
-    )
-    assert result.sellers_sorted == ()
-    assert result.nonparticipating_visits_sorted == ()
+def test_constructor_rejects_empty_sellers_sorted():
+    try:
+        _direct_rank_result(
+            sellers_sorted=(),
+            nonparticipating_visits_sorted=(),
+        )
+        raise AssertionError("Expected ValueError")
+    except ValueError:
+        pass
 
 
 def test_constructor_rejects_list_for_sellers_sorted():
@@ -625,12 +628,9 @@ def test_constructor_rejects_list_for_trade_order():
 def test_constructor_rejects_duplicate_trade_order():
     try:
         _direct_rank_result(
-            trade_order=(("veh_a", 1), ("veh_a", 1)),
-            trade_rank_by_visit_key={("veh_a", 1): 1, ("veh_b", 1): 2},
-            buyers_sorted=(("veh_b", 1),),
-            sellers_sorted=(),
+            trade_order=(("veh_b", 1), ("veh_b", 1)),
+            trade_rank_by_visit_key={("veh_b", 1): 1, ("veh_a", 1): 2},
             trade_scope=(("veh_a", 1), ("veh_b", 1)),
-            last_buyer_rank=2,
         )
         raise AssertionError("Expected ValueError")
     except ValueError:
@@ -2471,7 +2471,7 @@ TESTS = [
     test_constructor_rejects_list_for_buyers_sorted,
     test_constructor_rejects_empty_buyers_sorted,
     test_constructor_rejects_duplicate_buyers,
-    test_constructor_accepts_empty_sellers_and_nonparticipants,
+    test_constructor_rejects_empty_sellers_sorted,
     test_constructor_rejects_list_for_sellers_sorted,
     test_constructor_rejects_duplicate_sellers_sorted,
     test_constructor_rejects_list_for_nonparticipating_visits_sorted,

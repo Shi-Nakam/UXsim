@@ -179,7 +179,7 @@ def _candidate_local_result(
     *,
     node_name: str = "merge",
     buyer_keys=None,
-    seller_names=(),
+    seller_names=("seller_a",),
 ):
     if buyer_keys is None:
         buyer_keys = (_visit_key("buyer_a"),)
@@ -283,7 +283,7 @@ def _candidate_economic_result(
     *,
     node_name: str = "merge",
     buyer_keys=None,
-    seller_names=(),
+    seller_names=("seller_a",),
     surplus=3.0,
     total_buyer_value_G=None,
     total_required_compensation_R=1.0,
@@ -819,7 +819,6 @@ def test_buyer_count_is_the_second_criterion():
         buyer_keys=(_visit_key("buyer_b"), _visit_key("buyer_c")),
         surplus=4.0,
         total_required_compensation_R=1.0,
-        seller_names=(),
     )
     result = _select(_economic_set([("merge", [one_buyer, two_buyers])]), world)
     node_result = result.node_candidate_selection_results[0]
@@ -835,7 +834,6 @@ def test_seller_count_party_total_and_trade_scope_are_not_used():
         buyer_keys=(_visit_key("buyer_a"),),
         surplus=3.0,
         total_required_compensation_R=1.0,
-        seller_names=(),
     )
     many_sellers = _candidate_economic_result(
         buyer_keys=(_visit_key("buyer_b"),),
@@ -853,7 +851,6 @@ def test_seller_count_party_total_and_trade_scope_are_not_used():
         buyer_keys=(_visit_key("buyer_a"),),
         surplus=4.0,
         total_required_compensation_R=1.0,
-        seller_names=(),
     )
     tied_many_sellers = _candidate_economic_result(
         buyer_keys=(_visit_key("buyer_b"),),

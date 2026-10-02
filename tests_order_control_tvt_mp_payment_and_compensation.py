@@ -733,21 +733,6 @@ def test_multiple_buyers_keep_saved_order_and_formula():
     assert payments[1].payment_P_b == 2.0
 
 
-def test_zero_sellers_gives_zero_payments():
-    candidate = _candidate_economic_result(
-        buyer_records=(_buyer_record("buyer_a", G_b=5.0),),
-        seller_records=(),
-    )
-    economic_set = _economic_set([("merge", [candidate])])
-    result = _calculate(
-        _selection_set(economic_set, [_selected_node_result("merge", candidate)])
-    )
-    node_result = result.node_payment_and_compensation_results[0]
-    assert node_result.seller_compensation_records == ()
-    assert candidate.total_required_compensation_R == 0.0
-    assert node_result.buyer_payment_records[0].payment_P_b == 0.0
-
-
 def test_multiple_sellers_keep_saved_order():
     sellers = (
         _seller_record("seller_a", R_s=1.0),
@@ -825,7 +810,7 @@ def test_node_order_is_preserved():
     second = _candidate_economic_result(
         node_name="other",
         buyer_records=(_buyer_record("buyer_b", G_b=8.0),),
-        seller_records=(),
+        seller_records=(_seller_record("seller_b", R_s=2.0),),
     )
     economic_set = _economic_set([("merge", [first]), ("other", [second])])
     result = _calculate(
@@ -1200,7 +1185,7 @@ def test_rejects_empty_buyers_and_bad_g_b_or_r_s():
 
     nonpositive_g_b = _candidate_economic_result(
         buyer_records=(_buyer_record("buyer_a", G_b=0.0),),
-        seller_records=(),
+        seller_records=(_seller_record("seller_a", R_s=0.0),),
         economically_feasible=True,
         total_buyer_value_G=0.0,
         total_required_compensation_R=0.0,
@@ -1287,7 +1272,7 @@ def test_one_node_inconsistency_stops_later_nodes_without_partial_result():
     later = _candidate_economic_result(
         node_name="other",
         buyer_records=(_buyer_record("buyer_b", G_b=8.0),),
-        seller_records=(),
+        seller_records=(_seller_record("seller_b", R_s=2.0),),
     )
     economic_set = _economic_set([("merge", [bad]), ("other", [later])])
     selection_set = _selection_set(
