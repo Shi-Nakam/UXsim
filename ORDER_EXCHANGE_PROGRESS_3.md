@@ -697,3 +697,41 @@
 - `diagnostics/order_control.zip` を stage しない
 - commit と push を分離する
 - 実装結果は第4巻と進捗第3巻の双方へ追記する
+
+# TVT-MP actual passage基盤 実装項目2 実装完了要約（2026-10-02）
+
+詳細設計第4巻の同日実装結果節（「TVT-MP actual passage基盤 実装項目2 実装・検証結果（2026-10-02）」）を正式参照先として、次を記録する。
+
+- atomic apply成功後のregistry一括登録を実装
+- buyers_sortedをVisitKey tupleへ訂正
+- buyer・seller・nonparticipating全件をproposal化
+- buyer・sellerは成立時recordの検査済みtrue VOT
+- nonparticipatingはcandidate observationの凍結true VOT
+- buyer・sellerはOBSERVED必須
+- nonparticipatingはOBSERVEDまたはUNOBSERVED_AT_HORIZON
+- 全Node proposalをcommit前に重複検査
+- replacement dictをprepare
+- rank、money、log commit後にregistryを一括反映
+- 失敗時はrank、money、log、registry、registry dict objectを変更しない
+- Node.transfer以降へ未接続
+- 検証:
+  - 67 passed
+  - TVT-MP既存関連354 passed
+  - 合計421 passed
+  - FCFS・BATCH 366 passed
+  - py_compile成功
+  - git diff --check成功
+- 変更はコード・テスト4ファイル
+- diagnostics/order_control.zipは未追跡のまま
+
+## 最新の再開地点（2026-10-02・実装項目2完了後）
+
+**本節が、実装項目2完了後の最新再開地点である。** 同日の実装項目2設計確定後の再開地点は履歴として残す。
+
+- 実装項目2のコードは現在未コミット
+- 検証と独立確認は完了
+- 次にコード4ファイルをstage、確認、commit、pushする
+- コード保存後、この実装結果文書を別のdocumentコミットとして保存する
+- commitとpushを分離する
+- diagnostics/order_control.zipをstageしない
+- コード保存と文書保存が終わるまで実装項目3へ進まない

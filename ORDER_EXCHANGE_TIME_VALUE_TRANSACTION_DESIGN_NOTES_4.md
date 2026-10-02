@@ -5853,3 +5853,287 @@ Cursor 調査だけで確定せず、Terminal で次を直接確認したこと�
 - current actual passage 型の `buyers_sorted` 型不整合
 
 独立確認の結果、**BLOCKER はなく、利用者判断事項も残っていない。** 実装項目2を上記設計で一意に実装できる。
+
+# TVT-MP actual passage基盤 実装項目2 実装・検証結果（2026-10-02）
+
+## 1. 実装結果
+
+実装項目2
+「atomic apply成功後のregistry一括登録」
+を完全実装前設計に基づいて実装した。
+
+変更ファイル:
+
+- uxsim/order_control_tvt_mp_actual_passage.py
+- uxsim/order_control_tvt_mp_atomic_apply.py
+- tests_order_control_tvt_mp_actual_passage.py
+- tests_order_control_tvt_mp_atomic_apply.py
+
+コード差分全体:
+
+- 4 files changed
+- 1375 insertions
+- 65 deletions
+
+## 2. buyers_sorted型訂正
+
+actual passage型のbuyers_sortedを、誤っていた
+
+tuple[str, ...]
+
+から、正式な次の型へ訂正した。
+
+tuple[OrderControlTvtVisitKey, ...]
+
+訂正対象:
+
+- OrderControlTvtMpActualPassageObservationRecord
+- OrderControlTvtMpActualPassageWaitEntry
+- OrderControlTvtMpActualPassageTradeWait
+- registryのtransaction key
+- actual passage専用テストfixture
+
+正式なtransaction key:
+
+(tvt_decision_timestep, node_name, buyers_sorted)
+
+buyers_sortedはbuyer Vehicle名のtupleではなく、buyer VisitKeyのtupleである。
+
+## 3. prepare用内部型
+
+atomic applyへ次の非公開prepare型を追加した。
+
+- _PreparedActualPassageProposal
+- _PreparedActualPassageRegistryReplacement
+
+_PreparedActualPassageProposalは、1 selected Node分のWaitEntry tupleとTradeWaitを保持する。
+
+_PreparedActualPassageRegistryReplacementは、次を保持する。
+
+- 対象registry
+- 全proposal反映済みentry replacement dict
+- 全proposal反映済みtransaction replacement dict
+
+prepare中はlive registryを変更しない。
+
+## 4. 成立時recordの直接受渡し
+
+_PreparedVehicleUpdateへ次を追加した。
+
+establishment_record:
+OrderControlTvtMpTradeEstablishmentLogRecord
+
+_prepare_one_money_recordが作成した同じestablishment_record objectを、次の両方へ使用する。
+
+- updated_order_exchange_logへappend
+- _PreparedVehicleUpdate.establishment_recordへ保存
+
+registry proposalはvehicle_update.establishment_recordを直接参照する。
+
+更新後logの末尾から成立時recordを逆探索しない。
+buyer・sellerのlive Vehicle.vot_trueをregistry proposal作成時に再読取しない。
+
+専用テストで、次を確認した。
+
+- prepared updateが保持するestablishment_record
+- updated_order_exchange_log末尾のrecord
+- commit後のVehicle.order_exchange_log内record
+
+これらが同じobjectである。
+
+## 5. selected Nodeのregistration proposal
+
+selected candidateの次の経路からtraffic observationを取得する。
+
+selected candidate economic result
+→ candidate local virtual calculation result
+→ traffic_observation_records
+
+traffic observationの順序を維持して、buyer、seller、nonparticipating全件のWaitEntryとTradeWaitをprepareする。
+
+fallbackとNO_VISITS_TO_CONFIRMではproposalを作らない。
+
+## 6. role別true VOT正本
+
+buyer・seller:
+
+- 成立時recordに保存したtrue_vot_per_second
+- _prepare_one_money_recordで検査済みの値
+- registry proposal時にlive Vehicle.vot_trueを再読取しない
+
+nonparticipating:
+
+- candidate traffic observationに凍結されたtrue_vot_per_second
+- live Vehicle.vot_trueを読まない
+
+## 7. role別status制約
+
+buyer・seller:
+
+- OBSERVED必須
+- UNOBSERVED_AT_HORIZONはRuntimeError
+- NoneもRuntimeError
+
+nonparticipating:
+
+- OBSERVEDを許容
+- UNOBSERVED_AT_HORIZONを許容
+- NoneはRuntimeError
+
+UNOBSERVED_AT_HORIZONのnonparticipatingも、actual passage待機registryへ登録する。
+
+## 8. candidate保存値の引継ぎ
+
+WaitEntryのbaseline_minus_candidate 3値は、candidate traffic observationの既存fieldから名前を変えてコピーする。
+
+baseline_minus_candidate_passage_timesteps
+=
+predicted_time_difference_timesteps
+
+baseline_minus_candidate_passage_seconds
+=
+predicted_time_difference_seconds
+
+baseline_minus_candidate_time_value
+=
+predicted_signed_time_value_change
+
+atomic applyでDELTATを読み直したり、secondsとtime valueを再計算したりしない。
+
+## 9. 追加した不変条件
+
+prepareで次を検査する。
+
+- traffic_observation_recordsとtrade_scopeがtuple
+- 件数、順序、VisitKey、roleが一致
+- VisitKey重複なし
+- vehicle_nameとVisitKey先頭要素が一致
+- roleはbuyer、seller、nonparticipatingのみ
+- buyer・seller成立時recordとの一対一対応
+- baseline passageとcandidate passageの一致
+- nonparticipatingに成立時recordがない
+- role別status制約
+- OBSERVEDではbaseline passageとcandidate passageがPython int
+- OBSERVEDではpredicted_time_difference_timestepsが次の正式式と完全一致
+
+predicted_time_difference_timesteps
+=
+baseline_passage_timestep - candidate_passage_timestep
+
+- UNOBSERVED_AT_HORIZONではcandidate passageとpredicted 3値がNone
+
+seconds値とtime valueの式はatomic applyで再計算しない。
+DELTATを再読取しない。
+
+## 10. 全Node一括検査とreplacement
+
+全Node分の既存prepareとregistration proposal作成後、commit開始前に次を検査する。
+
+- proposal内entry key重複
+- proposal内transaction key重複
+- 既存registryとのentry key重複
+- 既存registryとのtransaction key重複
+
+entry key:
+
+(node_name, visit_key)
+
+transaction key:
+
+(tvt_decision_timestep, node_name, buyers_sorted)
+
+既存registryの2つのdictをコピーし、全proposal反映済みreplacement dictを完成させる。
+
+live registryへ逐次追加しない。
+
+## 11. commit順
+
+既存commit順を維持した。
+
+1. rank state
+2. payment_paid
+3. payment_received
+4. order_exchange_log
+5. actual passage wait registryのreplacement dict
+
+registry反映はreturn直前である。
+
+commit中には検索、照合、検査、再計算を行わない。
+
+selected Nodeが0件なら、registryの既存dict objectを置き換えない。
+
+## 12. 失敗時のatomic性
+
+prepareまたはregistry検査に失敗した場合、次をすべて変更しない。
+
+- rank state
+- payment_paid
+- payment_received
+- order_exchange_log
+- registry entry mapping
+- registry transaction mapping
+- registry内部dict object
+
+複数Nodeの途中で失敗しても、先行Node分だけをregistryへ登録しない。
+
+## 13. テストと独立確認
+
+Cursorの報告だけで確定せず、Terminalで次を独立確認した。
+
+- prepare用内部型
+- 全Node proposal集約
+- replacement dict作成位置
+- registry commit位置
+- 成立時recordの直接受渡し
+- live true VOTを再読取していないこと
+- role別status制約
+- baseline passageのPython int検査
+- baseline minus candidateの完全一致検査
+- 失敗時のruntime snapshot不変
+- registry内容とdict object不変
+
+検証結果:
+
+- actual passage専用テストとatomic applyテスト:
+  67 passed
+- TVT-MP既存関連8ファイル:
+  354 passed
+- 上記合計:
+  421 passed
+- FCFS・BATCH:
+  366 passed
+  実行時間約5分27秒
+- py_compile:
+  成功
+- git diff --check:
+  成功
+
+UXsim正式サンプルは、実装項目2では再実行していない。
+重要実装段階または最終仕上げ項目で再実行する。
+
+## 14. 範囲外
+
+今回接続していないもの:
+
+- Node.transfer
+- actual passage observer
+- actual observation record生成
+- actual recordのVehicle.order_exchange_log追加
+- evaluation end
+- 未観測確定
+- buyer・seller完了通知
+- ex-post evaluation
+- Vehicle別role評価
+- nonparticipating actual外部効果計算
+- 実験出力と集計
+
+交通動作は変更していない。
+既存成立時logの意味も変更していない。
+
+## 15. 次の作業
+
+次はactual系の実装項目3へ進む。
+
+実装項目3の正式内容は、現在の工程計画と依存関係を再確認してから開始する。
+
+コード実装前に、詳細設計第4巻と進捗第3巻の双方へ完全実装前設計を記録する。
