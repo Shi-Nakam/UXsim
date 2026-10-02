@@ -768,3 +768,39 @@
 - commitとpushを分離する
 - diagnostics/order_control.zipをstageしない
 - 実装結果は第4巻と進捗第3巻の双方へ追記する
+
+# TVT-MP actual passage基盤 実装項目3 実装完了要約（2026-10-02）
+
+正式参照先は、詳細設計第4巻の同日節「TVT-MP actual passage基盤 実装項目3 実装・検証結果（2026-10-02）」である。
+
+- 実WorldのTVT物理通過成功にactual passage observationを接続
+- prepareは物理移動前
+- 物理移動、clearance更新、commitの順
+- entryなしの確定Visitは正常に無視
+- baseline forkでは非実行
+- frozen recordをVehicle logとWaitEntryへ同じobjectとして保存
+- statusをACTUAL_PASSAGE_OBSERVEDへ変更
+- entryはregistryへ残す
+- 3組9 field
+- candidate未観測nonparticipatingのcandidate系はNone
+- TradeWaitと完了通知以降へ未接続
+- 検証:
+  - 69 passed
+  - TVT-MP関連474 passed
+  - FCFS・BATCH 366 passed
+  - py_compile成功
+  - git diff --check成功
+- 変更はコード・テスト4ファイル
+- diagnostics/order_control.zipは未追跡のまま
+
+## 最新の再開地点（2026-10-02・実装項目3完了後）
+
+**本節が、実装項目3完了後の最新再開地点である。** 同日の実装項目3設計確定後の再開地点は履歴として残す。
+
+- 実装項目3のコードは現在未コミット
+- 検証と独立確認は完了
+- 次にコード4ファイルをstage、確認、commit、pushする
+- コード保存後、この実装結果文書を別のdocumentコミットとして保存する
+- commitとpushを分離する
+- diagnostics/order_control.zipをstageしない
+- コード保存と文書保存が終わるまで実装項目4へ進まない

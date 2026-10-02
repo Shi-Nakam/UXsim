@@ -6650,3 +6650,342 @@ Cursor報告だけで確定せず、Terminalで次を直接確認した。
 
 独立確認の結果、BLOCKERはない。
 利用者判断事項も残っていない。
+
+# TVT-MP actual passage基盤 実装項目3 実装・検証結果（2026-10-02）
+
+## 1. 実装結果
+
+実装項目3として、実WorldのTVT物理通過成功時にactual passage observationを記録する処理を実装した。
+
+変更ファイル:
+
+- uxsim/order_control_tvt_mp_actual_passage.py
+- uxsim/order_control_tvt_mp_physical_transfer.py
+- tests_order_control_tvt_mp_actual_passage.py
+- tests_order_control_tvt_mp_physical_transfer.py
+
+コード差分:
+
+- 4 files changed
+- 1167 insertions
+- 4 deletions
+
+今回実装したもの:
+
+- actual passage observationのprepare
+- 実WorldのTVT物理通過成功への接続
+- frozen actual passage observation recordの生成
+- 3組9 field
+- Vehicle.order_exchange_logへのactual record追加
+- WaitEntryへの同じrecord objectの関連付け
+- WaitEntryのACTUAL_PASSAGE_OBSERVEDへの状態遷移
+
+## 2. prepare用内部型とAPI
+
+uxsim/order_control_tvt_mp_actual_passage.pyへ、次のfrozen非公開型を追加した。
+
+_PreparedTvtMpActualPassageObservationUpdate
+
+保持するもの:
+
+- vehicle
+- updated_order_exchange_log
+- wait_entry
+- actual_passage_observation_record
+- committed_wait_status
+
+追加した関数:
+
+prepare_tvt_mp_actual_passage_observation
+
+commit_tvt_mp_actual_passage_observation
+
+prepareは対応entryがない場合にNoneを返す。
+
+entryがある場合は、必要な検査、3組9 fieldの計算、frozen record生成、更新後log生成を行うが、live状態は変更しない。
+
+commitはprepared updateの単純代入だけを行う。
+
+## 3. 物理通過への接続順
+
+uxsim/order_control_tvt_mp_physical_transfer.pyの
+_try_confirmed_candidates
+へ接続した。
+
+正式な順序:
+
+1. actual passage observationをprepare
+2. node._transfer_one_vehicle_between_links
+3. last_order_control_inlinkを更新
+4. last_order_control_entry_timestepを更新
+5. prepared actual passage observationをcommit
+
+prepareは物理移動前に行う。
+
+したがって、prepareがRuntimeErrorになった場合は物理移動前に停止し、交通状態とclearance履歴を変更しない。
+
+commitは物理移動とclearance履歴更新の後で行い、検索、検査、再計算はしない。
+
+temporary skip、容量不足、入口空間不足、clearance停止ではprepareもcommitもしない。
+
+## 4. 実World限定
+
+actual passage observationを行う条件:
+
+node.W._order_control_baseline_collector is None
+
+generic baseline forkとTVT順位適用baseline forkではprepareもcommitもしない。
+
+baseline collectorによるbaseline passage記録は既存どおり維持する。
+
+downstream boundary observerを物理通過moduleから直接呼ばない既存契約も維持した。
+
+## 5. entryなしの確定Visit
+
+entry key:
+
+(node.name, visit_key)
+
+対応WaitEntryがない場合は正常にNoneを返し、物理通過を継続する。
+
+RuntimeErrorにはしない。
+
+これにより、次の確定Visitも正常に通過できる。
+
+- trade_scope外baseline Visit
+- fallbackで確定されたVisit
+- 以前の意思決定で確定済みのVisit
+
+## 6. identityと状態検査
+
+entryが存在する場合、prepareで次を検査する。
+
+- entry.node_nameとnode.nameの一致
+- entry.visit_keyと入力VisitKeyの一致
+- entry.vehicle_nameとvehicle.nameの一致
+- wait_statusがWAITING_FOR_ACTUAL_PASSAGE
+- actual_passage_observation_recordがNone
+
+不一致はRuntimeErrorとする。
+
+観測済みentryへの重複呼出しも拒否する。
+actual recordを二重に追加しない。
+
+登録時に保証済みのrole、buyers_sorted、predicted route等を過剰に再検査しない。
+
+## 7. 時刻と値の検査
+
+actual_passage_timestep:
+
+- Python int
+- boolを拒否
+- tvt_decision_timestep以上
+- decision timestepと同時刻は許可
+
+baseline_passage_timestep:
+
+- Python int
+- boolを拒否
+
+candidate_passage_timestep:
+
+- Python intまたはNone
+
+DELTAT:
+
+- boolまたはNoneではない
+- Python intまたはfloat
+- finite
+- 正
+
+true_vot_per_second:
+
+- WaitEntryに凍結済みの値
+- live Vehicle.vot_trueを読み直さない
+- boolまたはNoneではない
+- Python intまたはfloat
+- finite
+- 0以上
+
+actual outlink名:
+
+- 空でないstr
+
+不整合はRuntimeErrorとする。
+
+丸め、tolerance、Decimalは使用しない。
+
+## 8. 3組9 field
+
+### baselineとcandidate
+
+WaitEntryの保存値をそのままrecordへコピーする。
+
+- baseline_minus_candidate_passage_timesteps
+- baseline_minus_candidate_passage_seconds
+- baseline_minus_candidate_time_value
+
+actual passage observerでは再計算しない。
+
+### baselineとactual
+
+baseline_minus_actual_passage_timesteps
+=
+baseline_passage_timestep - actual_passage_timestep
+
+baseline_minus_actual_passage_seconds
+=
+baseline_minus_actual_passage_timesteps × DELTAT
+
+baseline_minus_actual_time_value
+=
+baseline_minus_actual_passage_seconds × true_vot_per_second
+
+### candidateとactual
+
+candidate_passage_timestepがPython intの場合:
+
+candidate_minus_actual_passage_timesteps
+=
+candidate_passage_timestep - actual_passage_timestep
+
+candidate_minus_actual_passage_seconds
+=
+candidate_minus_actual_passage_timesteps × DELTAT
+
+candidate_minus_actual_time_value
+=
+candidate_minus_actual_passage_seconds × true_vot_per_second
+
+candidate_passage_timestepがNoneの場合は、candidate_minus_actualの3値をすべてNoneとする。
+
+candidateがUNOBSERVED_AT_HORIZONだったnonparticipatingでは:
+
+- baseline_minus_candidateの3値はNone
+- baseline_minus_actualの3値は計算
+- candidate_minus_actualの3値はNone
+
+## 9. frozen actual observation record
+
+生成する型:
+
+OrderControlTvtMpActualPassageObservationRecord
+
+情報源:
+
+- 取引識別、Visit識別、role、predicted情報、baseline passage、candidate passage、true VOT:
+  WaitEntry
+- observation_status:
+  ACTUAL_PASSAGE_OBSERVED
+- baseline_minus_candidate:
+  WaitEntry保存値
+- baseline_minus_actual:
+  actual passage時に計算
+- candidate_minus_actual:
+  candidate passageがあれば計算、なければNone
+- actual_passage_timestep:
+  node.W.T
+- actual_route_next_link_name:
+  物理移動前に保存したcandidate.outlink.name
+
+移動後のVehicle.order_control_current_visitから旧VisitKeyを再取得しない。
+
+role別saving、delay、signed differenceは今回生成しない。
+
+## 10. Vehicle logとWaitEntryの更新
+
+prepareでvehicle.order_exchange_logがlistであることを検査する。
+
+live listへappendせず、コピーへactual observation recordを追加する。
+
+commit順:
+
+1. vehicle.order_exchange_logを更新後listへ置換
+2. wait_entry.actual_passage_observation_recordへrecordを設定
+3. wait_entry.wait_statusをACTUAL_PASSAGE_OBSERVEDへ変更
+
+Vehicle logとWaitEntryには同じfrozen record objectを保存する。
+
+観測後もWaitEntryをregistryから削除しない。
+
+TradeWaitは変更しない。
+
+## 11. module docstring
+
+order_control_tvt_mp_physical_transfer.pyの旧説明を更新した。
+
+実装後の契約:
+
+- 実Worldではactual passage observationを記録する
+- actual outcome、ex-post evaluation、role別評価は実装しない
+- downstream boundary observerは直接呼ばない
+
+## 12. テストと独立確認
+
+Cursor報告だけで確定せず、Terminalで次を独立確認した。
+
+- 変更範囲が指定4ファイルだけであること
+- prepared updateがfrozenであること
+- prepareとcommitの分離
+- prepare、物理移動、clearance更新、commitの順序
+- baseline forkで呼ばないこと
+- entryなしの正常return
+- identityと待機状態の検査
+- actual時刻とdecision時刻の検査
+- baseline・candidate timestepの型検査
+- DELTATと凍結true VOTの検査
+- actual route名の検査
+- baseline_minus_candidateを再計算していないこと
+- candidate未観測時のNone
+- commitが単純代入だけであること
+- temporary skip、容量不足、clearance停止、baseline forkのテスト
+- prepare失敗時の物理状態非変更
+
+検証結果:
+
+- actual passage専用テストと物理通過専用テスト:
+  69 passed
+- TVT-MP関連11ファイル:
+  474 passed
+- FCFS・BATCH:
+  366 passed
+  実行時間約5分33秒
+- py_compile:
+  成功
+- git diff --check:
+  成功
+
+UXsim正式サンプルは実装項目3では再実行していない。
+重要実装段階または最終仕上げ項目で再実行する。
+
+## 13. 範囲外
+
+今回変更していないもの:
+
+- TradeWait
+- buyer・seller完了検出
+- completion flag
+- ex-post evaluation
+- Vehicle別role評価
+- nonparticipating actual外部効果集計
+- evaluation end
+- 未観測確定
+- 実験出力
+- Node.transfer
+- atomic apply
+
+正式支払額と正式補償額は変更していない。
+
+## 14. 次の作業
+
+次はactual系の実装項目4へ進む。
+
+実装項目4の正式範囲は、現在の工程計画と依存関係を確認してから確定する。
+
+有力候補:
+
+- buyer・seller全員のactual passage完了検出
+- TradeWaitのcompletion flag
+- 完了通知または後続評価起動境界
+
+コード実装前に、詳細設計第4巻と進捗第3巻の双方へ完全実装前設計を記録する。
