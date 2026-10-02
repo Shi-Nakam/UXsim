@@ -17,6 +17,9 @@ import dill as pickle
 from .analyzer import *
 from .utils import *
 from .scenario_reader_writer import *
+from uxsim.order_control_tvt_mp_actual_passage import (
+    OrderControlTvtMpActualPassageWaitRegistry,
+)
 
 
 def _validate_order_control_batch_t_trigger_level(value, node_name=None):
@@ -4169,6 +4172,9 @@ class World:
         W.order_control_tvt_driver_started_timestep = None
         W.order_control_tvt_baseline_horizon_steps = 6
         W.order_control_tvt_max_candidate_visit_count = None
+        W.order_control_tvt_mp_actual_passage_wait_registry = (
+            OrderControlTvtMpActualPassageWaitRegistry()
+        )
         # Last timestep that still runs real traffic and TVT. None keeps
         # ordinary TSIZE termination and does not auto-start the driver.
         W.order_control_tvt_evaluation_end_timestep = None
