@@ -105,7 +105,7 @@ def _base_observation_record_kwargs(
     return {
         "tvt_decision_timestep": 10,
         "node_name": "node_a",
-        "buyers_sorted": ("buyer_1",),
+        "buyers_sorted": (_sample_visit_key("buyer_1", 1),),
         "visit_key": visit_key,
         "vehicle_name": visit_key[0],
         "role": role,
@@ -193,6 +193,7 @@ def test_observation_record_observed_with_actual_values():
             candidate_minus_actual_time_value=_CANDIDATE_MINUS_ACTUAL_TIME_VALUE,
         )
     )
+    assert record.buyers_sorted == (_sample_visit_key("buyer_1", 1),)
     assert record.actual_passage_timestep == _TEST_ACTUAL_PASSAGE_TIMESTEP_OBSERVED
     assert record.actual_route_next_link_name == "link_actual"
     assert (
@@ -294,7 +295,7 @@ def test_wait_entry_wait_status_is_mutable():
     entry = OrderControlTvtMpActualPassageWaitEntry(
         tvt_decision_timestep=1,
         node_name="n",
-        buyers_sorted=("b",),
+        buyers_sorted=(_sample_visit_key("b", 1),),
         visit_key=visit_key,
         vehicle_name=visit_key[0],
         role=OrderControlTvtMpActualPassageRole.BUYER,
@@ -322,7 +323,7 @@ def test_trade_wait_notification_flag_is_mutable():
     trade = OrderControlTvtMpActualPassageTradeWait(
         tvt_decision_timestep=3,
         node_name="node_trade",
-        buyers_sorted=("buyer_a",),
+        buyers_sorted=(_sample_visit_key("buyer_a", 1),),
         all_visit_keys=(buyer_key, seller_key, nonpart_key),
         buyer_visit_keys=(buyer_key,),
         seller_visit_keys=(seller_key,),
@@ -401,7 +402,7 @@ def test_trade_wait_holds_distinct_visit_keys_by_role():
     trade = OrderControlTvtMpActualPassageTradeWait(
         tvt_decision_timestep=5,
         node_name="role_node",
-        buyers_sorted=("b1",),
+        buyers_sorted=(_sample_visit_key("b1", 1),),
         all_visit_keys=(buyer_key, seller_key, nonpart_key),
         buyer_visit_keys=(buyer_key,),
         seller_visit_keys=(seller_key,),
@@ -420,7 +421,7 @@ def test_registry_entry_mapping_uses_node_name_and_visit_key():
     entry = OrderControlTvtMpActualPassageWaitEntry(
         tvt_decision_timestep=2,
         node_name=node_name,
-        buyers_sorted=("x",),
+        buyers_sorted=(_sample_visit_key("x", 1),),
         visit_key=visit_key,
         vehicle_name="map_v",
         role=OrderControlTvtMpActualPassageRole.SELLER,
@@ -441,11 +442,15 @@ def test_registry_entry_mapping_uses_node_name_and_visit_key():
 
 def test_registry_trade_mapping_uses_transaction_key():
     registry = OrderControlTvtMpActualPassageWaitRegistry()
-    transaction_key = (20, "trade_node", ("buyer_z", "buyer_y"))
+    buyers_sorted = (
+        _sample_visit_key("buyer_z", 1),
+        _sample_visit_key("buyer_y", 2),
+    )
+    transaction_key = (20, "trade_node", buyers_sorted)
     trade = OrderControlTvtMpActualPassageTradeWait(
         tvt_decision_timestep=20,
         node_name="trade_node",
-        buyers_sorted=("buyer_z", "buyer_y"),
+        buyers_sorted=buyers_sorted,
         all_visit_keys=(),
         buyer_visit_keys=(),
         seller_visit_keys=(),
@@ -453,3 +458,31 @@ def test_registry_trade_mapping_uses_transaction_key():
     )
     registry.trades_by_transaction_key[transaction_key] = trade
     assert registry.trades_by_transaction_key[transaction_key] is trade
+    assert trade.buyers_sorted == (
+        ("buyer_z", 1),
+        ("buyer_y", 2),
+    )
+    assert transaction_key[2] == trade.buyers_sorted
+
+
+def test_buyers_sorted_and_transaction_key_annotations_use_visit_keys():
+    expected = "tuple[OrderControlTvtVisitKey, ...]"
+    assert (
+        OrderControlTvtMpActualPassageObservationRecord.__annotations__[
+            "buyers_sorted"
+        ]
+        == expected
+    )
+    assert (
+        OrderControlTvtMpActualPassageWaitEntry.__annotations__["buyers_sorted"]
+        == expected
+    )
+    assert (
+        OrderControlTvtMpActualPassageTradeWait.__annotations__["buyers_sorted"]
+        == expected
+    )
+    trade_annotation = OrderControlTvtMpActualPassageWaitRegistry.__annotations__[
+        "trades_by_transaction_key"
+    ]
+    assert "tuple[OrderControlTvtVisitKey, ...]" in trade_annotation
+    assert "tuple[str, ...]" not in trade_annotation

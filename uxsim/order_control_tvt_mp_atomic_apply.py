@@ -2,12 +2,14 @@
 TVT-MP atomic apply.
 
 One validated final-consistency result is one apply. Prepare every target
-Node ledger and every buyer or seller Vehicle update before the first live
-assignment. Commit only if that prepare finishes. A failure leaves every
-rank ledger, cumulative amount, and order-exchange log unchanged.
+Node ledger, every buyer or seller Vehicle update, and every actual-passage
+wait proposal before the first live assignment. Commit only if that prepare
+finishes. A failure leaves every rank ledger, cumulative amount,
+order-exchange log, and actual-passage wait registry unchanged.
 
 This module does not rerun validation, ranks, payments, or virtual
-calculations, and it does not build an actual-outcome record.
+calculations. It does not build an actual-passage observation record, and
+it does not read DELTAT again when it copies saved candidate differences.
 """
 
 from __future__ import annotations
@@ -28,8 +30,17 @@ from uxsim.order_control_tvt_candidate_visit_set import (
 from uxsim.order_control_tvt_inlink_candidate_physical_order import (
     OrderControlTvtInlinkCandidatePhysicalOrderSetResult,
 )
+from uxsim.order_control_tvt_mp_actual_passage import (
+    OrderControlTvtMpActualPassageRole,
+    OrderControlTvtMpActualPassageTradeWait,
+    OrderControlTvtMpActualPassageWaitEntry,
+    OrderControlTvtMpActualPassageWaitRegistry,
+    OrderControlTvtMpActualPassageWaitStatus,
+)
 from uxsim.order_control_tvt_mp_candidate_local_virtual_calculation import (
     OrderControlTvtMpCandidateLocalVirtualCalculationResult,
+    OrderControlTvtMpCandidatePassageObservationStatus,
+    OrderControlTvtMpCandidateTrafficObservationRecord,
 )
 from uxsim.order_control_tvt_mp_candidate_selection import (
     OrderControlTvtMpCandidateSelectionSetResult,
@@ -60,6 +71,7 @@ from uxsim.order_control_tvt_mp_general_trade_rank import (
     OrderControlTvtMpGeneralTradeRankSetResult,
 )
 from uxsim.order_control_tvt_mp_local_binding_rank_sequence import (
+    OrderControlTvtMpLocalBindingRankVisit,
     OrderControlTvtMpLocalBindingTradeRole,
 )
 from uxsim.order_control_tvt_mp_local_virtual_calculation_set import (
@@ -142,6 +154,7 @@ class _PreparedVehicleUpdate:
     updated_payment_paid: int | float
     updated_payment_received: int | float
     updated_order_exchange_log: list
+    establishment_record: OrderControlTvtMpTradeEstablishmentLogRecord
 
 
 @dataclass
@@ -150,6 +163,29 @@ class _PreparedNodeLedgerCommit:
 
     rank_state: OrderControlTvtNodeRankState
     prepared: object
+
+
+@dataclass
+class _PreparedActualPassageProposal:
+    """One selected Node's wait entries and trade wait. Not yet assigned."""
+
+    entries: tuple[OrderControlTvtMpActualPassageWaitEntry, ...]
+    trade: OrderControlTvtMpActualPassageTradeWait
+
+
+@dataclass
+class _PreparedActualPassageRegistryReplacement:
+    """Copied registry dicts with every proposal already inserted."""
+
+    registry: OrderControlTvtMpActualPassageWaitRegistry
+    entries: dict[
+        tuple[str, OrderControlTvtVisitKey],
+        OrderControlTvtMpActualPassageWaitEntry,
+    ]
+    trades: dict[
+        tuple[int, str, tuple[OrderControlTvtVisitKey, ...]],
+        OrderControlTvtMpActualPassageTradeWait,
+    ]
 
 
 def apply_tvt_mp_validated_result(
@@ -161,8 +197,9 @@ def apply_tvt_mp_validated_result(
     Apply one validated all-Node result, or change nothing.
 
     Positional arguments only. There is no per-Node or per-Vehicle public
-    apply. Prepare builds every ledger replacement and every Vehicle update
-    first. Commit assigns those prepared values and does not inspect them.
+    apply. Prepare builds every ledger replacement, every Vehicle update,
+    and every actual-passage wait proposal first. Commit assigns those
+    prepared values and does not inspect them.
     """
     validation_result = _require_validation_result(
         final_consistency_validation_set_result,
@@ -174,11 +211,13 @@ def apply_tvt_mp_validated_result(
 
     _reject_duplicate_money_vehicle_names(saved_columns)
 
+    # Prepare does not assign rank ledgers, money, logs, or the wait registry.
     node_commits: list[_PreparedNodeLedgerCommit] = []
     vehicle_updates: list[_PreparedVehicleUpdate] = []
+    passage_proposals: list[_PreparedActualPassageProposal] = []
     node_index = 0
     for final_rank_node in saved_columns.final_rank_nodes:
-        node_commit, node_vehicle_updates = _prepare_one_node(
+        node_commit, node_vehicle_updates, passage_proposal = _prepare_one_node(
             saved_columns=saved_columns,
             node_index=node_index,
             final_rank_node=final_rank_node,
@@ -190,7 +229,17 @@ def apply_tvt_mp_validated_result(
             node_commits.append(node_commit)
         for vehicle_update in node_vehicle_updates:
             vehicle_updates.append(vehicle_update)
+        if passage_proposal is not None:
+            passage_proposals.append(passage_proposal)
         node_index = node_index + 1
+
+    # Zero selected Nodes keep the registry's current dict objects.
+    prepared_registry = None
+    if len(passage_proposals) > 0:
+        prepared_registry = _prepare_actual_passage_registry_replacement(
+            real_world,
+            passage_proposals,
+        )
 
     # The success object only points at the input validation result.
     # It is built before commit and returned only after commit finishes.
@@ -212,6 +261,13 @@ def apply_tvt_mp_validated_result(
     for vehicle_update in vehicle_updates:
         vehicle_update.vehicle.order_exchange_log = (
             vehicle_update.updated_order_exchange_log
+        )
+    if prepared_registry is not None:
+        prepared_registry.registry.entries_by_node_name_and_visit_key = (
+            prepared_registry.entries
+        )
+        prepared_registry.registry.trades_by_transaction_key = (
+            prepared_registry.trades
         )
     return apply_result
 
@@ -540,7 +596,11 @@ def _prepare_one_node(
     real_world: World,
     rank_states: Mapping[str, OrderControlTvtNodeRankState],
     decision_timestep: int,
-) -> tuple[_PreparedNodeLedgerCommit | None, list[_PreparedVehicleUpdate]]:
+) -> tuple[
+    _PreparedNodeLedgerCommit | None,
+    list[_PreparedVehicleUpdate],
+    _PreparedActualPassageProposal | None,
+]:
     node_name = final_rank_node.node_name
     rank_state = _require_rank_state_for_node(rank_states, node_name)
     # Existence is required even when this Node confirms no visits.
@@ -556,57 +616,52 @@ def _prepare_one_node(
                 f"Node {node_name!r}: NO_VISITS_TO_CONFIRM has a non-empty "
                 "final rank column."
             )
-        return None, []
+        return None, [], None
 
     visit_pairs, k_confirmed_before = _require_final_rank_column_for_ledger(
         final_rank_node,
         rank_state,
         real_world,
     )
-    if len(visit_pairs) == 0:
-        # A selected Node with money rows must still be checked. An empty
-        # fallback or no-visit column has nothing to commit.
-        if status is not OrderControlTvtMpFinalRankStatus.SELECTED_CANDIDATE_RANKS:
-            return None, []
-        return None, _prepare_selected_vehicle_updates(
-            saved_columns=saved_columns,
-            node_index=node_index,
-            final_rank_node=final_rank_node,
-            payment_node=payment_node,
-            real_world=real_world,
-            decision_timestep=decision_timestep,
-            k_confirmed_before=k_confirmed_before,
+    node_commit = None
+    if len(visit_pairs) != 0:
+        outlink_names = _outlink_names_at_target_node(real_world, node_name)
+        try:
+            prepared_ledger = rank_state._prepare_formal_route_confirmation(
+                visit_pairs,
+                outlink_names,
+            )
+        except ValueError as error:
+            raise RuntimeError(
+                f"Node {node_name!r}: rank-ledger prepare rejected the final "
+                f"rank column. {error}"
+            ) from error
+        node_commit = _PreparedNodeLedgerCommit(
+            rank_state=rank_state,
+            prepared=prepared_ledger,
         )
 
-    outlink_names = _outlink_names_at_target_node(real_world, node_name)
-    try:
-        prepared_ledger = rank_state._prepare_formal_route_confirmation(
-            visit_pairs,
-            outlink_names,
-        )
-    except ValueError as error:
-        raise RuntimeError(
-            f"Node {node_name!r}: rank-ledger prepare rejected the final "
-            f"rank column. {error}"
-        ) from error
+    if status is not OrderControlTvtMpFinalRankStatus.SELECTED_CANDIDATE_RANKS:
+        # Fallback confirms ranks only. It does not open an actual-passage wait.
+        return node_commit, [], None
 
-    vehicle_updates: list[_PreparedVehicleUpdate] = []
-    if status is OrderControlTvtMpFinalRankStatus.SELECTED_CANDIDATE_RANKS:
-        vehicle_updates = _prepare_selected_vehicle_updates(
-            saved_columns=saved_columns,
-            node_index=node_index,
-            final_rank_node=final_rank_node,
-            payment_node=payment_node,
-            real_world=real_world,
-            decision_timestep=decision_timestep,
-            k_confirmed_before=k_confirmed_before,
-        )
-
-    node_commit = _PreparedNodeLedgerCommit(
-        rank_state=rank_state,
-        prepared=prepared_ledger,
+    # A selected Node with money rows must still be checked. An empty
+    # final-rank column has no ledger commit, but it can still have waits.
+    vehicle_updates = _prepare_selected_vehicle_updates(
+        saved_columns=saved_columns,
+        node_index=node_index,
+        final_rank_node=final_rank_node,
+        payment_node=payment_node,
+        real_world=real_world,
+        decision_timestep=decision_timestep,
+        k_confirmed_before=k_confirmed_before,
     )
-    return node_commit, vehicle_updates
+    passage_proposal = _prepare_actual_passage_proposal(
+        final_rank_node=final_rank_node,
+        decision_timestep=decision_timestep,
+        vehicle_updates=vehicle_updates,
+    )
+    return node_commit, vehicle_updates, passage_proposal
 
 
 def _require_status_and_money_agree(
@@ -813,6 +868,587 @@ def _prepare_selected_vehicle_updates(
     return vehicle_updates
 
 
+def _prepare_actual_passage_proposal(
+    *,
+    final_rank_node: OrderControlTvtNodeMpFinalRankResult,
+    decision_timestep: int,
+    vehicle_updates: list[_PreparedVehicleUpdate],
+) -> _PreparedActualPassageProposal:
+    """
+    Build wait entries and one trade wait for one selected Node.
+
+    The live registry is not changed here. Buyer and seller true VOT comes
+    from the establishment record already prepared for that Vehicle. A
+    nonparticipating true VOT comes from the saved traffic observation.
+    """
+    node_name = final_rank_node.node_name
+    selected = _require_selected_candidate(final_rank_node)
+    local_result = _require_local_result(selected, node_name)
+    if local_result.node_name != node_name:
+        raise RuntimeError(
+            f"Node {node_name!r}: selected local result belongs to "
+            f"{local_result.node_name!r}."
+        )
+    buyers_sorted = _require_buyers_sorted(local_result, node_name)
+    traffic_records = local_result.traffic_observation_records
+    trade_scope = (
+        local_result.binding_rank_sequence.trade_scope_of_this_candidate_visits
+    )
+    _require_traffic_observations_match_trade_scope(
+        node_name,
+        traffic_records,
+        trade_scope,
+    )
+    establishment_records = _establishment_records_from_vehicle_updates(
+        vehicle_updates,
+        node_name,
+    )
+
+    entries: list[OrderControlTvtMpActualPassageWaitEntry] = []
+    all_visit_keys: list[OrderControlTvtVisitKey] = []
+    buyer_visit_keys: list[OrderControlTvtVisitKey] = []
+    seller_visit_keys: list[OrderControlTvtVisitKey] = []
+    nonparticipating_visit_keys: list[OrderControlTvtVisitKey] = []
+    matched_establishment_visit_keys: list[OrderControlTvtVisitKey] = []
+
+    for traffic_record in traffic_records:
+        visit_key = traffic_record.visit_key
+        actual_role = _actual_passage_role(
+            traffic_record.trade_role,
+            node_name,
+            visit_key,
+        )
+        _require_role_status(
+            actual_role,
+            traffic_record.passage_observation_status,
+            node_name,
+            visit_key,
+        )
+        if (
+            actual_role is OrderControlTvtMpActualPassageRole.BUYER
+            or actual_role is OrderControlTvtMpActualPassageRole.SELLER
+        ):
+            establishment = _require_matching_establishment(
+                establishment_records,
+                traffic_record,
+                node_name=node_name,
+                buyers_sorted=buyers_sorted,
+                expected_trade_role=_establishment_role_for_actual_role(actual_role),
+            )
+            if visit_key in matched_establishment_visit_keys:
+                raise RuntimeError(
+                    f"Node {node_name!r}: VisitKey {visit_key!r} was matched "
+                    "to more than one establishment record."
+                )
+            matched_establishment_visit_keys.append(visit_key)
+            # Same checked value that was stored on the establishment record.
+            # Do not read Vehicle.vot_true again.
+            true_vot_per_second = establishment.true_vot_per_second
+        else:
+            # Saved on the traffic observation. Do not read Vehicle.vot_true.
+            true_vot_per_second = traffic_record.true_vot_per_second
+
+        # Copy the saved candidate differences. Do not recompute them.
+        entry = OrderControlTvtMpActualPassageWaitEntry(
+            tvt_decision_timestep=decision_timestep,
+            node_name=node_name,
+            buyers_sorted=buyers_sorted,
+            visit_key=visit_key,
+            vehicle_name=traffic_record.vehicle_name,
+            role=actual_role,
+            wait_status=(
+                OrderControlTvtMpActualPassageWaitStatus.WAITING_FOR_ACTUAL_PASSAGE
+            ),
+            baseline_passage_timestep=traffic_record.baseline_passage_timestep,
+            candidate_passage_timestep=traffic_record.candidate_passage_timestep,
+            true_vot_per_second=true_vot_per_second,
+            baseline_minus_candidate_passage_timesteps=(
+                traffic_record.predicted_time_difference_timesteps
+            ),
+            baseline_minus_candidate_passage_seconds=(
+                traffic_record.predicted_time_difference_seconds
+            ),
+            baseline_minus_candidate_time_value=(
+                traffic_record.predicted_signed_time_value_change
+            ),
+            predicted_observation_status=traffic_record.passage_observation_status,
+            predicted_route_next_link_name=traffic_record.route_next_link_name,
+            actual_passage_observation_record=None,
+        )
+        entries.append(entry)
+        all_visit_keys.append(visit_key)
+        if actual_role is OrderControlTvtMpActualPassageRole.BUYER:
+            buyer_visit_keys.append(visit_key)
+        elif actual_role is OrderControlTvtMpActualPassageRole.SELLER:
+            seller_visit_keys.append(visit_key)
+        else:
+            nonparticipating_visit_keys.append(visit_key)
+
+    _require_establishments_match_buyer_and_seller_observations(
+        establishment_records,
+        matched_establishment_visit_keys,
+        node_name,
+    )
+    trade = OrderControlTvtMpActualPassageTradeWait(
+        tvt_decision_timestep=decision_timestep,
+        node_name=node_name,
+        buyers_sorted=buyers_sorted,
+        all_visit_keys=tuple(all_visit_keys),
+        buyer_visit_keys=tuple(buyer_visit_keys),
+        seller_visit_keys=tuple(seller_visit_keys),
+        nonparticipating_visit_keys=tuple(nonparticipating_visit_keys),
+    )
+    return _PreparedActualPassageProposal(
+        entries=tuple(entries),
+        trade=trade,
+    )
+
+
+def _require_traffic_observations_match_trade_scope(
+    node_name: str,
+    traffic_records: object,
+    trade_scope: object,
+) -> None:
+    """Saved traffic observations and trade scope must name the same visits."""
+    if not isinstance(traffic_records, tuple):
+        raise RuntimeError(
+            f"Node {node_name!r}: traffic_observation_records must be a "
+            f"tuple; got type {type(traffic_records).__name__}."
+        )
+    if not isinstance(trade_scope, tuple):
+        raise RuntimeError(
+            f"Node {node_name!r}: trade_scope_of_this_candidate_visits must "
+            f"be a tuple; got type {type(trade_scope).__name__}."
+        )
+    if len(traffic_records) != len(trade_scope):
+        raise RuntimeError(
+            f"Node {node_name!r}: traffic observation count "
+            f"{len(traffic_records)} does not match trade scope count "
+            f"{len(trade_scope)}."
+        )
+
+    seen_visit_keys: list[OrderControlTvtVisitKey] = []
+    index = 0
+    for traffic_record in traffic_records:
+        trade_scope_visit = trade_scope[index]
+        position = index + 1
+        index = index + 1
+        if not isinstance(
+            traffic_record,
+            OrderControlTvtMpCandidateTrafficObservationRecord,
+        ):
+            raise RuntimeError(
+                f"Node {node_name!r}: traffic observation position {position} "
+                "must be OrderControlTvtMpCandidateTrafficObservationRecord; "
+                f"got type {type(traffic_record).__name__}."
+            )
+        if not isinstance(trade_scope_visit, OrderControlTvtMpLocalBindingRankVisit):
+            raise RuntimeError(
+                f"Node {node_name!r}: trade scope position {position} must be "
+                "OrderControlTvtMpLocalBindingRankVisit; got type "
+                f"{type(trade_scope_visit).__name__}."
+            )
+        visit_key = _require_saved_visit_key(
+            traffic_record.visit_key,
+            f"Node {node_name!r} traffic observation position {position}",
+        )
+        scope_visit_key = _require_saved_visit_key(
+            trade_scope_visit.visit_key,
+            f"Node {node_name!r} trade scope position {position}",
+        )
+        if visit_key != scope_visit_key:
+            raise RuntimeError(
+                f"Node {node_name!r}: traffic observation position {position} "
+                f"has VisitKey {visit_key!r}, but trade scope has "
+                f"{scope_visit_key!r}."
+            )
+        if traffic_record.trade_role is not trade_scope_visit.trade_role:
+            raise RuntimeError(
+                f"Node {node_name!r}: VisitKey {visit_key!r} has traffic "
+                f"observation role {traffic_record.trade_role!r}, but trade "
+                f"scope role {trade_scope_visit.trade_role!r}."
+            )
+        if visit_key in seen_visit_keys:
+            raise RuntimeError(
+                f"Node {node_name!r}: VisitKey {visit_key!r} is duplicated "
+                "in traffic observations and trade scope."
+            )
+        seen_visit_keys.append(visit_key)
+        if traffic_record.vehicle_name != visit_key[0]:
+            raise RuntimeError(
+                f"Node {node_name!r}: traffic observation vehicle_name "
+                f"{traffic_record.vehicle_name!r} does not match VisitKey "
+                f"{visit_key!r}."
+            )
+        _actual_passage_role(traffic_record.trade_role, node_name, visit_key)
+        _require_status_and_candidate_values(traffic_record, node_name)
+
+
+def _require_status_and_candidate_values(
+    traffic_record: OrderControlTvtMpCandidateTrafficObservationRecord,
+    node_name: str,
+) -> None:
+    """OBSERVED keeps candidate numbers. UNOBSERVED_AT_HORIZON keeps None."""
+    status = traffic_record.passage_observation_status
+    visit_key = traffic_record.visit_key
+    candidate_passage_timestep = traffic_record.candidate_passage_timestep
+    predicted_timesteps = traffic_record.predicted_time_difference_timesteps
+    predicted_seconds = traffic_record.predicted_time_difference_seconds
+    predicted_value = traffic_record.predicted_signed_time_value_change
+    if status is None:
+        raise RuntimeError(
+            f"Node {node_name!r}: VisitKey {visit_key!r} passage observation "
+            "status is None."
+        )
+    if status is OrderControlTvtMpCandidatePassageObservationStatus.OBSERVED:
+        baseline_passage_timestep = traffic_record.baseline_passage_timestep
+        if type(baseline_passage_timestep) is not int:
+            raise RuntimeError(
+                f"Node {node_name!r}: VisitKey {visit_key!r} is OBSERVED but "
+                "baseline_passage_timestep is not a Python int; got "
+                f"{baseline_passage_timestep!r}."
+            )
+        if type(candidate_passage_timestep) is not int:
+            raise RuntimeError(
+                f"Node {node_name!r}: VisitKey {visit_key!r} is OBSERVED but "
+                "candidate_passage_timestep is not a Python int; got "
+                f"{candidate_passage_timestep!r}."
+            )
+        _require_saved_predicted_number(
+            predicted_timesteps,
+            node_name,
+            visit_key,
+            "predicted_time_difference_timesteps",
+        )
+        _require_saved_predicted_number(
+            predicted_seconds,
+            node_name,
+            visit_key,
+            "predicted_time_difference_seconds",
+        )
+        _require_saved_predicted_number(
+            predicted_value,
+            node_name,
+            visit_key,
+            "predicted_signed_time_value_change",
+        )
+        expected_predicted_time_difference_timesteps = (
+            baseline_passage_timestep - candidate_passage_timestep
+        )
+        if predicted_timesteps != expected_predicted_time_difference_timesteps:
+            raise RuntimeError(
+                f"Node {node_name!r}: VisitKey {visit_key!r} "
+                "predicted_time_difference_timesteps "
+                f"{predicted_timesteps!r} does not equal baseline minus "
+                "candidate passage timesteps "
+                f"{expected_predicted_time_difference_timesteps!r}."
+            )
+        return
+    if (
+        status
+        is OrderControlTvtMpCandidatePassageObservationStatus.UNOBSERVED_AT_HORIZON
+    ):
+        if (
+            candidate_passage_timestep is not None
+            or predicted_timesteps is not None
+            or predicted_seconds is not None
+            or predicted_value is not None
+        ):
+            raise RuntimeError(
+                f"Node {node_name!r}: VisitKey {visit_key!r} is "
+                "UNOBSERVED_AT_HORIZON, so candidate passage and predicted "
+                "candidate differences must all be None."
+            )
+        return
+    raise RuntimeError(
+        f"Node {node_name!r}: VisitKey {visit_key!r} has passage observation "
+        f"status {status!r}."
+    )
+
+
+def _require_saved_predicted_number(
+    value: object,
+    node_name: str,
+    visit_key: OrderControlTvtVisitKey,
+    field_name: str,
+) -> None:
+    """Presence check only. The stored number is copied unchanged."""
+    if isinstance(value, bool) or type(value) not in (int, float):
+        raise RuntimeError(
+            f"Node {node_name!r}: VisitKey {visit_key!r} field {field_name} "
+            "must be a Python int or float when the visit is OBSERVED; "
+            f"got {value!r}."
+        )
+
+
+def _require_role_status(
+    actual_role: OrderControlTvtMpActualPassageRole,
+    status: object,
+    node_name: str,
+    visit_key: OrderControlTvtVisitKey,
+) -> None:
+    if status is None:
+        raise RuntimeError(
+            f"Node {node_name!r}: VisitKey {visit_key!r} passage observation "
+            "status is None."
+        )
+    observed = OrderControlTvtMpCandidatePassageObservationStatus.OBSERVED
+    unobserved = (
+        OrderControlTvtMpCandidatePassageObservationStatus.UNOBSERVED_AT_HORIZON
+    )
+    if (
+        actual_role is OrderControlTvtMpActualPassageRole.BUYER
+        or actual_role is OrderControlTvtMpActualPassageRole.SELLER
+    ):
+        if status is not observed:
+            raise RuntimeError(
+                f"Node {node_name!r}: {actual_role.value} VisitKey "
+                f"{visit_key!r} must be OBSERVED; got {status!r}."
+            )
+        return
+    if actual_role is OrderControlTvtMpActualPassageRole.NONPARTICIPATING:
+        if status is not observed and status is not unobserved:
+            raise RuntimeError(
+                f"Node {node_name!r}: nonparticipating VisitKey {visit_key!r} "
+                "must be OBSERVED or UNOBSERVED_AT_HORIZON; got "
+                f"{status!r}."
+            )
+        return
+    raise RuntimeError(
+        f"Node {node_name!r}: VisitKey {visit_key!r} has actual passage role "
+        f"{actual_role!r}."
+    )
+
+
+def _actual_passage_role(
+    binding_role: object,
+    node_name: str,
+    visit_key: OrderControlTvtVisitKey,
+) -> OrderControlTvtMpActualPassageRole:
+    if binding_role is OrderControlTvtMpLocalBindingTradeRole.BUYER:
+        return OrderControlTvtMpActualPassageRole.BUYER
+    if binding_role is OrderControlTvtMpLocalBindingTradeRole.SELLER:
+        return OrderControlTvtMpActualPassageRole.SELLER
+    if binding_role is OrderControlTvtMpLocalBindingTradeRole.NONPARTICIPATING:
+        return OrderControlTvtMpActualPassageRole.NONPARTICIPATING
+    raise RuntimeError(
+        f"Node {node_name!r}: VisitKey {visit_key!r} has trade role "
+        f"{binding_role!r}. Actual passage wait accepts only buyer, seller, "
+        "and nonparticipating."
+    )
+
+
+def _establishment_role_for_actual_role(
+    actual_role: OrderControlTvtMpActualPassageRole,
+) -> OrderControlTvtMpTradeEstablishmentRole:
+    if actual_role is OrderControlTvtMpActualPassageRole.BUYER:
+        return OrderControlTvtMpTradeEstablishmentRole.BUYER
+    if actual_role is OrderControlTvtMpActualPassageRole.SELLER:
+        return OrderControlTvtMpTradeEstablishmentRole.SELLER
+    raise RuntimeError(
+        f"Actual passage role {actual_role!r} has no establishment role."
+    )
+
+
+def _establishment_records_from_vehicle_updates(
+    vehicle_updates: list[_PreparedVehicleUpdate],
+    node_name: str,
+) -> list[OrderControlTvtMpTradeEstablishmentLogRecord]:
+    """Each prepared Vehicle update carries its establishment row directly."""
+    establishment_records: list[OrderControlTvtMpTradeEstablishmentLogRecord] = []
+    seen_visit_keys: list[OrderControlTvtVisitKey] = []
+    for vehicle_update in vehicle_updates:
+        establishment = vehicle_update.establishment_record
+        if not isinstance(establishment, OrderControlTvtMpTradeEstablishmentLogRecord):
+            raise RuntimeError(
+                f"Node {node_name!r}: prepared Vehicle update "
+                "establishment_record must be "
+                "OrderControlTvtMpTradeEstablishmentLogRecord; got "
+                f"type {type(establishment).__name__}."
+            )
+        if establishment.visit_key in seen_visit_keys:
+            raise RuntimeError(
+                f"Node {node_name!r}: establishment VisitKey "
+                f"{establishment.visit_key!r} is duplicated."
+            )
+        seen_visit_keys.append(establishment.visit_key)
+        establishment_records.append(establishment)
+    return establishment_records
+
+
+def _require_matching_establishment(
+    establishment_records: list[OrderControlTvtMpTradeEstablishmentLogRecord],
+    traffic_record: OrderControlTvtMpCandidateTrafficObservationRecord,
+    *,
+    node_name: str,
+    buyers_sorted: tuple[OrderControlTvtVisitKey, ...],
+    expected_trade_role: OrderControlTvtMpTradeEstablishmentRole,
+) -> OrderControlTvtMpTradeEstablishmentLogRecord:
+    visit_key = traffic_record.visit_key
+    matched = None
+    match_count = 0
+    for establishment in establishment_records:
+        if establishment.visit_key == visit_key:
+            match_count = match_count + 1
+            matched = establishment
+    if match_count != 1 or matched is None:
+        raise RuntimeError(
+            f"Node {node_name!r}: VisitKey {visit_key!r} does not match "
+            f"exactly one establishment record; found {match_count}."
+        )
+    if matched.visit_key != traffic_record.visit_key:
+        raise RuntimeError(
+            f"Node {node_name!r}: establishment VisitKey {matched.visit_key!r} "
+            f"does not match traffic observation VisitKey {visit_key!r}."
+        )
+    if matched.vehicle_name != traffic_record.vehicle_name:
+        raise RuntimeError(
+            f"Node {node_name!r}: establishment vehicle_name "
+            f"{matched.vehicle_name!r} does not match traffic observation "
+            f"vehicle_name {traffic_record.vehicle_name!r}."
+        )
+    if matched.node_name != node_name:
+        raise RuntimeError(
+            f"Node {node_name!r}: establishment node_name "
+            f"{matched.node_name!r} does not match."
+        )
+    if matched.buyers_sorted != buyers_sorted:
+        raise RuntimeError(
+            f"Node {node_name!r}: establishment buyers_sorted "
+            f"{matched.buyers_sorted!r} does not match {buyers_sorted!r}."
+        )
+    if matched.trade_role is not expected_trade_role:
+        raise RuntimeError(
+            f"Node {node_name!r}: VisitKey {visit_key!r} has establishment "
+            f"role {matched.trade_role!r}, not {expected_trade_role!r}."
+        )
+    if (
+        matched.baseline_passage_timestep
+        != traffic_record.baseline_passage_timestep
+    ):
+        raise RuntimeError(
+            f"Node {node_name!r}: VisitKey {visit_key!r} baseline passage "
+            f"{traffic_record.baseline_passage_timestep!r} does not match "
+            f"establishment baseline {matched.baseline_passage_timestep!r}."
+        )
+    if (
+        matched.candidate_passage_timestep
+        != traffic_record.candidate_passage_timestep
+    ):
+        raise RuntimeError(
+            f"Node {node_name!r}: VisitKey {visit_key!r} candidate passage "
+            f"{traffic_record.candidate_passage_timestep!r} does not match "
+            f"establishment candidate {matched.candidate_passage_timestep!r}."
+        )
+    return matched
+
+
+def _require_establishments_match_buyer_and_seller_observations(
+    establishment_records: list[OrderControlTvtMpTradeEstablishmentLogRecord],
+    matched_establishment_visit_keys: list[OrderControlTvtVisitKey],
+    node_name: str,
+) -> None:
+    if len(establishment_records) != len(matched_establishment_visit_keys):
+        raise RuntimeError(
+            f"Node {node_name!r}: buyer and seller traffic observations do "
+            "not match establishment records one to one; observations "
+            f"{len(matched_establishment_visit_keys)}, establishment records "
+            f"{len(establishment_records)}."
+        )
+    for establishment in establishment_records:
+        if establishment.visit_key not in matched_establishment_visit_keys:
+            raise RuntimeError(
+                f"Node {node_name!r}: establishment VisitKey "
+                f"{establishment.visit_key!r} has no buyer or seller traffic "
+                "observation."
+            )
+
+
+def _prepare_actual_passage_registry_replacement(
+    real_world: World,
+    passage_proposals: list[_PreparedActualPassageProposal],
+) -> _PreparedActualPassageRegistryReplacement:
+    """
+    Check keys, then copy the two registry dicts and insert every proposal.
+
+    This still runs before commit. The live dict objects are not replaced
+    and their contents are not changed.
+    """
+    registry = real_world.order_control_tvt_mp_actual_passage_wait_registry
+    if not isinstance(registry, OrderControlTvtMpActualPassageWaitRegistry):
+        raise RuntimeError(
+            "real_W.order_control_tvt_mp_actual_passage_wait_registry must "
+            "be OrderControlTvtMpActualPassageWaitRegistry; got type "
+            f"{type(registry).__name__}."
+        )
+    current_entries = registry.entries_by_node_name_and_visit_key
+    current_trades = registry.trades_by_transaction_key
+    if not isinstance(current_entries, dict) or not isinstance(current_trades, dict):
+        raise RuntimeError(
+            "actual passage wait registry must hold two dicts; got "
+            f"entries {type(current_entries).__name__} and trades "
+            f"{type(current_trades).__name__}."
+        )
+
+    seen_entry_keys: list[tuple[str, OrderControlTvtVisitKey]] = []
+    seen_transaction_keys: list[
+        tuple[int, str, tuple[OrderControlTvtVisitKey, ...]]
+    ] = []
+    for proposal in passage_proposals:
+        trade = proposal.trade
+        transaction_key = (
+            trade.tvt_decision_timestep,
+            trade.node_name,
+            trade.buyers_sorted,
+        )
+        if transaction_key in seen_transaction_keys:
+            raise RuntimeError(
+                "actual passage transaction key "
+                f"{transaction_key!r} is duplicated in this apply."
+            )
+        seen_transaction_keys.append(transaction_key)
+        for entry in proposal.entries:
+            entry_key = (entry.node_name, entry.visit_key)
+            if entry_key in seen_entry_keys:
+                raise RuntimeError(
+                    f"actual passage entry key {entry_key!r} is duplicated "
+                    "in this apply."
+                )
+            seen_entry_keys.append(entry_key)
+
+    for entry_key in seen_entry_keys:
+        if entry_key in current_entries:
+            raise RuntimeError(
+                f"actual passage entry key {entry_key!r} is already in the "
+                "wait registry."
+            )
+    for transaction_key in seen_transaction_keys:
+        if transaction_key in current_trades:
+            raise RuntimeError(
+                "actual passage transaction key "
+                f"{transaction_key!r} is already in the wait registry."
+            )
+
+    replacement_entries = dict(current_entries)
+    replacement_trades = dict(current_trades)
+    for proposal in passage_proposals:
+        trade = proposal.trade
+        transaction_key = (
+            trade.tvt_decision_timestep,
+            trade.node_name,
+            trade.buyers_sorted,
+        )
+        for entry in proposal.entries:
+            entry_key = (entry.node_name, entry.visit_key)
+            replacement_entries[entry_key] = entry
+        replacement_trades[transaction_key] = trade
+    return _PreparedActualPassageRegistryReplacement(
+        registry=registry,
+        entries=replacement_entries,
+        trades=replacement_trades,
+    )
+
+
 def _prepare_one_money_record(
     *,
     real_world: World,
@@ -952,6 +1588,7 @@ def _prepare_one_money_record(
         updated_payment_paid=updated_paid,
         updated_payment_received=updated_received,
         updated_order_exchange_log=updated_log,
+        establishment_record=establishment_record,
     )
 
 

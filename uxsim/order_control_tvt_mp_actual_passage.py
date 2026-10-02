@@ -37,7 +37,7 @@ class OrderControlTvtMpActualPassageWaitStatus(Enum):
 class OrderControlTvtMpActualPassageObservationRecord:
     tvt_decision_timestep: int
     node_name: str
-    buyers_sorted: tuple[str, ...]
+    buyers_sorted: tuple[OrderControlTvtVisitKey, ...]
     visit_key: OrderControlTvtVisitKey
     vehicle_name: str
     role: OrderControlTvtMpActualPassageRole
@@ -64,7 +64,7 @@ class OrderControlTvtMpActualPassageObservationRecord:
 class OrderControlTvtMpActualPassageWaitEntry:
     tvt_decision_timestep: int
     node_name: str
-    buyers_sorted: tuple[str, ...]
+    buyers_sorted: tuple[OrderControlTvtVisitKey, ...]
     visit_key: OrderControlTvtVisitKey
     vehicle_name: str
     role: OrderControlTvtMpActualPassageRole
@@ -86,7 +86,7 @@ class OrderControlTvtMpActualPassageWaitEntry:
 class OrderControlTvtMpActualPassageTradeWait:
     tvt_decision_timestep: int
     node_name: str
-    buyers_sorted: tuple[str, ...]
+    buyers_sorted: tuple[OrderControlTvtVisitKey, ...]
     all_visit_keys: tuple[OrderControlTvtVisitKey, ...]
     buyer_visit_keys: tuple[OrderControlTvtVisitKey, ...]
     seller_visit_keys: tuple[OrderControlTvtVisitKey, ...]
@@ -101,6 +101,6 @@ class OrderControlTvtMpActualPassageWaitRegistry:
         OrderControlTvtMpActualPassageWaitEntry,
     ] = field(default_factory=dict)
     trades_by_transaction_key: dict[
-        tuple[int, str, tuple[str, ...]],
+        tuple[int, str, tuple[OrderControlTvtVisitKey, ...]],
         OrderControlTvtMpActualPassageTradeWait,
     ] = field(default_factory=dict)
