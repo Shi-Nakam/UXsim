@@ -6137,3 +6137,516 @@ UXsim正式サンプルは、実装項目2では再実行していない。
 実装項目3の正式内容は、現在の工程計画と依存関係を再確認してから開始する。
 
 コード実装前に、詳細設計第4巻と進捗第3巻の双方へ完全実装前設計を記録する。
+
+# TVT-MP actual passage基盤 実装項目3 完全実装前設計（2026-10-02）
+
+**本節が、actual passage 基盤実装項目3の完全実装前設計の正式参照先である。** 実装項目2の実装・検証結果（同日、直前）は当時の記録として残す。本節はコード実装前の仕様であり、実装結果の記録ではない。
+
+## 1. 目的
+
+実装項目3の目的は、実WorldでTVT確定Visitが対象Nodeを物理通過した事実を、その通過成功時刻・実際の通過先とともにactual passage observationとして記録することである。
+
+今回含める:
+
+- 実WorldのTVT物理通過成功への接続
+- actual passage記録のprepare
+- World側WaitEntryとの照合
+- frozen actual passage observation record生成
+- 3組9 fieldの保存
+- Vehicle.order_exchange_logへのactual record追加
+- WaitEntryへの同じrecord objectの関連付け
+- WaitEntryのACTUAL_PASSAGE_OBSERVEDへの状態遷移
+
+今回含めない:
+
+- TradeWaitの更新
+- buyer・seller全員の完了検出
+- buyer_seller_actual_passage_completion_notifiedの更新
+- ex-post evaluation
+- Vehicle別role評価
+- nonparticipating外部効果集計
+- evaluation endでの未観測確定
+- 実験出力・集計
+
+## 2. 正本となる通過位置
+
+actual passage記録の正本は、実WorldにおけるTVT物理通過成功である。
+
+接続位置:
+
+uxsim/order_control_tvt_mp_physical_transfer.py
+の
+_try_confirmed_candidates
+
+物理通過成功は次の正常終了で確定する。
+
+node._transfer_one_vehicle_between_links(
+    vehicle,
+    inlink,
+    outlink,
+)
+
+actual passage timestep:
+
+node.W.T
+
+actual route:
+
+移動前に保存したcandidate.outlink.name
+
+旧VisitKey:
+
+移動前に保存したcandidate.visit_key
+
+移動後のVehicle.order_control_current_visitから旧VisitKeyを再取得しない。
+理由は、物理移動中にbegin_order_control_visit_on_link_entryが呼ばれ、current visitが次Node向けに更新または消去されるためである。
+
+## 3. 実World限定
+
+actual passage observationを行うのは、次の場合だけである。
+
+node.W._order_control_baseline_collector is None
+
+generic baseline forkとTVT順位適用baseline forkではactual passage observationをprepareもcommitもしない。
+
+baseline collectorによるbaseline passage記録は既存どおり維持する。
+
+downstream boundary observerは今回のactual passage observerとは別である。
+物理通過moduleからdownstream boundary observerを直接呼ばない既存契約は変更しない。
+
+## 4. registry entryなしの通過
+
+entry key:
+
+(node.name, candidate.visit_key)
+
+registryに対応entryがない場合は、正常に記録対象外として扱う。
+
+RuntimeErrorにしない。
+
+理由:
+
+rank ledgerには次のようなactual passage registry対象外Visitも存在する。
+
+- selected candidateのtrade_scope外baseline Visit
+- fallbackで確定されたVisit
+- 以前の意思決定で確定済みのVisit
+
+これらも正常にTVT物理通過する。
+
+## 5. prepareとcommitの分離
+
+actual passage observationは、物理移動後に初めて検査・計算する単一observerにはしない。
+
+正式な順序:
+
+1. actual passage observationをprepare
+2. 物理移動
+3. order-control clearance履歴更新
+4. prepared actual passage observationをcommit
+
+prepareは物理移動前に行う。
+
+prepareで行うもの:
+
+- registryとentryの取得
+- entryなしならNoneを返す
+- identity検査
+- wait状態検査
+- actual時刻検査
+- DELTAT検査
+- 凍結true VOT検査
+- actual outlink名検査
+- 3組9 fieldの生成
+- frozen observation record生成
+- 更新後Vehicle.order_exchange_logの生成
+
+prepare中に変更しないもの:
+
+- Vehicle.order_exchange_log
+- WaitEntry
+- 交通状態
+- clearance履歴
+- registry mapping
+- TradeWait
+
+prepareがRuntimeErrorになった場合、物理移動前に停止する。
+
+物理移動後のcommitは、検索、照合、検査、計算を伴わない単純代入だけとする。
+
+新しいrollbackは実装しない。
+
+## 6. API
+
+uxsim/order_control_tvt_mp_actual_passage.pyへ、次の責務を持つ関数を追加する。
+
+推奨関数:
+
+prepare_tvt_mp_actual_passage_observation(
+    *,
+    node,
+    vehicle,
+    visit_key,
+    actual_outlink,
+    actual_passage_timestep,
+)
+
+戻り値:
+
+- 対応WaitEntryがない場合: None
+- 対応WaitEntryがある場合: prepared actual passage update
+
+commit関数:
+
+commit_tvt_mp_actual_passage_observation(
+    prepared_update,
+)
+
+commit関数はprepared updateがNoneのときは呼ばない。
+
+必要最小限の非公開frozen dataclassを用意する。
+
+例:
+
+_PreparedTvtMpActualPassageObservationUpdate
+
+保持するもの:
+
+- Vehicle
+- 更新後order_exchange_log
+- WaitEntry
+- frozen actual passage observation record
+- commit後wait status
+
+actual_passage.pyはruntimeでuxsim.pyをimportしない。
+physical transferからactual_passage.pyをimportしても循環importにしない。
+
+## 7. 物理通過側の接続順
+
+_try_confirmed_candidates内で、temporary skipとclearance検査を通過した後にprepareする。
+
+処理順:
+
+prepared_actual_passage = prepare...
+
+node._transfer_one_vehicle_between_links(...)
+
+node.last_order_control_inlink = inlink
+node.last_order_control_entry_timestep = node.W.T
+
+commit_tvt_mp_actual_passage_observation(
+    prepared_actual_passage
+)
+
+ただし、prepareとcommitは実Worldだけで行う。
+
+temporary skip、容量不足、入口空間不足、clearance停止ではprepareもcommitもしない。
+
+observerのcommitはclearance履歴更新後に行う。
+
+物理移動後のcommitは、通常例外を出さない単純代入だけとする。
+
+## 8. entry identityと状態
+
+entryが存在する場合、prepareで次を検査する。
+
+- entry.node_name == node.name
+- entry.visit_key == visit_key
+- entry.vehicle_name == vehicle.name
+
+次の正常待機状態を要求する。
+
+entry.wait_status
+is WAITING_FOR_ACTUAL_PASSAGE
+
+entry.actual_passage_observation_record
+is None
+
+次はRuntimeError:
+
+- wait statusがWAITINGではない
+- observation recordが既に存在する
+- identity不一致
+- 同じ通過へのobserver重複呼出し
+
+重複呼出しを正常無視しない。
+actual recordの二重追加を拒否する。
+
+登録時に保証済みのrole、predicted route、transaction identityを過剰に再検査しない。
+
+## 9. 時刻と値の検査
+
+actual_passage_timestep:
+
+- type(value) is int
+- boolを拒否
+- entry.tvt_decision_timestep以上
+- decision timestepと同じ値は許可
+- decision timestepより前ならRuntimeError
+
+baseline_passage_timestep:
+
+- type(value) is int
+- boolを拒否
+
+candidate_passage_timestep:
+
+- Python intまたはNone
+- buyer・sellerとcandidate観測済みnonparticipatingではint
+- candidateがUNOBSERVED_AT_HORIZONだったnonparticipatingではNone
+
+DELTAT:
+
+- boolまたはNoneではない
+- Python intまたはfloat
+- finite
+- 0より大きい
+
+true_vot_per_second:
+
+- WaitEntryに凍結済みの値を使う
+- live Vehicle.vot_trueを読まない
+- boolまたはNoneではない
+- Python intまたはfloat
+- finite
+- 0以上
+
+actual_outlink.name:
+
+- 空でないstr
+
+例外型:
+
+RuntimeError
+
+丸め、tolerance、Decimalは使用しない。
+
+## 10. 3組9 field
+
+### baselineとcandidate
+
+WaitEntryの保存値をそのまま使う。
+
+baseline_minus_candidate_passage_timesteps
+baseline_minus_candidate_passage_seconds
+baseline_minus_candidate_time_value
+
+actual passage observerでは再計算しない。
+
+### baselineとactual
+
+baseline_minus_actual_passage_timesteps
+=
+baseline_passage_timestep - actual_passage_timestep
+
+baseline_minus_actual_passage_seconds
+=
+baseline_minus_actual_passage_timesteps × DELTAT
+
+baseline_minus_actual_time_value
+=
+baseline_minus_actual_passage_seconds × true_vot_per_second
+
+### candidateとactual
+
+candidate_passage_timestepがPython intなら:
+
+candidate_minus_actual_passage_timesteps
+=
+candidate_passage_timestep - actual_passage_timestep
+
+candidate_minus_actual_passage_seconds
+=
+candidate_minus_actual_passage_timesteps × DELTAT
+
+candidate_minus_actual_time_value
+=
+candidate_minus_actual_passage_seconds × true_vot_per_second
+
+candidate_passage_timestepがNoneなら、candidate_minus_actualの3値はすべてNone。
+
+candidateがUNOBSERVED_AT_HORIZONだったnonparticipatingでは:
+
+- baseline_minus_candidate 3値はNone
+- baseline_minus_actual 3値は計算する
+- candidate_minus_actual 3値はNone
+
+## 11. frozen observation record
+
+生成する型:
+
+OrderControlTvtMpActualPassageObservationRecord
+
+field情報源:
+
+- tvt_decision_timestep: WaitEntry
+- node_name: WaitEntry
+- buyers_sorted: WaitEntry
+- visit_key: WaitEntry
+- vehicle_name: WaitEntry
+- role: WaitEntry
+- observation_status:
+  ACTUAL_PASSAGE_OBSERVED
+- baseline_passage_timestep: WaitEntry
+- candidate_passage_timestep: WaitEntry
+- true_vot_per_second: WaitEntry
+- predicted_observation_status: WaitEntry
+- predicted_route_next_link_name: WaitEntry
+- baseline_minus_candidate 3値: WaitEntry
+- baseline_minus_actual 3値:今回計算
+- candidate_minus_actual 3値:今回計算またはNone
+- actual_passage_timestep: prepare引数
+- actual_route_next_link_name: 移動前outlink.name
+
+role別のsaving、delay、signed differenceへは今回展開しない。
+
+## 12. Vehicle logとWaitEntryのatomic更新
+
+prepareでVehicle.order_exchange_logがlistであることを検査する。
+
+更新後logは、live listへappendせず、次で作る。
+
+updated_log = list(vehicle.order_exchange_log)
+updated_log.append(actual_observation_record)
+
+commitは次の単純代入だけとする。
+
+1. vehicle.order_exchange_log = updated_log
+2. entry.actual_passage_observation_record = actual_observation_record
+3. entry.wait_status = ACTUAL_PASSAGE_OBSERVED
+
+Vehicle logとWaitEntryには、同じfrozen record objectを保存する。
+
+commit中に検索、検査、計算をしない。
+
+## 13. registry entry保持
+
+観測後もWaitEntryをregistryから削除しない。
+
+理由:
+
+- TradeWaitから後続の完了検出に使う
+- 観測済みと未登録を区別する
+- evaluation endでWAITINGだけを未観測確定できる
+
+観測後:
+
+- wait_status = ACTUAL_PASSAGE_OBSERVED
+- actual_passage_observation_record = frozen record
+
+TradeWaitは今回変更しない。
+
+## 14. テスト
+
+変更予定テスト:
+
+- tests_order_control_tvt_mp_actual_passage.py
+- tests_order_control_tvt_mp_physical_transfer.py
+
+actual passage専用テストで確認:
+
+- buyer record
+- seller record
+- nonparticipating OBSERVED record
+- candidate UNOBSERVED_AT_HORIZONだったnonparticipatingのactual record
+- 3組9 field
+- actual route
+- actual timestep
+- 凍結true VOT
+- live true VOTを読み直さない
+- logとWaitEntryが同じrecord object
+- status遷移
+- entry保持
+- logがlistでない場合の非反映
+- identity不一致の非反映
+- 重複呼出し拒否
+- decisionより前のactual時刻拒否
+- DELTAT不正拒否
+- true VOT不正拒否
+- prepare失敗時にlogとWaitEntry不変
+
+physical transferテストで確認:
+
+- 実Worldの通過成功時だけprepareとcommit
+- entryなし通過は正常
+- temporary skipでは呼ばない
+- capacity不足では呼ばない
+- clearance停止では呼ばない
+- baseline forkでは呼ばない
+- collectorのbaseline passage記録は既存どおり
+- actual timestepはW.T
+- actual routeは実際のoutlink
+- prepare失敗時は物理移動前に停止し、交通状態とclearance履歴が不変
+- downstream boundary observerを直接呼ばない既存testを維持
+
+既存assertを削除・弱体化しない。
+
+## 15. module docstring
+
+order_control_tvt_mp_physical_transfer.pyの次の旧記述は、実装項目3後に更新する。
+
+旧:
+
+Does not record actual passage or actual outcome.
+
+新しい意味:
+
+- 実Worldではactual passage observationを記録する
+- actual outcome、ex-post evaluation、role別評価は行わない
+
+「downstream observerを呼ばない」という既存記述は維持する。
+
+## 16. 変更予定ファイル
+
+変更予定:
+
+- uxsim/order_control_tvt_mp_actual_passage.py
+- uxsim/order_control_tvt_mp_physical_transfer.py
+- tests_order_control_tvt_mp_actual_passage.py
+- tests_order_control_tvt_mp_physical_transfer.py
+
+変更しない:
+
+- uxsim/uxsim.py
+- atomic apply
+- candidate local calculation
+- economic evaluation
+- TradeWait
+- evaluation end
+- diagnostics
+
+## 17. 実装項目4以降との境界
+
+実装項目3後に残すもの:
+
+- buyer・seller全員のactual passage完了検出
+- TradeWait.buyer_seller_actual_passage_completion_notified
+- 完了通知
+- ex-post evaluation起動
+- evaluation endの未観測確定
+- Vehicle別role評価
+- nonparticipating actual外部効果集計
+- 実験出力・集計
+
+正式支払と正式補償はactual passageで変更しない。
+
+## 18. 独立確認結果
+
+Cursor報告だけで確定せず、Terminalで次を直接確認した。
+
+- 物理通過成功位置
+- 移動前VisitKeyとactual outlinkを保持できること
+- 移動後にcurrent visitが切り替わること
+- W.Tが通過時刻の正本であること
+- 実Worldとbaseline forkの識別
+- entryなし確定Visitが正常に存在すること
+- WaitEntryとrecordの型
+- Vehicle logのlist契約
+- existing true VOT、timestep、DELTAT検査
+- temporary skip、容量不足、clearance停止の既存テスト
+- baseline collectorの既存テスト
+- 循環importが生じないこと
+- downstream boundary observerの既存契約
+
+独立確認の結果、BLOCKERはない。
+利用者判断事項も残っていない。
