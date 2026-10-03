@@ -1434,3 +1434,293 @@ Git運用:
 - `tests_order_control_tvt_mp_physical_transfer.py`
 
 実装開始時も、役割別事後評価、evaluation end、未観測確定、実験出力へ範囲を広げない。
+
+# TVT-MP buyer・seller actual passage初回通知 実装・検証完了要約（2026-10-03）
+
+正式参照先:
+
+- `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_4.md`
+- 「TVT-MP buyer・seller actual passage初回通知 実装・検証結果（2026-10-03）」
+
+## 完了したこと
+
+取引に参加したbuyerとsellerが全員、実際に交差点を通過したことを検出し、全員がそろった最初の1回だけ、その取引を
+
+「事後評価を開始できる状態」
+
+として通知する仕組みを実装した。
+
+nonparticipatingの通過完了は待たない。
+
+buyer・seller全員がそろう前には通知しない。
+
+一度通知した取引は、nonparticipatingが後から通過しても再通知しない。
+
+今回完成したのは通知境界までである。
+
+buyer・sellerの役割別事後評価、nonparticipatingの外部効果評価、集計、実験出力はまだ開始していない。
+
+## 本番変更
+
+変更した本番コードは次の1ファイルだけである。
+
+- `uxsim/order_control_tvt_mp_actual_passage.py`
+
+次の本番コードは変更していない。
+
+- `uxsim/order_control_tvt_mp_physical_transfer.py`
+- `uxsim/uxsim.py`
+- `uxsim/order_control_tvt_mp_atomic_apply.py`
+- economic evaluation
+- candidate selection
+- payment and compensation
+- final rank
+- final consistency validation
+- seller非空契約
+
+physical transfer本番コードは、車両の物理移動成功後に既存のactual passage commitを呼んでいるため、新たな接続変更を必要としなかった。
+
+## 初回通知条件
+
+次をすべて満たした場合だけ、初回通知を行う。
+
+- buyer全員のactual passageが観測済み
+- seller全員のactual passageが観測済み
+- 各buyer・seller Visitにactual passage observation recordが存在
+- `buyer_seller_actual_passage_completion_notified`がFalse
+
+commit時に次を同じ成功処理で反映する。
+
+- Vehicle logへのactual observation追加
+- WaitEntryへの同じrecord objectの保存
+- WaitEntryの観測済み状態への更新
+- TradeWaitの通知済みflag更新
+
+初回通知時だけ対象TradeWaitを返す。
+
+次の場合は通知を返さない。
+
+- buyerまたはsellerに未通過Visitが残る
+- 既に通知済み
+- 今回の通過によって初回通知条件が成立しない
+
+事後評価計算は実行しない。
+
+## nonparticipatingの扱い
+
+nonparticipatingはbuyer・seller全員通過の判定に含めない。
+
+buyer・sellerが全員通過済みであれば、nonparticipatingが未通過でも初回通知する。
+
+通知済み取引でnonparticipatingが後から通過しても再通知しない。
+
+buyer・sellerが全員通過済みなのに通知済みflagがFalseの破損状態を、nonparticipatingの通過によって暗黙修復しない。
+
+## 通知済み状態の整合
+
+通知済みflagがTrueの場合、今回の通過前からbuyer・seller全員が観測済みであることを要求する。
+
+flagがTrueなのにbuyerまたはsellerに未通過Visitが残る場合は、破損状態として拒否する。
+
+今回の通過後なら全員がそろう場合でも、通過前からflagがTrueであることを正常扱いしない。
+
+## 正式TradeWaitの整合
+
+正常なTradeWaitでは、次を必須とする。
+
+- buyer Visitが1件以上
+- seller Visitが1件以上
+- buyer、seller、nonparticipatingの各role列に重複がない
+- role列間にVisitKeyの重複がない
+- role別VisitKeyが全て`all_visit_keys`に存在する
+- `all_visit_keys`の全Visitが、いずれか1つのroleに分類されている
+
+空buyer集合または空seller集合を、自動的な全員通過として扱わない。
+
+nonparticipatingはrole列の整合対象だが、buyer・seller全員通過の判定には含めない。
+
+## 原子性
+
+prepare段階では、次を変更しない。
+
+- Vehicle log
+- WaitEntry
+- TradeWait
+- 通知済みflag
+- registry内部dict
+
+prepareで重大な不整合が見つかった場合は、物理移動前に停止する。
+
+物理移動成功後のcommitで、個別actual passage記録と初回通知状態をまとめて反映する。
+
+skip、容量不足、入口空間不足、clearance停止、prepare失敗では、個別actual passageも通知済みflagも更新しない。
+
+## 維持した既存契約
+
+次は変更していない。
+
+- actual passage observation record
+- 3組9 field
+- baseline minus candidateの保存済み値
+- baseline minus actualの計算
+- candidate minus actualの計算
+- true VOTの保存値利用
+- actual passage timestep
+- actual route
+- Vehicle log
+- WaitEntryへの同一record object保存
+- WaitEntryの状態遷移
+- 二重観測拒否
+- 正式支払額
+- 正式補償額
+- physical transferの戻り値契約
+- Node.transferの処理契約
+
+## テスト変更
+
+変更したテストは次の2ファイルである。
+
+- `tests_order_control_tvt_mp_actual_passage.py`
+- `tests_order_control_tvt_mp_physical_transfer.py`
+
+正常なテスト取引を、buyerとsellerが各1件以上存在する正式TradeWaitへ変更した。
+
+物理通過テストでも、WaitEntryだけでなく、対応するbuyer・seller・必要なnonparticipatingとTradeWaitを登録するようにした。
+
+既存の実通過時刻、経路、3組9 field、true VOT、二重観測拒否、clearance、entryなし正常通過の検査は維持した。
+
+## 主な正常系確認
+
+- buyer 1件・seller 1件
+- buyer先行では通知しない
+- seller先行では通知しない
+- buyerが最後に通過したとき初回通知
+- sellerが最後に通過したとき初回通知
+- buyer複数
+- seller複数
+- buyer・seller双方が複数
+- 全員がそろうまで通知しない
+- nonparticipatingが未通過でも通知
+- nonparticipatingが先に通過済みでも通知条件は変わらない
+- 通知後のnonparticipating通過で再通知しない
+- prepare段階のlive state不変
+- 個別actual recordと通知済みflagを同じ成功commitで反映
+- baseline forkではactual passageもflagも変更しない
+- skip、容量不足、clearance停止ではactual passageもflagも変更しない
+
+## 主な異常系確認
+
+- TradeWait欠落
+- 空buyer列
+- 空seller列
+- buyerまたはsellerのWaitEntry欠落
+- role不一致
+- role列内重複
+- role列間重複
+- `all_visit_keys`重複
+- role列と`all_visit_keys`の不一致
+- role未分類VisitKey
+- transaction identity不一致
+- 観測済み状態なのにrecordなし
+- 待機状態なのにrecordあり
+- flagがTrueなのにbuyerまたはseller未通過
+- buyer・seller全員観測済みなのにflagがFalseのままnonparticipatingが通過
+- prepare失敗時のlive state不変
+
+## 検証結果
+
+actual passageとphysical transferの専用テスト:
+
+- 107 passed
+
+最終状態のTVT-MP統合回帰13ファイル:
+
+- 662 passed
+
+FCFS・BATCHコア回帰:
+
+- 384 passed
+
+重複しない最終確認対象の合計:
+
+- 1,046 passed
+
+その他:
+
+- 変更対象3ファイルの`py_compile`成功
+- `git diff --check`成功
+- UXsim正式サンプルは今回再実行していない
+
+## 今回実装しなかったもの
+
+- buyerのactual時間短縮評価
+- sellerのactual遅延評価
+- nonparticipatingのactual外部効果評価
+- ex-post効用計算
+- 正式支払額または正式補償額の再計算
+- evaluation end
+- 未観測確定
+- 実験出力
+- 集計
+- グラフ
+- 初回通知されたTradeWaitの後続評価への接続
+
+BLOCKERなし。
+
+利用者判断事項なし。
+
+## 最新の再開地点（2026-10-03・buyer・seller actual passage初回通知実装検証後）
+
+**本節が、buyer・seller actual passage初回通知の実装・検証後における最新再開地点である。**
+
+現在の状態:
+
+- branchは`feature/intersection-order-control`
+- 実装開始時の基点はコミット`54c396d`
+- buyer・seller actual passage初回通知を実装済み
+- actual passage専用・物理通過専用テスト107件成功
+- TVT-MP統合回帰662件成功
+- FCFS・BATCHコア回帰384件成功
+- 重複しない合計1,046件成功
+- 変更対象3ファイルのpy_compile成功
+- git diff --check成功
+- 詳細設計第4巻へ実装・検証結果を追記済み
+- 本番physical transferコードは変更していない
+- 事後評価計算は未着手
+- BLOCKERなし
+- 利用者判断事項なし
+
+保存対象:
+
+文書2ファイル:
+
+- `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_4.md`
+- `ORDER_EXCHANGE_PROGRESS_3.md`
+
+本番コード1ファイル:
+
+- `uxsim/order_control_tvt_mp_actual_passage.py`
+
+テスト2ファイル:
+
+- `tests_order_control_tvt_mp_actual_passage.py`
+- `tests_order_control_tvt_mp_physical_transfer.py`
+
+次の作業:
+
+1. 文書2ファイル、コード1ファイル、テスト2ファイルの差分をTerminalで独立確認する
+2. 保存対象5ファイルだけをstageする
+3. `diagnostics/order_control.zip`をstageしない
+4. 実装、テスト、文書を同一保存単位でcommitする
+5. commit名に`document`を含める
+6. commit結果、最新コミット、残存変更を確認する
+7. 別指示でpushする
+8. push後にHEADとoriginの一致を確認する
+9. 後続の事後評価設計へ進む前に、その正式範囲と依存関係を確認する
+
+Git運用:
+
+- Git操作は利用者がTerminalで行う
+- CursorにGit操作をさせない
+- commitとpushを分離する
+- `diagnostics/order_control.zip`を変更、展開、削除、stageしない

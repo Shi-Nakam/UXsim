@@ -443,6 +443,7 @@ def test_registry_entry_mapping_uses_node_name_and_visit_key():
 
 
 def test_registry_trade_mapping_uses_transaction_key():
+    # Type-only mapping check: empty buyer/seller keys are not a formal trade.
     registry = OrderControlTvtMpActualPassageWaitRegistry()
     buyers_sorted = (
         _sample_visit_key("buyer_z", 1),
@@ -521,6 +522,137 @@ def _observation_world():
     return world
 
 
+def _register_peer_waiting_entry(
+    world,
+    *,
+    node_name,
+    vehicle_name,
+    role,
+    visit_index,
+    decision_timestep,
+    buyers_sorted,
+):
+    visit_key = _sample_visit_key(vehicle_name, visit_index)
+    entry = OrderControlTvtMpActualPassageWaitEntry(
+        tvt_decision_timestep=decision_timestep,
+        node_name=node_name,
+        buyers_sorted=buyers_sorted,
+        visit_key=visit_key,
+        vehicle_name=vehicle_name,
+        role=role,
+        wait_status=OrderControlTvtMpActualPassageWaitStatus.WAITING_FOR_ACTUAL_PASSAGE,
+        baseline_passage_timestep=_PREPARE_BASELINE_PASSAGE_TIMESTEP,
+        candidate_passage_timestep=_PREPARE_CANDIDATE_PASSAGE_TIMESTEP,
+        true_vot_per_second=_TEST_TRUE_VOT_PER_SECOND,
+        baseline_minus_candidate_passage_timesteps=_COPIED_BASELINE_MINUS_CANDIDATE[0],
+        baseline_minus_candidate_passage_seconds=_COPIED_BASELINE_MINUS_CANDIDATE[1],
+        baseline_minus_candidate_time_value=_COPIED_BASELINE_MINUS_CANDIDATE[2],
+        predicted_observation_status=(
+            OrderControlTvtMpCandidatePassageObservationStatus.OBSERVED
+        ),
+        predicted_route_next_link_name="link_pred",
+    )
+    registry = world.order_control_tvt_mp_actual_passage_wait_registry
+    registry.entries_by_node_name_and_visit_key[(node_name, visit_key)] = entry
+    return visit_key, entry
+
+
+def _register_formal_trade_wait(
+    world,
+    *,
+    decision_timestep,
+    node_name,
+    buyers_sorted,
+    buyer_visit_keys,
+    seller_visit_keys,
+    nonparticipating_visit_keys=(),
+    completion_notified=False,
+):
+    all_visit_keys = tuple(
+        list(buyer_visit_keys)
+        + list(seller_visit_keys)
+        + list(nonparticipating_visit_keys)
+    )
+    trade = OrderControlTvtMpActualPassageTradeWait(
+        tvt_decision_timestep=decision_timestep,
+        node_name=node_name,
+        buyers_sorted=buyers_sorted,
+        all_visit_keys=all_visit_keys,
+        buyer_visit_keys=buyer_visit_keys,
+        seller_visit_keys=seller_visit_keys,
+        nonparticipating_visit_keys=nonparticipating_visit_keys,
+        buyer_seller_actual_passage_completion_notified=completion_notified,
+    )
+    transaction_key = (decision_timestep, node_name, buyers_sorted)
+    registry = world.order_control_tvt_mp_actual_passage_wait_registry
+    registry.trades_by_transaction_key[transaction_key] = trade
+    return trade, transaction_key
+
+
+def _attach_minimal_formal_trade_for_entry(world, node_name, entry, visit_key, role):
+    decision_timestep = entry.tvt_decision_timestep
+    buyers_sorted = entry.buyers_sorted
+    registry = world.order_control_tvt_mp_actual_passage_wait_registry
+    if role is OrderControlTvtMpActualPassageRole.BUYER:
+        buyer_visit_keys = (visit_key,)
+        seller_visit_key, _ = _register_peer_waiting_entry(
+            world,
+            node_name=node_name,
+            vehicle_name="formal_peer_seller",
+            role=OrderControlTvtMpActualPassageRole.SELLER,
+            visit_index=50,
+            decision_timestep=decision_timestep,
+            buyers_sorted=buyers_sorted,
+        )
+        seller_visit_keys = (seller_visit_key,)
+        nonparticipating_visit_keys = ()
+    elif role is OrderControlTvtMpActualPassageRole.SELLER:
+        seller_visit_keys = (visit_key,)
+        buyer_visit_key, _ = _register_peer_waiting_entry(
+            world,
+            node_name=node_name,
+            vehicle_name="formal_peer_buyer",
+            role=OrderControlTvtMpActualPassageRole.BUYER,
+            visit_index=51,
+            decision_timestep=decision_timestep,
+            buyers_sorted=buyers_sorted,
+        )
+        buyer_visit_keys = (buyer_visit_key,)
+        nonparticipating_visit_keys = ()
+    else:
+        nonparticipating_visit_keys = (visit_key,)
+        buyer_visit_key, _ = _register_peer_waiting_entry(
+            world,
+            node_name=node_name,
+            vehicle_name="formal_peer_buyer",
+            role=OrderControlTvtMpActualPassageRole.BUYER,
+            visit_index=52,
+            decision_timestep=decision_timestep,
+            buyers_sorted=buyers_sorted,
+        )
+        seller_visit_key, _ = _register_peer_waiting_entry(
+            world,
+            node_name=node_name,
+            vehicle_name="formal_peer_seller",
+            role=OrderControlTvtMpActualPassageRole.SELLER,
+            visit_index=53,
+            decision_timestep=decision_timestep,
+            buyers_sorted=buyers_sorted,
+        )
+        buyer_visit_keys = (buyer_visit_key,)
+        seller_visit_keys = (seller_visit_key,)
+    trade, _transaction_key = _register_formal_trade_wait(
+        world,
+        decision_timestep=decision_timestep,
+        node_name=node_name,
+        buyers_sorted=buyers_sorted,
+        buyer_visit_keys=buyer_visit_keys,
+        seller_visit_keys=seller_visit_keys,
+        nonparticipating_visit_keys=nonparticipating_visit_keys,
+    )
+    return trade
+
+
 def _register_waiting_entry(
     world,
     *,
@@ -537,6 +669,7 @@ def _register_waiting_entry(
     entry_visit_key=None,
     entry_node_name=None,
     entry_vehicle_name=None,
+    attach_minimal_formal_trade=True,
 ):
     visit_key = _sample_visit_key(vehicle_name, 1)
     if entry_visit_key is None:
@@ -570,10 +703,19 @@ def _register_waiting_entry(
     )
     registry = world.order_control_tvt_mp_actual_passage_wait_registry
     registry.entries_by_node_name_and_visit_key[(node_name, visit_key)] = entry
+    trade = None
+    if attach_minimal_formal_trade:
+        trade = _attach_minimal_formal_trade_for_entry(
+            world,
+            node_name,
+            entry,
+            visit_key,
+            role,
+        )
     node = _ObservationNode(world, node_name)
     vehicle = _ObservationVehicle(vehicle_name, log)
     outlink = _ObservationOutlink("link_actual")
-    return node, vehicle, visit_key, outlink, entry
+    return node, vehicle, visit_key, outlink, entry, trade
 
 
 def _commit_prepared(node, vehicle, visit_key, outlink, actual_timestep):
@@ -585,8 +727,8 @@ def _commit_prepared(node, vehicle, visit_key, outlink, actual_timestep):
         actual_passage_timestep=actual_timestep,
     )
     assert prepared is not None
-    commit_tvt_mp_actual_passage_observation(prepared)
-    return prepared
+    notified_trade = commit_tvt_mp_actual_passage_observation(prepared)
+    return prepared, notified_trade
 
 
 def _assert_prepare_rejects(node, vehicle, visit_key, outlink, actual_timestep, entry):
@@ -595,6 +737,11 @@ def _assert_prepare_rejects(node, vehicle, visit_key, outlink, actual_timestep, 
     record_before = entry.actual_passage_observation_record
     registry = node.W.order_control_tvt_mp_actual_passage_wait_registry
     entries_before = registry.entries_by_node_name_and_visit_key
+    trades_before = registry.trades_by_transaction_key
+    trade_flags_before = {
+        key: trade.buyer_seller_actual_passage_completion_notified
+        for key, trade in trades_before.items()
+    }
     try:
         prepare_tvt_mp_actual_passage_observation(
             node=node,
@@ -611,6 +758,12 @@ def _assert_prepare_rejects(node, vehicle, visit_key, outlink, actual_timestep, 
     assert entry.wait_status is status_before
     assert entry.actual_passage_observation_record is record_before
     assert registry.entries_by_node_name_and_visit_key is entries_before
+    assert registry.trades_by_transaction_key is trades_before
+    for key, trade in trades_before.items():
+        assert (
+            trade.buyer_seller_actual_passage_completion_notified
+            == trade_flags_before[key]
+        )
     assert entries_before[(node.name, visit_key)] is entry
 
 
@@ -634,7 +787,7 @@ def test_prepare_returns_none_when_wait_entry_is_missing():
 def _assert_observed_actual_record(role, vehicle_name):
     world = _observation_world()
     old_log = ["establishment"]
-    node, vehicle, visit_key, outlink, entry = _register_waiting_entry(
+    node, vehicle, visit_key, outlink, entry, trade = _register_waiting_entry(
         world,
         node_name="node_a",
         vehicle_name=vehicle_name,
@@ -646,24 +799,14 @@ def _assert_observed_actual_record(role, vehicle_name):
         baseline_minus_candidate=_COPIED_BASELINE_MINUS_CANDIDATE,
         log=old_log,
     )
-    trade = OrderControlTvtMpActualPassageTradeWait(
-        tvt_decision_timestep=_PREPARE_DECISION_TIMESTEP,
-        node_name="node_a",
-        buyers_sorted=(_sample_visit_key("buyer_1", 1),),
-        all_visit_keys=(visit_key,),
-        buyer_visit_keys=(visit_key,),
-        seller_visit_keys=(),
-        nonparticipating_visit_keys=(),
-    )
     registry = world.order_control_tvt_mp_actual_passage_wait_registry
     transaction_key = (
         _PREPARE_DECISION_TIMESTEP,
         "node_a",
         (_sample_visit_key("buyer_1", 1),),
     )
-    registry.trades_by_transaction_key[transaction_key] = trade
     vehicle.vot_true = 999.0
-    prepared = _commit_prepared(
+    prepared, notified_trade = _commit_prepared(
         node,
         vehicle,
         visit_key,
@@ -700,7 +843,8 @@ def _assert_observed_actual_record(role, vehicle_name):
     assert registry.entries_by_node_name_and_visit_key[(node.name, visit_key)] is entry
     assert registry.trades_by_transaction_key[transaction_key] is trade
     assert trade.buyer_seller_actual_passage_completion_notified is False
-    return node, vehicle, visit_key, outlink, entry
+    assert notified_trade is None
+    return node, vehicle, visit_key, outlink, entry, trade
 
 
 def test_buyer_actual_record_is_stored_on_log_and_wait_entry():
@@ -726,7 +870,7 @@ def test_nonparticipating_observed_actual_record_is_stored():
 
 def test_unobserved_candidate_nonparticipating_keeps_candidate_difference_none():
     world = _observation_world()
-    node, vehicle, visit_key, outlink, entry = _register_waiting_entry(
+    node, vehicle, visit_key, outlink, entry, _trade = _register_waiting_entry(
         world,
         node_name="node_a",
         vehicle_name="watcher",
@@ -769,7 +913,7 @@ def test_unobserved_candidate_nonparticipating_keeps_candidate_difference_none()
 
 def test_actual_timestep_equal_to_decision_timestep_is_allowed():
     world = _observation_world()
-    node, vehicle, visit_key, outlink, entry = _register_waiting_entry(
+    node, vehicle, visit_key, outlink, entry, _trade = _register_waiting_entry(
         world,
         node_name="node_a",
         vehicle_name="buyer",
@@ -797,7 +941,7 @@ def test_actual_timestep_equal_to_decision_timestep_is_allowed():
 
 def test_prepare_rejects_non_list_log_without_writing():
     world = _observation_world()
-    node, vehicle, visit_key, outlink, entry = _register_waiting_entry(
+    node, vehicle, visit_key, outlink, entry, _trade = _register_waiting_entry(
         world,
         node_name="node_a",
         vehicle_name="buyer",
@@ -821,7 +965,7 @@ def test_prepare_rejects_non_list_log_without_writing():
 
 def test_prepare_rejects_identity_mismatch_without_writing():
     world = _observation_world()
-    node, vehicle, visit_key, outlink, entry = _register_waiting_entry(
+    node, vehicle, visit_key, outlink, entry, _trade = _register_waiting_entry(
         world,
         node_name="node_a",
         vehicle_name="buyer",
@@ -843,7 +987,7 @@ def test_prepare_rejects_identity_mismatch_without_writing():
         entry,
     )
     world = _observation_world()
-    node, vehicle, visit_key, outlink, entry = _register_waiting_entry(
+    node, vehicle, visit_key, outlink, entry, _trade = _register_waiting_entry(
         world,
         node_name="node_a",
         vehicle_name="buyer",
@@ -865,7 +1009,7 @@ def test_prepare_rejects_identity_mismatch_without_writing():
         entry,
     )
     world = _observation_world()
-    node, vehicle, visit_key, outlink, entry = _register_waiting_entry(
+    node, vehicle, visit_key, outlink, entry, _trade = _register_waiting_entry(
         world,
         node_name="node_a",
         vehicle_name="buyer",
@@ -890,7 +1034,7 @@ def test_prepare_rejects_identity_mismatch_without_writing():
 
 def test_prepare_rejects_bad_wait_state_without_writing():
     world = _observation_world()
-    node, vehicle, visit_key, outlink, entry = _register_waiting_entry(
+    node, vehicle, visit_key, outlink, entry, _trade = _register_waiting_entry(
         world,
         node_name="node_a",
         vehicle_name="buyer",
@@ -915,7 +1059,7 @@ def test_prepare_rejects_bad_wait_state_without_writing():
 
 def test_second_observation_of_the_same_visit_is_rejected():
     world = _observation_world()
-    node, vehicle, visit_key, outlink, entry = _register_waiting_entry(
+    node, vehicle, visit_key, outlink, entry, _trade = _register_waiting_entry(
         world,
         node_name="node_a",
         vehicle_name="buyer",
@@ -957,7 +1101,7 @@ def test_second_observation_of_the_same_visit_is_rejected():
 
 def test_prepare_rejects_actual_timestep_before_decision_without_writing():
     world = _observation_world()
-    node, vehicle, visit_key, outlink, entry = _register_waiting_entry(
+    node, vehicle, visit_key, outlink, entry, _trade = _register_waiting_entry(
         world,
         node_name="node_a",
         vehicle_name="buyer",
@@ -989,7 +1133,7 @@ def test_prepare_rejects_bad_passage_deltat_vot_and_route_without_writing():
             "actual_timestep",
             _PREPARE_ACTUAL_TIMESTEP,
         )
-        node, vehicle, visit_key, outlink, entry = _register_waiting_entry(
+        node, vehicle, visit_key, outlink, entry, _trade = _register_waiting_entry(
             world,
             node_name="node_a",
             vehicle_name="buyer",
@@ -1042,3 +1186,764 @@ def test_prepare_rejects_bad_passage_deltat_vot_and_route_without_writing():
     one_case(route_name="")
     one_case(actual_timestep=True)
     one_case(actual_timestep=12.0)
+
+
+def _create_formal_trade_with_entries(
+    *,
+    buyer_vehicle_names,
+    seller_vehicle_names,
+    nonpart_vehicle_name=None,
+    completion_notified=False,
+):
+    world = _observation_world()
+    node_name = "node_a"
+    buyers_sorted = (_sample_visit_key("buyer_1", 1),)
+    decision_timestep = _PREPARE_DECISION_TIMESTEP
+    outlink = _ObservationOutlink("link_actual")
+    node = _ObservationNode(world, node_name)
+    buyer_keys = []
+    seller_keys = []
+    vehicles = {}
+    entries = {}
+
+    def add_role(vehicle_name, role):
+        visit_key = _sample_visit_key(vehicle_name, 1)
+        entry = OrderControlTvtMpActualPassageWaitEntry(
+            tvt_decision_timestep=decision_timestep,
+            node_name=node_name,
+            buyers_sorted=buyers_sorted,
+            visit_key=visit_key,
+            vehicle_name=vehicle_name,
+            role=role,
+            wait_status=OrderControlTvtMpActualPassageWaitStatus.WAITING_FOR_ACTUAL_PASSAGE,
+            baseline_passage_timestep=_PREPARE_BASELINE_PASSAGE_TIMESTEP,
+            candidate_passage_timestep=_PREPARE_CANDIDATE_PASSAGE_TIMESTEP,
+            true_vot_per_second=_TEST_TRUE_VOT_PER_SECOND,
+            baseline_minus_candidate_passage_timesteps=_COPIED_BASELINE_MINUS_CANDIDATE[0],
+            baseline_minus_candidate_passage_seconds=_COPIED_BASELINE_MINUS_CANDIDATE[1],
+            baseline_minus_candidate_time_value=_COPIED_BASELINE_MINUS_CANDIDATE[2],
+            predicted_observation_status=(
+                OrderControlTvtMpCandidatePassageObservationStatus.OBSERVED
+            ),
+            predicted_route_next_link_name="link_pred",
+        )
+        registry = world.order_control_tvt_mp_actual_passage_wait_registry
+        registry.entries_by_node_name_and_visit_key[(node_name, visit_key)] = entry
+        vehicles[visit_key] = _ObservationVehicle(vehicle_name, [])
+        entries[visit_key] = entry
+        return visit_key
+
+    for name in buyer_vehicle_names:
+        buyer_keys.append(
+            add_role(name, OrderControlTvtMpActualPassageRole.BUYER)
+        )
+    for name in seller_vehicle_names:
+        seller_keys.append(
+            add_role(name, OrderControlTvtMpActualPassageRole.SELLER)
+        )
+    nonpart_keys = ()
+    if nonpart_vehicle_name is not None:
+        nonpart_keys = (
+            add_role(
+                nonpart_vehicle_name,
+                OrderControlTvtMpActualPassageRole.NONPARTICIPATING,
+            ),
+        )
+    trade, _transaction_key = _register_formal_trade_wait(
+        world,
+        decision_timestep=decision_timestep,
+        node_name=node_name,
+        buyers_sorted=buyers_sorted,
+        buyer_visit_keys=tuple(buyer_keys),
+        seller_visit_keys=tuple(seller_keys),
+        nonparticipating_visit_keys=nonpart_keys,
+        completion_notified=completion_notified,
+    )
+    return world, node, outlink, trade, buyer_keys, seller_keys, nonpart_keys, vehicles, entries
+
+
+def _pass_visit(node, vehicles, visit_key, outlink, actual_timestep=_PREPARE_ACTUAL_TIMESTEP):
+    vehicle = vehicles[visit_key]
+    log_before = vehicle.order_exchange_log
+    entry = node.W.order_control_tvt_mp_actual_passage_wait_registry.entries_by_node_name_and_visit_key[
+        (node.name, visit_key)
+    ]
+    status_before = entry.wait_status
+    record_before = entry.actual_passage_observation_record
+    registry = node.W.order_control_tvt_mp_actual_passage_wait_registry
+    trades_before = registry.trades_by_transaction_key
+    trade_flag_before = {
+        key: trade.buyer_seller_actual_passage_completion_notified
+        for key, trade in trades_before.items()
+    }
+    prepared = prepare_tvt_mp_actual_passage_observation(
+        node=node,
+        vehicle=vehicle,
+        visit_key=visit_key,
+        actual_outlink=outlink,
+        actual_passage_timestep=actual_timestep,
+    )
+    assert prepared is not None
+    notified_trade = commit_tvt_mp_actual_passage_observation(prepared)
+    return prepared, notified_trade, log_before, status_before, record_before, trade_flag_before
+
+
+def test_buyer_then_seller_emits_completion_once():
+    world, node, outlink, trade, buyer_keys, seller_keys, _, vehicles, entries = (
+        _create_formal_trade_with_entries(
+            buyer_vehicle_names=("buyer_a",),
+            seller_vehicle_names=("seller_a",),
+        )
+    )
+    _, notified_first, _, _, _, _ = _pass_visit(
+        node, vehicles, buyer_keys[0], outlink
+    )
+    assert notified_first is None
+    assert trade.buyer_seller_actual_passage_completion_notified is False
+    _, notified_second, _, _, _, _ = _pass_visit(
+        node, vehicles, seller_keys[0], outlink
+    )
+    assert notified_second is trade
+    assert trade.buyer_seller_actual_passage_completion_notified is True
+    assert entries[buyer_keys[0]].actual_passage_observation_record is not None
+    assert entries[seller_keys[0]].actual_passage_observation_record is not None
+
+
+def test_seller_then_buyer_emits_completion_on_last_buyer():
+    world, node, outlink, trade, buyer_keys, seller_keys, _, vehicles, _ = (
+        _create_formal_trade_with_entries(
+            buyer_vehicle_names=("buyer_a",),
+            seller_vehicle_names=("seller_a",),
+        )
+    )
+    _, notified_first = _pass_visit(node, vehicles, seller_keys[0], outlink)[:2]
+    assert notified_first is None
+    _, notified_second = _pass_visit(node, vehicles, buyer_keys[0], outlink)[:2]
+    assert notified_second is trade
+    assert trade.buyer_seller_actual_passage_completion_notified is True
+
+
+def test_multiple_buyers_notify_only_after_last_buyer_or_seller():
+    _, node, outlink, trade, buyer_keys, seller_keys, _, vehicles, _ = (
+        _create_formal_trade_with_entries(
+            buyer_vehicle_names=("buyer_a", "buyer_b"),
+            seller_vehicle_names=("seller_a",),
+        )
+    )
+    for buyer_key in buyer_keys:
+        _, notified = _pass_visit(node, vehicles, buyer_key, outlink)[:2]
+        assert notified is None
+    _, notified = _pass_visit(node, vehicles, seller_keys[0], outlink)[:2]
+    assert notified is trade
+
+
+def test_multiple_sellers_notify_only_after_all_complete():
+    _, node, outlink, trade, buyer_keys, seller_keys, _, vehicles, _ = (
+        _create_formal_trade_with_entries(
+            buyer_vehicle_names=("buyer_a",),
+            seller_vehicle_names=("seller_a", "seller_b"),
+        )
+    )
+    _, notified = _pass_visit(node, vehicles, buyer_keys[0], outlink)[:2]
+    assert notified is None
+    _, notified = _pass_visit(node, vehicles, seller_keys[0], outlink)[:2]
+    assert notified is None
+    _, notified = _pass_visit(node, vehicles, seller_keys[1], outlink)[:2]
+    assert notified is trade
+
+
+def test_multiple_buyers_and_sellers_notify_when_all_complete():
+    _, node, outlink, trade, buyer_keys, seller_keys, _, vehicles, _ = (
+        _create_formal_trade_with_entries(
+            buyer_vehicle_names=("buyer_a", "buyer_b"),
+            seller_vehicle_names=("seller_a", "seller_b"),
+        )
+    )
+    visit_order = (
+        buyer_keys[0],
+        seller_keys[0],
+        buyer_keys[1],
+        seller_keys[1],
+    )
+    for visit_key in visit_order[:-1]:
+        _, notified = _pass_visit(node, vehicles, visit_key, outlink)[:2]
+        assert notified is None
+    _, notified = _pass_visit(node, vehicles, visit_order[-1], outlink)[:2]
+    assert notified is trade
+
+
+def test_nonparticipating_unobserved_still_notifies_when_buyer_seller_complete():
+    _, node, outlink, trade, buyer_keys, seller_keys, nonpart_keys, vehicles, _ = (
+        _create_formal_trade_with_entries(
+            buyer_vehicle_names=("buyer_a",),
+            seller_vehicle_names=("seller_a",),
+            nonpart_vehicle_name="watcher",
+        )
+    )
+    _, notified = _pass_visit(node, vehicles, buyer_keys[0], outlink)[:2]
+    assert notified is None
+    _, notified = _pass_visit(node, vehicles, seller_keys[0], outlink)[:2]
+    assert notified is trade
+    assert (
+        node.W.order_control_tvt_mp_actual_passage_wait_registry.entries_by_node_name_and_visit_key[
+            (node.name, nonpart_keys[0])
+        ].wait_status
+        is OrderControlTvtMpActualPassageWaitStatus.WAITING_FOR_ACTUAL_PASSAGE
+    )
+
+
+def test_nonparticipating_observed_first_still_notifies_on_last_buyer_or_seller():
+    _, node, outlink, trade, buyer_keys, seller_keys, nonpart_keys, vehicles, _ = (
+        _create_formal_trade_with_entries(
+            buyer_vehicle_names=("buyer_a",),
+            seller_vehicle_names=("seller_a",),
+            nonpart_vehicle_name="watcher",
+        )
+    )
+    _, notified = _pass_visit(node, vehicles, nonpart_keys[0], outlink)[:2]
+    assert notified is None
+    _, notified = _pass_visit(node, vehicles, buyer_keys[0], outlink)[:2]
+    assert notified is None
+    _, notified = _pass_visit(node, vehicles, seller_keys[0], outlink)[:2]
+    assert notified is trade
+
+
+def test_nonparticipating_after_notification_does_not_renotify():
+    _, node, outlink, trade, buyer_keys, seller_keys, nonpart_keys, vehicles, _ = (
+        _create_formal_trade_with_entries(
+            buyer_vehicle_names=("buyer_a",),
+            seller_vehicle_names=("seller_a",),
+            nonpart_vehicle_name="watcher",
+        )
+    )
+    _pass_visit(node, vehicles, buyer_keys[0], outlink)
+    _pass_visit(node, vehicles, seller_keys[0], outlink)
+    assert trade.buyer_seller_actual_passage_completion_notified is True
+    _, notified = _pass_visit(node, vehicles, nonpart_keys[0], outlink)[:2]
+    assert notified is None
+    assert trade.buyer_seller_actual_passage_completion_notified is True
+
+
+def test_prepare_leaves_live_state_unchanged_before_commit():
+    _, node, outlink, trade, buyer_keys, _, _, vehicles, entries = (
+        _create_formal_trade_with_entries(
+            buyer_vehicle_names=("buyer_a",),
+            seller_vehicle_names=("seller_a",),
+        )
+    )
+    visit_key = buyer_keys[0]
+    vehicle = vehicles[visit_key]
+    entry = entries[visit_key]
+    log_before = vehicle.order_exchange_log
+    status_before = entry.wait_status
+    record_before = entry.actual_passage_observation_record
+    flag_before = trade.buyer_seller_actual_passage_completion_notified
+    registry = node.W.order_control_tvt_mp_actual_passage_wait_registry
+    entries_before = registry.entries_by_node_name_and_visit_key
+    trades_before = registry.trades_by_transaction_key
+    prepared = prepare_tvt_mp_actual_passage_observation(
+        node=node,
+        vehicle=vehicle,
+        visit_key=visit_key,
+        actual_outlink=outlink,
+        actual_passage_timestep=_PREPARE_ACTUAL_TIMESTEP,
+    )
+    assert prepared is not None
+    assert vehicle.order_exchange_log is log_before
+    assert entry.wait_status is status_before
+    assert entry.actual_passage_observation_record is record_before
+    assert trade.buyer_seller_actual_passage_completion_notified is flag_before
+    assert registry.entries_by_node_name_and_visit_key is entries_before
+    assert registry.trades_by_transaction_key is trades_before
+
+
+def test_commit_applies_record_and_flag_in_same_successful_commit():
+    _, node, outlink, trade, buyer_keys, seller_keys, _, vehicles, entries = (
+        _create_formal_trade_with_entries(
+            buyer_vehicle_names=("buyer_a",),
+            seller_vehicle_names=("seller_a",),
+        )
+    )
+    _pass_visit(node, vehicles, buyer_keys[0], outlink)
+    prepared, notified = _pass_visit(node, vehicles, seller_keys[0], outlink)[:2]
+    assert notified is trade
+    seller_entry = entries[seller_keys[0]]
+    assert seller_entry.actual_passage_observation_record is (
+        prepared.actual_passage_observation_record
+    )
+    assert trade.buyer_seller_actual_passage_completion_notified is True
+
+
+def test_prepare_rejects_missing_trade_wait():
+    world = _observation_world()
+    node, vehicle, visit_key, outlink, entry, _trade = _register_waiting_entry(
+        world,
+        node_name="node_a",
+        vehicle_name="buyer",
+        role=OrderControlTvtMpActualPassageRole.BUYER,
+        candidate_passage_timestep=_PREPARE_CANDIDATE_PASSAGE_TIMESTEP,
+        predicted_observation_status=(
+            OrderControlTvtMpCandidatePassageObservationStatus.OBSERVED
+        ),
+        baseline_minus_candidate=_COPIED_BASELINE_MINUS_CANDIDATE,
+        log=["old"],
+        attach_minimal_formal_trade=False,
+    )
+    registry = world.order_control_tvt_mp_actual_passage_wait_registry
+    registry.trades_by_transaction_key.clear()
+    _assert_prepare_rejects(
+        node,
+        vehicle,
+        visit_key,
+        outlink,
+        _PREPARE_ACTUAL_TIMESTEP,
+        entry,
+    )
+
+
+def test_prepare_rejects_empty_buyer_visit_keys():
+    world, node, outlink, trade, buyer_keys, seller_keys, _, vehicles, entries = (
+        _create_formal_trade_with_entries(
+            buyer_vehicle_names=("buyer_a",),
+            seller_vehicle_names=("seller_a",),
+        )
+    )
+    trade.buyer_visit_keys = ()
+    vehicle = vehicles[buyer_keys[0]]
+    entry = entries[buyer_keys[0]]
+    _assert_prepare_rejects(
+        node,
+        vehicle,
+        buyer_keys[0],
+        outlink,
+        _PREPARE_ACTUAL_TIMESTEP,
+        entry,
+    )
+
+
+def test_prepare_rejects_empty_seller_visit_keys():
+    world, node, outlink, trade, buyer_keys, seller_keys, _, vehicles, entries = (
+        _create_formal_trade_with_entries(
+            buyer_vehicle_names=("buyer_a",),
+            seller_vehicle_names=("seller_a",),
+        )
+    )
+    trade.seller_visit_keys = ()
+    vehicle = vehicles[seller_keys[0]]
+    entry = entries[seller_keys[0]]
+    _assert_prepare_rejects(
+        node,
+        vehicle,
+        seller_keys[0],
+        outlink,
+        _PREPARE_ACTUAL_TIMESTEP,
+        entry,
+    )
+
+
+def test_prepare_rejects_missing_buyer_wait_entry():
+    _, node, outlink, trade, buyer_keys, seller_keys, _, vehicles, entries = (
+        _create_formal_trade_with_entries(
+            buyer_vehicle_names=("buyer_a",),
+            seller_vehicle_names=("seller_a",),
+        )
+    )
+    registry = node.W.order_control_tvt_mp_actual_passage_wait_registry
+    del registry.entries_by_node_name_and_visit_key[(node.name, buyer_keys[0])]
+    vehicle = vehicles[seller_keys[0]]
+    entry = entries[seller_keys[0]]
+    _assert_prepare_rejects(
+        node,
+        vehicle,
+        seller_keys[0],
+        outlink,
+        _PREPARE_ACTUAL_TIMESTEP,
+        entry,
+    )
+
+
+def test_prepare_rejects_missing_seller_wait_entry():
+    _, node, outlink, trade, buyer_keys, seller_keys, _, vehicles, entries = (
+        _create_formal_trade_with_entries(
+            buyer_vehicle_names=("buyer_a",),
+            seller_vehicle_names=("seller_a",),
+        )
+    )
+    registry = node.W.order_control_tvt_mp_actual_passage_wait_registry
+    del registry.entries_by_node_name_and_visit_key[(node.name, seller_keys[0])]
+    vehicle = vehicles[buyer_keys[0]]
+    entry = entries[buyer_keys[0]]
+    _assert_prepare_rejects(
+        node,
+        vehicle,
+        buyer_keys[0],
+        outlink,
+        _PREPARE_ACTUAL_TIMESTEP,
+        entry,
+    )
+
+
+def test_prepare_rejects_buyer_role_mismatch():
+    _, node, outlink, trade, buyer_keys, seller_keys, _, vehicles, entries = (
+        _create_formal_trade_with_entries(
+            buyer_vehicle_names=("buyer_a",),
+            seller_vehicle_names=("seller_a",),
+        )
+    )
+    entries[buyer_keys[0]].role = OrderControlTvtMpActualPassageRole.SELLER
+    vehicle = vehicles[buyer_keys[0]]
+    entry = entries[buyer_keys[0]]
+    _assert_prepare_rejects(
+        node,
+        vehicle,
+        buyer_keys[0],
+        outlink,
+        _PREPARE_ACTUAL_TIMESTEP,
+        entry,
+    )
+
+
+def test_prepare_rejects_seller_role_mismatch():
+    _, node, outlink, trade, buyer_keys, seller_keys, _, vehicles, entries = (
+        _create_formal_trade_with_entries(
+            buyer_vehicle_names=("buyer_a",),
+            seller_vehicle_names=("seller_a",),
+        )
+    )
+    entries[seller_keys[0]].role = OrderControlTvtMpActualPassageRole.BUYER
+    vehicle = vehicles[seller_keys[0]]
+    entry = entries[seller_keys[0]]
+    _assert_prepare_rejects(
+        node,
+        vehicle,
+        seller_keys[0],
+        outlink,
+        _PREPARE_ACTUAL_TIMESTEP,
+        entry,
+    )
+
+
+def test_prepare_rejects_duplicate_visit_key_across_buyer_and_seller():
+    _, node, outlink, trade, buyer_keys, seller_keys, _, vehicles, entries = (
+        _create_formal_trade_with_entries(
+            buyer_vehicle_names=("buyer_a",),
+            seller_vehicle_names=("seller_a",),
+        )
+    )
+    trade.seller_visit_keys = (buyer_keys[0],)
+    vehicle = vehicles[buyer_keys[0]]
+    entry = entries[buyer_keys[0]]
+    _assert_prepare_rejects(
+        node,
+        vehicle,
+        buyer_keys[0],
+        outlink,
+        _PREPARE_ACTUAL_TIMESTEP,
+        entry,
+    )
+
+
+def _assert_prepare_rejects_for_buyer_passage(
+    node,
+    outlink,
+    buyer_keys,
+    vehicles,
+    entries,
+):
+    vehicle = vehicles[buyer_keys[0]]
+    entry = entries[buyer_keys[0]]
+    _assert_prepare_rejects(
+        node,
+        vehicle,
+        buyer_keys[0],
+        outlink,
+        _PREPARE_ACTUAL_TIMESTEP,
+        entry,
+    )
+
+
+def test_prepare_rejects_duplicate_visit_key_within_buyer_visit_keys():
+    _, node, outlink, trade, buyer_keys, seller_keys, _, vehicles, entries = (
+        _create_formal_trade_with_entries(
+            buyer_vehicle_names=("buyer_a",),
+            seller_vehicle_names=("seller_a",),
+        )
+    )
+    trade.buyer_visit_keys = (buyer_keys[0], buyer_keys[0])
+    _assert_prepare_rejects_for_buyer_passage(
+        node, outlink, buyer_keys, vehicles, entries
+    )
+
+
+def test_prepare_rejects_duplicate_visit_key_within_seller_visit_keys():
+    _, node, outlink, trade, buyer_keys, seller_keys, _, vehicles, entries = (
+        _create_formal_trade_with_entries(
+            buyer_vehicle_names=("buyer_a",),
+            seller_vehicle_names=("seller_a",),
+        )
+    )
+    trade.seller_visit_keys = (seller_keys[0], seller_keys[0])
+    _assert_prepare_rejects_for_buyer_passage(
+        node, outlink, buyer_keys, vehicles, entries
+    )
+
+
+def test_prepare_rejects_duplicate_visit_key_within_nonparticipating_visit_keys():
+    _, node, outlink, trade, buyer_keys, seller_keys, nonpart_keys, vehicles, entries = (
+        _create_formal_trade_with_entries(
+            buyer_vehicle_names=("buyer_a",),
+            seller_vehicle_names=("seller_a",),
+            nonpart_vehicle_name="watcher",
+        )
+    )
+    trade.nonparticipating_visit_keys = (nonpart_keys[0], nonpart_keys[0])
+    _assert_prepare_rejects_for_buyer_passage(
+        node, outlink, buyer_keys, vehicles, entries
+    )
+
+
+def test_prepare_rejects_duplicate_visit_key_across_buyer_and_nonparticipating():
+    _, node, outlink, trade, buyer_keys, seller_keys, nonpart_keys, vehicles, entries = (
+        _create_formal_trade_with_entries(
+            buyer_vehicle_names=("buyer_a",),
+            seller_vehicle_names=("seller_a",),
+            nonpart_vehicle_name="watcher",
+        )
+    )
+    trade.nonparticipating_visit_keys = (buyer_keys[0],)
+    _assert_prepare_rejects_for_buyer_passage(
+        node, outlink, buyer_keys, vehicles, entries
+    )
+
+
+def test_prepare_rejects_duplicate_visit_key_across_seller_and_nonparticipating():
+    _, node, outlink, trade, buyer_keys, seller_keys, nonpart_keys, vehicles, entries = (
+        _create_formal_trade_with_entries(
+            buyer_vehicle_names=("buyer_a",),
+            seller_vehicle_names=("seller_a",),
+            nonpart_vehicle_name="watcher",
+        )
+    )
+    trade.nonparticipating_visit_keys = (seller_keys[0],)
+    _assert_prepare_rejects_for_buyer_passage(
+        node, outlink, buyer_keys, vehicles, entries
+    )
+
+
+def test_prepare_rejects_duplicate_visit_key_within_all_visit_keys():
+    _, node, outlink, trade, buyer_keys, seller_keys, _, vehicles, entries = (
+        _create_formal_trade_with_entries(
+            buyer_vehicle_names=("buyer_a",),
+            seller_vehicle_names=("seller_a",),
+        )
+    )
+    trade.all_visit_keys = (
+        buyer_keys[0],
+        seller_keys[0],
+        buyer_keys[0],
+    )
+    _assert_prepare_rejects_for_buyer_passage(
+        node, outlink, buyer_keys, vehicles, entries
+    )
+
+
+def test_prepare_rejects_buyer_visit_key_missing_from_all_visit_keys():
+    _, node, outlink, trade, buyer_keys, seller_keys, _, vehicles, entries = (
+        _create_formal_trade_with_entries(
+            buyer_vehicle_names=("buyer_a",),
+            seller_vehicle_names=("seller_a",),
+        )
+    )
+    trade.all_visit_keys = (seller_keys[0],)
+    _assert_prepare_rejects_for_buyer_passage(
+        node, outlink, buyer_keys, vehicles, entries
+    )
+
+
+def test_prepare_rejects_seller_visit_key_missing_from_all_visit_keys():
+    _, node, outlink, trade, buyer_keys, seller_keys, _, vehicles, entries = (
+        _create_formal_trade_with_entries(
+            buyer_vehicle_names=("buyer_a",),
+            seller_vehicle_names=("seller_a",),
+        )
+    )
+    trade.all_visit_keys = (buyer_keys[0],)
+    _assert_prepare_rejects_for_buyer_passage(
+        node, outlink, buyer_keys, vehicles, entries
+    )
+
+
+def test_prepare_rejects_nonparticipating_visit_key_missing_from_all_visit_keys():
+    _, node, outlink, trade, buyer_keys, seller_keys, nonpart_keys, vehicles, entries = (
+        _create_formal_trade_with_entries(
+            buyer_vehicle_names=("buyer_a",),
+            seller_vehicle_names=("seller_a",),
+            nonpart_vehicle_name="watcher",
+        )
+    )
+    trade.all_visit_keys = (buyer_keys[0], seller_keys[0])
+    _assert_prepare_rejects_for_buyer_passage(
+        node, outlink, buyer_keys, vehicles, entries
+    )
+
+
+def test_prepare_rejects_unclassified_visit_key_in_all_visit_keys():
+    _, node, outlink, trade, buyer_keys, seller_keys, _, vehicles, entries = (
+        _create_formal_trade_with_entries(
+            buyer_vehicle_names=("buyer_a",),
+            seller_vehicle_names=("seller_a",),
+        )
+    )
+    orphan_visit_key = _sample_visit_key("orphan_vehicle", 99)
+    trade.all_visit_keys = (
+        buyer_keys[0],
+        seller_keys[0],
+        orphan_visit_key,
+    )
+    _assert_prepare_rejects_for_buyer_passage(
+        node, outlink, buyer_keys, vehicles, entries
+    )
+
+
+def test_prepare_rejects_transaction_identity_mismatch():
+    _, node, outlink, trade, buyer_keys, seller_keys, _, vehicles, entries = (
+        _create_formal_trade_with_entries(
+            buyer_vehicle_names=("buyer_a",),
+            seller_vehicle_names=("seller_a",),
+        )
+    )
+    trade.tvt_decision_timestep = trade.tvt_decision_timestep + 1
+    vehicle = vehicles[buyer_keys[0]]
+    entry = entries[buyer_keys[0]]
+    _assert_prepare_rejects(
+        node,
+        vehicle,
+        buyer_keys[0],
+        outlink,
+        _PREPARE_ACTUAL_TIMESTEP,
+        entry,
+    )
+
+
+def test_prepare_rejects_observed_status_without_record():
+    _, node, outlink, trade, buyer_keys, seller_keys, _, vehicles, entries = (
+        _create_formal_trade_with_entries(
+            buyer_vehicle_names=("buyer_a",),
+            seller_vehicle_names=("seller_a",),
+        )
+    )
+    peer_entry = entries[seller_keys[0]]
+    peer_entry.wait_status = (
+        OrderControlTvtMpActualPassageWaitStatus.ACTUAL_PASSAGE_OBSERVED
+    )
+    vehicle = vehicles[buyer_keys[0]]
+    entry = entries[buyer_keys[0]]
+    _assert_prepare_rejects(
+        node,
+        vehicle,
+        buyer_keys[0],
+        outlink,
+        _PREPARE_ACTUAL_TIMESTEP,
+        entry,
+    )
+
+
+def test_prepare_rejects_waiting_status_with_existing_record():
+    _, node, outlink, trade, buyer_keys, seller_keys, _, vehicles, entries = (
+        _create_formal_trade_with_entries(
+            buyer_vehicle_names=("buyer_a",),
+            seller_vehicle_names=("seller_a",),
+        )
+    )
+    peer_entry = entries[seller_keys[0]]
+    peer_entry.actual_passage_observation_record = (
+        OrderControlTvtMpActualPassageObservationRecord(
+            **_base_observation_record_kwargs(
+                seller_keys[0],
+                OrderControlTvtMpActualPassageRole.SELLER,
+                OrderControlTvtMpActualPassageObservationStatus.ACTUAL_PASSAGE_OBSERVED,
+                actual_passage_timestep=_PREPARE_ACTUAL_TIMESTEP,
+                actual_route_next_link_name="link_actual",
+                baseline_minus_actual_passage_timesteps=-2,
+                baseline_minus_actual_passage_seconds=-120,
+                baseline_minus_actual_time_value=-60.0,
+                candidate_minus_actual_passage_timesteps=-4,
+                candidate_minus_actual_passage_seconds=-240,
+                candidate_minus_actual_time_value=-120.0,
+            )
+        )
+    )
+    vehicle = vehicles[buyer_keys[0]]
+    entry = entries[buyer_keys[0]]
+    _assert_prepare_rejects(
+        node,
+        vehicle,
+        buyer_keys[0],
+        outlink,
+        _PREPARE_ACTUAL_TIMESTEP,
+        entry,
+    )
+
+
+def test_prepare_rejects_completion_flag_true_when_passing_buyer_still_incomplete_on_live():
+    _, node, outlink, trade, buyer_keys, seller_keys, _, vehicles, entries = (
+        _create_formal_trade_with_entries(
+            buyer_vehicle_names=("buyer_a",),
+            seller_vehicle_names=("seller_a",),
+        )
+    )
+    trade.buyer_seller_actual_passage_completion_notified = True
+    vehicle = vehicles[buyer_keys[0]]
+    entry = entries[buyer_keys[0]]
+    _assert_prepare_rejects(
+        node,
+        vehicle,
+        buyer_keys[0],
+        outlink,
+        _PREPARE_ACTUAL_TIMESTEP,
+        entry,
+    )
+
+
+def test_prepare_rejects_completion_flag_true_when_passing_seller_would_complete_all():
+    _, node, outlink, trade, buyer_keys, seller_keys, _, vehicles, entries = (
+        _create_formal_trade_with_entries(
+            buyer_vehicle_names=("buyer_a",),
+            seller_vehicle_names=("seller_a",),
+        )
+    )
+    _pass_visit(node, vehicles, buyer_keys[0], outlink)
+    trade.buyer_seller_actual_passage_completion_notified = True
+    vehicle = vehicles[seller_keys[0]]
+    entry = entries[seller_keys[0]]
+    _assert_prepare_rejects(
+        node,
+        vehicle,
+        seller_keys[0],
+        outlink,
+        _PREPARE_ACTUAL_TIMESTEP,
+        entry,
+    )
+
+
+def test_prepare_rejects_nonparticipating_when_flag_false_but_buyer_seller_complete():
+    _, node, outlink, trade, buyer_keys, seller_keys, nonpart_keys, vehicles, entries = (
+        _create_formal_trade_with_entries(
+            buyer_vehicle_names=("buyer_a",),
+            seller_vehicle_names=("seller_a",),
+            nonpart_vehicle_name="watcher",
+        )
+    )
+    _pass_visit(node, vehicles, buyer_keys[0], outlink)
+    _pass_visit(node, vehicles, seller_keys[0], outlink)
+    trade.buyer_seller_actual_passage_completion_notified = False
+    vehicle = vehicles[nonpart_keys[0]]
+    entry = entries[nonpart_keys[0]]
+    _assert_prepare_rejects(
+        node,
+        vehicle,
+        nonpart_keys[0],
+        outlink,
+        _PREPARE_ACTUAL_TIMESTEP,
+        entry,
+    )

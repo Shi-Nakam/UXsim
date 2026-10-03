@@ -16,7 +16,10 @@ import uxsim.order_control_tvt_mp_physical_transfer as physical_transfer
 from uxsim.order_control_baseline_collector import OrderControlBaselineCollector
 from uxsim.order_control_baseline_driver import run_snapshot_fixed_baseline_fork
 from uxsim.order_control_tvt_mp_actual_passage import (
+    OrderControlTvtMpActualPassageObservationRecord,
+    OrderControlTvtMpActualPassageObservationStatus,
     OrderControlTvtMpActualPassageRole,
+    OrderControlTvtMpActualPassageTradeWait,
     OrderControlTvtMpActualPassageWaitEntry,
     OrderControlTvtMpActualPassageWaitStatus,
 )
@@ -1053,30 +1056,231 @@ def test_empty_incoming_vehicles_do_not_require_rank_ledger():
     assert cases[2][1].apply_copied_tvt_confirmed_ranks is False
 
 
-def _waiting_passage_entry(world, vehicle, *, role):
-    visit_key = (vehicle.name, vehicle.order_control_current_visit["visit_id"])
+_PASSAGE_BASELINE_TIMESTEP = 15
+_PASSAGE_CANDIDATE_TIMESTEP = 11
+_PASSAGE_TRUE_VOT = 2.0
+_PASSAGE_PEER_VISIT_ID = 99
+
+
+def _passage_wait_entry_kwargs(
+    *,
+    visit_key,
+    vehicle_name,
+    role,
+    decision_timestep,
+    buyers_sorted,
+):
+    return {
+        "tvt_decision_timestep": decision_timestep,
+        "node_name": "junction",
+        "buyers_sorted": buyers_sorted,
+        "visit_key": visit_key,
+        "vehicle_name": vehicle_name,
+        "role": role,
+        "wait_status": OrderControlTvtMpActualPassageWaitStatus.WAITING_FOR_ACTUAL_PASSAGE,
+        "baseline_passage_timestep": _PASSAGE_BASELINE_TIMESTEP,
+        "candidate_passage_timestep": _PASSAGE_CANDIDATE_TIMESTEP,
+        "true_vot_per_second": _PASSAGE_TRUE_VOT,
+        "baseline_minus_candidate_passage_timesteps": 100,
+        "baseline_minus_candidate_passage_seconds": 101,
+        "baseline_minus_candidate_time_value": 102,
+        "predicted_observation_status": (
+            OrderControlTvtMpCandidatePassageObservationStatus.OBSERVED
+        ),
+        "predicted_route_next_link_name": "not-the-live-outlink",
+    }
+
+
+def _register_passage_wait_entry(
+    registry,
+    *,
+    visit_key,
+    vehicle_name,
+    role,
+    decision_timestep,
+    buyers_sorted,
+):
     entry = OrderControlTvtMpActualPassageWaitEntry(
-        tvt_decision_timestep=world.T,
+        **_passage_wait_entry_kwargs(
+            visit_key=visit_key,
+            vehicle_name=vehicle_name,
+            role=role,
+            decision_timestep=decision_timestep,
+            buyers_sorted=buyers_sorted,
+        )
+    )
+    registry.entries_by_node_name_and_visit_key[("junction", visit_key)] = entry
+    return entry
+
+
+def _mark_wait_entry_actually_observed(entry, *, actual_timestep):
+    record = OrderControlTvtMpActualPassageObservationRecord(
+        tvt_decision_timestep=entry.tvt_decision_timestep,
+        node_name=entry.node_name,
+        buyers_sorted=entry.buyers_sorted,
+        visit_key=entry.visit_key,
+        vehicle_name=entry.vehicle_name,
+        role=entry.role,
+        observation_status=(
+            OrderControlTvtMpActualPassageObservationStatus.ACTUAL_PASSAGE_OBSERVED
+        ),
+        baseline_passage_timestep=entry.baseline_passage_timestep,
+        candidate_passage_timestep=entry.candidate_passage_timestep,
+        true_vot_per_second=entry.true_vot_per_second,
+        predicted_observation_status=entry.predicted_observation_status,
+        predicted_route_next_link_name=entry.predicted_route_next_link_name,
+        baseline_minus_candidate_passage_timesteps=(
+            entry.baseline_minus_candidate_passage_timesteps
+        ),
+        baseline_minus_candidate_passage_seconds=(
+            entry.baseline_minus_candidate_passage_seconds
+        ),
+        baseline_minus_candidate_time_value=entry.baseline_minus_candidate_time_value,
+        baseline_minus_actual_passage_timesteps=(
+            entry.baseline_passage_timestep - actual_timestep
+        ),
+        baseline_minus_actual_passage_seconds=(
+            entry.baseline_passage_timestep - actual_timestep
+        ),
+        baseline_minus_actual_time_value=(
+            (entry.baseline_passage_timestep - actual_timestep) * entry.true_vot_per_second
+        ),
+        candidate_minus_actual_passage_timesteps=(
+            entry.candidate_passage_timestep - actual_timestep
+        ),
+        candidate_minus_actual_passage_seconds=(
+            entry.candidate_passage_timestep - actual_timestep
+        ),
+        candidate_minus_actual_time_value=(
+            (entry.candidate_passage_timestep - actual_timestep) * entry.true_vot_per_second
+        ),
+        actual_passage_timestep=actual_timestep,
+        actual_route_next_link_name="out",
+    )
+    entry.actual_passage_observation_record = record
+    entry.wait_status = OrderControlTvtMpActualPassageWaitStatus.ACTUAL_PASSAGE_OBSERVED
+    return entry
+
+
+def _register_formal_trade_wait_for_passage(
+    registry,
+    *,
+    decision_timestep,
+    buyers_sorted,
+    buyer_visit_keys,
+    seller_visit_keys,
+    nonparticipating_visit_keys=(),
+):
+    all_visit_keys = tuple(
+        list(buyer_visit_keys)
+        + list(seller_visit_keys)
+        + list(nonparticipating_visit_keys)
+    )
+    trade = OrderControlTvtMpActualPassageTradeWait(
+        tvt_decision_timestep=decision_timestep,
         node_name="junction",
-        buyers_sorted=((vehicle.name, 1),),
+        buyers_sorted=buyers_sorted,
+        all_visit_keys=all_visit_keys,
+        buyer_visit_keys=buyer_visit_keys,
+        seller_visit_keys=seller_visit_keys,
+        nonparticipating_visit_keys=nonparticipating_visit_keys,
+    )
+    transaction_key = (decision_timestep, "junction", buyers_sorted)
+    registry.trades_by_transaction_key[transaction_key] = trade
+    return trade
+
+
+def _waiting_passage_entry(
+    world,
+    vehicle,
+    *,
+    role,
+    include_waiting_nonparticipant=False,
+):
+    visit_key = (vehicle.name, vehicle.order_control_current_visit["visit_id"])
+    decision_timestep = world.T
+    registry = world.order_control_tvt_mp_actual_passage_wait_registry
+    peer_buyer_name = f"peer_buyer_for_{vehicle.name}"
+    peer_seller_name = f"peer_seller_for_{vehicle.name}"
+    peer_buyer_visit_key = (peer_buyer_name, _PASSAGE_PEER_VISIT_ID)
+    peer_seller_visit_key = (peer_seller_name, _PASSAGE_PEER_VISIT_ID)
+    nonparticipating_visit_keys = ()
+    if role is OrderControlTvtMpActualPassageRole.BUYER:
+        buyer_visit_keys = (visit_key,)
+        seller_visit_keys = (peer_seller_visit_key,)
+        buyers_sorted = (visit_key,)
+        _register_passage_wait_entry(
+            registry,
+            visit_key=peer_seller_visit_key,
+            vehicle_name=peer_seller_name,
+            role=OrderControlTvtMpActualPassageRole.SELLER,
+            decision_timestep=decision_timestep,
+            buyers_sorted=buyers_sorted,
+        )
+    elif role is OrderControlTvtMpActualPassageRole.SELLER:
+        buyer_visit_keys = (peer_buyer_visit_key,)
+        seller_visit_keys = (visit_key,)
+        buyers_sorted = (peer_buyer_visit_key,)
+        _register_passage_wait_entry(
+            registry,
+            visit_key=peer_buyer_visit_key,
+            vehicle_name=peer_buyer_name,
+            role=OrderControlTvtMpActualPassageRole.BUYER,
+            decision_timestep=decision_timestep,
+            buyers_sorted=buyers_sorted,
+        )
+    else:
+        buyer_visit_keys = (peer_buyer_visit_key,)
+        seller_visit_keys = (peer_seller_visit_key,)
+        nonparticipating_visit_keys = (visit_key,)
+        buyers_sorted = (peer_buyer_visit_key,)
+        _register_passage_wait_entry(
+            registry,
+            visit_key=peer_buyer_visit_key,
+            vehicle_name=peer_buyer_name,
+            role=OrderControlTvtMpActualPassageRole.BUYER,
+            decision_timestep=decision_timestep,
+            buyers_sorted=buyers_sorted,
+        )
+        _register_passage_wait_entry(
+            registry,
+            visit_key=peer_seller_visit_key,
+            vehicle_name=peer_seller_name,
+            role=OrderControlTvtMpActualPassageRole.SELLER,
+            decision_timestep=decision_timestep,
+            buyers_sorted=buyers_sorted,
+        )
+    if include_waiting_nonparticipant and role is not OrderControlTvtMpActualPassageRole.NONPARTICIPATING:
+        nonpart_name = f"peer_nonpart_for_{vehicle.name}"
+        nonpart_visit_key = (nonpart_name, _PASSAGE_PEER_VISIT_ID + 1)
+        nonparticipating_visit_keys = (nonpart_visit_key,)
+        _register_passage_wait_entry(
+            registry,
+            visit_key=nonpart_visit_key,
+            vehicle_name=nonpart_name,
+            role=OrderControlTvtMpActualPassageRole.NONPARTICIPATING,
+            decision_timestep=decision_timestep,
+            buyers_sorted=buyers_sorted,
+        )
+        buyer_visit_keys = tuple(buyer_visit_keys)
+        seller_visit_keys = tuple(seller_visit_keys)
+    entry = _register_passage_wait_entry(
+        registry,
         visit_key=visit_key,
         vehicle_name=vehicle.name,
         role=role,
-        wait_status=OrderControlTvtMpActualPassageWaitStatus.WAITING_FOR_ACTUAL_PASSAGE,
-        baseline_passage_timestep=15,
-        candidate_passage_timestep=11,
-        true_vot_per_second=2.0,
-        baseline_minus_candidate_passage_timesteps=100,
-        baseline_minus_candidate_passage_seconds=101,
-        baseline_minus_candidate_time_value=102,
-        predicted_observation_status=(
-            OrderControlTvtMpCandidatePassageObservationStatus.OBSERVED
-        ),
-        predicted_route_next_link_name="not-the-live-outlink",
+        decision_timestep=decision_timestep,
+        buyers_sorted=buyers_sorted,
     )
-    registry = world.order_control_tvt_mp_actual_passage_wait_registry
-    registry.entries_by_node_name_and_visit_key[("junction", visit_key)] = entry
-    return visit_key, entry
+    trade = _register_formal_trade_wait_for_passage(
+        registry,
+        decision_timestep=decision_timestep,
+        buyers_sorted=buyers_sorted,
+        buyer_visit_keys=buyer_visit_keys,
+        nonparticipating_visit_keys=nonparticipating_visit_keys,
+        seller_visit_keys=seller_visit_keys,
+    )
+    return visit_key, entry, trade
 
 
 def _forbid_actual_prepare(calls):
@@ -1098,7 +1302,7 @@ def test_real_world_passage_records_actual_observation_after_clearance_update():
     vehicle.order_exchange_log = ["establishment"]
     old_log = vehicle.order_exchange_log
     _confirm(world, [vehicle])
-    visit_key, entry = _waiting_passage_entry(
+    visit_key, entry, trade = _waiting_passage_entry(
         world,
         vehicle,
         role=OrderControlTvtMpActualPassageRole.BUYER,
@@ -1155,6 +1359,15 @@ def test_real_world_passage_records_actual_observation_after_clearance_update():
     registry = world.order_control_tvt_mp_actual_passage_wait_registry
     assert registry.entries_by_node_name_and_visit_key[("junction", visit_key)] is entry
     assert vehicle.vot_true is None
+    assert trade.buyer_seller_actual_passage_completion_notified is False
+    peer_seller_key = trade.seller_visit_keys[0]
+    peer_seller_entry = registry.entries_by_node_name_and_visit_key[
+        ("junction", peer_seller_key)
+    ]
+    assert (
+        peer_seller_entry.wait_status
+        is OrderControlTvtMpActualPassageWaitStatus.WAITING_FOR_ACTUAL_PASSAGE
+    )
 
 
 def test_passage_without_wait_entry_does_not_record_actual_observation():
@@ -1174,7 +1387,7 @@ def test_temporary_skip_does_not_prepare_actual_observation():
     world = _world("actual_skip_not_head")
     blocked = _place(world, "blocked_actual", "in_a", visit_id=1, behind=True)
     _confirm(world, [blocked])
-    visit_key, entry = _waiting_passage_entry(
+    visit_key, entry, trade = _waiting_passage_entry(
         world,
         blocked,
         role=OrderControlTvtMpActualPassageRole.NONPARTICIPATING,
@@ -1188,6 +1401,7 @@ def test_temporary_skip_does_not_prepare_actual_observation():
         OrderControlTvtMpActualPassageWaitStatus.WAITING_FOR_ACTUAL_PASSAGE
     )
     assert entry.actual_passage_observation_record is None
+    assert trade.buyer_seller_actual_passage_completion_notified is False
     assert ("junction", visit_key) in (
         world.order_control_tvt_mp_actual_passage_wait_registry
         .entries_by_node_name_and_visit_key
@@ -1200,7 +1414,7 @@ def test_capacity_shortage_does_not_prepare_actual_observation():
     junction.flow_capacity_remain = 0
     vehicle = _place(world, "flow_actual", "in_a", visit_id=1)
     _confirm(world, [vehicle])
-    visit_key, entry = _waiting_passage_entry(
+    visit_key, entry, trade = _waiting_passage_entry(
         world,
         vehicle,
         role=OrderControlTvtMpActualPassageRole.SELLER,
@@ -1211,6 +1425,7 @@ def test_capacity_shortage_does_not_prepare_actual_observation():
     assert calls == []
     assert vehicle.link.name == "in_a"
     assert entry.actual_passage_observation_record is None
+    assert trade.buyer_seller_actual_passage_completion_notified is False
     assert ("junction", visit_key) in (
         world.order_control_tvt_mp_actual_passage_wait_registry
         .entries_by_node_name_and_visit_key
@@ -1224,7 +1439,7 @@ def test_clearance_stop_does_not_prepare_actual_observation():
     junction.order_control_clearance_timesteps = 1
     vehicle = _place(world, "clear_actual", "in_a", visit_id=1)
     _confirm(world, [vehicle])
-    _waiting_passage_entry(
+    _visit_key, _entry, trade = _waiting_passage_entry(
         world,
         vehicle,
         role=OrderControlTvtMpActualPassageRole.BUYER,
@@ -1238,6 +1453,7 @@ def test_clearance_stop_does_not_prepare_actual_observation():
     assert vehicle.link.name == "in_a"
     assert junction.last_order_control_inlink.name == "side"
     assert junction.last_order_control_entry_timestep == world.T
+    assert trade.buyer_seller_actual_passage_completion_notified is False
 
 
 def test_baseline_fork_does_not_prepare_actual_observation():
@@ -1245,7 +1461,7 @@ def test_baseline_fork_does_not_prepare_actual_observation():
     vehicle = _place(world, "fork_car", "in_a", visit_id=1)
     vehicle.order_exchange_log = ["old"]
     _confirm(world, [vehicle])
-    visit_key, entry = _waiting_passage_entry(
+    visit_key, entry, trade = _waiting_passage_entry(
         world,
         vehicle,
         role=OrderControlTvtMpActualPassageRole.BUYER,
@@ -1279,6 +1495,7 @@ def test_baseline_fork_does_not_prepare_actual_observation():
         world.order_control_tvt_mp_actual_passage_wait_registry
         .entries_by_node_name_and_visit_key
     )
+    assert trade.buyer_seller_actual_passage_completion_notified is False
 
 
 def test_prepare_failure_stops_before_physical_passage():
@@ -1286,7 +1503,7 @@ def test_prepare_failure_stops_before_physical_passage():
     vehicle = _place(world, "bad_log_car", "in_a", visit_id=1)
     vehicle.order_exchange_log = ("not-a-list",)
     _confirm(world, [vehicle])
-    visit_key, entry = _waiting_passage_entry(
+    visit_key, entry, trade = _waiting_passage_entry(
         world,
         vehicle,
         role=OrderControlTvtMpActualPassageRole.BUYER,
@@ -1324,6 +1541,123 @@ def test_prepare_failure_stops_before_physical_passage():
     assert entry.actual_passage_observation_record is None
     registry = world.order_control_tvt_mp_actual_passage_wait_registry
     assert registry.entries_by_node_name_and_visit_key[("junction", visit_key)] is entry
+    assert trade.buyer_seller_actual_passage_completion_notified is False
+
+
+def _place_peer_vehicle_for_visit_key(world, visit_key, *, inlink_name="in_b"):
+    vehicle_name = visit_key[0]
+    visit_id = visit_key[1]
+    return _place(world, vehicle_name, inlink_name, visit_id=visit_id)
+
+
+def test_physical_buyer_first_records_observation_without_completion_flag():
+    world = _world("physical_buyer_first")
+    buyer = _place(world, "buyer_first", "in_a", visit_id=1)
+    _confirm(world, [buyer])
+    visit_key, entry, trade = _waiting_passage_entry(
+        world,
+        buyer,
+        role=OrderControlTvtMpActualPassageRole.BUYER,
+    )
+    _junction(world).transfer()
+    assert entry.actual_passage_observation_record is not None
+    assert entry.wait_status is (
+        OrderControlTvtMpActualPassageWaitStatus.ACTUAL_PASSAGE_OBSERVED
+    )
+    assert trade.buyer_seller_actual_passage_completion_notified is False
+
+
+def test_physical_seller_pre_observed_buyer_last_sets_completion_flag():
+    world = _world("physical_buyer_last")
+    buyer = _place(world, "buyer_last", "in_a", visit_id=1)
+    _confirm(world, [buyer])
+    visit_key, entry, trade = _waiting_passage_entry(
+        world,
+        buyer,
+        role=OrderControlTvtMpActualPassageRole.BUYER,
+    )
+    registry = world.order_control_tvt_mp_actual_passage_wait_registry
+    peer_seller_key = trade.seller_visit_keys[0]
+    peer_seller_entry = registry.entries_by_node_name_and_visit_key[
+        ("junction", peer_seller_key)
+    ]
+    _mark_wait_entry_actually_observed(peer_seller_entry, actual_timestep=world.T)
+    peer_seller_record_before = peer_seller_entry.actual_passage_observation_record
+    _junction(world).transfer()
+    assert buyer.link.name == "out"
+    assert entry.actual_passage_observation_record is not None
+    assert entry.wait_status is (
+        OrderControlTvtMpActualPassageWaitStatus.ACTUAL_PASSAGE_OBSERVED
+    )
+    assert trade.buyer_seller_actual_passage_completion_notified is True
+    assert peer_seller_entry.actual_passage_observation_record is peer_seller_record_before
+
+
+def test_physical_buyer_pre_observed_seller_last_sets_completion_flag():
+    world = _world("physical_seller_last")
+    seller = _place(world, "seller_last", "in_b", visit_id=2)
+    _confirm(world, [seller])
+    visit_key, entry, trade = _waiting_passage_entry(
+        world,
+        seller,
+        role=OrderControlTvtMpActualPassageRole.SELLER,
+    )
+    registry = world.order_control_tvt_mp_actual_passage_wait_registry
+    peer_buyer_key = trade.buyer_visit_keys[0]
+    peer_buyer_entry = registry.entries_by_node_name_and_visit_key[
+        ("junction", peer_buyer_key)
+    ]
+    _mark_wait_entry_actually_observed(peer_buyer_entry, actual_timestep=world.T)
+    peer_buyer_record_before = peer_buyer_entry.actual_passage_observation_record
+    _junction(world).transfer()
+    assert seller.link.name == "out"
+    assert entry.actual_passage_observation_record is not None
+    assert entry.wait_status is (
+        OrderControlTvtMpActualPassageWaitStatus.ACTUAL_PASSAGE_OBSERVED
+    )
+    assert trade.buyer_seller_actual_passage_completion_notified is True
+    assert peer_buyer_entry.actual_passage_observation_record is peer_buyer_record_before
+
+
+def test_physical_completion_does_not_wait_for_nonparticipating():
+    world = _world("physical_nonpart_unobserved")
+    buyer = _place(world, "buyer_nonpart", "in_a", visit_id=1)
+    _confirm(world, [buyer])
+    _visit_key, _entry, trade = _waiting_passage_entry(
+        world,
+        buyer,
+        role=OrderControlTvtMpActualPassageRole.BUYER,
+        include_waiting_nonparticipant=True,
+    )
+    registry = world.order_control_tvt_mp_actual_passage_wait_registry
+    peer_seller_key = trade.seller_visit_keys[0]
+    peer_seller_entry = registry.entries_by_node_name_and_visit_key[
+        ("junction", peer_seller_key)
+    ]
+    _mark_wait_entry_actually_observed(
+        peer_seller_entry,
+        actual_timestep=world.T,
+    )
+    peer_seller_record_before = (
+        peer_seller_entry.actual_passage_observation_record
+    )
+
+    _junction(world).transfer()
+
+    assert buyer.link.name == "out"
+    assert trade.buyer_seller_actual_passage_completion_notified is True
+    assert (
+        peer_seller_entry.actual_passage_observation_record
+        is peer_seller_record_before
+    )
+    nonpart_key = trade.nonparticipating_visit_keys[0]
+    nonpart_entry = registry.entries_by_node_name_and_visit_key[
+        ("junction", nonpart_key)
+    ]
+    assert (
+        nonpart_entry.wait_status
+        is OrderControlTvtMpActualPassageWaitStatus.WAITING_FOR_ACTUAL_PASSAGE
+    )
 
 
 def test_registry_matches_defined_functions():
