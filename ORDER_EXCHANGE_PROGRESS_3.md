@@ -1724,3 +1724,279 @@ Git運用:
 - CursorにGit操作をさせない
 - commitとpushを分離する
 - `diagnostics/order_control.zip`を変更、展開、削除、stageしない
+
+## TVT-MP全role一括実績評価・順位分析・集計の完全実装前全体設計を確定（2026-10-04）
+
+正式な技術詳細の参照先:
+
+- `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_4.md`
+- 「TVT-MP 全role一括実績評価・順位分析・集計 完全実装前全体設計（2026-10-04）」
+
+本節は進捗記録である。詳細設計第4巻末尾の新節（約615行）をそのまま複製しない。進捗第3巻だけを読んでも、現在地、主要方針、未実装範囲、次の再開手順を誤らない程度の具体性を残す。
+
+今回の作業は文書追記のみである。コード、テスト、診断は変更していない。
+
+### 1. 現在地
+
+- actual passage実装項目1から4は実装・検証・文書化・保存済みである。
+- buyer・seller全員のactual passageがそろった最初の1回だけ通知する仕組みまで実装済みである。
+- 事後評価計算、評価終了時未観測確定、実通過順位、集計、実験出力は未実装である。
+- 今回はコードやテストを変更せず、後続実装全体の設計を詳細設計第4巻へ記録した。
+- 旧来の項目5、6、7、8という分割は、今後の正式実装単位としてまだ確定していない。
+
+### 2. 全role一括実績評価方式
+
+- buyer、seller、nonparticipatingのactual passageを評価期間中に収集する。
+- 評価終了時に未観測を確定した後、全roleを同じ最終評価工程で扱う。
+- roleごとに評価時点を変えるのではなく、追加評価項目だけを変える。
+- buyer・sellerには金銭、参考金額、実績利得、満足理由分類を追加する。
+- nonparticipatingは全role共通のactual observationから実績評価する。
+- 候補選択、正式支払、正式補償、selected candidate、final rankをやり直さない。
+
+### 3. buyer・seller初回通知
+
+- 実装済み通知は維持する。削除、無効化、コメントアウトをしない。
+- buyer・seller全員が観測済みとなり、参考支払額・参考補償額を計算可能になったことを示す目印である。
+- nonparticipatingを待たずに通知する既存契約は維持する。
+- 通知は最終実績評価を直ちに開始する命令ではない。
+- 現在使用されていないTradeWait戻り値を、即時評価へ接続しない。
+- 最終評価は評価終了時に一括して行う。
+
+### 4. 保存結果の三層構造
+
+次の三層を区別する。
+
+1. 全role共通のactual passage observation record
+2. buyer・seller個別追加評価record
+3. 取引全体評価record
+
+次も記録する。
+
+- 現在のactual passage observation recordを観測事実の正本とする。
+- baseline、candidate、actualの通過時刻と3組9 fieldを維持する。
+- 未観測を0にしない。
+- 成立時recordを変更しない。
+- buyer・seller個別追加評価には、取引別の正式金額、参考金額、実績利得、満足理由分類を扱う。
+- 取引全体評価には、事後成立・事後不成立・未観測による評価不能、参考金額、不成立理由を扱う。
+- 正式な型名、field名、保存場所、APIは未確定である。
+
+### 5. nonparticipating
+
+- nonparticipating専用のrole固有追加recordは原則として作らない。
+- nonparticipating取引別実績利得は、共通recordのbaseline_minus_actual_time_valueである。
+- 正はbaselineより早い、0は同時刻、負はbaselineより遅い。
+- 未観測なら実績利得を計算しない。
+- 支払、補償、参考金額、事後成立判定には含めない。
+- nonparticipating Vehicleは走行中一貫してnonparticipatingである。
+- 参加Vehicleは取引ごとにbuyerまたはsellerになり得るが、走行中にnonparticipatingへ変更しない。
+
+### 6. buyer・sellerの実績利得と満足理由分類
+
+buyer取引別実績利得:
+
+```
+= true VOTによる実績時間節約価値
+  - その取引の正式支払額
+```
+
+seller取引別実績利得:
+
+```
+= その取引の正式補償額
+  - true VOTによる実績遅延損失
+```
+
+満足理由分類（確定名称）:
+
+buyer:
+
+- 実績時間節約が0以下 → 自明な不満足（割り算しない）
+- 実績時間節約が正で、1秒当たり正式支払額がtrue VOT超過 → 価格面から不満足
+- 実績時間節約が正で、1秒当たり正式支払額がtrue VOT以下 → 価格面でも満足
+
+seller:
+
+- 実績遅延が0以下 → 自明な満足（割り算しない）
+- 実績遅延が正で、1秒当たり正式補償額がtrue VOT未満 → 補償面でも不満足
+- 実績遅延が正で、1秒当たり正式補償額がtrue VOT以上 → 補償面から満足
+
+最終判定:
+
+- 実績利得0以上は満足、0未満は不満足（0は満足）
+- 割り算は理由分類に使う。分母が0以下なら割り算しない
+
+### 7. 取引全体の事後評価
+
+- buyer・seller全員が観測済みの場合だけ評価可能である。
+- buyerが1人でも実績節約価値0以下なら事後不成立である（条件は0未満ではなく0以下）。
+- buyer全体の実績節約価値がseller全体の実績要求補償総額未満なら事後不成立である。
+- 事後不成立なら参考支払・参考補償を全員0とする。正式支払・正式補償は変更しない。
+- buyerまたはsellerに未観測がある場合は、事後不成立ではなく評価不能である。
+- 評価不能の場合は、参考金額、実績利得、満足分類を計算しない。
+
+### 8. 予測と実績の比較母集団
+
+- baseline、candidate、actualの三つを区別する。
+- 時刻差・時間価値差は、actualと比較対象の予測の双方が観測済みのVisitだけで比較する。
+- 未観測を誤差0または最大誤差として混ぜない。
+- 未観測は、対象数、観測済み数、未観測数、観測率として別に評価する。
+- candidateでは観測済みだがactualでは未観測だった件数も集計候補である。
+- 一般の通過時刻予測では完全一致率を中心指標にしない。
+- 許容誤差を現時点で恣意的に定めない。
+- 符号付き差、絶対差、平均、中央値、分位点、分布を用いる方向である。
+
+### 9. 取引内順位
+
+- baseline_local_rank、post_trade_local_rank、ledger_assigned_rank、rank_changeの既存定義を変更しない。
+- rank_change = baseline_local_rank - post_trade_local_rank（正は前進、0は不変、負は後退）。
+- nonparticipatingにもtrade_scope内のbaseline順位と確定順位を引き継げる。
+- 実通過順位は現在未保存である。
+- 同一timestep内に複数Visitが順次通過し得るため、actual passage timestepだけでは実通過順を常に復元できない。
+- 通過成功時にNode側の実順序情報を残し、同一取引のtrade_scope内で実通過順位を導出する方向である。
+- 未観測Visitには実通過順位を推定しない。
+- nonparticipatingについて、順位完全一致率、符号付き順位差、絶対順位差、前進・不変・後退割合を集計候補とする。
+
+### 10. 進路
+
+- 「candidate予測進路」という曖昧な一括名称を使わない。
+- trade_scope内Visitでは、局所仮想計算で使用した保存済み進路、その進路の由来、実進路を区別する。
+- 既存の進路由来は、RANK_LEDGER_FORMAL_ROUTE、SNAPSHOT_ROUTE_ALREADY_DECIDED、BASELINE_TARGET_NODE_ARRIVAL_ROUTEである。
+- 後方unbound Vehicleには、SNAPSHOT_FIXED_ROUTE、BASELINE_ARRIVAL_ROUTE、DETERMINISTIC_VIRTUAL_ROUTEがある。
+- 後方unbound Vehicleの仮想進路情報は局所計算の診断情報であり、採用取引の個別実績評価へ混ぜない。
+
+### 11. Vehicle・OD旅行単位の到着順位
+
+- TVTあり・なしで、Vehicle名、OD、設定上の出発時刻、出発順位、random seed、ネットワーク、変更対象以外のVehicle条件を固定する。
+- VOTまたは参加状態による経由ルート、通過Node、混雑、到着時刻の変化は制度効果として許容する。
+- 同一出発timestepは同着出発順位とする。
+- 同一到着timestepは同着到着順位とする。
+- Vehicle IDで同着間の順位差を作らない。Vehicle IDは安定表示順にだけ使用する。
+- 未到着・trip abortには到着順位を推定しない。
+
+中心指標:
+
+```
+TVTによる到着順位効果
+= TVTなしの到着順位
+  - TVTありの到着順位
+```
+
+- 正はTVTありで到着順位が早い、0は変化なし、負はTVTありで到着順位が遅い。
+- 出発順位から到着順位への変化単独は、OD距離等の影響が強いため中心指標にしない。
+
+### 12. Vehicle別・集合別評価
+
+参加Vehicle:
+
+```
+Vehicle別総実績利得
+= buyer取引別実績利得の合計
+  + seller取引別実績利得の合計
+```
+
+nonparticipating Vehicle:
+
+```
+Vehicle別総実績利得
+= 各対象Visitのbaseline_minus_actual_time_valueの合計
+```
+
+- 同一Vehicleのbuyer役割別、seller役割別、全参加役割合計を区別する。
+- 個別Vehicleは総実績利得0以上を満足、0未満を不満足、0を満足と評価できる。
+- 複数Vehicleの金額単位の実績利得も合計可能である。
+- 複数Vehicleの合計は純利益・純損失または集合全体の総合判定と表現する。個人の心理的満足と混同しない。
+- 正式定義未確定のwelfareとは呼ばない。
+
+### 13. 集計と比較実験
+
+集計単位:
+
+- Vehicle別
+- Vehicle×役割別
+- 取引別
+- Node別
+- 実験条件別
+- 必要なVehicle集合別
+
+比較実験の必須要件:
+
+- 他条件を固定し、対象VehicleのVOTだけを変える比較ができること。
+- 他条件を固定し、対象Vehicleの参加・非参加だけを変える比較ができること。
+- 経由ルートや通過Nodeが変わることは制度効果として許容する。
+- buyer・seller比率、OD所要時間、時間価値、正式金額、実績利得、満足分類、順位、到着順位効果、他Vehicleへの波及などを後段集計候補とする。
+- 集計項目は後から追加・削除しやすくする。後から復元できない個別情報を先に保存する。
+- 出力列、ファイル形式、実験条件メタデータは未確定である。
+
+### 14. 後続実装の依存順
+
+候補となる依存順:
+
+1. 成立時保存値と順位情報の引継ぎ
+2. 実通過順序の記録
+3. 評価終了時未観測確定
+4. 取引全体評価
+5. buyer・seller個別追加評価
+6. 後段集計・実験出力
+
+- 正式実装単位はまだ確定していない。
+- 文書保存後に反証レビューと依存関係確認を行う。その後に最初の正式実装単位を決める。
+- 短さや高度なPython技法より、明示的で初学者が追いやすい実装を優先する。
+
+### 15. 変更しないもの
+
+- candidate選択
+- 成立時経済条件
+- 正式支払
+- 正式補償
+- selected candidate
+- final rank
+- final consistency validation
+- atomic applyの成立条件
+- clearance
+- 実World交通動作
+- actual passage observation
+- 3組9 field
+- buyer・seller初回通知
+- 過去の正式記録
+
+### 16. 未確定事項
+
+少なくとも次を未確定として記録する。
+
+- 新しい型名、field名、field順序、Enum名
+- 評価終了接続API
+- 一括処理の原子性
+- 再実行防止
+- 取引全体評価recordの保存場所
+- 実通過順序の正式記録方法
+- 集計API
+- 実験出力の列・形式
+- 実験条件メタデータ
+- welfare
+- true VOT分布
+- true VOT=0の最終契約
+- true VOTが取引ごとに変わる場合の累計1秒当たり指標
+
+### 17. BLOCKERと利用者判断事項
+
+- 現時点で文書化を妨げるBLOCKERはない。
+- 今回の文書追記に必要な利用者判断事項は残っていない。
+- §16の未確定事項は、後続詳細設計で扱う。未確定事項を暗黙に決めたことにしない。
+
+### 18. 最新の再開地点
+
+**本節が、TVT-MP全role一括実績評価・順位分析・集計の完全実装前全体設計確定後における最新再開地点である。**
+
+直前の「最新の再開地点（2026-10-03・buyer・seller actual passage初回通知実装検証後）」は、actual passage項目4完了時点の記録として残す。実装全体の最新方針と再開手順は、本節§18を参照する。
+
+次の手順:
+
+1. 詳細設計第4巻の新節はTerminal独立確認済みである。
+2. 今回の進捗第3巻追記後、両文書の整合をTerminalで独立確認する。
+3. 文書だけを保存する。
+4. コミット名には`document`を含める。
+5. commit後に最新commit、残存変更、未追跡ファイルを確認する。
+6. pushはcommit確認後の別指示で行う。
+7. push後に後続実装全体の反証レビューと依存関係確認へ進む。
+8. 反証レビュー後に、最初の正式実装単位を確定する。
+9. コード、テスト、診断の変更はまだ開始しない。
