@@ -9362,3 +9362,461 @@ FCFS・BATCHは今回の新型を構築しないため、今回の変更に直�
 4. 別の指示でpushする。
 5. push後に、最初の正式実装単位「成立時評価用入口の凍結」の実装指示を作成する。
 6. それまではコード変更へ進まない。
+
+# TVT-MP Node別実通過履歴の実装前詳細設計（2026-10-05）
+
+本節は、TVT-MP全role一括実績評価の次の正式実装単位「Node別実通過履歴の記録」の実装前詳細設計である。実装完了記録ではない。
+
+本節を、Node別実通過履歴の最新の正式参照先とする。直前の大見出し「TVT-MP全role一括実績評価 統合反証レビューと成立時評価用入口の実装前詳細設計（2026-10-04）」は削除、短縮、置換、書換えしない。成立時評価用入口の凍結はコミット `8625f47` で実装・テスト・push済みである。その実装済み状態は本節で覆さない。
+
+本節の追記作業では、Pythonコード、テスト、診断、指定外の文書、およびGit管理状態を変更しない。
+
+## 1. 今回の目的
+
+次の正式実装単位は、Node別実通過履歴の記録である。
+
+目的:
+
+実Worldのtime_value Nodeで、順位台帳上の確定Visitが物理通過に成功した順序を、取引単位ではなくNode単位の連続した実通過順位として保存する。
+
+後続評価は、この履歴を使って次を行えるようにする。
+
+- Node別割当順位とNode別実通過順位の比較
+- Node連続順位上の実績順位変化
+- partition 3、partition 4、fallback、過去確定Visitを同じ母集団で扱うこと
+- 取引関係Visitだけを後から抽出すること
+- 未通過Visitへ推定順位を付けないこと
+
+今回、順位差の計算や事後評価は実装しない。
+
+## 2. 正本の分離
+
+正本を次のように分ける。
+
+- Node順位台帳: 割当順位とformal routeの正本
+- Node別実通過履歴: Node連続順位上の実通過順序、実通過時刻、実進路の正本
+- actual passage observation record: trade scopeの通過観測事実、3組9 field、role、true VOTの正本
+- WaitEntry: trade scopeの観測待ち状態と成立時frozen入力
+- TradeWait: 取引識別とbuyer・seller初回観測完了通知の正本
+
+Node順位台帳へ実通過順位を追加しない。actual passage observation recordへNode実通過順位を複製しない。WaitEntryがあるVisitだけへ実通過順位の母集団を縮小しない。取引内順位は作らない。
+
+## 3. Node連続実通過順位の定義
+
+Nodeごとに、順位台帳上の確定Visitが実Worldで物理通過に成功した順へ、1、2、3、...の連続順位を付ける。
+
+- 取引ごとにリセットしない。
+- 同一timestep内に複数Visitが成功した場合は、実際の物理転送処理の成功順で連番にする。
+- 通過時刻だけから後で順位を再構成しない。
+- 未通過Visitには実通過順位を付けない。
+- 評価終了時に末尾順位を推定しない。
+- 取引内で1位から順位を付け直さない。
+
+後続で使用する概念式は次である。
+
+```
+実績順位変化
+= Node別割当順位
+  - Node別実通過順位
+```
+
+正は前進、0は一致、負は後退である。この計算自体は今回実装しない。
+
+## 4. 履歴の対象Visit
+
+履歴へ記録する対象:
+
+- 実World
+- `order_control_type`が`time_value`のNode
+- Node順位台帳で確定済みのVisit
+- 物理通過に成功したVisit
+
+含まれるもの:
+
+- 選択取引のpartition 3 buyer
+- 選択取引のpartition 3 seller
+- 選択取引のpartition 3 nonparticipating
+- partition 4
+- baseline fallbackで確定したVisit
+- 過去の意思決定で順位台帳へ確定済みのVisit
+- 将来の意思決定で確定した後に通過するVisit
+
+含めないもの:
+
+- 未確定Visit
+- 物理先頭でないため一時スキップされたVisit
+- 容量不足または入口空間不足で一時スキップされたVisit
+- clearance待ちで停止したVisit
+- 物理通過に失敗したVisit
+- baseline fork
+- generic baseline forkの通常合流
+- FCFS通過
+- BATCH通過
+- order controlなしの通常通過
+- trip-end Vehicle
+
+FCFS、BATCH、order controlなしを含めない理由は、今回のNode連続順位がTVTの順位台帳へ接続されたorder-control対象Visitの割当順位と実通過順位を比較するためである。
+
+## 5. 独立した履歴型
+
+Node別実通過履歴は、actual passage wait registryとは別の独立した型とする。
+
+`uxsim/order_control_tvt_mp_actual_passage.py`へ置く。新しい本番モジュールは作らない。
+
+概念構造:
+
+- frozenな実通過record
+- mutableなNode別履歴registry
+- 物理移動前に作るprepared recordまたはprepared update
+
+Worldには、既存のactual passage wait registryとは別の属性として空の履歴registryを初期化する。
+
+既存wait registryへ履歴fieldを追加しない。理由は、wait registryが取引の観測待ちを担当し、Node別履歴はtrade scope外も含む実通過順序を担当するためである。
+
+公開型名、private helper名の細部は実装時に既存命名規則へ合わせてよい。
+
+## 6. 実通過recordの最小field
+
+Node別実通過recordの最小fieldは次とする。
+
+- `visit_key`
+- `actual_passage_timestep`
+- `actual_route_next_link_name`
+- `actual_node_passage_rank`
+
+recordはfrozenとする。
+
+保存しないもの:
+
+- `node_name`
+- `vehicle_name`
+- 取引識別
+- role
+- WaitEntry識別
+- order control方式
+- formal route
+- Node別割当順位
+- declared VOT
+- true VOT
+- 正式支払
+- 正式補償
+
+理由:
+
+- `node_name`はregistryのNode keyを正本とする。
+- `vehicle_name`はVisitKeyから得られる。
+- 取引識別とroleは既存WaitEntryおよびTradeWaitの責務である。
+- formal routeと割当順位はNode順位台帳の責務である。
+- 経済情報は成立時frozen入力の責務である。
+- 実通過履歴は交通上の実通過順序だけを正本とする。
+
+## 7. registryの構造
+
+registryは、Node名から、そのNodeの実通過record列を保持する。
+
+概念構造:
+
+```
+records_by_node_name: dict[str, tuple[record, ...]]
+```
+
+または、既存コード規則に適合する同等の明示的構造とする。
+
+次順位は、対象Nodeの現在の履歴件数 + 1 とする。独立したmutable counterは持たない。
+
+理由:
+
+- 履歴長とcounterの不一致を避ける。
+- 同一Nodeの物理転送処理は直列である。
+- 同一timestepでも成功順にcommitされるため、履歴長 + 1で連番になる。
+
+同じNodeの同じVisitKeyを二度登録することは拒否する。別NodeではNode keyが異なる。同一Vehicleの同一Node再訪はVisitKeyのvisit_idで区別する。`vehicle_name`だけで検索、重複確認、登録を行わない。
+
+## 8. World初期化
+
+`uxsim/uxsim.py`のWorld初期化で、既存の`order_control_tvt_mp_actual_passage_wait_registry`の隣に、Node別実通過履歴の空registryを初期化する。
+
+driverに初期化を委ねない。lazy initializationにしない。実Worldとfork Worldの双方で属性の形は存在する。
+
+ただし、baseline forkでは履歴へrecordを追加しない。
+
+World初期化以外の`uxsim.py`処理は変更しない。
+
+## 9. physical transferの現行境界
+
+現行の確定Visit通過処理は次の順である。
+
+1. candidate分類
+2. temporary skip判定
+3. clearance判定
+4. actual passage observationのprepare
+5. `_transfer_one_vehicle_between_links`
+6. clearance履歴更新
+7. actual passage observationのcommit
+
+actual passage observationは実Worldでだけprepareする。baseline forkではprepareしない。
+
+Node別実通過履歴も、実Worldの確定Visitについてだけ扱う。
+
+## 10. 履歴prepare
+
+物理移動前に、実通過履歴へ追加するprepared recordまたはprepared updateを作る。
+
+prepareで少なくとも次を検査する。
+
+- 実Worldであること
+- Node別履歴registryの型
+- Node名
+- VisitKey
+- VisitKeyと`vehicle_name`の対応
+- actual passage timestep
+- 実進路名
+- 対象Nodeの既存履歴
+- 同じNodeの同じVisitKeyが未登録であること
+- 次順位が履歴件数 + 1であること
+- 対象VisitがNode順位台帳で確定済みであること
+
+ただし、登録時にNode順位台帳側が既に保証しているformal routeや割当順位の不変条件を無意味に再検査しない。
+
+prepareではlive履歴を変更しない。tupleやdictの置換案を作る場合も、live属性へ代入しない。
+
+temporary skip、capacity不足、入口空間不足、clearance停止では履歴prepareへ到達しない。
+
+baseline forkでは履歴prepareを呼ばない。
+
+## 11. 物理通過成功後の反映
+
+物理移動とclearance履歴更新が成功した後に、preparedなNode別履歴を反映する。
+
+成功側の順序は次とする。
+
+1. physical transfer
+2. clearance履歴更新
+3. Node別実通過履歴のcommit
+4. WaitEntryがある場合だけactual passage observationのcommit
+
+Node別履歴をobservationより先にcommitする理由:
+
+- Node別履歴は、partition 3に限定されない物理通過順序の正本である。
+- actual passage observationは、WaitEntryがあるtrade scope Visitだけの観測正本である。
+- 観測commitが失敗した場合でも、既に生じた物理通過順序を失わない方を優先する。
+- observation recordからNode実通過順位を再構成できないためである。
+
+これは、物理移動後の既存例外窓を解消するものではない。履歴commitまたはobservation commitが物理移動後に失敗する可能性は残る。
+
+次を一般化して記載しない。
+
+- 通過処理が失敗した場合は常に何も変更されない
+- 履歴とobservationが常に同時に原子的commitされる
+
+新しい複合トランザクション機構は作らない。今回の変更で既存の物理通過条件やclearanceを変更しない。
+
+## 12. actual passage observationとの関係
+
+WaitEntryがあるpartition 3 Visit:
+
+- 履歴prepare
+- observation prepare
+- 物理通過
+- clearance更新
+- 履歴commit
+- observation commit
+
+WaitEntryがない確定Visit:
+
+- 履歴prepare
+- observation prepareは既存どおりNone
+- 物理通過
+- clearance更新
+- 履歴commit
+- observation commitなし
+
+対象例:
+
+- partition 4
+- fallback
+- 過去に確定済みだが評価用WaitEntryがないVisit
+
+observation recordへNode実通過順位を複製しない。後続評価は`(node_name, VisitKey)`を用いて、WaitEntryとNode別履歴を結合する。`Vehicle.order_exchange_log`やlive Vehicleを検索しない。
+
+## 13. 同一timestepの複数通過
+
+同一timestepに同じNodeで複数Visitが物理通過に成功した場合、時刻だけでは順序を復元できない。
+
+そのため、`_try_confirmed_candidates`の実際の成功処理順に履歴へ追加する。
+
+例:
+
+- 履歴長が5
+- 同一timestepの最初の成功Visitは`actual_node_passage_rank=6`
+- 次の成功Visitは`actual_node_passage_rank=7`
+
+両recordの`actual_passage_timestep`が同じでも、順位は異なる。
+
+Vehicle ID、VisitKeyの辞書順、formal route名で同着順位を並べ替えない。
+
+## 14. 未通過Visit
+
+未通過Visitには履歴recordを作らない。
+
+評価終了時未観測確定では、そのNodeの履歴にVisitKeyが存在しないことを使って、実通過順位なしと判定できる。
+
+今回の単位では次を実装しない。
+
+- 未観測確定
+- `simulation_terminated`接続
+- 未通過VisitへのNone field付きrecord作成
+- 推定順位
+- 末尾順位
+- 最大順位
+- 未通過Visitを実通過列へ追加する処理
+
+履歴はシミュレーション終了まで保持する。
+
+## 15. 反証結果
+
+少なくとも次を記録する。
+
+- 同一Vehicleの複数取引: VisitKeyで区別できる。
+- 同一Vehicleの同一Node再訪: visit_idが異なるVisitKeyで区別できる。
+- 同一timestepの複数通過: 実際のcommit順で連番になる。
+- buyer・sellerが先に通過しnonparticipatingが残る: 通過済みVisitだけ履歴recordを持つ。
+- partition 4: WaitEntryなしでも履歴へ記録する。
+- fallback: WaitEntryなしでも履歴へ記録する。
+- temporary skip: 履歴prepareへ到達しない。
+- clearance停止: 履歴prepareへ到達しない。
+- prepare失敗: 物理移動前なので履歴は変わらない。
+- 物理移動後のcommit失敗: 既存例外窓の範囲で起こり得る。
+- 未通過Visit: recordなしのまま残し、順位を推定しない。
+- 同一VisitKeyの重複: 同じNode内では拒否する。
+- 別Node: Node keyで分離する。
+
+これらはBLOCKERではない。
+
+## 16. テスト契約
+
+### 履歴型
+
+- recordがfrozen
+- 必須fieldとfield順序
+- VisitKey
+- actual passage timestep
+- 実進路名
+- `actual_node_passage_rank`
+- 空Node履歴
+- 同一Nodeで連続順位
+- Nodeごとの独立順位
+- 同一VisitKey重複拒否
+- 同一`vehicle_name`でも異なるVisitKeyを許容
+- 同一VisitKeyでも別NodeならNode key上は分離
+
+### physical transfer
+
+- partition 3の成功通過を履歴へ記録
+- partition 4の成功通過を履歴へ記録
+- fallbackの成功通過を履歴へ記録
+- 過去確定Visitの成功通過を履歴へ記録
+- WaitEntryなしでも履歴を記録
+- 同一timestepの複数成功に連番を付与
+- 次timestepでも同じNodeの順位を継続
+- 別Nodeでは1から開始
+- temporary skipでは記録なし
+- capacity不足では記録なし
+- 入口空間不足では記録なし
+- clearance停止では記録なし
+- baseline forkでは記録なし
+- generic baseline forkでは記録なし
+- trip-endでは記録なし
+- prepare失敗では物理通過前に停止
+- 重複VisitKeyでは物理通過前に停止
+- actual passage observationがNoneでも履歴を記録
+- physical transfer、clearance、履歴commit、observation commitの順序
+- 既存physical transferの交通動作を変更していないこと
+
+### World初期化
+
+- 新しい履歴registryが空で初期化される
+- Worldごとに別オブジェクトである
+- 既存wait registryとは別オブジェクトである
+
+## 17. 変更予定ファイル
+
+本番変更予定:
+
+- `uxsim/order_control_tvt_mp_actual_passage.py`
+- `uxsim/order_control_tvt_mp_physical_transfer.py`
+- `uxsim/uxsim.py`
+
+テスト変更予定:
+
+- `tests_order_control_tvt_mp_actual_passage.py`
+- `tests_order_control_tvt_mp_physical_transfer.py`
+- World初期化を直接確認する既存テストがある場合は、そのテストファイル
+
+必要なfixture追従がある場合だけ、直接関係する既存テストを追加変更する。
+
+変更しないもの:
+
+- Node順位台帳の公開契約
+- atomic applyの成立処理
+- final rank
+- final consistency validation
+- payment
+- compensation
+- candidate選択
+- FCFS本処理
+- BATCH本処理
+- clearance条件
+- physical transferの通過可否条件
+- actual observationの3組9 field
+- buyer・seller初回通知
+- 評価終了時未観測確定
+- 取引全体評価
+- buyer・seller個別追加評価
+- 集計
+- 実験出力
+
+## 18. 実装後の回帰範囲
+
+- actual passage専用テスト
+- physical transfer専用テスト
+- World初期化へ直接影響するテスト
+- atomic apply専用テスト
+- final rank専用テスト
+- final consistency validation専用テスト
+- 変更したPythonモジュールの`py_compile`
+
+FCFS・BATCHの本処理は変更しない。ただし、physical transfer専用テスト内の既存FCFS・BATCH早期return回帰は維持する。
+
+## 19. 今回実装しない範囲
+
+- Node別割当順位と実通過順位の差の計算
+- Node連続順位上の実績順位評価record
+- 評価終了時未観測確定
+- `simulation_terminated`接続
+- 取引全体事後評価
+- buyer・seller個別追加評価
+- nonparticipating外部効果の最終評価
+- 満足・不満足判定
+- 集計
+- 実験出力
+- 取引内順位
+- observation recordへの実通過順位複製
+- 新しい本番モジュール
+
+## 20. BLOCKERと利用者判断
+
+- BLOCKERなし
+- 利用者判断事項なし
+- 実装時に決めてよい細部は、型名、private helperの分割方法、テスト関数名だけ
+
+## 21. 次の作業
+
+今回の文書追記後は次の順で進む。
+
+1. Terminalで2文書の原文と差分を独立確認する。
+2. `document`を含むコミット名で文書をcommitする。
+3. commit結果、最新コミット、残存変更を確認する。
+4. 別の指示でpushする。
+5. push後に「Node別実通過履歴の記録」の実装指示を作成する。
+6. それまではコード変更へ進まない。

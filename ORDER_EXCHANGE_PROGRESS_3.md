@@ -2103,3 +2103,92 @@ Vehicle別総実績利得
 4. pushは別指示で行う。
 5. push後に、最初の正式実装単位「成立時評価用入口の凍結」の実装指示を作成する。
 6. それまではコード、テスト、診断の変更に進まない。
+
+# TVT-MP Node別実通過履歴 実装前詳細設計を確定（2026-10-05）
+
+正式な技術詳細の参照先:
+
+- `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_4.md`
+- 「TVT-MP Node別実通過履歴の実装前詳細設計（2026-10-05）」
+
+本節は進捗記録である。詳細設計第4巻の新節を全文複製しない。直前の大見出し「TVT-MP成立時評価用入口 実装前詳細設計を確定（2026-10-04）」は削除、短縮、置換、書換えしない。成立時評価用入口の凍結はコミット `8625f47` で実装・テスト・push済みである。
+
+今回の作業は文書追記のみである。コード、テスト、診断は変更していない。
+
+### 1. 次の正式実装単位
+
+- **Node別実通過履歴の記録**
+- 実Worldの`time_value` Nodeで、順位台帳上の確定Visitが物理通過に成功した順を、取引単位ではなくNode単位の連続順位として保存する。
+- 順位差の計算と事後評価は今回実装しない。
+
+### 2. 正本
+
+- Node順位台帳は割当順位とformal routeの正本のままである。実通過順位は入れない。
+- Node別実通過履歴は、実通過順序、実通過時刻、実進路の独立した正本である。
+- actual passage wait registryとは別である。既存wait registryへ履歴fieldを追加しない。
+- actual passage observation recordへNode実通過順位を複製しない。
+
+### 3. 順位と対象
+
+- Node連続順位は取引ごとにリセットしない。取引内順位は作らない。
+- 次順位は、そのNodeの履歴件数 + 1 である。独立したmutable counterは持たない。
+- 同一timestepの複数成功も、物理転送の成功順で連番にする。時刻、Vehicle ID、VisitKeyの辞書順、formal route名では並べ替えない。
+- 対象は partition 3 の buyer・seller・nonparticipating、partition 4、baseline fallback、過去に台帳へ確定済みのVisit、および将来確定後に通過するVisitである。
+- 対象外は、未確定Visit、一時スキップ、容量不足、入口空間不足、clearance停止、物理通過失敗、baseline fork、generic baseline fork、FCFS、BATCH、order controlなし、trip-endである。
+
+### 4. recordとregistry
+
+最小field: `visit_key`、`actual_passage_timestep`、`actual_route_next_link_name`、`actual_node_passage_rank`。recordはfrozenである。
+
+`node_name`はregistryのNode keyを正本とする。`vehicle_name`だけで識別しない。同じNodeの同じVisitKeyの再登録は拒否する。再訪はvisit_idで区別する。
+
+World初期化で、既存の`order_control_tvt_mp_actual_passage_wait_registry`の隣に空の履歴registryを置く。driver任せにもlazy initializationにもしない。実Worldとfork Worldの双方に属性はある。baseline forkではrecordを追加しない。`uxsim.py`の変更はWorld初期化だけである。
+
+### 5. prepareと成功側の順序
+
+- 物理移動前にprepareする。prepareではlive履歴を変更しない。
+- temporary skip、容量不足、入口空間不足、clearance停止では履歴prepareへ到達しない。
+- 成功側の順序は、physical transfer、clearance更新、Node別実通過履歴のcommit、WaitEntryがある場合だけのobservation commitである。
+- 物理移動後の既存例外窓は残る。履歴とobservationが常に同時に原子的commitされる、とは記載しない。
+- WaitEntryがない partition 4、fallback、過去確定Visitも履歴へ記録する。observation prepareがNoneでも履歴は記録する。
+
+### 6. 未通過と今回実装しない範囲
+
+未通過Visitには履歴recordを作らない。順位を推定しない。末尾順位も付けない。履歴はシミュレーション終了まで保持する。
+
+今回実装しない: 割当順位と実通過順位の差、実績順位評価record、評価終了時未観測確定、`simulation_terminated`接続、取引全体評価、個別追加評価、満足判定、集計、実験出力、取引内順位、observation recordへの順位複製、新しい本番モジュール。
+
+### 7. 変更予定
+
+本番:
+
+- `uxsim/order_control_tvt_mp_actual_passage.py`
+- `uxsim/order_control_tvt_mp_physical_transfer.py`
+- `uxsim/uxsim.py`（World初期化のみ）
+
+テスト:
+
+- `tests_order_control_tvt_mp_actual_passage.py`
+- `tests_order_control_tvt_mp_physical_transfer.py`
+- World初期化を直接確認する既存テストがある場合、そのテストファイル
+
+### 8. BLOCKERと利用者判断
+
+- BLOCKERなし
+- 利用者判断事項なし
+- 実装時に決めてよい細部は、型名、private helperの分割、テスト関数名だけ
+
+### 9. 最新の再開地点
+
+**本節が、Node別実通過履歴の実装前詳細設計確定後における最新再開地点である。**
+
+直前の「TVT-MP成立時評価用入口 実装前詳細設計を確定（2026-10-04）」は、その時点の記録として残す。最新手順は本節§9を参照する。
+
+次の手順:
+
+1. Terminalで2文書の原文と差分を独立確認する。
+2. `document`を含むコミット名で文書をcommitする。
+3. commit結果、最新コミット、残存変更を確認する。
+4. pushは別指示で行う。
+5. push後に「Node別実通過履歴の記録」の実装指示を作成する。
+6. それまではコード変更へ進まない。
