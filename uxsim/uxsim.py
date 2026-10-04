@@ -18,6 +18,7 @@ from .analyzer import *
 from .utils import *
 from .scenario_reader_writer import *
 from uxsim.order_control_tvt_mp_actual_passage import (
+    OrderControlTvtMpActualNodePassageHistoryRegistry,
     OrderControlTvtMpActualPassageWaitRegistry,
 )
 
@@ -4174,6 +4175,9 @@ class World:
         W.order_control_tvt_max_candidate_visit_count = None
         W.order_control_tvt_mp_actual_passage_wait_registry = (
             OrderControlTvtMpActualPassageWaitRegistry()
+        )
+        W.order_control_tvt_mp_actual_node_passage_history_registry = (
+            OrderControlTvtMpActualNodePassageHistoryRegistry()
         )
         # Last timestep that still runs real traffic and TVT. None keeps
         # ordinary TSIZE termination and does not auto-start the driver.

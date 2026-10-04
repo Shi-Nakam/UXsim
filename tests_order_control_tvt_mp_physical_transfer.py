@@ -16,6 +16,7 @@ import uxsim.order_control_tvt_mp_physical_transfer as physical_transfer
 from uxsim.order_control_baseline_collector import OrderControlBaselineCollector
 from uxsim.order_control_baseline_driver import run_snapshot_fixed_baseline_fork
 from uxsim.order_control_tvt_mp_actual_passage import (
+    OrderControlTvtMpActualNodePassageRecord,
     OrderControlTvtMpActualPassageCommonFrozenInput,
     OrderControlTvtMpActualPassageMonetaryFrozenInput,
     OrderControlTvtMpActualPassageObservationRecord,
@@ -1689,6 +1690,619 @@ def test_physical_completion_does_not_wait_for_nonparticipating():
         nonpart_entry.wait_status
         is OrderControlTvtMpActualPassageWaitStatus.WAITING_FOR_ACTUAL_PASSAGE
     )
+
+
+def _node_history(world, node_name="junction"):
+    registry = world.order_control_tvt_mp_actual_node_passage_history_registry
+    return registry.records_by_node_name.get(node_name, ())
+
+
+def _assert_single_history(world, vehicle, *, route_name="out", visit_id=1):
+    records = _node_history(world)
+    assert len(records) == 1
+    record = records[0]
+    assert record.visit_key == (vehicle.name, visit_id)
+    assert record.actual_passage_timestep == world.T
+    assert record.actual_route_next_link_name == route_name
+    assert record.actual_node_passage_rank == 1
+    assert isinstance(record, OrderControlTvtMpActualNodePassageRecord)
+    return record
+
+
+def _forbid_history_prepare(calls):
+    def spy(**kwargs):
+        calls.append(kwargs["visit_key"])
+        raise AssertionError("node passage history prepare must not be called")
+
+    return patch.object(
+        physical_transfer,
+        "prepare_tvt_mp_actual_node_passage_history",
+        spy,
+    )
+
+
+def _register_fork_snapshot(collector, vehicle):
+    collector.register_snapshot_visit(
+        vehicle_name=vehicle.name,
+        vehicle_id=vehicle.id,
+        node_name="junction",
+        inlink_name="in_a",
+        visit_id=vehicle.order_control_current_visit["visit_id"],
+        was_arrived_at_snapshot=True,
+        baseline_arrival_timestep=10,
+        arrival_tiebreaker=0.1,
+        route_next_link_name="out",
+        baseline_passage_timestep=None,
+    )
+
+
+def test_partition3_roles_record_node_passage_history_and_observation():
+    assert "actual_node_passage_rank" not in (
+        OrderControlTvtMpActualPassageObservationRecord.__dataclass_fields__
+    )
+    roles = [
+        (OrderControlTvtMpActualPassageRole.BUYER, "buyer_history"),
+        (OrderControlTvtMpActualPassageRole.SELLER, "seller_history"),
+        (
+            OrderControlTvtMpActualPassageRole.NONPARTICIPATING,
+            "nonpart_history",
+        ),
+    ]
+    for role, vehicle_name in roles:
+        world = _world("history_" + vehicle_name)
+        vehicle = _place(world, vehicle_name, "in_a", visit_id=1)
+        _confirm(world, [vehicle])
+        visit_key, entry, trade = _waiting_passage_entry(
+            world,
+            vehicle,
+            role=role,
+        )
+        _junction(world).transfer()
+        record = _assert_single_history(world, vehicle)
+        assert record.visit_key == visit_key
+        assert entry.actual_passage_observation_record is not None
+        assert entry.actual_passage_observation_record.visit_key == visit_key
+        if role is OrderControlTvtMpActualPassageRole.NONPARTICIPATING:
+            assert trade.buyer_seller_actual_passage_completion_notified is False
+
+
+def test_partition4_fallback_and_past_confirmed_visits_record_history():
+    # These visits are confirmed on the rank ledger and have no WaitEntry.
+    partition4 = _world("history_partition4")
+    partition4_vehicle = _place(partition4, "partition4_car", "in_a", visit_id=1)
+    _confirm(partition4, [partition4_vehicle])
+    _junction(partition4).transfer()
+    _assert_single_history(partition4, partition4_vehicle)
+    assert (
+        partition4.order_control_tvt_mp_actual_passage_wait_registry
+        .entries_by_node_name_and_visit_key
+        == {}
+    )
+
+    fallback = _world("history_fallback")
+    fallback_vehicle = _place(fallback, "fallback_history_car", "in_a", visit_id=1)
+    _confirm(fallback, [fallback_vehicle])
+    _junction(fallback).transfer()
+    _assert_single_history(fallback, fallback_vehicle)
+    assert (
+        fallback.order_control_tvt_mp_actual_passage_wait_registry
+        .entries_by_node_name_and_visit_key
+        == {}
+    )
+
+    past = _world("history_past_confirmed")
+    past_vehicle = _place(past, "past_history_car", "in_a", visit_id=1)
+    _confirm(past, [past_vehicle])
+    past.T = 14
+    _prepare_logs(past)
+    junction = _junction(past)
+    junction.incoming_vehicles = [past_vehicle]
+    junction.transfer()
+    record = _assert_single_history(past, past_vehicle)
+    assert record.actual_passage_timestep == 14
+
+
+def test_history_is_recorded_when_observation_prepare_returns_none():
+    world = _world("history_observation_none")
+    vehicle = _place(world, "no_entry_history", "in_a", visit_id=1)
+    _confirm(world, [vehicle])
+    seen = []
+    original = physical_transfer.prepare_tvt_mp_actual_passage_observation
+
+    def spy(**kwargs):
+        result = original(**kwargs)
+        seen.append(result)
+        return result
+
+    vehicle.order_exchange_log = ["old"]
+    with patch.object(
+        physical_transfer,
+        "prepare_tvt_mp_actual_passage_observation",
+        spy,
+    ):
+        _junction(world).transfer()
+    assert seen == [None]
+    _assert_single_history(world, vehicle)
+    assert vehicle.order_exchange_log == ["old"]
+
+
+def test_same_timestep_successes_keep_attempt_order_ranks():
+    world = _world("history_same_timestep")
+    world.addNode("dest_b", 2, 1)
+    world.addLink(
+        "out_b",
+        "junction",
+        "dest_b",
+        length=100,
+        free_flow_speed=20,
+        number_of_lanes=1,
+    )
+    _prepare_logs(world)
+    # Same inlink: after the first leaves, the next confirmed vehicle is the
+    # physical head and clearance does not wait. Different outlinks keep an
+    # open entrance for the second success in this timestep.
+    first = _place(world, "z_first", "in_a", visit_id=1, outlink_name="out")
+    second = _place(world, "a_second", "in_a", visit_id=2, outlink_name="out_b")
+    junction = _junction(world)
+    junction.incoming_vehicles = [second, first]
+    _confirm(world, [first, second])
+    for link in world.LINKS:
+        link.capacity_in_remain = 10
+        link.capacity_out_remain = 10
+    junction.flow_capacity_remain = 10
+    junction.transfer()
+    records = _node_history(world)
+    assert [record.visit_key[0] for record in records] == ["z_first", "a_second"]
+    assert [record.actual_node_passage_rank for record in records] == [1, 2]
+    assert records[0].actual_passage_timestep == world.T
+    assert records[1].actual_passage_timestep == world.T
+    assert records[0].actual_route_next_link_name == "out"
+    assert records[1].actual_route_next_link_name == "out_b"
+
+
+def test_later_timestep_continues_the_node_passage_rank():
+    world = _world("history_continued_rank", flow_capacity=1)
+    world.addNode("dest_b", 2, 1)
+    world.addLink(
+        "out_b",
+        "junction",
+        "dest_b",
+        length=100,
+        free_flow_speed=20,
+        number_of_lanes=1,
+    )
+    _prepare_logs(world)
+    first = _place(world, "continued_first", "in_a", visit_id=1)
+    second = _place(
+        world,
+        "continued_second",
+        "in_b",
+        visit_id=2,
+        outlink_name="out_b",
+    )
+    _confirm(world, [first, second])
+    junction = _junction(world)
+    junction.transfer()
+    assert first.link.name == "out"
+    assert second.link.name == "in_b"
+    assert [record.visit_key[0] for record in _node_history(world)] == [
+        "continued_first",
+    ]
+    world.T = 12
+    _prepare_logs(world)
+    junction.flow_capacity_remain = 1
+    junction.incoming_vehicles = [second]
+    for link in world.LINKS:
+        link.capacity_in_remain = 10
+        link.capacity_out_remain = 10
+    junction.transfer()
+    assert second.link.name == "out_b"
+    records = _node_history(world)
+    assert [record.actual_node_passage_rank for record in records] == [1, 2]
+    assert records[1].visit_key == ("continued_second", 2)
+    assert records[1].actual_route_next_link_name == "out_b"
+    assert records[0].actual_passage_timestep == 10
+    assert records[1].actual_passage_timestep == 12
+
+
+def test_another_node_starts_its_passage_rank_at_one():
+    world = _world("history_second_node")
+    first = _place(world, "node_a_car", "in_a", visit_id=1)
+    _confirm(world, [first])
+    _junction(world).transfer()
+    world.addNode("dest_b", 4, 0)
+    world.addNode(
+        "junction_b",
+        3,
+        0,
+        order_control_type="time_value",
+        order_control_eligible=True,
+    )
+    world.addLink(
+        "in_b2",
+        "orig_b",
+        "junction_b",
+        length=100,
+        free_flow_speed=20,
+        number_of_lanes=1,
+        merge_priority=1,
+    )
+    world.addLink(
+        "out_b2",
+        "junction_b",
+        "dest_b",
+        length=100,
+        free_flow_speed=20,
+        number_of_lanes=1,
+    )
+    _prepare_logs(world)
+    node_b = world.get_node("junction_b")
+    inlink = world.get_link("in_b2")
+    outlink = world.get_link("out_b2")
+    vehicle = world.addVehicle("orig_b", "dest_b", 0, name="node_b_car")
+    vehicle.state = "run"
+    vehicle.link = inlink
+    vehicle.x = inlink.length
+    vehicle.x_old = inlink.length
+    vehicle.link_arrival_time = 0
+    vehicle.move_remain = 0
+    vehicle.v = 0
+    vehicle.route_next_link = outlink
+    vehicle.order_control_visit_id = 1
+    vehicle.order_control_current_visit = {
+        "visit_id": 1,
+        "node": node_b,
+        "inlink": inlink,
+        "earliest_arrival_timestep": 0,
+        "arrival_time": 0.0,
+        "arrival_tiebreaker": 0.1,
+        "batch_assignment": None,
+    }
+    inlink.vehicles.append(vehicle)
+    node_b.incoming_vehicles.append(vehicle)
+    world.VEHICLES_RUNNING[vehicle.name] = vehicle
+    rank_state = OrderControlTvtNodeRankState("junction_b")
+    rank_state.register_undetermined_visit(("node_b_car", 1))
+    rank_state.confirm_visits_in_order([("node_b_car", 1)])
+    world.order_control_tvt_rank_states_by_node_name["junction_b"] = rank_state
+    node_b.transfer()
+    records_b = _node_history(world, "junction_b")
+    assert len(records_b) == 1
+    assert records_b[0].actual_node_passage_rank == 1
+    assert records_b[0].visit_key == ("node_b_car", 1)
+    assert _node_history(world)[0].actual_node_passage_rank == 1
+
+
+def test_temporary_skip_does_not_record_the_skipped_visit():
+    world = _world("history_not_head")
+    blocked = _place(world, "blocked_history", "in_a", visit_id=1, behind=True)
+    follower = _place(world, "follower_history", "in_b", visit_id=2)
+    _confirm(world, [blocked, follower])
+    _junction(world).transfer()
+    assert blocked.link.name == "in_a"
+    assert follower.link.name == "out"
+    assert [record.visit_key[0] for record in _node_history(world)] == [
+        "follower_history",
+    ]
+
+    empty_world = _world("history_empty_inlink")
+    missing = _place(empty_world, "missing_history", "in_a", visit_id=1)
+    empty_world.get_link("in_a").vehicles.clear()
+    nxt = _place(empty_world, "next_history", "in_b", visit_id=2)
+    _confirm(empty_world, [missing, nxt])
+    _junction(empty_world).transfer()
+    assert missing.link.name == "in_a"
+    assert [record.visit_key[0] for record in _node_history(empty_world)] == [
+        "next_history",
+    ]
+
+
+def test_capacity_entry_and_clearance_blocks_do_not_record_history():
+    flow_world = _world("history_flow", flow_capacity=1)
+    flow_world.get_node("junction").flow_capacity_remain = 0
+    flow_vehicle = _place(flow_world, "flow_history", "in_a", visit_id=1)
+    _confirm(flow_world, [flow_vehicle])
+    flow_calls = []
+    with _forbid_history_prepare(flow_calls):
+        _junction(flow_world).transfer()
+    assert flow_calls == []
+    assert flow_vehicle.link.name == "in_a"
+    assert _node_history(flow_world) == ()
+
+    out_world = _world("history_out_capacity")
+    out_vehicle = _place(out_world, "out_history", "in_a", visit_id=1)
+    out_world.get_link("in_a").capacity_out_remain = 0
+    _confirm(out_world, [out_vehicle])
+    out_calls = []
+    with _forbid_history_prepare(out_calls):
+        _junction(out_world).transfer()
+    assert out_calls == []
+    assert out_vehicle.link.name == "in_a"
+    assert _node_history(out_world) == ()
+
+    in_world = _world("history_in_capacity")
+    in_vehicle = _place(in_world, "in_history", "in_a", visit_id=1)
+    in_world.get_link("out").capacity_in_remain = 0
+    _confirm(in_world, [in_vehicle])
+    in_calls = []
+    with _forbid_history_prepare(in_calls):
+        _junction(in_world).transfer()
+    assert in_calls == []
+    assert in_vehicle.link.name == "in_a"
+    assert _node_history(in_world) == ()
+
+    space_world = _world("history_entry_space")
+    parked = space_world.addVehicle("orig_a", "dest", 0, name="parked_history")
+    parked.state = "run"
+    parked.link = space_world.get_link("out")
+    parked.x = 0
+    parked.x_old = 0
+    space_world.get_link("out").vehicles.append(parked)
+    no_room = _place(space_world, "no_room_history", "in_a", visit_id=1)
+    _confirm(space_world, [no_room])
+    space_calls = []
+    with _forbid_history_prepare(space_calls):
+        _junction(space_world).transfer()
+    assert space_calls == []
+    assert no_room.link.name == "in_a"
+    assert _node_history(space_world) == ()
+
+    clear_world = _world("history_clearance")
+    clear_world.order_control_clearance_timesteps = 1
+    junction = _junction(clear_world)
+    junction.order_control_clearance_timesteps = 1
+    clear_vehicle = _place(clear_world, "clear_history", "in_a", visit_id=1)
+    _confirm(clear_world, [clear_vehicle])
+    junction.last_order_control_inlink = clear_world.get_link("side")
+    junction.last_order_control_entry_timestep = clear_world.T
+    clear_calls = []
+    with _forbid_history_prepare(clear_calls):
+        junction.transfer()
+    assert clear_calls == []
+    assert clear_vehicle.link.name == "in_a"
+    assert _node_history(clear_world) == ()
+    assert junction.last_order_control_inlink.name == "side"
+
+
+def test_baseline_forks_do_not_record_node_passage_history():
+    world = _world("history_tvt_fork")
+    vehicle = _place(world, "fork_history_car", "in_a", visit_id=1)
+    _confirm(world, [vehicle])
+    collector = _as_fork(world)
+    _register_fork_snapshot(collector, vehicle)
+    calls = []
+    with _forbid_history_prepare(calls):
+        _junction(world).transfer()
+    assert calls == []
+    assert vehicle.link.name == "out"
+    assert _node_history(world) == ()
+
+    generic = _world("history_generic_fork")
+    generic_vehicle = _place(generic, "generic_history_car", "in_a", visit_id=1)
+    generic_collector = _as_fork(
+        generic,
+        apply_copied_tvt_confirmed_ranks=False,
+    )
+    _register_fork_snapshot(generic_collector, generic_vehicle)
+    generic_calls = []
+    with _forbid_history_prepare(generic_calls):
+        _junction(generic).transfer()
+    assert generic_calls == []
+    assert generic_vehicle.link.name == "out"
+    assert _node_history(generic) == ()
+    assert generic_collector.apply_copied_tvt_confirmed_ranks is False
+
+
+def test_fcfs_batch_and_no_order_control_do_not_record_history():
+    plain = _world(
+        "history_none",
+        order_control_type="none",
+        order_control_eligible=False,
+    )
+    plain_vehicle = _place(plain, "plain_history", "in_a", visit_id=1)
+    _junction(plain).transfer()
+    assert plain_vehicle.link.name == "out"
+    assert _node_history(plain) == ()
+
+    fcfs_world = _world(
+        "history_fcfs",
+        order_control_type="fcfs",
+        order_control_eligible=True,
+    )
+    fcfs_vehicle = _place(fcfs_world, "fcfs_history", "in_a", visit_id=1)
+    _junction(fcfs_world).transfer()
+    assert fcfs_vehicle.link.name == "out"
+    assert _node_history(fcfs_world) == ()
+
+    batch_world = _world(
+        "history_batch",
+        order_control_type="batch",
+        order_control_eligible=True,
+    )
+    _place(batch_world, "batch_history", "in_a", visit_id=1)
+    try:
+        _junction(batch_world).transfer()
+    except Exception as error:
+        assert "node passage history" not in str(error)
+        assert "TVT rank ledger" not in str(error)
+    assert _node_history(batch_world) == ()
+
+
+def test_trip_end_does_not_record_node_passage_history():
+    world = _world("history_trip_end")
+    waiting = _place(world, "waiting_history", "in_a", visit_id=1, waiting=True)
+    _confirm(world, [waiting])
+    calls = []
+    with _forbid_history_prepare(calls):
+        _junction(world).transfer()
+    assert calls == []
+    assert waiting.state == "end"
+    assert _node_history(world) == ()
+
+
+def test_duplicate_visit_key_stops_before_physical_passage():
+    world = _world("history_duplicate")
+    vehicle = _place(world, "duplicate_car", "in_a", visit_id=1)
+    _confirm(world, [vehicle])
+    existing = OrderControlTvtMpActualNodePassageRecord(
+        ("duplicate_car", 1),
+        0,
+        "out",
+        1,
+    )
+    registry = world.order_control_tvt_mp_actual_node_passage_history_registry
+    registry.records_by_node_name["junction"] = (existing,)
+    junction = _junction(world)
+    inlink = world.get_link("in_a")
+    outlink = world.get_link("out")
+    outlink_before = list(outlink.vehicles)
+    vehicle.order_exchange_log = ["old"]
+    error = _expect_runtime_error(junction.transfer)
+    assert "duplicate_car" in str(error)
+    assert vehicle.link is inlink
+    assert list(outlink.vehicles) == outlink_before
+    assert registry.records_by_node_name["junction"] == (existing,)
+    assert junction.last_order_control_inlink is None
+    assert junction.last_order_control_entry_timestep is None
+    assert vehicle.order_exchange_log == ["old"]
+
+
+def test_same_vehicle_new_visit_continues_the_node_rank():
+    world = _world("history_revisit")
+    vehicle = _place(world, "revisit_car", "in_a", visit_id=1)
+    rank_state = _confirm(world, [vehicle])
+    junction = _junction(world)
+    junction.transfer()
+    assert [record.visit_key for record in _node_history(world)] == [
+        ("revisit_car", 1),
+    ]
+    inlink = world.get_link("in_a")
+    outlink = world.get_link("out")
+    outlink.vehicles.remove(vehicle)
+    vehicle.link = inlink
+    vehicle.x = inlink.length
+    vehicle.x_old = inlink.length
+    vehicle.state = "run"
+    vehicle.route_next_link = outlink
+    vehicle.order_control_visit_id = 2
+    vehicle.order_control_current_visit = {
+        "visit_id": 2,
+        "node": junction,
+        "inlink": inlink,
+        "earliest_arrival_timestep": 0,
+        "arrival_time": 0.0,
+        "arrival_tiebreaker": 0.2,
+        "batch_assignment": None,
+    }
+    inlink.vehicles.append(vehicle)
+    junction.incoming_vehicles.append(vehicle)
+    rank_state.register_undetermined_visit(("revisit_car", 2))
+    rank_state.confirm_visits_in_order([("revisit_car", 2)])
+    world.T = 12
+    _prepare_logs(world)
+    inlink.capacity_out_remain = 10
+    outlink.capacity_in_remain = 10
+    junction.transfer()
+    records = _node_history(world)
+    assert [record.visit_key for record in records] == [
+        ("revisit_car", 1),
+        ("revisit_car", 2),
+    ]
+    assert [record.actual_node_passage_rank for record in records] == [1, 2]
+    assert records[0].actual_passage_timestep == 10
+    assert records[1].actual_passage_timestep == 12
+
+
+def test_history_commit_is_after_clearance_and_before_observation_commit():
+    world = _world("history_commit_order")
+    vehicle = _place(world, "order_car", "in_a", visit_id=1)
+    _confirm(world, [vehicle])
+    visit_key, entry, _trade = _waiting_passage_entry(
+        world,
+        vehicle,
+        role=OrderControlTvtMpActualPassageRole.BUYER,
+    )
+    junction = _junction(world)
+    inlink = world.get_link("in_a")
+    order = []
+    original_history_prepare = (
+        physical_transfer.prepare_tvt_mp_actual_node_passage_history
+    )
+    original_observation_prepare = (
+        physical_transfer.prepare_tvt_mp_actual_passage_observation
+    )
+    original_history_commit = (
+        physical_transfer.commit_tvt_mp_actual_node_passage_history
+    )
+    original_observation_commit = (
+        physical_transfer.commit_tvt_mp_actual_passage_observation
+    )
+    original_transfer = junction._transfer_one_vehicle_between_links
+
+    def history_prepare_spy(**kwargs):
+        order.append("prepare_history")
+        assert vehicle.link is inlink
+        assert kwargs["visit_key"] == visit_key
+        return original_history_prepare(**kwargs)
+
+    def observation_prepare_spy(**kwargs):
+        order.append("prepare_observation")
+        assert vehicle.link is inlink
+        return original_observation_prepare(**kwargs)
+
+    def transfer_spy(moved_vehicle, moved_inlink, moved_outlink):
+        order.append("transfer")
+        return original_transfer(moved_vehicle, moved_inlink, moved_outlink)
+
+    def history_commit_spy(prepared):
+        order.append("commit_history")
+        assert vehicle.link.name == "out"
+        assert junction.last_order_control_inlink is inlink
+        assert junction.last_order_control_entry_timestep == world.T
+        assert entry.actual_passage_observation_record is None
+        return original_history_commit(prepared)
+
+    def observation_commit_spy(prepared):
+        order.append("commit_observation")
+        stored = _node_history(world)
+        assert len(stored) == 1
+        assert stored[0].actual_node_passage_rank == 1
+        return original_observation_commit(prepared)
+
+    with patch.object(
+        physical_transfer,
+        "prepare_tvt_mp_actual_node_passage_history",
+        history_prepare_spy,
+    ):
+        with patch.object(
+            physical_transfer,
+            "prepare_tvt_mp_actual_passage_observation",
+            observation_prepare_spy,
+        ):
+            with patch.object(
+                junction,
+                "_transfer_one_vehicle_between_links",
+                transfer_spy,
+            ):
+                with patch.object(
+                    physical_transfer,
+                    "commit_tvt_mp_actual_node_passage_history",
+                    history_commit_spy,
+                ):
+                    with patch.object(
+                        physical_transfer,
+                        "commit_tvt_mp_actual_passage_observation",
+                        observation_commit_spy,
+                    ):
+                        junction.transfer()
+    assert order == [
+        "prepare_history",
+        "prepare_observation",
+        "transfer",
+        "commit_history",
+        "commit_observation",
+    ]
+    assert entry.actual_passage_observation_record is not None
 
 
 def test_registry_matches_defined_functions():

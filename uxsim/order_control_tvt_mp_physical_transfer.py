@@ -3,13 +3,16 @@ Physical passage attempts for confirmed TVT-MP ranks.
 
 Reads the current incoming vehicles and the node's rank ledger. Does not
 import uxsim.uxsim. Does not change the ledger, payments, or formal routes.
-On the real world, a confirmed passage records an actual passage
-observation. It does not build an actual outcome, run ex-post evaluation,
-or evaluate roles. It does not call the downstream observer.
+On the real world, a confirmed passage records node passage history, then
+an actual passage observation when a wait entry exists. It does not build
+an actual outcome, run ex-post evaluation, or evaluate roles. It does not
+call the downstream observer. A baseline fork records neither.
 """
 
 from uxsim.order_control_tvt_mp_actual_passage import (
+    commit_tvt_mp_actual_node_passage_history,
     commit_tvt_mp_actual_passage_observation,
+    prepare_tvt_mp_actual_node_passage_history,
     prepare_tvt_mp_actual_passage_observation,
 )
 from uxsim.order_control_tvt_node_rank_state import OrderControlTvtNodeRankState
@@ -40,8 +43,9 @@ def transfer_tvt_mp_passage_attempts(node):
     A generic fork does not read the rank ledger. A real world or a TVT
     rank-applying fork with no incoming vehicles returns before the ledger
     check.     One or more incoming vehicles still require that node's ledger.
-    On the real world, a successful confirmed passage records an actual
-    passage observation. A baseline fork does not. This function does not
+    On the real world, a successful confirmed passage records node passage
+    history. It also records an actual passage observation when a wait
+    entry exists. A baseline fork records neither. This function does not
     finish the node transfer and does not call the downstream observer.
     """
     baseline_collector = getattr(node.W, "_order_control_baseline_collector", None)
@@ -244,9 +248,19 @@ def _try_confirmed_candidates(node, confirmed_candidates):
         if node._order_control_clearance_blocks_passage(vehicle, inlink):
             return True
         # Prepare uses the visit and outlink saved before the move.
-        # A baseline fork does not prepare or commit an actual observation.
+        # A baseline fork prepares neither the node passage history nor an
+        # actual observation. History covers every confirmed visit. The
+        # observation covers a trade-scope wait entry only.
+        prepared_history = None
         prepared_actual_passage = None
         if node.W._order_control_baseline_collector is None:
+            prepared_history = prepare_tvt_mp_actual_node_passage_history(
+                node=node,
+                vehicle=candidate.vehicle,
+                visit_key=candidate.visit_key,
+                actual_outlink=candidate.outlink,
+                actual_passage_timestep=node.W.T,
+            )
             prepared_actual_passage = prepare_tvt_mp_actual_passage_observation(
                 node=node,
                 vehicle=candidate.vehicle,
@@ -257,6 +271,8 @@ def _try_confirmed_candidates(node, confirmed_candidates):
         node._transfer_one_vehicle_between_links(vehicle, inlink, outlink)
         node.last_order_control_inlink = inlink
         node.last_order_control_entry_timestep = node.W.T
+        if prepared_history is not None:
+            commit_tvt_mp_actual_node_passage_history(prepared_history)
         if prepared_actual_passage is not None:
             commit_tvt_mp_actual_passage_observation(prepared_actual_passage)
     return False

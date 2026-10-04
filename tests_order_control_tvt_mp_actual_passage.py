@@ -1,8 +1,19 @@
 import dataclasses
+import inspect
 
 import pytest
 
+from tests_order_control_tvt_mp_physical_transfer import (
+    _as_fork,
+    _confirm,
+    _junction,
+    _place,
+    _register_only,
+    _world,
+)
 from uxsim.order_control_tvt_mp_actual_passage import (
+    OrderControlTvtMpActualNodePassageHistoryRegistry,
+    OrderControlTvtMpActualNodePassageRecord,
     OrderControlTvtMpActualPassageCommonFrozenInput,
     OrderControlTvtMpActualPassageMonetaryFrozenInput,
     OrderControlTvtMpActualPassageObservationRecord,
@@ -12,7 +23,10 @@ from uxsim.order_control_tvt_mp_actual_passage import (
     OrderControlTvtMpActualPassageWaitEntry,
     OrderControlTvtMpActualPassageWaitRegistry,
     OrderControlTvtMpActualPassageWaitStatus,
+    _PreparedTvtMpActualNodePassageHistoryUpdate,
+    commit_tvt_mp_actual_node_passage_history,
     commit_tvt_mp_actual_passage_observation,
+    prepare_tvt_mp_actual_node_passage_history,
     prepare_tvt_mp_actual_passage_observation,
 )
 from uxsim.order_control_tvt_mp_local_binding_rank_sequence import (
@@ -21,7 +35,10 @@ from uxsim.order_control_tvt_mp_local_binding_rank_sequence import (
 from uxsim.order_control_tvt_mp_candidate_local_virtual_calculation import (
     OrderControlTvtMpCandidatePassageObservationStatus,
 )
-from uxsim.order_control_tvt_node_rank_state import OrderControlTvtVisitKey
+from uxsim.order_control_tvt_node_rank_state import (
+    OrderControlTvtNodeRankState,
+    OrderControlTvtVisitKey,
+)
 from uxsim.uxsim import World
 
 _ROUTE_ORIGIN = OrderControlTvtMpLocalBindingRouteOrigin.RANK_LEDGER_FORMAL_ROUTE
@@ -2181,3 +2198,454 @@ def test_prepare_rejects_nonparticipating_when_flag_false_but_buyer_seller_compl
         _PREPARE_ACTUAL_TIMESTEP,
         entry,
     )
+
+
+def _history_record_kwargs(**changes):
+    values = {
+        "visit_key": ("history_car", 1),
+        "actual_passage_timestep": 10,
+        "actual_route_next_link_name": "out",
+        "actual_node_passage_rank": 1,
+    }
+    values.update(changes)
+    return values
+
+
+def _confirmed_history_world(name, vehicle_name="history_car", visit_id=1):
+    world = _world(name)
+    vehicle = _place(world, vehicle_name, "in_a", visit_id=visit_id)
+    _confirm(world, [vehicle])
+    node = _junction(world)
+    outlink = world.get_link("out")
+    visit_key = (vehicle_name, visit_id)
+    return world, node, vehicle, outlink, visit_key
+
+
+def test_node_passage_record_is_frozen_and_has_four_required_fields():
+    fields = dataclasses.fields(OrderControlTvtMpActualNodePassageRecord)
+    assert [field.name for field in fields] == [
+        "visit_key",
+        "actual_passage_timestep",
+        "actual_route_next_link_name",
+        "actual_node_passage_rank",
+    ]
+    for field in fields:
+        assert field.default is dataclasses.MISSING
+        assert field.default_factory is dataclasses.MISSING
+    record = OrderControlTvtMpActualNodePassageRecord(
+        ("history_car", 1),
+        10,
+        "out",
+        1,
+    )
+    assert record.visit_key == ("history_car", 1)
+    assert record.actual_passage_timestep == 10
+    assert record.actual_route_next_link_name == "out"
+    assert record.actual_node_passage_rank == 1
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        record.actual_node_passage_rank = 2
+    same_timestep = OrderControlTvtMpActualNodePassageRecord(
+        ("other_car", 1),
+        10,
+        "out_b",
+        2,
+    )
+    assert record.actual_passage_timestep == same_timestep.actual_passage_timestep
+    assert "node_name" not in record.__dataclass_fields__
+    assert "vehicle_name" not in record.__dataclass_fields__
+    assert "role" not in record.__dataclass_fields__
+    saved = dataclasses.asdict(record)
+    assert set(saved) == {
+        "visit_key",
+        "actual_passage_timestep",
+        "actual_route_next_link_name",
+        "actual_node_passage_rank",
+    }
+
+
+def test_node_passage_record_rejects_a_bad_shape():
+    rejected = []
+    cases = [
+        ("empty vehicle name", _history_record_kwargs(visit_key=("", 1))),
+        ("visit id zero", _history_record_kwargs(visit_key=("history_car", 0))),
+        ("visit id bool", _history_record_kwargs(visit_key=("history_car", True))),
+        ("visit key not a tuple", _history_record_kwargs(visit_key="history_car")),
+        ("short visit key", _history_record_kwargs(visit_key=("history_car",))),
+        ("bool timestep", _history_record_kwargs(actual_passage_timestep=True)),
+        ("negative timestep", _history_record_kwargs(actual_passage_timestep=-1)),
+        ("empty route", _history_record_kwargs(actual_route_next_link_name="")),
+        ("non-string route", _history_record_kwargs(actual_route_next_link_name=1)),
+        ("bool rank", _history_record_kwargs(actual_node_passage_rank=True)),
+        ("zero rank", _history_record_kwargs(actual_node_passage_rank=0)),
+        ("negative rank", _history_record_kwargs(actual_node_passage_rank=-1)),
+    ]
+    for label, kwargs in cases:
+        try:
+            OrderControlTvtMpActualNodePassageRecord(**kwargs)
+        except RuntimeError:
+            continue
+        rejected.append(label)
+    assert rejected == []
+    rank_one = OrderControlTvtMpActualNodePassageRecord(
+        **_history_record_kwargs(actual_node_passage_rank=1)
+    )
+    assert rank_one.actual_node_passage_rank == 1
+
+
+def test_node_passage_history_registry_keeps_per_node_tuples():
+    registry = OrderControlTvtMpActualNodePassageHistoryRegistry()
+    assert registry.records_by_node_name == {}
+    assert registry.records_by_node_name.get("missing", ()) == ()
+    assert [
+        field.name
+        for field in dataclasses.fields(OrderControlTvtMpActualNodePassageHistoryRegistry)
+    ] == ["records_by_node_name"]
+    other = OrderControlTvtMpActualNodePassageHistoryRegistry()
+    assert other.records_by_node_name is not registry.records_by_node_name
+    wait_registry = OrderControlTvtMpActualPassageWaitRegistry()
+    assert type(registry) is not type(wait_registry)
+    assert registry is not wait_registry
+
+
+def test_world_initializes_independent_node_passage_history_registries():
+    world_a = World(
+        name="history_world_a",
+        print_mode=0,
+        save_mode=0,
+        show_mode=0,
+        show_progress=0,
+        random_seed=0,
+    )
+    world_b = World(
+        name="history_world_b",
+        print_mode=0,
+        save_mode=0,
+        show_mode=0,
+        show_progress=0,
+        random_seed=1,
+    )
+    history_a = world_a.order_control_tvt_mp_actual_node_passage_history_registry
+    history_b = world_b.order_control_tvt_mp_actual_node_passage_history_registry
+    assert isinstance(history_a, OrderControlTvtMpActualNodePassageHistoryRegistry)
+    assert isinstance(history_b, OrderControlTvtMpActualNodePassageHistoryRegistry)
+    assert history_a.records_by_node_name == {}
+    assert history_b.records_by_node_name == {}
+    assert history_a is not history_b
+    assert history_a is not world_a.order_control_tvt_mp_actual_passage_wait_registry
+    assert type(history_a) is not type(
+        world_a.order_control_tvt_mp_actual_passage_wait_registry
+    )
+    history_a.records_by_node_name["junction"] = ()
+    assert history_b.records_by_node_name == {}
+    fork = world_a.copy()
+    fork_history = fork.order_control_tvt_mp_actual_node_passage_history_registry
+    assert isinstance(fork_history, OrderControlTvtMpActualNodePassageHistoryRegistry)
+    assert fork_history is not history_a
+    assert fork_history.records_by_node_name == {"junction": ()}
+
+
+def test_prepare_node_passage_history_keeps_live_state_until_commit():
+    world, node, vehicle, outlink, visit_key = _confirmed_history_world(
+        "history_prepare_ok",
+    )
+    registry = world.order_control_tvt_mp_actual_node_passage_history_registry
+    rank_state = world.order_control_tvt_rank_states_by_node_name["junction"]
+    link_before = vehicle.link
+    prepared = prepare_tvt_mp_actual_node_passage_history(
+        node=node,
+        vehicle=vehicle,
+        visit_key=visit_key,
+        actual_outlink=outlink,
+        actual_passage_timestep=world.T,
+    )
+    assert prepared.node_name == "junction"
+    assert prepared.record.visit_key == visit_key
+    assert prepared.record.actual_passage_timestep == world.T
+    assert prepared.record.actual_route_next_link_name == "out"
+    assert prepared.record.actual_node_passage_rank == 1
+    assert prepared.updated_node_records == (prepared.record,)
+    assert registry.records_by_node_name == {}
+    assert vehicle.link is link_before
+    assert rank_state.assigned_rank(visit_key) == 1
+    assert rank_state.formal_route_next_link_name(visit_key) is None
+    by_name = prepare_tvt_mp_actual_node_passage_history(
+        node=node,
+        vehicle=vehicle.name,
+        visit_key=visit_key,
+        actual_outlink=outlink,
+        actual_passage_timestep=world.T,
+    )
+    assert by_name.record.actual_node_passage_rank == 1
+    assert registry.records_by_node_name == {}
+
+
+def test_prepare_node_passage_history_uses_existing_length_plus_one():
+    world, node, vehicle, outlink, visit_key = _confirmed_history_world(
+        "history_rank_two",
+    )
+    registry = world.order_control_tvt_mp_actual_node_passage_history_registry
+    first = prepare_tvt_mp_actual_node_passage_history(
+        node=node,
+        vehicle=vehicle,
+        visit_key=visit_key,
+        actual_outlink=outlink,
+        actual_passage_timestep=world.T,
+    )
+    commit_tvt_mp_actual_node_passage_history(first)
+    rank_state = world.order_control_tvt_rank_states_by_node_name["junction"]
+    second_vehicle = _place(world, "second_car", "in_b", visit_id=2)
+    rank_state.register_undetermined_visit(("second_car", 2))
+    rank_state.confirm_visits_in_order([("second_car", 2)])
+    second_outlink = world.get_link("out")
+    prepared = prepare_tvt_mp_actual_node_passage_history(
+        node=node,
+        vehicle=second_vehicle,
+        visit_key=("second_car", 2),
+        actual_outlink=second_outlink,
+        actual_passage_timestep=world.T,
+    )
+    assert prepared.record.actual_node_passage_rank == 2
+    assert len(registry.records_by_node_name["junction"]) == 1
+    commit_tvt_mp_actual_node_passage_history(prepared)
+    records = registry.records_by_node_name["junction"]
+    assert isinstance(records, tuple)
+    assert [record.actual_node_passage_rank for record in records] == [1, 2]
+    assert records[0].visit_key == ("history_car", 1)
+    assert records[1].visit_key == ("second_car", 2)
+
+
+def test_prepare_node_passage_history_separates_nodes_and_visit_keys():
+    world, node, vehicle, outlink, visit_key = _confirmed_history_world(
+        "history_separate",
+    )
+    world.addNode("dest_b", 4, 0)
+    world.addNode(
+        "junction_b",
+        3,
+        0,
+        order_control_type="time_value",
+        order_control_eligible=True,
+    )
+    world.addLink(
+        "out_b",
+        "junction_b",
+        "dest_b",
+        length=100,
+        free_flow_speed=20,
+        number_of_lanes=1,
+    )
+    node_b = world.get_node("junction_b")
+    rank_state_b = OrderControlTvtNodeRankState("junction_b")
+    rank_state_b.register_undetermined_visit(visit_key)
+    rank_state_b.confirm_visits_in_order([visit_key])
+    world.order_control_tvt_rank_states_by_node_name["junction_b"] = rank_state_b
+    first = prepare_tvt_mp_actual_node_passage_history(
+        node=node,
+        vehicle=vehicle,
+        visit_key=visit_key,
+        actual_outlink=outlink,
+        actual_passage_timestep=world.T,
+    )
+    commit_tvt_mp_actual_node_passage_history(first)
+    second = prepare_tvt_mp_actual_node_passage_history(
+        node=node_b,
+        vehicle=vehicle,
+        visit_key=visit_key,
+        actual_outlink=world.get_link("out_b"),
+        actual_passage_timestep=world.T,
+    )
+    assert second.record.actual_node_passage_rank == 1
+    assert second.record.visit_key == visit_key
+    commit_tvt_mp_actual_node_passage_history(second)
+    registry = world.order_control_tvt_mp_actual_node_passage_history_registry
+    assert registry.records_by_node_name["junction"][0].actual_node_passage_rank == 1
+    assert registry.records_by_node_name["junction_b"][0].actual_node_passage_rank == 1
+
+    rank_state = world.order_control_tvt_rank_states_by_node_name["junction"]
+    revisit_key = ("history_car", 2)
+    rank_state.register_undetermined_visit(revisit_key)
+    rank_state.confirm_visits_in_order([revisit_key])
+    revisit = prepare_tvt_mp_actual_node_passage_history(
+        node=node,
+        vehicle=vehicle,
+        visit_key=revisit_key,
+        actual_outlink=outlink,
+        actual_passage_timestep=world.T,
+    )
+    assert revisit.record.actual_node_passage_rank == 2
+    assert revisit.record.visit_key[0] == visit_key[0]
+    assert revisit.record.visit_key != visit_key
+
+
+def test_prepare_node_passage_history_rejects_bad_live_inputs():
+    world, node, vehicle, outlink, visit_key = _confirmed_history_world(
+        "history_prepare_reject",
+    )
+    registry = world.order_control_tvt_mp_actual_node_passage_history_registry
+    loose_world = _world("history_unconfirmed")
+    loose = _place(loose_world, "loose_car", "in_a", visit_id=1)
+    _register_only(loose_world, [loose])
+    with pytest.raises(RuntimeError):
+        prepare_tvt_mp_actual_node_passage_history(
+            node=_junction(loose_world),
+            vehicle=loose,
+            visit_key=("loose_car", 1),
+            actual_outlink=loose_world.get_link("out"),
+            actual_passage_timestep=loose_world.T,
+        )
+    with pytest.raises(RuntimeError):
+        prepare_tvt_mp_actual_node_passage_history(
+            node=node,
+            vehicle=vehicle,
+            visit_key=("other_car", 1),
+            actual_outlink=outlink,
+            actual_passage_timestep=world.T,
+        )
+    with pytest.raises(RuntimeError):
+        prepare_tvt_mp_actual_node_passage_history(
+            node=node,
+            vehicle=vehicle,
+            visit_key=visit_key,
+            actual_outlink=outlink,
+            actual_passage_timestep=world.T - 1,
+        )
+    with pytest.raises(RuntimeError):
+        prepare_tvt_mp_actual_node_passage_history(
+            node=node,
+            vehicle=vehicle,
+            visit_key=visit_key,
+            actual_outlink=world.get_link("side"),
+            actual_passage_timestep=world.T,
+        )
+    world.order_control_tvt_mp_actual_node_passage_history_registry = (
+        world.order_control_tvt_mp_actual_passage_wait_registry
+    )
+    with pytest.raises(RuntimeError):
+        prepare_tvt_mp_actual_node_passage_history(
+            node=node,
+            vehicle=vehicle,
+            visit_key=visit_key,
+            actual_outlink=outlink,
+            actual_passage_timestep=world.T,
+        )
+    world.order_control_tvt_mp_actual_node_passage_history_registry = registry
+    registry.records_by_node_name["junction"] = []
+    with pytest.raises(RuntimeError):
+        prepare_tvt_mp_actual_node_passage_history(
+            node=node,
+            vehicle=vehicle,
+            visit_key=visit_key,
+            actual_outlink=outlink,
+            actual_passage_timestep=world.T,
+        )
+    broken_rank = OrderControlTvtMpActualNodePassageRecord(
+        ("earlier_car", 1),
+        0,
+        "out",
+        2,
+    )
+    registry.records_by_node_name["junction"] = (broken_rank,)
+    with pytest.raises(RuntimeError):
+        prepare_tvt_mp_actual_node_passage_history(
+            node=node,
+            vehicle=vehicle,
+            visit_key=visit_key,
+            actual_outlink=outlink,
+            actual_passage_timestep=world.T,
+        )
+    duplicate_a = OrderControlTvtMpActualNodePassageRecord(
+        ("earlier_car", 1),
+        0,
+        "out",
+        1,
+    )
+    duplicate_b = OrderControlTvtMpActualNodePassageRecord(
+        ("earlier_car", 1),
+        1,
+        "out",
+        2,
+    )
+    registry.records_by_node_name["junction"] = (duplicate_a, duplicate_b)
+    with pytest.raises(RuntimeError):
+        prepare_tvt_mp_actual_node_passage_history(
+            node=node,
+            vehicle=vehicle,
+            visit_key=visit_key,
+            actual_outlink=outlink,
+            actual_passage_timestep=world.T,
+        )
+    registry.records_by_node_name["junction"] = (
+        OrderControlTvtMpActualNodePassageRecord(visit_key, 0, "out", 1),
+    )
+    with pytest.raises(RuntimeError):
+        prepare_tvt_mp_actual_node_passage_history(
+            node=node,
+            vehicle=vehicle,
+            visit_key=visit_key,
+            actual_outlink=outlink,
+            actual_passage_timestep=world.T,
+        )
+    assert vehicle.link.name == "in_a"
+    assert registry.records_by_node_name["junction"][0].visit_key == visit_key
+    _as_fork(world)
+    with pytest.raises(RuntimeError):
+        prepare_tvt_mp_actual_node_passage_history(
+            node=node,
+            vehicle=vehicle,
+            visit_key=visit_key,
+            actual_outlink=outlink,
+            actual_passage_timestep=world.T,
+        )
+
+
+def test_commit_node_passage_history_assigns_prepared_values_only():
+    world, node, vehicle, outlink, visit_key = _confirmed_history_world(
+        "history_commit",
+    )
+    registry = world.order_control_tvt_mp_actual_node_passage_history_registry
+    other = OrderControlTvtMpActualNodePassageRecord(
+        ("other_node_car", 1),
+        3,
+        "side",
+        1,
+    )
+    registry.records_by_node_name["other_node"] = (other,)
+    prepared = prepare_tvt_mp_actual_node_passage_history(
+        node=node,
+        vehicle=vehicle,
+        visit_key=visit_key,
+        actual_outlink=outlink,
+        actual_passage_timestep=world.T,
+    )
+    rank_state = world.order_control_tvt_rank_states_by_node_name["junction"]
+
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("commit searched the rank ledger")
+
+    rank_state.is_confirmed = fail_if_called
+    world.T = 99
+    commit_source = inspect.getsource(commit_tvt_mp_actual_node_passage_history)
+    assert "sort(" not in commit_source
+    assert "is_confirmed" not in commit_source
+    assert "assigned_rank" not in commit_source
+    assert "OrderControlTvtMpActualNodePassageRecord(" not in commit_source
+    commit_tvt_mp_actual_node_passage_history(prepared)
+    stored = registry.records_by_node_name["junction"]
+    assert isinstance(stored, tuple)
+    assert stored[0] is prepared.record
+    assert stored[0].actual_passage_timestep == 10
+    assert stored[0].actual_node_passage_rank == 1
+    assert registry.records_by_node_name["other_node"] == (other,)
+    late = OrderControlTvtMpActualNodePassageRecord(("z_car", 1), 20, "out", 1)
+    early = OrderControlTvtMpActualNodePassageRecord(("a_car", 1), 5, "out", 2)
+    unsorted = _PreparedTvtMpActualNodePassageHistoryUpdate(
+        registry=registry,
+        node_name="unsorted_node",
+        record=early,
+        updated_node_records=(late, early),
+    )
+    commit_tvt_mp_actual_node_passage_history(unsorted)
+    assert registry.records_by_node_name["unsorted_node"] == (late, early)
+    assert registry.records_by_node_name["unsorted_node"][0] is late
+    with pytest.raises(RuntimeError):
+        commit_tvt_mp_actual_node_passage_history(prepared.record)

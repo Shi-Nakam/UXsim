@@ -5,7 +5,10 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING
 
-from uxsim.order_control_tvt_node_rank_state import OrderControlTvtVisitKey
+from uxsim.order_control_tvt_node_rank_state import (
+    OrderControlTvtNodeRankState,
+    OrderControlTvtVisitKey,
+)
 
 if TYPE_CHECKING:
     from uxsim.order_control_tvt_mp_candidate_local_virtual_calculation import (
@@ -243,6 +246,71 @@ class OrderControlTvtMpActualPassageWaitRegistry:
         tuple[int, str, tuple[OrderControlTvtVisitKey, ...]],
         OrderControlTvtMpActualPassageTradeWait,
     ] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class OrderControlTvtMpActualNodePassageRecord:
+    """One successful real-world passage, in Node order. Not a trade rank.
+
+    node_name stays on the history registry key. vehicle_name stays inside
+    visit_key. Assigned rank and the formal route stay on the rank ledger.
+    """
+
+    visit_key: OrderControlTvtVisitKey
+    actual_passage_timestep: int
+    actual_route_next_link_name: str
+    actual_node_passage_rank: int
+
+    def __post_init__(self) -> None:
+        _require_history_visit_key(self.visit_key)
+        if type(self.actual_passage_timestep) is not int:
+            raise RuntimeError(
+                "actual_passage_timestep must be a Python int, not bool; "
+                f"got {self.actual_passage_timestep!r}."
+            )
+        if self.actual_passage_timestep < 0:
+            raise RuntimeError(
+                "actual_passage_timestep must be >= 0; got "
+                f"{self.actual_passage_timestep!r}."
+            )
+        if (
+            not isinstance(self.actual_route_next_link_name, str)
+            or self.actual_route_next_link_name == ""
+        ):
+            raise RuntimeError(
+                "actual_route_next_link_name must be a non-empty str; got "
+                f"{self.actual_route_next_link_name!r}."
+            )
+        if type(self.actual_node_passage_rank) is not int:
+            raise RuntimeError(
+                "actual_node_passage_rank must be a Python int, not bool; "
+                f"got {self.actual_node_passage_rank!r}."
+            )
+        if self.actual_node_passage_rank < 1:
+            raise RuntimeError(
+                "actual_node_passage_rank must be >= 1; got "
+                f"{self.actual_node_passage_rank!r}."
+            )
+
+
+@dataclass
+class OrderControlTvtMpActualNodePassageHistoryRegistry:
+    """Successful passages per Node. The next rank is the tuple length + 1."""
+
+    records_by_node_name: dict[
+        str,
+        tuple[OrderControlTvtMpActualNodePassageRecord, ...],
+    ] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class _PreparedTvtMpActualNodePassageHistoryUpdate:
+    """One history tuple ready to assign. The live registry is unchanged."""
+
+    registry: OrderControlTvtMpActualNodePassageHistoryRegistry
+    node_name: str
+    record: OrderControlTvtMpActualNodePassageRecord
+    updated_node_records: tuple[OrderControlTvtMpActualNodePassageRecord, ...]
 
 
 @dataclass(frozen=True)
@@ -1092,3 +1160,269 @@ def _validate_completion_flag_consistency(
             "TradeWait completion flag is still False during nonparticipating "
             "passage."
         )
+
+
+def _require_history_visit_key(visit_key) -> OrderControlTvtVisitKey:
+    """Check the VisitKey shape only. Do not look up a vehicle or a ledger."""
+    if not isinstance(visit_key, tuple) or len(visit_key) != 2:
+        raise RuntimeError(
+            "visit_key must be a length-2 tuple (vehicle_name, visit_id); "
+            f"got {visit_key!r}."
+        )
+    vehicle_name = visit_key[0]
+    visit_id = visit_key[1]
+    if not isinstance(vehicle_name, str) or vehicle_name == "":
+        raise RuntimeError(
+            "visit_key vehicle_name must be a non-empty str; "
+            f"got {vehicle_name!r}."
+        )
+    if type(visit_id) is not int:
+        raise RuntimeError(
+            "visit_key visit_id must be a Python int, not bool; "
+            f"got {visit_id!r}."
+        )
+    if visit_id < 1:
+        raise RuntimeError(
+            f"visit_key visit_id must be >= 1; got {visit_id!r}."
+        )
+    return visit_key
+
+
+def _vehicle_name_for_history(vehicle) -> str:
+    if isinstance(vehicle, str):
+        vehicle_name = vehicle
+    else:
+        vehicle_name = getattr(vehicle, "name", None)
+    if not isinstance(vehicle_name, str) or vehicle_name == "":
+        raise RuntimeError(
+            "vehicle name must be a non-empty str; "
+            f"got {vehicle_name!r}."
+        )
+    return vehicle_name
+
+
+def _require_real_world_for_passage_history(node) -> None:
+    collector = getattr(node.W, "_order_control_baseline_collector", None)
+    if collector is not None:
+        raise RuntimeError(
+            f"Node {node.name!r}: node passage history is recorded on the "
+            "real world only. A baseline fork does not prepare it."
+        )
+
+
+def _require_passage_history_registry(node):
+    registry = getattr(
+        node.W,
+        "order_control_tvt_mp_actual_node_passage_history_registry",
+        None,
+    )
+    if not isinstance(registry, OrderControlTvtMpActualNodePassageHistoryRegistry):
+        raise RuntimeError(
+            f"Node {node.name!r}: node passage history registry must be "
+            "OrderControlTvtMpActualNodePassageHistoryRegistry; got type "
+            f"{type(registry).__name__}."
+        )
+    if not isinstance(registry.records_by_node_name, dict):
+        raise RuntimeError(
+            f"Node {node.name!r}: node passage history records_by_node_name "
+            "must be a dict; got type "
+            f"{type(registry.records_by_node_name).__name__}."
+        )
+    return registry
+
+
+def _require_history_node_name(node) -> str:
+    node_name = getattr(node, "name", None)
+    if not isinstance(node_name, str) or node_name == "":
+        raise RuntimeError(
+            f"node name must be a non-empty str; got {node_name!r}."
+        )
+    return node_name
+
+
+def _require_history_passage_timestep(actual_passage_timestep, node) -> int:
+    if type(actual_passage_timestep) is not int:
+        raise RuntimeError(
+            f"Node {node.name!r}: actual_passage_timestep must be a Python "
+            f"int, not bool; got {actual_passage_timestep!r}."
+        )
+    if actual_passage_timestep < 0:
+        raise RuntimeError(
+            f"Node {node.name!r}: actual_passage_timestep must be >= 0; got "
+            f"{actual_passage_timestep!r}."
+        )
+    if actual_passage_timestep != node.W.T:
+        raise RuntimeError(
+            f"Node {node.name!r}: actual_passage_timestep "
+            f"{actual_passage_timestep!r} does not match World timestep "
+            f"{node.W.T!r}."
+        )
+    return actual_passage_timestep
+
+
+def _require_registered_history_outlink(node, actual_outlink, visit_key) -> str:
+    route_name = getattr(actual_outlink, "name", None)
+    if not isinstance(route_name, str) or route_name == "":
+        raise RuntimeError(
+            f"Node {node.name!r}: VisitKey {visit_key!r} actual outlink name "
+            f"must be a non-empty str; got {route_name!r}."
+        )
+    outlink_is_registered = False
+    registered_outlinks = getattr(node, "outlinks", None)
+    if isinstance(registered_outlinks, dict):
+        for registered_outlink in registered_outlinks.values():
+            if registered_outlink is actual_outlink:
+                outlink_is_registered = True
+                break
+    if not outlink_is_registered:
+        raise RuntimeError(
+            f"Node {node.name!r}: VisitKey {visit_key!r} actual outlink "
+            f"{route_name!r} is not a registered outlink of this node."
+        )
+    return route_name
+
+
+def _require_visit_confirmed_on_node_ledger(node, visit_key) -> None:
+    """Confirm the visit is on this node's ledger. Do not copy its rank."""
+    ledgers = getattr(node.W, "order_control_tvt_rank_states_by_node_name", None)
+    if not isinstance(ledgers, dict) or node.name not in ledgers:
+        raise RuntimeError(
+            f"Node {node.name!r}: VisitKey {visit_key!r} is not confirmed "
+            "on this node's rank ledger."
+        )
+    rank_state = ledgers[node.name]
+    if not isinstance(rank_state, OrderControlTvtNodeRankState):
+        raise RuntimeError(
+            f"Node {node.name!r}: VisitKey {visit_key!r} is not confirmed "
+            "on this node's rank ledger."
+        )
+    if rank_state.node_name != node.name:
+        raise RuntimeError(
+            f"Node {node.name!r}: VisitKey {visit_key!r} is not confirmed "
+            "on this node's rank ledger."
+        )
+    if not rank_state.is_confirmed(visit_key):
+        raise RuntimeError(
+            f"Node {node.name!r}: VisitKey {visit_key!r} is not confirmed "
+            "on this node's rank ledger."
+        )
+
+
+def _require_existing_node_passage_records(node_name, stored_records):
+    """Read one node's saved history. Do not sort it or change it."""
+    if not isinstance(stored_records, tuple):
+        raise RuntimeError(
+            f"Node {node_name!r}: node passage history must be a tuple; got "
+            f"type {type(stored_records).__name__}."
+        )
+    seen_visit_keys = []
+    expected_rank = 1
+    for record in stored_records:
+        if not isinstance(record, OrderControlTvtMpActualNodePassageRecord):
+            raise RuntimeError(
+                f"Node {node_name!r}: node passage history contains "
+                f"{type(record).__name__}, not "
+                "OrderControlTvtMpActualNodePassageRecord."
+            )
+        if record.actual_node_passage_rank != expected_rank:
+            raise RuntimeError(
+                f"Node {node_name!r}: node passage history rank "
+                f"{record.actual_node_passage_rank!r} is not the continuous "
+                f"rank {expected_rank}."
+            )
+        if record.visit_key in seen_visit_keys:
+            raise RuntimeError(
+                f"Node {node_name!r}: node passage history already contains "
+                f"duplicate VisitKey {record.visit_key!r}."
+            )
+        seen_visit_keys.append(record.visit_key)
+        expected_rank = expected_rank + 1
+    return stored_records, seen_visit_keys
+
+
+def prepare_tvt_mp_actual_node_passage_history(
+    *,
+    node,
+    vehicle,
+    visit_key,
+    actual_outlink,
+    actual_passage_timestep,
+):
+    """Build one node-passage history update. Do not change live state.
+
+    The next rank is the saved tuple length plus one. This does not move
+    the vehicle, update clearance, or append the history. Physical transfer
+    calls this before the move, and only on the real world.
+    """
+    _require_real_world_for_passage_history(node)
+    registry = _require_passage_history_registry(node)
+    node_name = _require_history_node_name(node)
+    checked_visit_key = _require_history_visit_key(visit_key)
+    vehicle_name = _vehicle_name_for_history(vehicle)
+    if checked_visit_key[0] != vehicle_name:
+        raise RuntimeError(
+            f"Node {node_name!r}: VisitKey vehicle_name "
+            f"{checked_visit_key[0]!r} does not match {vehicle_name!r}."
+        )
+    checked_timestep = _require_history_passage_timestep(
+        actual_passage_timestep,
+        node,
+    )
+    route_name = _require_registered_history_outlink(
+        node,
+        actual_outlink,
+        checked_visit_key,
+    )
+    _require_visit_confirmed_on_node_ledger(node, checked_visit_key)
+
+    stored_records = registry.records_by_node_name.get(node_name, ())
+    existing_records, seen_visit_keys = _require_existing_node_passage_records(
+        node_name,
+        stored_records,
+    )
+    if checked_visit_key in seen_visit_keys:
+        raise RuntimeError(
+            f"Node {node_name!r}: VisitKey {checked_visit_key!r} is already "
+            "in this node's passage history."
+        )
+    new_rank = len(existing_records) + 1
+    record = OrderControlTvtMpActualNodePassageRecord(
+        visit_key=checked_visit_key,
+        actual_passage_timestep=checked_timestep,
+        actual_route_next_link_name=route_name,
+        actual_node_passage_rank=new_rank,
+    )
+    if record.actual_node_passage_rank != len(existing_records) + 1:
+        raise RuntimeError(
+            f"Node {node_name!r}: new passage rank "
+            f"{record.actual_node_passage_rank!r} is not "
+            f"{len(existing_records) + 1}."
+        )
+    updated_node_records = existing_records + (record,)
+    return _PreparedTvtMpActualNodePassageHistoryUpdate(
+        registry=registry,
+        node_name=node_name,
+        record=record,
+        updated_node_records=updated_node_records,
+    )
+
+
+def commit_tvt_mp_actual_node_passage_history(prepared_update) -> None:
+    """Assign one prepared node history tuple.
+
+    Does not sort, recompute ranks, search the ledger, or rebuild the
+    record. This assignment is separate from the physical move and from
+    the actual observation commit.
+    """
+    if not isinstance(
+        prepared_update,
+        _PreparedTvtMpActualNodePassageHistoryUpdate,
+    ):
+        raise RuntimeError(
+            "prepared node passage history update must be "
+            "_PreparedTvtMpActualNodePassageHistoryUpdate; got type "
+            f"{type(prepared_update).__name__}."
+        )
+    prepared_update.registry.records_by_node_name[prepared_update.node_name] = (
+        prepared_update.updated_node_records
+    )
