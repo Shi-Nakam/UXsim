@@ -1845,16 +1845,18 @@ seller:
 - 許容誤差を現時点で恣意的に定めない。
 - 符号付き差、絶対差、平均、中央値、分位点、分布を用いる方向である。
 
-### 9. 取引内順位
+### 9. Node連続順位と実績順位評価
 
-- baseline_local_rank、post_trade_local_rank、ledger_assigned_rank、rank_changeの既存定義を変更しない。
-- rank_change = baseline_local_rank - post_trade_local_rank（正は前進、0は不変、負は後退）。
-- nonparticipatingにもtrade_scope内のbaseline順位と確定順位を引き継げる。
-- 実通過順位は現在未保存である。
-- 同一timestep内に複数Visitが順次通過し得るため、actual passage timestepだけでは実通過順を常に復元できない。
-- 通過成功時にNode側の実順序情報を残し、同一取引のtrade_scope内で実通過順位を導出する方向である。
-- 未観測Visitには実通過順位を推定しない。
-- nonparticipatingについて、順位完全一致率、符号付き順位差、絶対順位差、前進・不変・後退割合を集計候補とする。
+- 順位評価の正本は、対象Nodeのorder-control対象Visitを順位台帳へ順次接続したNode別の連続順位である。
+- buyer、seller、nonparticipatingを交通上同じ連続順位列で扱う。trade_scope内、candidate内局所順位だけ、registry登録Visitだけへ母集団を縮小しない。
+- baseline_local_rank、post_trade_local_rank、ledger_assigned_rank、rank_changeの既存定義（候補内局所順位の予定順位変化）は変更しない。
+- rank_change = baseline_local_rank - post_trade_local_rank（正は前進、0は不変、負は後退）。これは予定順位変化であり、Node連続順位上の実績順位変化とは別である。
+- 実績順位変化は、Node別割当順位とNode別実通過順位を同じNode連続順位母集団で比較する（概念式: 割当順位 − 実通過順位。正は前進、0は一致、負は後退）。
+- Node連続順位上で、先行Visitの追越し・後続Visitからの被追越し、何位前進・後退したか、割当どおり通過したかを評価する。
+- 実通過順位は現在未保存である。同一timestep内の複数通過のため、通過成功時にNode別実通過順序の情報を残す必要がある（正式な保存方法は未確定）。
+- 未観測VisitにはNode別実通過順位を推定しない。取引内で1位から順位を付け直す仕組みは作らない。
+- 取引別集計では、取引関係のbuyer・seller・nonparticipatingについて、Node連続順位上の実績順位変化を抽出する。
+- nonparticipatingについて、Node連続順位上の順位完全一致率、符号付き・絶対順位変化、前進・不変・後退割合を集計候補とする。
 
 ### 10. 進路
 
@@ -1924,6 +1926,9 @@ Vehicle別総実績利得
 - 他条件を固定し、対象Vehicleの参加・非参加だけを変える比較ができること。
 - 経由ルートや通過Nodeが変わることは制度効果として許容する。
 - buyer・seller比率、OD所要時間、時間価値、正式金額、実績利得、満足分類、順位、到着順位効果、他Vehicleへの波及などを後段集計候補とする。
+- 順位変化はNode連続順位上で計算する。取引別・Vehicle別・Vehicle×役割別・Node別の各集計は、同じNode連続順位上の個別結果から導出する。
+- 取引ごとに新しい順位体系を作らない。取引別集計はNode連続順位上の結果を取引関係Visitについて抽出する。
+- 参加・非参加変更比較でも、Node連続順位上の実績順位変化を比較する。
 - 集計項目は後から追加・削除しやすくする。後から復元できない個別情報を先に保存する。
 - 出力列、ファイル形式、実験条件メタデータは未確定である。
 
@@ -1961,6 +1966,8 @@ Vehicle別総実績利得
 
 ### 16. 未確定事項
 
+順位評価の正本をNode連続順位とする方針は確定済みである。trade_scope内順位かNode連続順位かは未確定事項ではない。
+
 少なくとも次を未確定として記録する。
 
 - 新しい型名、field名、field順序、Enum名
@@ -1968,7 +1975,8 @@ Vehicle別総実績利得
 - 一括処理の原子性
 - 再実行防止
 - 取引全体評価recordの保存場所
-- 実通過順序の正式記録方法
+- Node別実通過順序の正式な記録方法
+- Node別実通過順位の評価終了時導出方法
 - 集計API
 - 実験出力の列・形式
 - 実験条件メタデータ
