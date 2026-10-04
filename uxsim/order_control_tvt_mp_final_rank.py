@@ -91,12 +91,29 @@ _INFORMATION_SHORTAGE_STATUSES = (
 
 @dataclass(frozen=True)
 class OrderControlTvtMpFinalRankVisitRecord:
-    """One newly confirmed visit: local rank, formal route, and source."""
+    """One newly confirmed visit: local rank, formal route, and source.
+
+    route_origin records where the formal route was read from. It is not
+    the route name, and it is not compared with that name.
+    """
 
     visit_key: OrderControlTvtVisitKey
     final_local_rank: int
     formal_route_next_link_name: str
     finalization_source: OrderControlTvtMpFinalizationSource
+    route_origin: OrderControlTvtMpLocalBindingRouteOrigin
+
+    def __post_init__(self) -> None:
+        if not isinstance(
+            self.route_origin,
+            OrderControlTvtMpLocalBindingRouteOrigin,
+        ):
+            raise RuntimeError(
+                "route_origin must be "
+                "OrderControlTvtMpLocalBindingRouteOrigin; got type "
+                f"{type(self.route_origin).__name__} with value "
+                f"{self.route_origin!r}."
+            )
 
 
 @dataclass(frozen=True)
@@ -1143,11 +1160,18 @@ def _final_rank_record_from_binding_visit(
         node_name=node_name,
         visit_key=visit_key,
     )
+    if formal_route != binding_visit.route_next_link_name:
+        raise RuntimeError(
+            f"Node {node_name!r}: VisitKey {visit_key!r} formal route "
+            f"{formal_route!r} does not match binding route "
+            f"{binding_visit.route_next_link_name!r}."
+        )
     return OrderControlTvtMpFinalRankVisitRecord(
         visit_key=visit_key,
         final_local_rank=final_local_rank,
         formal_route_next_link_name=formal_route,
         finalization_source=finalization_source,
+        route_origin=binding_visit.route_origin,
     )
 
 
@@ -1231,12 +1255,18 @@ def _build_baseline_fallback_node_result(
             node_name=node_name,
             visit_key=visit_key,
         )
+        # Fallback reads the saved baseline arrival route. It does not read
+        # a rank-ledger formal route or a snapshot-already-decided route.
         final_rank_visits.append(
             OrderControlTvtMpFinalRankVisitRecord(
                 visit_key=visit_key,
                 final_local_rank=next_local_rank,
                 formal_route_next_link_name=formal_route,
                 finalization_source=OrderControlTvtMpFinalizationSource.BASELINE,
+                route_origin=(
+                    OrderControlTvtMpLocalBindingRouteOrigin
+                    .BASELINE_TARGET_NODE_ARRIVAL_ROUTE
+                ),
             )
         )
         next_local_rank = next_local_rank + 1

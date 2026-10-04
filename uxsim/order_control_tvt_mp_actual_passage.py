@@ -61,6 +61,105 @@ class OrderControlTvtMpActualPassageObservationRecord:
     actual_route_next_link_name: str | None
 
 
+@dataclass(frozen=True)
+class OrderControlTvtMpActualPassageCommonFrozenInput:
+    """Establishment ranks and route origin copied for later evaluation.
+
+    Identity fields that already live on the wait entry are not repeated
+    here. The formal route and the Node rank stay on the rank ledger.
+    """
+
+    baseline_local_rank: int
+    post_trade_local_rank: int
+    rank_change: int
+    route_origin: OrderControlTvtMpLocalBindingRouteOrigin
+
+    def __post_init__(self) -> None:
+        # Imported here because uxsim.py loads this module while World is
+        # still being defined. The binding module reaches World.
+        from uxsim.order_control_tvt_mp_local_binding_rank_sequence import (
+            OrderControlTvtMpLocalBindingRouteOrigin,
+        )
+        if type(self.baseline_local_rank) is not int:
+            raise RuntimeError(
+                "baseline_local_rank must be a Python int, not bool; got "
+                f"{self.baseline_local_rank!r}."
+            )
+        if type(self.post_trade_local_rank) is not int:
+            raise RuntimeError(
+                "post_trade_local_rank must be a Python int, not bool; got "
+                f"{self.post_trade_local_rank!r}."
+            )
+        if type(self.rank_change) is not int:
+            raise RuntimeError(
+                "rank_change must be a Python int, not bool; got "
+                f"{self.rank_change!r}."
+            )
+        expected_rank_change = (
+            self.baseline_local_rank - self.post_trade_local_rank
+        )
+        if self.rank_change != expected_rank_change:
+            raise RuntimeError(
+                "rank_change must equal baseline_local_rank minus "
+                "post_trade_local_rank; got "
+                f"{self.rank_change!r}, expected {expected_rank_change!r}."
+            )
+        if not isinstance(
+            self.route_origin,
+            OrderControlTvtMpLocalBindingRouteOrigin,
+        ):
+            raise RuntimeError(
+                "route_origin must be "
+                "OrderControlTvtMpLocalBindingRouteOrigin; got type "
+                f"{type(self.route_origin).__name__} with value "
+                f"{self.route_origin!r}."
+            )
+
+
+@dataclass(frozen=True)
+class OrderControlTvtMpActualPassageMonetaryFrozenInput:
+    """Buyer or seller transaction amounts copied at establishment.
+
+    Zero is a real computed amount. None is not used in these fields.
+    Buyer and seller share this one type.
+    """
+
+    declared_vot_per_second: float
+    payment_paid_in_this_transaction: int | float
+    payment_received_in_this_transaction: int | float
+
+    def __post_init__(self) -> None:
+        _require_non_negative_money_number(
+            self.declared_vot_per_second,
+            "declared_vot_per_second",
+        )
+        _require_non_negative_money_number(
+            self.payment_paid_in_this_transaction,
+            "payment_paid_in_this_transaction",
+        )
+        _require_non_negative_money_number(
+            self.payment_received_in_this_transaction,
+            "payment_received_in_this_transaction",
+        )
+
+
+def _require_non_negative_money_number(value: object, field_name: str) -> None:
+    """Reject None, bool, and non-finite numbers. Zero is allowed."""
+    if value is None:
+        raise RuntimeError(
+            f"{field_name} must be a formal number, not None."
+        )
+    if isinstance(value, bool) or type(value) not in (int, float):
+        raise RuntimeError(
+            f"{field_name} must be a Python int or float, not bool; got "
+            f"{value!r}."
+        )
+    if not math.isfinite(value) or value < 0:
+        raise RuntimeError(
+            f"{field_name} must be finite and >= 0; got {value!r}."
+        )
+
+
 @dataclass
 class OrderControlTvtMpActualPassageWaitEntry:
     tvt_decision_timestep: int
@@ -78,9 +177,48 @@ class OrderControlTvtMpActualPassageWaitEntry:
     baseline_minus_candidate_time_value: int | float | None
     predicted_observation_status: OrderControlTvtMpCandidatePassageObservationStatus
     predicted_route_next_link_name: str
+    common_frozen_input: OrderControlTvtMpActualPassageCommonFrozenInput
+    monetary_frozen_input: OrderControlTvtMpActualPassageMonetaryFrozenInput | None
     actual_passage_observation_record: (
         OrderControlTvtMpActualPassageObservationRecord | None
     ) = None
+
+    def __post_init__(self) -> None:
+        """Check this object's shape only. Do not search logs or ledgers."""
+        if not isinstance(
+            self.common_frozen_input,
+            OrderControlTvtMpActualPassageCommonFrozenInput,
+        ):
+            raise RuntimeError(
+                "common_frozen_input must be "
+                "OrderControlTvtMpActualPassageCommonFrozenInput; got type "
+                f"{type(self.common_frozen_input).__name__}."
+            )
+        if (
+            self.role is OrderControlTvtMpActualPassageRole.BUYER
+            or self.role is OrderControlTvtMpActualPassageRole.SELLER
+        ):
+            if not isinstance(
+                self.monetary_frozen_input,
+                OrderControlTvtMpActualPassageMonetaryFrozenInput,
+            ):
+                raise RuntimeError(
+                    f"{self.role.value} wait entry requires "
+                    "OrderControlTvtMpActualPassageMonetaryFrozenInput; got "
+                    f"{self.monetary_frozen_input!r}."
+                )
+            return
+        if self.role is OrderControlTvtMpActualPassageRole.NONPARTICIPATING:
+            if self.monetary_frozen_input is not None:
+                raise RuntimeError(
+                    "nonparticipating wait entry must not carry a monetary "
+                    "frozen input; None means no monetary contract."
+                )
+            return
+        raise RuntimeError(
+            "wait entry role must be buyer, seller, or nonparticipating; "
+            f"got {self.role!r}."
+        )
 
 
 @dataclass

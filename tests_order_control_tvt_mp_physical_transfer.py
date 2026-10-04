@@ -16,12 +16,17 @@ import uxsim.order_control_tvt_mp_physical_transfer as physical_transfer
 from uxsim.order_control_baseline_collector import OrderControlBaselineCollector
 from uxsim.order_control_baseline_driver import run_snapshot_fixed_baseline_fork
 from uxsim.order_control_tvt_mp_actual_passage import (
+    OrderControlTvtMpActualPassageCommonFrozenInput,
+    OrderControlTvtMpActualPassageMonetaryFrozenInput,
     OrderControlTvtMpActualPassageObservationRecord,
     OrderControlTvtMpActualPassageObservationStatus,
     OrderControlTvtMpActualPassageRole,
     OrderControlTvtMpActualPassageTradeWait,
     OrderControlTvtMpActualPassageWaitEntry,
     OrderControlTvtMpActualPassageWaitStatus,
+)
+from uxsim.order_control_tvt_mp_local_binding_rank_sequence import (
+    OrderControlTvtMpLocalBindingRouteOrigin,
 )
 from uxsim.order_control_tvt_mp_candidate_local_virtual_calculation import (
     OrderControlTvtMpCandidatePassageObservationStatus,
@@ -1088,6 +1093,32 @@ def _passage_wait_entry_kwargs(
             OrderControlTvtMpCandidatePassageObservationStatus.OBSERVED
         ),
         "predicted_route_next_link_name": "not-the-live-outlink",
+        "common_frozen_input": OrderControlTvtMpActualPassageCommonFrozenInput(
+            baseline_local_rank=2,
+            post_trade_local_rank=1,
+            rank_change=1,
+            route_origin=(
+                OrderControlTvtMpLocalBindingRouteOrigin
+                .BASELINE_TARGET_NODE_ARRIVAL_ROUTE
+            ),
+        ),
+        "monetary_frozen_input": (
+            None
+            if role is OrderControlTvtMpActualPassageRole.NONPARTICIPATING
+            else OrderControlTvtMpActualPassageMonetaryFrozenInput(
+                declared_vot_per_second=1.0,
+                payment_paid_in_this_transaction=(
+                    1.0
+                    if role is OrderControlTvtMpActualPassageRole.BUYER
+                    else 0
+                ),
+                payment_received_in_this_transaction=(
+                    1.0
+                    if role is OrderControlTvtMpActualPassageRole.SELLER
+                    else 0
+                ),
+            )
+        ),
     }
 
 

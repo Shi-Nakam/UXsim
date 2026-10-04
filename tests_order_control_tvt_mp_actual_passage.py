@@ -3,6 +3,8 @@ import dataclasses
 import pytest
 
 from uxsim.order_control_tvt_mp_actual_passage import (
+    OrderControlTvtMpActualPassageCommonFrozenInput,
+    OrderControlTvtMpActualPassageMonetaryFrozenInput,
     OrderControlTvtMpActualPassageObservationRecord,
     OrderControlTvtMpActualPassageObservationStatus,
     OrderControlTvtMpActualPassageRole,
@@ -13,12 +15,16 @@ from uxsim.order_control_tvt_mp_actual_passage import (
     commit_tvt_mp_actual_passage_observation,
     prepare_tvt_mp_actual_passage_observation,
 )
+from uxsim.order_control_tvt_mp_local_binding_rank_sequence import (
+    OrderControlTvtMpLocalBindingRouteOrigin,
+)
 from uxsim.order_control_tvt_mp_candidate_local_virtual_calculation import (
     OrderControlTvtMpCandidatePassageObservationStatus,
 )
 from uxsim.order_control_tvt_node_rank_state import OrderControlTvtVisitKey
 from uxsim.uxsim import World
 
+_ROUTE_ORIGIN = OrderControlTvtMpLocalBindingRouteOrigin.RANK_LEDGER_FORMAL_ROUTE
 _TEST_DELTAT_SECONDS = 60
 _TEST_TRUE_VOT_PER_SECOND = 0.5
 _TEST_BASELINE_PASSAGE_TIMESTEP = 10
@@ -292,6 +298,44 @@ def test_observation_record_is_frozen():
         record.actual_passage_timestep = 99
 
 
+def _common_frozen(
+    *,
+    baseline_local_rank=2,
+    post_trade_local_rank=1,
+    route_origin=_ROUTE_ORIGIN,
+):
+    return OrderControlTvtMpActualPassageCommonFrozenInput(
+        baseline_local_rank=baseline_local_rank,
+        post_trade_local_rank=post_trade_local_rank,
+        rank_change=baseline_local_rank - post_trade_local_rank,
+        route_origin=route_origin,
+    )
+
+
+def _monetary_frozen(
+    *,
+    declared_vot_per_second=1.0,
+    payment_paid_in_this_transaction=3.0,
+    payment_received_in_this_transaction=0,
+):
+    return OrderControlTvtMpActualPassageMonetaryFrozenInput(
+        declared_vot_per_second=declared_vot_per_second,
+        payment_paid_in_this_transaction=payment_paid_in_this_transaction,
+        payment_received_in_this_transaction=payment_received_in_this_transaction,
+    )
+
+
+def _frozen_fields(role, **monetary_changes):
+    if role is OrderControlTvtMpActualPassageRole.NONPARTICIPATING:
+        monetary = None
+    else:
+        monetary = _monetary_frozen(**monetary_changes)
+    return {
+        "common_frozen_input": _common_frozen(),
+        "monetary_frozen_input": monetary,
+    }
+
+
 def test_wait_entry_wait_status_is_mutable():
     visit_key = _sample_visit_key("veh_wait", 0)
     entry = OrderControlTvtMpActualPassageWaitEntry(
@@ -310,12 +354,196 @@ def test_wait_entry_wait_status_is_mutable():
             OrderControlTvtMpCandidatePassageObservationStatus.OBSERVED
         ),
         predicted_route_next_link_name="link",
+        **_frozen_fields(OrderControlTvtMpActualPassageRole.BUYER),
     )
     entry.wait_status = OrderControlTvtMpActualPassageWaitStatus.ACTUAL_PASSAGE_OBSERVED
     assert (
         entry.wait_status
         is OrderControlTvtMpActualPassageWaitStatus.ACTUAL_PASSAGE_OBSERVED
     )
+
+
+def test_common_and_monetary_frozen_inputs_keep_establishment_values():
+    common = _common_frozen(baseline_local_rank=4, post_trade_local_rank=1)
+    assert dataclasses.is_dataclass(common)
+    assert common.__dataclass_params__.frozen is True
+    assert common.rank_change == 3
+    assert common.route_origin is _ROUTE_ORIGIN
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        common.rank_change = 0
+    monetary = _monetary_frozen(
+        declared_vot_per_second=0.0,
+        payment_paid_in_this_transaction=0,
+        payment_received_in_this_transaction=0.0,
+    )
+    assert monetary.__dataclass_params__.frozen is True
+    assert monetary.declared_vot_per_second == 0.0
+    assert monetary.payment_paid_in_this_transaction == 0
+    assert monetary.payment_received_in_this_transaction == 0.0
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        monetary.declared_vot_per_second = 1.0
+
+
+def test_common_frozen_input_rejects_a_rank_change_that_is_not_the_difference():
+    with pytest.raises(RuntimeError, match="rank_change"):
+        OrderControlTvtMpActualPassageCommonFrozenInput(
+            baseline_local_rank=4,
+            post_trade_local_rank=1,
+            rank_change=0,
+            route_origin=_ROUTE_ORIGIN,
+        )
+
+
+def test_monetary_frozen_input_rejects_none_amounts():
+    with pytest.raises(RuntimeError, match="not None"):
+        OrderControlTvtMpActualPassageMonetaryFrozenInput(
+            declared_vot_per_second=1.0,
+            payment_paid_in_this_transaction=None,
+            payment_received_in_this_transaction=0,
+        )
+
+
+def test_wait_entry_requires_common_frozen_input():
+    visit_key = _sample_visit_key("veh_required", 1)
+    with pytest.raises(TypeError):
+        OrderControlTvtMpActualPassageWaitEntry(
+            tvt_decision_timestep=1,
+            node_name="n",
+            buyers_sorted=(visit_key,),
+            visit_key=visit_key,
+            vehicle_name=visit_key[0],
+            role=OrderControlTvtMpActualPassageRole.BUYER,
+            wait_status=(
+                OrderControlTvtMpActualPassageWaitStatus.WAITING_FOR_ACTUAL_PASSAGE
+            ),
+            baseline_passage_timestep=None,
+            candidate_passage_timestep=None,
+            true_vot_per_second=0.0,
+            **_wait_entry_baseline_minus_candidate_kwargs(),
+            predicted_observation_status=(
+                OrderControlTvtMpCandidatePassageObservationStatus.OBSERVED
+            ),
+            predicted_route_next_link_name="link",
+            monetary_frozen_input=_monetary_frozen(),
+        )
+
+
+def test_buyer_and_seller_require_monetary_frozen_input():
+    for role in (
+        OrderControlTvtMpActualPassageRole.BUYER,
+        OrderControlTvtMpActualPassageRole.SELLER,
+    ):
+        visit_key = _sample_visit_key(role.value, 1)
+        with pytest.raises(RuntimeError, match="requires"):
+            OrderControlTvtMpActualPassageWaitEntry(
+                tvt_decision_timestep=1,
+                node_name="n",
+                buyers_sorted=(visit_key,),
+                visit_key=visit_key,
+                vehicle_name=visit_key[0],
+                role=role,
+                wait_status=(
+                    OrderControlTvtMpActualPassageWaitStatus.WAITING_FOR_ACTUAL_PASSAGE
+                ),
+                baseline_passage_timestep=None,
+                candidate_passage_timestep=None,
+                true_vot_per_second=0.0,
+                **_wait_entry_baseline_minus_candidate_kwargs(),
+                predicted_observation_status=(
+                    OrderControlTvtMpCandidatePassageObservationStatus.OBSERVED
+                ),
+                predicted_route_next_link_name="link",
+                common_frozen_input=_common_frozen(),
+                monetary_frozen_input=None,
+            )
+
+
+def test_nonparticipating_rejects_a_monetary_frozen_input():
+    visit_key = _sample_visit_key("watcher", 1)
+    with pytest.raises(RuntimeError, match="must not carry"):
+        OrderControlTvtMpActualPassageWaitEntry(
+            tvt_decision_timestep=1,
+            node_name="n",
+            buyers_sorted=(visit_key,),
+            visit_key=visit_key,
+            vehicle_name=visit_key[0],
+            role=OrderControlTvtMpActualPassageRole.NONPARTICIPATING,
+            wait_status=(
+                OrderControlTvtMpActualPassageWaitStatus.WAITING_FOR_ACTUAL_PASSAGE
+            ),
+            baseline_passage_timestep=None,
+            candidate_passage_timestep=None,
+            true_vot_per_second=0.0,
+            **_wait_entry_baseline_minus_candidate_kwargs(),
+            predicted_observation_status=(
+                OrderControlTvtMpCandidatePassageObservationStatus.OBSERVED
+            ),
+            predicted_route_next_link_name="link",
+            common_frozen_input=_common_frozen(),
+            monetary_frozen_input=_monetary_frozen(),
+        )
+
+
+def test_wait_entry_keeps_zero_true_vot_with_positive_declared_vot():
+    visit_key = _sample_visit_key("zero_true", 2)
+    entry = OrderControlTvtMpActualPassageWaitEntry(
+        tvt_decision_timestep=1,
+        node_name="n",
+        buyers_sorted=(visit_key,),
+        visit_key=visit_key,
+        vehicle_name=visit_key[0],
+        role=OrderControlTvtMpActualPassageRole.BUYER,
+        wait_status=OrderControlTvtMpActualPassageWaitStatus.WAITING_FOR_ACTUAL_PASSAGE,
+        baseline_passage_timestep=None,
+        candidate_passage_timestep=None,
+        true_vot_per_second=0.0,
+        **_wait_entry_baseline_minus_candidate_kwargs(),
+        predicted_observation_status=(
+            OrderControlTvtMpCandidatePassageObservationStatus.OBSERVED
+        ),
+        predicted_route_next_link_name="link",
+        **_frozen_fields(
+            OrderControlTvtMpActualPassageRole.BUYER,
+            declared_vot_per_second=4.0,
+            payment_paid_in_this_transaction=0,
+            payment_received_in_this_transaction=0,
+        ),
+    )
+    assert entry.true_vot_per_second == 0.0
+    assert entry.monetary_frozen_input.declared_vot_per_second == 4.0
+    assert entry.monetary_frozen_input.payment_paid_in_this_transaction == 0
+    assert entry.common_frozen_input.rank_change == 1
+    revisit_key = _sample_visit_key("zero_true", 3)
+    revisit = OrderControlTvtMpActualPassageWaitEntry(
+        tvt_decision_timestep=1,
+        node_name="n",
+        buyers_sorted=(visit_key,),
+        visit_key=revisit_key,
+        vehicle_name=visit_key[0],
+        role=OrderControlTvtMpActualPassageRole.SELLER,
+        wait_status=OrderControlTvtMpActualPassageWaitStatus.WAITING_FOR_ACTUAL_PASSAGE,
+        baseline_passage_timestep=None,
+        candidate_passage_timestep=None,
+        true_vot_per_second=0.0,
+        **_wait_entry_baseline_minus_candidate_kwargs(),
+        predicted_observation_status=(
+            OrderControlTvtMpCandidatePassageObservationStatus.OBSERVED
+        ),
+        predicted_route_next_link_name="link",
+        **_frozen_fields(
+            OrderControlTvtMpActualPassageRole.SELLER,
+            declared_vot_per_second=0.0,
+            payment_paid_in_this_transaction=0,
+            payment_received_in_this_transaction=0,
+        ),
+    )
+    registry = OrderControlTvtMpActualPassageWaitRegistry()
+    registry.entries_by_node_name_and_visit_key[("n", visit_key)] = entry
+    registry.entries_by_node_name_and_visit_key[("n", revisit_key)] = revisit
+    assert registry.entries_by_node_name_and_visit_key[("n", visit_key)] is entry
+    assert registry.entries_by_node_name_and_visit_key[("n", revisit_key)] is revisit
+    assert entry.vehicle_name == revisit.vehicle_name
+    assert entry.visit_key != revisit.visit_key
 
 
 def test_trade_wait_notification_flag_is_mutable():
@@ -363,6 +591,7 @@ def test_two_registry_instances_do_not_share_dicts():
                 OrderControlTvtMpCandidatePassageObservationStatus.OBSERVED
             ),
             predicted_route_next_link_name="",
+            **_frozen_fields(OrderControlTvtMpActualPassageRole.NONPARTICIPATING),
         )
     )
     assert registry_b.entries_by_node_name_and_visit_key == {}
@@ -392,6 +621,7 @@ def test_two_world_instances_do_not_share_registry_or_dicts():
                 OrderControlTvtMpCandidatePassageObservationStatus.OBSERVED
             ),
             predicted_route_next_link_name="",
+            **_frozen_fields(OrderControlTvtMpActualPassageRole.BUYER),
         )
     )
     assert registry_b.entries_by_node_name_and_visit_key == {}
@@ -436,6 +666,7 @@ def test_registry_entry_mapping_uses_node_name_and_visit_key():
             OrderControlTvtMpCandidatePassageObservationStatus.OBSERVED
         ),
         predicted_route_next_link_name="lnk",
+        **_frozen_fields(OrderControlTvtMpActualPassageRole.SELLER),
     )
     key = (node_name, visit_key)
     registry.entries_by_node_name_and_visit_key[key] = entry
@@ -551,6 +782,7 @@ def _register_peer_waiting_entry(
             OrderControlTvtMpCandidatePassageObservationStatus.OBSERVED
         ),
         predicted_route_next_link_name="link_pred",
+        **_frozen_fields(role),
     )
     registry = world.order_control_tvt_mp_actual_passage_wait_registry
     registry.entries_by_node_name_and_visit_key[(node_name, visit_key)] = entry
@@ -700,6 +932,7 @@ def _register_waiting_entry(
         baseline_minus_candidate_time_value=copied_value,
         predicted_observation_status=predicted_observation_status,
         predicted_route_next_link_name="link_pred",
+        **_frozen_fields(role),
     )
     registry = world.order_control_tvt_mp_actual_passage_wait_registry
     registry.entries_by_node_name_and_visit_key[(node_name, visit_key)] = entry
@@ -1226,6 +1459,7 @@ def _create_formal_trade_with_entries(
                 OrderControlTvtMpCandidatePassageObservationStatus.OBSERVED
             ),
             predicted_route_next_link_name="link_pred",
+            **_frozen_fields(role),
         )
         registry = world.order_control_tvt_mp_actual_passage_wait_registry
         registry.entries_by_node_name_and_visit_key[(node_name, visit_key)] = entry

@@ -15,6 +15,8 @@ import tests_order_control_tvt_mp_final_consistency_validation as saved
 import tests_order_control_tvt_mp_final_rank as fx
 from uxsim.order_control_tvt_candidate_visit_set import OrderControlTvtCandidateVisit
 from uxsim.order_control_tvt_mp_actual_passage import (
+    OrderControlTvtMpActualPassageCommonFrozenInput,
+    OrderControlTvtMpActualPassageMonetaryFrozenInput,
     OrderControlTvtMpActualPassageRole,
     OrderControlTvtMpActualPassageTradeWait,
     OrderControlTvtMpActualPassageWaitEntry,
@@ -45,6 +47,7 @@ from uxsim.order_control_tvt_mp_general_trade_rank import (
 )
 from uxsim.order_control_tvt_mp_local_binding_rank_sequence import (
     OrderControlTvtMpLocalBindingRankSequence,
+    OrderControlTvtMpLocalBindingRouteOrigin,
     OrderControlTvtMpLocalBindingTradeRole,
 )
 from uxsim.order_control_tvt_node_rank_state import OrderControlTvtNodeRankState
@@ -433,6 +436,18 @@ def _registry_parts(world):
     )
 
 
+def _seed_common_frozen():
+    return OrderControlTvtMpActualPassageCommonFrozenInput(
+        baseline_local_rank=1,
+        post_trade_local_rank=1,
+        rank_change=0,
+        route_origin=(
+            OrderControlTvtMpLocalBindingRouteOrigin
+            .BASELINE_TARGET_NODE_ARRIVAL_ROUTE
+        ),
+    )
+
+
 def _seed_wait_entry(node_name, visit_key):
     return OrderControlTvtMpActualPassageWaitEntry(
         tvt_decision_timestep=1,
@@ -450,6 +465,8 @@ def _seed_wait_entry(node_name, visit_key):
         baseline_minus_candidate_time_value=None,
         predicted_observation_status=PASSAGE_OBSERVED,
         predicted_route_next_link_name="seed-route",
+        common_frozen_input=_seed_common_frozen(),
+        monetary_frozen_input=None,
     )
 
 
@@ -776,6 +793,9 @@ def test_public_names_fields_and_no_trade_identity_type():
     assert list(OrderControlTvtMpAtomicApplySetResult.__dataclass_fields__) == [
         "final_consistency_validation_set_result",
     ]
+    assert list(
+        OrderControlTvtMpFinalConsistencyValidationSetResult.__dataclass_fields__
+    ) == ["final_rank_set_result"]
     assert list(OrderControlTvtMpTradeEstablishmentLogRecord.__dataclass_fields__) == (
         list(ESTABLISHMENT_FIELDS)
     )
@@ -983,6 +1003,18 @@ def test_zero_payment_and_zero_compensation_still_write_rows():
     assert world.VEHICLES["buyer"].payment_paid == 10.0
     assert world.VEHICLES["seller"].payment_received == 20.0
     assert world.VEHICLES["watcher"].order_exchange_log == ["old"]
+    entries = world.order_control_tvt_mp_actual_passage_wait_registry.entries_by_node_name_and_visit_key
+    buyer_entry = entries[("merge", _visit("buyer"))]
+    seller_entry = entries[("merge", _visit("seller"))]
+    assert buyer_entry.true_vot_per_second == 0.0
+    assert buyer_entry.monetary_frozen_input.declared_vot_per_second == 1.0
+    assert buyer_entry.monetary_frozen_input.payment_paid_in_this_transaction == 0.0
+    assert seller_entry.monetary_frozen_input.payment_received_in_this_transaction == 0.0
+    assert seller_entry.monetary_frozen_input.declared_vot_per_second == 0.0
+    assert entries[("merge", _visit("watcher"))].monetary_frozen_input is None
+    assert entries[("merge", _visit("watcher"))].true_vot_per_second == (
+        _FROZEN_NONPARTICIPATING_VOT
+    )
 
 
 def test_two_selected_nodes_apply_together():
@@ -1306,6 +1338,7 @@ def _two_node_selected_then_fallback():
                         1,
                         "base-alpha",
                         saved.BASELINE_SOURCE,
+                        saved._FALLBACK_ROUTE_ORIGIN,
                     ),
                 ),
             },
@@ -1818,6 +1851,56 @@ def test_selected_node_registers_every_trade_scope_role():
     assert buyer_entry.actual_passage_observation_record is None
     assert seller_entry.actual_passage_observation_record is None
     assert watcher_entry.actual_passage_observation_record is None
+    assert isinstance(
+        buyer_entry.common_frozen_input,
+        OrderControlTvtMpActualPassageCommonFrozenInput,
+    )
+    assert buyer_entry.common_frozen_input.baseline_local_rank == 2
+    assert buyer_entry.common_frozen_input.post_trade_local_rank == 1
+    assert buyer_entry.common_frozen_input.rank_change == 1
+    assert seller_entry.common_frozen_input.baseline_local_rank == 1
+    assert seller_entry.common_frozen_input.post_trade_local_rank == 2
+    assert seller_entry.common_frozen_input.rank_change == -1
+    assert watcher_entry.common_frozen_input.baseline_local_rank == 3
+    assert watcher_entry.common_frozen_input.post_trade_local_rank == 3
+    assert watcher_entry.common_frozen_input.rank_change == 0
+    saved_origin = (
+        OrderControlTvtMpLocalBindingRouteOrigin
+        .BASELINE_TARGET_NODE_ARRIVAL_ROUTE
+    )
+    assert buyer_entry.common_frozen_input.route_origin is saved_origin
+    assert seller_entry.common_frozen_input.route_origin is saved_origin
+    assert watcher_entry.common_frozen_input.route_origin is saved_origin
+    assert isinstance(
+        buyer_entry.monetary_frozen_input,
+        OrderControlTvtMpActualPassageMonetaryFrozenInput,
+    )
+    assert isinstance(
+        seller_entry.monetary_frozen_input,
+        OrderControlTvtMpActualPassageMonetaryFrozenInput,
+    )
+    assert watcher_entry.monetary_frozen_input is None
+    assert buyer_entry.monetary_frozen_input.declared_vot_per_second == (
+        buyer_record.declared_vot_per_second
+    )
+    assert buyer_entry.monetary_frozen_input.payment_paid_in_this_transaction == (
+        buyer_record.payment_paid_in_this_transaction
+    )
+    assert buyer_entry.monetary_frozen_input.payment_received_in_this_transaction == (
+        buyer_record.payment_received_in_this_transaction
+    )
+    assert seller_entry.monetary_frozen_input.declared_vot_per_second == (
+        seller_record.declared_vot_per_second
+    )
+    assert seller_entry.monetary_frozen_input.payment_paid_in_this_transaction == (
+        seller_record.payment_paid_in_this_transaction
+    )
+    assert seller_entry.monetary_frozen_input.payment_received_in_this_transaction == (
+        seller_record.payment_received_in_this_transaction
+    )
+    assert buyer_entry.monetary_frozen_input is not buyer_record
+    assert not hasattr(buyer_entry, "establishment_record")
+    assert ("merge", _visit("buyer", 2)) not in entries
 
 
 def test_nonparticipating_unobserved_at_horizon_is_registered():
@@ -2080,6 +2163,86 @@ def test_fallback_node_beside_selected_node_is_not_registered():
     assert ("east", _visit("later")) not in entries
     assert ("west", _visit("alpha")) not in entries
     assert world.VEHICLES["alpha"].order_exchange_log == ["old"]
+
+
+def test_formal_route_mismatch_changes_nothing():
+    validation, world, rank_states = _selected_context()
+    final_rank_set = validation.final_rank_set_result
+    node = final_rank_set.node_final_rank_results[0]
+    first = node.final_rank_visits[0]
+    broken_first = replace(first, formal_route_next_link_name="route-not-binding")
+    broken_node = replace(
+        node,
+        final_rank_visits=(broken_first,) + node.final_rank_visits[1:],
+    )
+    broken_set = replace(
+        final_rank_set,
+        node_final_rank_results=(broken_node,),
+    )
+    broken = OrderControlTvtMpFinalConsistencyValidationSetResult(
+        final_rank_set_result=broken_set,
+    )
+    _assert_runtime_unchanged(broken, world, rank_states)
+
+
+def test_evaluation_inputs_are_not_loaded_from_the_exchange_log():
+    import uxsim.order_control_tvt_mp_atomic_apply as apply_module
+
+    proposal_source = inspect.getsource(apply_module._prepare_actual_passage_proposal)
+    commit_source = inspect.getsource(apply_module.apply_tvt_mp_validated_result)
+    assert "order_exchange_log" not in proposal_source
+    assert "vehicle.vot_true" not in proposal_source
+    assert "OrderControlTvtMpActualPassageCommonFrozenInput(" not in commit_source
+    assert "OrderControlTvtMpActualPassageMonetaryFrozenInput(" not in commit_source
+    assert not hasattr(apply_module, "_PreparedEvaluationProposal")
+
+
+def test_two_selected_nodes_keep_separate_wait_entries():
+    validation = _two_node_selected_then_fallback()
+    world = _world(
+        {
+            "east": (
+                "route-buyer",
+                "route-seller",
+                "route-watcher",
+                "route-later",
+            ),
+            "west": ("base-alpha",),
+        },
+        ("buyer", "seller", "watcher", "later", "alpha"),
+    )
+    rank_states = {
+        "east": _rank_state(
+            "east",
+            (
+                _visit("buyer"),
+                _visit("seller"),
+                _visit("watcher"),
+                _visit("later"),
+            ),
+        ),
+        "west": _rank_state("west", (_visit("alpha"),)),
+    }
+    apply_tvt_mp_validated_result(validation, world, rank_states)
+    entries = (
+        world.order_control_tvt_mp_actual_passage_wait_registry
+        .entries_by_node_name_and_visit_key
+    )
+    trades = (
+        world.order_control_tvt_mp_actual_passage_wait_registry
+        .trades_by_transaction_key
+    )
+    assert ("east", _visit("buyer")) in entries
+    assert ("west", _visit("alpha")) not in entries
+    assert ("east", _visit("later")) not in entries
+    assert len(trades) == 1
+    east_buyer = entries[("east", _visit("buyer"))]
+    assert east_buyer.monetary_frozen_input is not None
+    assert entries[("east", _visit("watcher"))].monetary_frozen_input is None
+    assert east_buyer.common_frozen_input.rank_change == (
+        east_buyer.common_frozen_input.baseline_local_rank
+        - east_buyer.common_frozen_input.post_trade_local_rank
+    )
 
 
 def test_tests_registry_matches_defined_functions():

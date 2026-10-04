@@ -31,6 +31,8 @@ from uxsim.order_control_tvt_inlink_candidate_physical_order import (
     OrderControlTvtInlinkCandidatePhysicalOrderSetResult,
 )
 from uxsim.order_control_tvt_mp_actual_passage import (
+    OrderControlTvtMpActualPassageCommonFrozenInput,
+    OrderControlTvtMpActualPassageMonetaryFrozenInput,
     OrderControlTvtMpActualPassageRole,
     OrderControlTvtMpActualPassageTradeWait,
     OrderControlTvtMpActualPassageWaitEntry,
@@ -72,6 +74,7 @@ from uxsim.order_control_tvt_mp_general_trade_rank import (
 )
 from uxsim.order_control_tvt_mp_local_binding_rank_sequence import (
     OrderControlTvtMpLocalBindingRankVisit,
+    OrderControlTvtMpLocalBindingRouteOrigin,
     OrderControlTvtMpLocalBindingTradeRole,
 )
 from uxsim.order_control_tvt_mp_local_virtual_calculation_set import (
@@ -194,7 +197,7 @@ def apply_tvt_mp_validated_result(
     rank_states_by_node_name,
 ) -> OrderControlTvtMpAtomicApplySetResult:
     """
-    Apply one validated all-Node result, or change nothing.
+    Apply one validated all-Node result through a fully checked prepare phase.
 
     Positional arguments only. There is no per-Node or per-Vehicle public
     apply. Prepare builds every ledger replacement, every Vehicle update,
@@ -247,7 +250,10 @@ def apply_tvt_mp_validated_result(
         final_consistency_validation_set_result=validation_result,
     )
 
-    # Commit assigns prepared state only. It does not search, check, or add.
+    # Commit assigns prepared state only. It does not search, check, sort,
+    # recalculate, or build frozen inputs. Frozen inputs are already inside
+    # the prepared WaitEntry objects. This commit is still several live
+    # assignments, so an exception in this existing window can remain.
     for node_commit in node_commits:
         node_commit.rank_state._commit_prepared_formal_route_confirmation(
             node_commit.prepared,
@@ -642,7 +648,7 @@ def _prepare_one_node(
         )
 
     if status is not OrderControlTvtMpFinalRankStatus.SELECTED_CANDIDATE_RANKS:
-        # Fallback confirms ranks only. It does not open an actual-passage wait.
+        # Fallback confirms ranks only. It does not open an evaluation WaitEntry.
         return node_commit, [], None
 
     # A selected Node with money rows must still be checked. An empty
@@ -657,7 +663,10 @@ def _prepare_one_node(
         k_confirmed_before=k_confirmed_before,
     )
     passage_proposal = _prepare_actual_passage_proposal(
+        saved_columns=saved_columns,
+        node_index=node_index,
         final_rank_node=final_rank_node,
+        payment_node=payment_node,
         decision_timestep=decision_timestep,
         vehicle_updates=vehicle_updates,
     )
@@ -870,16 +879,22 @@ def _prepare_selected_vehicle_updates(
 
 def _prepare_actual_passage_proposal(
     *,
+    saved_columns: _SavedApplyColumns,
+    node_index: int,
     final_rank_node: OrderControlTvtNodeMpFinalRankResult,
+    payment_node: OrderControlTvtNodeMpPaymentAndCompensationResult,
     decision_timestep: int,
     vehicle_updates: list[_PreparedVehicleUpdate],
 ) -> _PreparedActualPassageProposal:
     """
     Build wait entries and one trade wait for one selected Node.
 
-    The live registry is not changed here. Buyer and seller true VOT comes
-    from the establishment record already prepared for that Vehicle. A
-    nonparticipating true VOT comes from the saved traffic observation.
+    The live registry is not changed here. Buyer and seller true VOT is the
+    value already checked for the establishment row. It is not read from the
+    live Vehicle again. A nonparticipating true VOT comes from the saved
+    traffic observation. The exchange log is not searched.
+    Monetary frozen inputs copy the same saved amounts that were written on
+    the establishment row. They do not keep that row object.
     """
     node_name = final_rank_node.node_name
     selected = _require_selected_candidate(final_rank_node)
@@ -903,6 +918,16 @@ def _prepare_actual_passage_proposal(
         vehicle_updates,
         node_name,
     )
+    candidate_visits = saved_columns.candidate_visit_nodes[node_index].candidate_visits
+    trade_rank_result = _matching_trade_rank_result(
+        saved_columns.trade_rank_nodes[node_index],
+        buyers_sorted,
+        node_name,
+    )
+    outside_visits = (
+        local_result.binding_rank_sequence
+        .outside_trade_scope_inside_k_fixed_visits
+    )
 
     entries: list[OrderControlTvtMpActualPassageWaitEntry] = []
     all_visit_keys: list[OrderControlTvtVisitKey] = []
@@ -911,7 +936,10 @@ def _prepare_actual_passage_proposal(
     nonparticipating_visit_keys: list[OrderControlTvtVisitKey] = []
     matched_establishment_visit_keys: list[OrderControlTvtVisitKey] = []
 
+    traffic_index = 0
     for traffic_record in traffic_records:
+        binding_visit = trade_scope[traffic_index]
+        traffic_index = traffic_index + 1
         visit_key = traffic_record.visit_key
         actual_role = _actual_passage_role(
             traffic_record.trade_role,
@@ -923,6 +951,39 @@ def _prepare_actual_passage_proposal(
             traffic_record.passage_observation_status,
             node_name,
             visit_key,
+        )
+        final_rank_visit = _matching_final_rank_visit(
+            final_rank_node.final_rank_visits,
+            visit_key,
+            node_name,
+        )
+        route_origin = _require_saved_route_origin(
+            final_rank_visit.route_origin,
+            node_name,
+            visit_key,
+        )
+        _require_binding_route_matches_final_rank(
+            binding_visit,
+            final_rank_visit,
+            route_origin,
+            node_name,
+        )
+        baseline_local_rank = _baseline_local_rank(
+            candidate_visits,
+            visit_key,
+            node_name,
+        )
+        post_trade_local_rank = _post_trade_local_rank(
+            trade_rank_result,
+            visit_key,
+            node_name,
+        )
+        rank_change = baseline_local_rank - post_trade_local_rank
+        common_frozen_input = OrderControlTvtMpActualPassageCommonFrozenInput(
+            baseline_local_rank=baseline_local_rank,
+            post_trade_local_rank=post_trade_local_rank,
+            rank_change=rank_change,
+            route_origin=route_origin,
         )
         if (
             actual_role is OrderControlTvtMpActualPassageRole.BUYER
@@ -944,9 +1005,42 @@ def _prepare_actual_passage_proposal(
             # Same checked value that was stored on the establishment record.
             # Do not read Vehicle.vot_true again.
             true_vot_per_second = establishment.true_vot_per_second
+            paid_amount, received_amount, declared_vot_per_second = (
+                _trade_money_inputs_for_visit(
+                    payment_node=payment_node,
+                    selected=selected,
+                    actual_role=actual_role,
+                    visit_key=visit_key,
+                    vehicle_name=traffic_record.vehicle_name,
+                    node_name=node_name,
+                )
+            )
+            _require_establishment_matches_frozen_money(
+                establishment,
+                baseline_local_rank=baseline_local_rank,
+                post_trade_local_rank=post_trade_local_rank,
+                rank_change=rank_change,
+                declared_vot_per_second=declared_vot_per_second,
+                payment_paid_in_this_transaction=paid_amount,
+                payment_received_in_this_transaction=received_amount,
+                node_name=node_name,
+            )
+            monetary_frozen_input = (
+                OrderControlTvtMpActualPassageMonetaryFrozenInput(
+                    declared_vot_per_second=declared_vot_per_second,
+                    payment_paid_in_this_transaction=paid_amount,
+                    payment_received_in_this_transaction=received_amount,
+                )
+            )
         else:
+            _require_no_establishment_for_visit(
+                establishment_records,
+                visit_key,
+                node_name,
+            )
             # Saved on the traffic observation. Do not read Vehicle.vot_true.
             true_vot_per_second = traffic_record.true_vot_per_second
+            monetary_frozen_input = None
 
         # Copy the saved candidate differences. Do not recompute them.
         entry = OrderControlTvtMpActualPassageWaitEntry(
@@ -973,6 +1067,8 @@ def _prepare_actual_passage_proposal(
             ),
             predicted_observation_status=traffic_record.passage_observation_status,
             predicted_route_next_link_name=traffic_record.route_next_link_name,
+            common_frozen_input=common_frozen_input,
+            monetary_frozen_input=monetary_frozen_input,
             actual_passage_observation_record=None,
         )
         entries.append(entry)
@@ -984,6 +1080,11 @@ def _prepare_actual_passage_proposal(
         else:
             nonparticipating_visit_keys.append(visit_key)
 
+    _require_partition_4_has_no_wait_entry(
+        outside_visits,
+        all_visit_keys,
+        node_name,
+    )
     _require_establishments_match_buyer_and_seller_observations(
         establishment_records,
         matched_establishment_visit_keys,
@@ -1361,6 +1462,246 @@ def _require_establishments_match_buyer_and_seller_observations(
                 f"Node {node_name!r}: establishment VisitKey "
                 f"{establishment.visit_key!r} has no buyer or seller traffic "
                 "observation."
+            )
+
+
+def _require_saved_route_origin(
+    value: object,
+    node_name: str,
+    visit_key: OrderControlTvtVisitKey,
+) -> OrderControlTvtMpLocalBindingRouteOrigin:
+    """Accept the saved enum. Do not compare it with a route name."""
+    if not isinstance(value, OrderControlTvtMpLocalBindingRouteOrigin):
+        raise RuntimeError(
+            f"Node {node_name!r}: VisitKey {visit_key!r} route_origin must be "
+            "OrderControlTvtMpLocalBindingRouteOrigin; got type "
+            f"{type(value).__name__} with value {value!r}."
+        )
+    return value
+
+
+def _require_binding_route_matches_final_rank(
+    binding_visit: OrderControlTvtMpLocalBindingRankVisit,
+    final_rank_visit: OrderControlTvtMpFinalRankVisitRecord,
+    route_origin: OrderControlTvtMpLocalBindingRouteOrigin,
+    node_name: str,
+) -> None:
+    visit_key = binding_visit.visit_key
+    if not isinstance(
+        binding_visit.route_origin,
+        OrderControlTvtMpLocalBindingRouteOrigin,
+    ):
+        raise RuntimeError(
+            f"Node {node_name!r}: VisitKey {visit_key!r} binding route_origin "
+            f"{binding_visit.route_origin!r} is not a saved route origin."
+        )
+    if route_origin is not binding_visit.route_origin:
+        raise RuntimeError(
+            f"Node {node_name!r}: VisitKey {visit_key!r} final rank "
+            f"route_origin {route_origin!r} does not match binding "
+            f"route_origin {binding_visit.route_origin!r}."
+        )
+    formal_route = final_rank_visit.formal_route_next_link_name
+    binding_route = binding_visit.route_next_link_name
+    if not isinstance(formal_route, str) or formal_route == "":
+        raise RuntimeError(
+            f"Node {node_name!r}: VisitKey {visit_key!r} final rank formal "
+            f"route must be a non-empty str; got {formal_route!r}."
+        )
+    if not isinstance(binding_route, str) or binding_route == "":
+        raise RuntimeError(
+            f"Node {node_name!r}: VisitKey {visit_key!r} binding route must "
+            f"be a non-empty str; got {binding_route!r}."
+        )
+    if formal_route != binding_route:
+        raise RuntimeError(
+            f"Node {node_name!r}: VisitKey {visit_key!r} final rank formal "
+            f"route {formal_route!r} does not match binding route "
+            f"{binding_route!r}."
+        )
+
+
+def _trade_money_inputs_for_visit(
+    *,
+    payment_node: OrderControlTvtNodeMpPaymentAndCompensationResult,
+    selected: OrderControlTvtMpCandidateEconomicEvaluationResult,
+    actual_role: OrderControlTvtMpActualPassageRole,
+    visit_key: OrderControlTvtVisitKey,
+    vehicle_name: str,
+    node_name: str,
+) -> tuple[int | float, int | float, float]:
+    """Read this transaction's saved amounts. Do not use cumulative totals."""
+    if actual_role is OrderControlTvtMpActualPassageRole.BUYER:
+        payment_record = _matching_payment_record(
+            payment_node.buyer_payment_records,
+            visit_key,
+            vehicle_name,
+            node_name,
+            "buyer payment",
+        )
+        economic_record = _matching_economic_record(
+            selected.buyer_economic_records,
+            visit_key,
+            vehicle_name,
+            node_name,
+        )
+        paid_amount = _require_non_negative_finite_number(
+            payment_record.payment_P_b,
+            f"Node {node_name!r} payment amount for {visit_key!r}",
+        )
+        received_amount = 0
+    elif actual_role is OrderControlTvtMpActualPassageRole.SELLER:
+        payment_record = _matching_payment_record(
+            payment_node.seller_compensation_records,
+            visit_key,
+            vehicle_name,
+            node_name,
+            "seller compensation",
+        )
+        economic_record = _matching_economic_record(
+            selected.seller_economic_records,
+            visit_key,
+            vehicle_name,
+            node_name,
+        )
+        paid_amount = 0
+        received_amount = _require_non_negative_finite_number(
+            payment_record.compensation_amount,
+            f"Node {node_name!r} compensation amount for {visit_key!r}",
+        )
+    else:
+        raise RuntimeError(
+            f"Node {node_name!r}: VisitKey {visit_key!r} role {actual_role!r} "
+            "has no transaction amount."
+        )
+    declared_vot_per_second = _require_declared_vot(
+        economic_record.declared_vot_per_second,
+        vehicle_name,
+    )
+    return paid_amount, received_amount, declared_vot_per_second
+
+
+def _matching_payment_record(
+    payment_records: tuple,
+    visit_key: OrderControlTvtVisitKey,
+    vehicle_name: str,
+    node_name: str,
+    record_label: str,
+):
+    matched = None
+    match_count = 0
+    for payment_record in payment_records:
+        if payment_record.visit_key == visit_key:
+            match_count = match_count + 1
+            matched = payment_record
+    if match_count != 1 or matched is None:
+        raise RuntimeError(
+            f"Node {node_name!r}: VisitKey {visit_key!r} does not match "
+            f"exactly one {record_label} record; found {match_count}."
+        )
+    if matched.vehicle_name != vehicle_name:
+        raise RuntimeError(
+            f"Node {node_name!r}: {record_label} vehicle_name "
+            f"{matched.vehicle_name!r} does not match {vehicle_name!r}."
+        )
+    return matched
+
+
+def _require_establishment_matches_frozen_money(
+    establishment: OrderControlTvtMpTradeEstablishmentLogRecord,
+    *,
+    baseline_local_rank: int,
+    post_trade_local_rank: int,
+    rank_change: int,
+    declared_vot_per_second: float,
+    payment_paid_in_this_transaction: int | float,
+    payment_received_in_this_transaction: int | float,
+    node_name: str,
+) -> None:
+    """Check the row. The frozen input is built from the saved inputs."""
+    visit_key = establishment.visit_key
+    if establishment.baseline_local_rank != baseline_local_rank:
+        raise RuntimeError(
+            f"Node {node_name!r}: VisitKey {visit_key!r} establishment "
+            f"baseline_local_rank {establishment.baseline_local_rank!r} does "
+            f"not match {baseline_local_rank!r}."
+        )
+    if establishment.post_trade_local_rank != post_trade_local_rank:
+        raise RuntimeError(
+            f"Node {node_name!r}: VisitKey {visit_key!r} establishment "
+            f"post_trade_local_rank {establishment.post_trade_local_rank!r} "
+            f"does not match {post_trade_local_rank!r}."
+        )
+    if establishment.rank_change != rank_change:
+        raise RuntimeError(
+            f"Node {node_name!r}: VisitKey {visit_key!r} establishment "
+            f"rank_change {establishment.rank_change!r} does not match "
+            f"{rank_change!r}."
+        )
+    if establishment.declared_vot_per_second != declared_vot_per_second:
+        raise RuntimeError(
+            f"Node {node_name!r}: VisitKey {visit_key!r} establishment "
+            "declared_vot_per_second "
+            f"{establishment.declared_vot_per_second!r} does not match "
+            f"{declared_vot_per_second!r}."
+        )
+    if (
+        establishment.payment_paid_in_this_transaction
+        != payment_paid_in_this_transaction
+    ):
+        raise RuntimeError(
+            f"Node {node_name!r}: VisitKey {visit_key!r} establishment "
+            "payment_paid_in_this_transaction "
+            f"{establishment.payment_paid_in_this_transaction!r} does not "
+            f"match {payment_paid_in_this_transaction!r}."
+        )
+    if (
+        establishment.payment_received_in_this_transaction
+        != payment_received_in_this_transaction
+    ):
+        raise RuntimeError(
+            f"Node {node_name!r}: VisitKey {visit_key!r} establishment "
+            "payment_received_in_this_transaction "
+            f"{establishment.payment_received_in_this_transaction!r} does "
+            f"not match {payment_received_in_this_transaction!r}."
+        )
+
+
+def _require_no_establishment_for_visit(
+    establishment_records: list[OrderControlTvtMpTradeEstablishmentLogRecord],
+    visit_key: OrderControlTvtVisitKey,
+    node_name: str,
+) -> None:
+    for establishment in establishment_records:
+        if establishment.visit_key == visit_key:
+            raise RuntimeError(
+                f"Node {node_name!r}: nonparticipating VisitKey {visit_key!r} "
+                "must not have an establishment record."
+            )
+
+
+def _require_partition_4_has_no_wait_entry(
+    outside_visits: object,
+    wait_entry_visit_keys: list[OrderControlTvtVisitKey],
+    node_name: str,
+) -> None:
+    if not isinstance(outside_visits, tuple):
+        raise RuntimeError(
+            f"Node {node_name!r}: outside_trade_scope_inside_k_fixed_visits "
+            f"must be a tuple; got type {type(outside_visits).__name__}."
+        )
+    for outside_visit in outside_visits:
+        if not isinstance(outside_visit, OrderControlTvtMpLocalBindingRankVisit):
+            raise RuntimeError(
+                f"Node {node_name!r}: partition 4 visit must be "
+                "OrderControlTvtMpLocalBindingRankVisit; got type "
+                f"{type(outside_visit).__name__}."
+            )
+        if outside_visit.visit_key in wait_entry_visit_keys:
+            raise RuntimeError(
+                f"Node {node_name!r}: partition 4 VisitKey "
+                f"{outside_visit.visit_key!r} must not have an evaluation "
+                "WaitEntry."
             )
 
 

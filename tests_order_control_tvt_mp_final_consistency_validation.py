@@ -33,6 +33,7 @@ from uxsim.order_control_tvt_mp_final_rank import (
     OrderControlTvtNodeMpFinalRankResult,
 )
 from uxsim.order_control_tvt_mp_local_binding_rank_sequence import (
+    OrderControlTvtMpLocalBindingRouteOrigin,
     OrderControlTvtMpLocalBindingTradeRole,
 )
 from uxsim.order_control_tvt_mp_payment_and_compensation import (
@@ -56,12 +57,18 @@ FALLBACK_RANKS = OrderControlTvtMpFinalRankStatus.BASELINE_FALLBACK_RANKS
 NO_VISITS = OrderControlTvtMpFinalRankStatus.NO_VISITS_TO_CONFIRM
 
 
-def _rank_record(visit_key, rank, route, source):
+_FALLBACK_ROUTE_ORIGIN = (
+    OrderControlTvtMpLocalBindingRouteOrigin.BASELINE_TARGET_NODE_ARRIVAL_ROUTE
+)
+
+
+def _rank_record(visit_key, rank, route, source, route_origin):
     return OrderControlTvtMpFinalRankVisitRecord(
         visit_key=visit_key,
         final_local_rank=rank,
         formal_route_next_link_name=route,
         finalization_source=source,
+        route_origin=route_origin,
     )
 
 
@@ -186,6 +193,7 @@ def _visits_from_partitions(partition_3, partition_4):
                 rank,
                 binding_visit.route_next_link_name,
                 SELECTED_SOURCE,
+                binding_visit.route_origin,
             )
         )
         rank = rank + 1
@@ -196,6 +204,7 @@ def _visits_from_partitions(partition_3, partition_4):
                 rank,
                 binding_visit.route_next_link_name,
                 BASELINE_SOURCE,
+                binding_visit.route_origin,
             )
         )
         rank = rank + 1
@@ -330,6 +339,7 @@ def _fallback_final_rank_set(node_name="merge", *, remaining=None, build_status=
                     rank,
                     "base-" + visit_key[0],
                     BASELINE_SOURCE,
+                    _FALLBACK_ROUTE_ORIGIN,
                 )
             )
             rank = rank + 1
@@ -1274,7 +1284,13 @@ def test_rejects_final_local_rank_that_is_not_consecutive():
     final_rank_set = _selected_final_rank_set()
     visits = final_rank_set.node_final_rank_results[0].final_rank_visits
     first = visits[0]
-    broken_first = _rank_record(first.visit_key, 2, first.formal_route_next_link_name, SELECTED_SOURCE)
+    broken_first = _rank_record(
+        first.visit_key,
+        2,
+        first.formal_route_next_link_name,
+        SELECTED_SOURCE,
+        first.route_origin,
+    )
     broken_visits = (broken_first,) + visits[1:]
     node = final_rank_set.node_final_rank_results[0]
     replaced = OrderControlTvtNodeMpFinalRankResult(
@@ -1295,6 +1311,7 @@ def test_rejects_selected_source_on_a_partition_3_visit_that_is_marked_baseline(
         1,
         first.formal_route_next_link_name,
         BASELINE_SOURCE,
+        first.route_origin,
     )
     broken_visits = (broken_first,) + visits[1:]
     node = final_rank_set.node_final_rank_results[0]
@@ -1314,7 +1331,13 @@ def test_rejects_selected_route_that_differs_from_the_binding_route():
     final_rank_set = _selected_final_rank_set()
     visits = final_rank_set.node_final_rank_results[0].final_rank_visits
     first = visits[0]
-    broken_first = _rank_record(first.visit_key, 1, "collector-buyer", SELECTED_SOURCE)
+    broken_first = _rank_record(
+        first.visit_key,
+        1,
+        "collector-buyer",
+        SELECTED_SOURCE,
+        first.route_origin,
+    )
     broken_visits = (broken_first,) + visits[1:]
     node = final_rank_set.node_final_rank_results[0]
     replaced = OrderControlTvtNodeMpFinalRankResult(
@@ -1358,7 +1381,13 @@ def test_rejects_empty_binding_route():
 def test_rejects_fallback_route_that_differs_from_the_collector():
     remaining = (fx._visit("alpha"),)
     visits = (
-        _rank_record(fx._visit("alpha"), 1, "guessed-route", BASELINE_SOURCE),
+        _rank_record(
+            fx._visit("alpha"),
+            1,
+            "guessed-route",
+            BASELINE_SOURCE,
+            _FALLBACK_ROUTE_ORIGIN,
+        ),
     )
     final_rank_set = _fallback_final_rank_set(remaining=remaining, visits=visits)
     message = _assert_runtime(final_rank_set, "collector snapshot")
@@ -1370,7 +1399,15 @@ def test_rejects_missing_collector_route_on_fallback():
     spec = fx._fallback_spec("merge", remaining=remaining, build_status=fx.COMPLETE)
     spec["routes"] = {}
     payment_set = fx._build([spec])
-    visits = (_rank_record(fx._visit("alpha"), 1, "base-alpha", BASELINE_SOURCE),)
+    visits = (
+        _rank_record(
+            fx._visit("alpha"),
+            1,
+            "base-alpha",
+            BASELINE_SOURCE,
+            _FALLBACK_ROUTE_ORIGIN,
+        ),
+    )
     final_rank_set = _final_set(
         payment_set,
         ({"status": FALLBACK_RANKS, "selected": None, "visits": visits},),
@@ -1421,7 +1458,15 @@ def test_rejects_preconfirmed_visit_repeated_in_the_remaining_window():
     # The fixture builder sets decision from leading + remaining when decision
     # is omitted, which repeats alpha. Validation must not drop the repeat.
     payment_set = fx._build([spec])
-    visits = (_rank_record(fx._visit("alpha"), 1, "base-alpha", BASELINE_SOURCE),)
+    visits = (
+        _rank_record(
+            fx._visit("alpha"),
+            1,
+            "base-alpha",
+            BASELINE_SOURCE,
+            _FALLBACK_ROUTE_ORIGIN,
+        ),
+    )
     final_rank_set = _final_set(
         payment_set,
         ({"status": FALLBACK_RANKS, "selected": None, "visits": visits},),
@@ -1497,7 +1542,13 @@ def test_one_node_inconsistency_stops_before_the_next_node():
                 "status": FALLBACK_RANKS,
                 "selected": None,
                 "visits": (
-                    _rank_record(fx._visit("alpha"), 1, "missing", BASELINE_SOURCE),
+                    _rank_record(
+                        fx._visit("alpha"),
+                        1,
+                        "missing",
+                        BASELINE_SOURCE,
+                        _FALLBACK_ROUTE_ORIGIN,
+                    ),
                 ),
             },
         ),
@@ -1544,6 +1595,7 @@ def test_rejects_none_formal_route():
         final_local_rank=1,
         formal_route_next_link_name=None,
         finalization_source=SELECTED_SOURCE,
+        route_origin=first.route_origin,
     )
     broken_visits = (broken_first,) + visits[1:]
     node = final_rank_set.node_final_rank_results[0]

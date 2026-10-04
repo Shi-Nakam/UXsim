@@ -65,6 +65,7 @@ from uxsim.order_control_tvt_mp_final_rank import (
     OrderControlTvtMpFinalRankVisitRecord,
     OrderControlTvtMpFinalizationSource,
     OrderControlTvtNodeMpFinalRankResult,
+    _build_baseline_fallback_node_result,
     build_tvt_mp_final_ranks,
 )
 from uxsim.order_control_tvt_mp_general_trade_rank import (
@@ -167,6 +168,7 @@ def _binding_visit(
     partition,
     route,
     role=OrderControlTvtMpLocalBindingTradeRole.NONPARTICIPATING,
+    route_origin=ROUTE_ORIGIN,
 ):
     return OrderControlTvtMpLocalBindingRankVisit(
         visit_key=_visit(name, visit_id),
@@ -174,7 +176,7 @@ def _binding_visit(
         binding_partition=partition,
         binding_rank=rank,
         route_next_link_name=route,
-        route_origin=ROUTE_ORIGIN,
+        route_origin=route_origin,
         inlink_name="in",
         baseline_arrival_timestep=11,
         arrival_tiebreaker=0,
@@ -686,6 +688,7 @@ def test_public_results_are_frozen_with_field_order():
         "final_local_rank",
         "formal_route_next_link_name",
         "finalization_source",
+        "route_origin",
     )
     assert tuple(OrderControlTvtNodeMpFinalRankResult.__dataclass_fields__) == (
         "node_name",
@@ -705,6 +708,7 @@ def test_public_results_are_frozen_with_field_order():
         final_local_rank=1,
         formal_route_next_link_name="out",
         finalization_source=OrderControlTvtMpFinalizationSource.BASELINE,
+        route_origin=ROUTE_ORIGIN,
     )
     try:
         record.final_local_rank = 2
@@ -800,6 +804,110 @@ def test_rejects_input_that_is_not_a_payment_set():
 # ---------------------------------------------------------------------------
 # Branch 1
 # ---------------------------------------------------------------------------
+
+
+def test_route_origin_is_required_and_has_no_default():
+    signature = inspect.signature(OrderControlTvtMpFinalRankVisitRecord)
+    parameter = signature.parameters["route_origin"]
+    assert parameter.default is inspect.Parameter.empty
+    try:
+        OrderControlTvtMpFinalRankVisitRecord(
+            visit_key=_visit("a"),
+            final_local_rank=1,
+            formal_route_next_link_name="out",
+            finalization_source=OrderControlTvtMpFinalizationSource.BASELINE,
+        )
+        missing_rejected = False
+    except TypeError:
+        missing_rejected = True
+    assert missing_rejected is True
+
+
+def test_route_origin_rejects_a_route_name_string():
+    try:
+        OrderControlTvtMpFinalRankVisitRecord(
+            visit_key=_visit("a"),
+            final_local_rank=1,
+            formal_route_next_link_name="trade-out",
+            finalization_source=OrderControlTvtMpFinalizationSource.SELECTED_CANDIDATE,
+            route_origin="trade-out",
+        )
+        rejected = False
+    except RuntimeError as error:
+        rejected = True
+        assert "OrderControlTvtMpLocalBindingRouteOrigin" in str(error)
+    assert rejected is True
+
+
+def test_constructor_accepts_each_saved_route_origin():
+    for route_origin in OrderControlTvtMpLocalBindingRouteOrigin:
+        record = OrderControlTvtMpFinalRankVisitRecord(
+            visit_key=_visit("a"),
+            final_local_rank=1,
+            formal_route_next_link_name="not-the-origin-name",
+            finalization_source=OrderControlTvtMpFinalizationSource.SELECTED_CANDIDATE,
+            route_origin=route_origin,
+        )
+        assert record.route_origin is route_origin
+        assert record.formal_route_next_link_name == "not-the-origin-name"
+
+
+def test_partition_3_and_4_copy_binding_route_origin():
+    origins = (
+        OrderControlTvtMpLocalBindingRouteOrigin.RANK_LEDGER_FORMAL_ROUTE,
+        OrderControlTvtMpLocalBindingRouteOrigin.SNAPSHOT_ROUTE_ALREADY_DECIDED,
+        OrderControlTvtMpLocalBindingRouteOrigin.BASELINE_TARGET_NODE_ARRIVAL_ROUTE,
+    )
+    for route_origin in origins:
+        scope = _binding_visit(
+            "scope",
+            rank=1,
+            partition=PARTITION_3,
+            route="trade-out",
+            role=OrderControlTvtMpLocalBindingTradeRole.BUYER,
+            route_origin=route_origin,
+        )
+        outside = _binding_visit(
+            "tail",
+            rank=2,
+            partition=PARTITION_4,
+            route="tail-out",
+            route_origin=route_origin,
+        )
+        spec = _selected_spec(
+            "merge",
+            partition_3=(scope,),
+            partition_4=(outside,),
+            remaining=(_visit("scope"), _visit("tail")),
+        )
+        result = build_tvt_mp_final_ranks(_build([spec]))
+        visits = result.node_final_rank_results[0].final_rank_visits
+        assert visits[0].route_origin is route_origin
+        assert visits[0].formal_route_next_link_name == "trade-out"
+        assert visits[1].route_origin is route_origin
+        assert visits[1].formal_route_next_link_name == "tail-out"
+        assert visits[0].route_origin.value != visits[0].formal_route_next_link_name
+
+
+def test_fallback_route_origin_is_baseline_target_node_arrival_route():
+    remaining = (_visit("zeta"), _visit("alpha"))
+    spec = _fallback_spec("merge", remaining=remaining, build_status=COMPLETE)
+    result = build_tvt_mp_final_ranks(_build([spec]))
+    expected = (
+        OrderControlTvtMpLocalBindingRouteOrigin.BASELINE_TARGET_NODE_ARRIVAL_ROUTE
+    )
+    for record in result.node_final_rank_results[0].final_rank_visits:
+        assert record.route_origin is expected
+        assert record.route_origin is not (
+            OrderControlTvtMpLocalBindingRouteOrigin.SNAPSHOT_ROUTE_ALREADY_DECIDED
+        )
+        assert record.route_origin is not (
+            OrderControlTvtMpLocalBindingRouteOrigin.RANK_LEDGER_FORMAL_ROUTE
+        )
+    fallback_source = inspect.getsource(_build_baseline_fallback_node_result)
+    assert "BASELINE_TARGET_NODE_ARRIVAL_ROUTE" in fallback_source
+    assert "SNAPSHOT_ROUTE_ALREADY_DECIDED" not in fallback_source
+    assert "RANK_LEDGER_FORMAL_ROUTE" not in fallback_source
 
 
 def test_branch1_partition_3_only_uses_selected_source_and_saved_route():
