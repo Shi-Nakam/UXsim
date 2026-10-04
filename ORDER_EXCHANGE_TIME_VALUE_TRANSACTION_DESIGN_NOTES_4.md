@@ -9820,3 +9820,671 @@ FCFS・BATCHの本処理は変更しない。ただし、physical transfer専用
 4. 別の指示でpushする。
 5. push後に「Node別実通過履歴の記録」の実装指示を作成する。
 6. それまではコード変更へ進まない。
+
+# TVT-MP 評価終了時未観測確定の実装前詳細設計（2026-10-05）
+
+本節は、次の正式実装単位「評価終了時の未観測確定」の実装前詳細設計である。実装完了記録ではない。
+
+本節を、評価終了時未観測確定の最新の正式参照先とする。直前の大見出し「TVT-MP Node別実通過履歴の実装前詳細設計（2026-10-05）」は削除、短縮、置換、書換えしない。Node別実通過履歴はコミット `79f0d04` で実装・テスト・push済みである。成立時評価用入口の凍結はコミット `8625f47` で実装・テスト・push済みである。
+
+古いactual outcome設計には、未観測recordを `Vehicle.order_exchange_log` へ追加する記述が残っている。その記述は削除しない。当時の記録として残す。本節の最新方針では、後続評価の正本をWaitEntry内のactual passage observation recordとする。未観測recordは `Vehicle.order_exchange_log` へ追加しない。後続評価はlogを検索しない。
+
+本節の追記作業では、Pythonコード、テスト、診断、指定外の文書、およびGit管理状態を変更しない。
+
+## 1. 今回の目的
+
+次の正式実装単位は、評価終了時の未観測確定である。
+
+目的は次である。
+
+評価対象の最終timestepの交通処理が完了した後、actual passage registry内の全trade・全roleについて、観測済みVisitは変更せず、まだ通過待ちのVisitを一度だけ正式な評価期間終了未観測へ確定する。
+
+対象roleは次である。
+
+- buyer
+- seller
+- nonparticipating
+
+全roleを同じ終了処理で一括して扱う。roleごとに確定時点を分けない。
+
+今回実装しないものは次である。
+
+- 取引全体の事後成立判定
+- 評価不能判定の最終record
+- 参考支払
+- 参考補償
+- buyer実績利得
+- seller実績利得
+- 満足・不満足
+- 理由分類
+- nonparticipating外部効果の最終金額評価
+- Node別順位差
+- 集計
+- 実験出力
+
+## 2. 評価終了timestepの境界
+
+`order_control_tvt_evaluation_end_timestep` は、実Worldで交通とTVT判断を実行する最後のinclusiveなtimestepである。
+
+評価対象が `T=0` から `T=9999` の場合、順序は次である。
+
+1. `T=9999` の先頭でTVT driverを実行する。
+2. `T=9999` のLink更新、Node更新、Node transferを実行する。
+3. `T=9999` に通過したVisitについて、Node別実通過履歴とactual passage observationをcommitする。
+4. 車両更新、経路更新、user functionを完了する。
+5. timestep loop後に `World.T` を `10000` へ進める。
+6. `simulation_terminated()` より前に、評価終了時未観測確定を実行する。
+7. その後に `simulation_terminated()` と `Analyzer.basic_analysis()` を実行する。
+
+実Worldでは `T=10000` の交通処理を実行しない。
+
+`World.T=10000` は、終了処理を実行する制御上の時刻であり、最後に観測した交通timestepではない。最後の評価対象timestepは `9999` である。
+
+`T=9999` で通過したVisitは観測済みとする。`T=9999` の終了までに通過しなかったVisitは、`T=10000` なら通過し得た場合でも未観測とする。
+
+未観測確定を、最終評価timestepのdriverより前、またはそのtimestepのNode transferより前に置かない。置くと、その時刻の通過観測より先に未観測が確定する。
+
+## 3. baseline horizonとの関係
+
+完全なbaseline horizonを確保するため、内部計算可能期間は評価期間より `baseline_horizon_steps + 1` 長くする。最終評価timestep自体を、その残り時刻数の1個目に含める。意思決定窓の長さは、この個数に含めない。
+
+実Worldは評価終了後へ進めない。baseline forkは、copy後に `order_control_tvt_evaluation_end_timestep=None` となり、必要な内部期間を計算できる。実Worldの評価終了timestepは、fork解除で変えない。
+
+評価終了時未観測確定は実Worldだけで実行する。baseline forkでは実行しない。fork上の `simulation_terminated()` 経路へも接続しない。
+
+## 4. exec_simulationへの接続位置
+
+`uxsim/uxsim.py` のtimestep loop後には、次の終了分岐がある。
+
+1. `World.T == World.TSIZE`
+2. `evaluation_end_timestep is not None` かつ `World.T == evaluation_end_timestep + 1`
+
+未観測確定は、評価終了timestepが設定され、かつ `World.T == evaluation_end_timestep + 1` である場合だけ実行する。
+
+`World.T == World.TSIZE` 側が先に評価される。評価終了後の時刻とTSIZEが一致する場合は、その分岐の `simulation_terminated()` 直前でも未観測確定を呼ぶ。horizon余白の検査を通る通常の研究設定では、評価終了の次の時刻はまだ `TSIZE` 未満であり、2番目の分岐が走る。評価終了が `TSIZE-1` のときは1番目の分岐だけが終了集計を呼ぶので、そちらにも同じ直前呼出しが要る。
+
+通常のUXsim終了、すなわち評価終了timestepが `None` の場合は未観測確定を呼ばない。
+
+同じ条件判定や呼出しを無意味に複製しないよう、`simulation_terminated()` 直前に呼ぶprivate helper等を利用してよい。ただし、`simulation_terminated()` 本体へTVT固有処理を混在させない。
+
+理由は次である。
+
+- `simulation_terminated()` は通常UXsim終了でも使われる。
+- TVT評価終了が設定されていない通常終了の既存契約を変更しない。評価終了timestepが `None` のとき、`T == TSIZE` の再入で `simulation_terminated()` を再度呼ぶ既存契約は残す。
+- 未観測確定は `Analyzer.basic_analysis()` より前に完了させる。
+- 評価終了後の再実行では、既存のended checkにより交通も終了処理も再実行しない。未観測確定も再実行しない。
+
+途中停止で `World.T` がまだ評価終了timestep以下のときは、未観測確定を実行しない。続きの実行で最終評価timestepの交通が終わり、`World.T` がその次になった呼出しだけが確定する。
+
+## 5. 現行の終了後状態
+
+現在のWaitEntryは次の3状態を表現できる。
+
+1. 通過待ち
+   - `wait_status = WAITING_FOR_ACTUAL_PASSAGE`
+   - `actual_passage_observation_record = None`
+2. 観測済み
+   - `wait_status = ACTUAL_PASSAGE_OBSERVED`
+   - observation recordのstatusも `ACTUAL_PASSAGE_OBSERVED`
+3. 評価終了未観測
+   - `wait_status = ACTUAL_PASSAGE_UNOBSERVED_AT_EVALUATION_END`
+   - observation recordのstatusも `ACTUAL_PASSAGE_UNOBSERVED_AT_EVALUATION_END`
+
+3番目のenum値とrecord形式は既に存在する。本番コードで、待ちのVisitをその状態へ確定する処理は未実装である。観測済みへの遷移は、物理通過成功時の既存commitが行う。
+
+今回、既存の3状態を正式に接続する。新しいstatus値は追加しない。
+
+観測済みentryも未観測entryも、registryから削除しない。entryとtradeはシミュレーション終了まで残る。
+
+## 6. 未観測確定の正本
+
+新しい未観測結果型は作らない。
+
+既存の `OrderControlTvtMpActualPassageObservationRecord` を使用する。
+
+未観測WaitEntryについて、evaluation end用のobservation recordを1件作り、WaitEntryへ保存する。同時にWaitEntryの `wait_status` を `ACTUAL_PASSAGE_UNOBSERVED_AT_EVALUATION_END` へ変更する。
+
+actual passage observation recordとWaitEntryのwait statusを、actual側観測結果の正本とする。両方が評価終了未観測であるとき、そのVisitのactual側は評価期間終了未観測である。
+
+専用の終了結果registryは作らない。TradeWaitへ未観測結果を複製しない。Node別実通過履歴へ未通過recordを追加しない。`Vehicle.order_exchange_log` へ未観測recordを追加しない。
+
+後続評価は、logを検索せず、WaitEntry内のobservation recordを読む。古い設計がlog追加を書いている箇所は残すが、読み先の最新参照先は本節である。
+
+## 7. 未観測recordのfield
+
+未観測recordは、既存recordのfield構造を変更せず、WaitEntryの保存済み情報から構築する。live Vehicle、`Vehicle.vot_true`、`Vehicle.order_exchange_log` から読み直さない。
+
+WaitEntryからコピーするものは次である。
+
+- `tvt_decision_timestep`
+- `node_name`
+- `buyers_sorted`
+- `visit_key`
+- `vehicle_name`
+- `role`
+- `baseline_passage_timestep`
+- `candidate_passage_timestep`
+- `true_vot_per_second`
+- `predicted_observation_status`
+- `predicted_route_next_link_name`
+- `baseline_minus_candidate_passage_timesteps`
+- `baseline_minus_candidate_passage_seconds`
+- `baseline_minus_candidate_time_value`
+
+設定するstatusは次である。
+
+- `observation_status = ACTUAL_PASSAGE_UNOBSERVED_AT_EVALUATION_END`
+
+actual側で `None` とするfieldは次である。
+
+- `baseline_minus_actual_passage_timesteps`
+- `baseline_minus_actual_passage_seconds`
+- `baseline_minus_actual_time_value`
+- `candidate_minus_actual_passage_timesteps`
+- `candidate_minus_actual_passage_seconds`
+- `candidate_minus_actual_time_value`
+- `actual_passage_timestep`
+- `actual_route_next_link_name`
+
+未観測を0として保存しない。0は、baselineまたはcandidateと同時刻に通過した観測事実であり、未観測ではない。
+
+評価終了timestepを各recordへ重複保存しない。評価終了境界の正本は、Worldの `order_control_tvt_evaluation_end_timestep` である。
+
+3組9 fieldの定義は変えない。baseline対candidateの3 fieldは、WaitEntryに保存済みの値をそのまま持つ。actualが絡む6 fieldだけを `None` にする。
+
+## 8. candidate未観測とactual未観測の区別
+
+candidate側とactual側の未観測を混同しない。candidate側の未観測は、局所仮想計算のhorizon末尾までにcandidate通過が観測されなかったことである。actual側の未観測は、実Worldの評価対象期間の交通が終わっても、対象Nodeの実通過が観測されなかったことである。
+
+4通りを区別する。
+
+1. candidate観測済み、actual観測済み
+2. candidate観測済み、actual未観測
+3. candidate未観測、actual観測済み
+4. candidate未観測、actual未観測
+
+candidate側は、既存の `predicted_observation_status` とcandidate field群を正本とする。actual側は、`observation_status` とactual field群を正本とする。
+
+未観測確定時に、candidate側statusやcandidate fieldを変更しない。candidate側が観測済みでも、actual側を未観測にできる。candidate側が未観測でも、actual側が観測済みである場合は、既存の観測済みrecordを変更しない。
+
+## 9. statusとrecordの正式な整合
+
+WaitEntryの正式状態は、次の3組だけとする。
+
+### 通過待ち
+
+- `wait_status = WAITING_FOR_ACTUAL_PASSAGE`
+- observation recordは `None`
+
+### 観測済み
+
+- `wait_status = ACTUAL_PASSAGE_OBSERVED`
+- observation recordが存在する
+- record statusは `ACTUAL_PASSAGE_OBSERVED`
+- actual passage timestepが存在する
+- actual routeが存在する
+- actual側fieldが既存の観測済み契約に従う
+
+### 評価終了未観測
+
+- `wait_status = ACTUAL_PASSAGE_UNOBSERVED_AT_EVALUATION_END`
+- observation recordが存在する
+- record statusは `ACTUAL_PASSAGE_UNOBSERVED_AT_EVALUATION_END`
+- actual passage timestepは `None`
+- actual routeは `None`
+- actual側6 fieldはすべて `None`
+
+上記以外の組合せは重大不整合として拒否する。待ちなのにrecordがある、観測済みなのにrecordが `None`、未観測statusなのにactual時刻がある、wait statusとrecord statusが食い違う、はいずれも拒否する。
+
+現行の保存済みentry整合helperは、主にwaitingとobservedの不整合を確認している。終了処理では、未観測状態を含む3状態を厳密に検査できるようにする。
+
+登録時に保証済みの金額、局所順位、`route_origin` 等を再計算しない。
+
+## 10. buyer・seller初回通知
+
+既存のbuyer・seller初回通知は変更しない。削除、無効化、コメントアウトをしない。
+
+完了扱いは引き続き、次の両方だけである。
+
+- `wait_status = ACTUAL_PASSAGE_OBSERVED`
+- observation recordあり
+
+評価終了未観測は、buyer・seller初回観測完了には数えない。未観測確定時に通知flagを立てない。既に立っている通知flagも変更しない。
+
+通知flagは、評価終了処理の対象選定に使用しない。通知は、参考金額を計算できる状態の目印であり、最終確定の開始条件ではない。
+
+nonparticipatingを含む全roleを、通知flagとは独立して一括処理する。通知済みのあとにnonparticipatingが未観測のまま残っていても、それは正常であり、そのentryだけを未観測確定する。
+
+## 11. Node別実通過履歴との整合
+
+評価終了prepareでは、WaitEntryとNode別実通過履歴を照合する。照合keyは `(node_name, VisitKey)` である。vehicle_nameだけでは照合しない。
+
+正常は次である。
+
+1. WaitEntryがobservedで、同じNode・VisitKeyの履歴recordがある
+2. WaitEntryがwaitingで、同じNode・VisitKeyの履歴recordがない
+
+重大不整合は次である。
+
+1. WaitEntryがobservedなのに、同じNode・VisitKeyの履歴recordがない
+2. WaitEntryがwaitingなのに、同じNode・VisitKeyの履歴recordがある
+3. WaitEntryのstatusとobservation recordが不整合
+4. 同じNode履歴に同じVisitKeyが重複
+5. Node履歴recordのrankが非連続
+
+2番目は、物理移動後に履歴commitが成功し、その後のobservation commitが失敗した既存の例外窓で起こり得る。評価終了処理は、この状態を修復しない。
+
+評価終了処理では、履歴からobservation recordを再構築しない。observation recordから履歴recordを再構築しない。不足した正本を推測で修復しない。未通過Visitへ実通過順位、末尾順位、最大順位、仮順位を付けない。
+
+partition 4とfallbackはWaitEntryを持たず、Node履歴だけを持ち得る。これらは評価終了未観測確定の対象外である。対象外VisitのためにWaitEntryを作り直さない。
+
+## 12. 全role一括処理
+
+evaluation end処理は、全TradeWaitを固定された再現可能な順で走査する。走査順は、transaction keyの比較順など、同じregistry内容なら同じ順になる順序とする。dictの反復順に依存しない。
+
+各TradeWaitについて、次を同じ処理で扱う。
+
+- buyer
+- seller
+- nonparticipating
+
+対象列はTradeWaitの `all_visit_keys` である。buyer列、seller列、nonparticipating列は、role分類と対応確認に使用する。roleごとに別の確定処理を作らない。
+
+prepareで少なくとも次を検査する。
+
+- trade key
+- `tvt_decision_timestep`
+- `node_name`
+- `buyers_sorted`
+- `all_visit_keys`
+- buyer VisitKey列
+- seller VisitKey列
+- nonparticipating VisitKey列
+- role列の排他性
+- role列の和と `all_visit_keys` の一致
+- 各VisitKeyに対応するentryが1件だけ存在
+- entryの取引識別がTradeWaitと一致
+- entryのroleがrole列と一致
+- 孤立entryがない
+- 孤立TradeWaitがない
+- 1つのentryが複数tradeに属さない
+
+TradeWaitの通知flagは対象選定に使用しない。
+
+entry keyは `(node_name, VisitKey)` である。同一Vehicleの複数取引と同一Node再訪は、visit_idが異なるVisitKeyとして別entryである。
+
+走査中にliveなentry dictやtrade dictを変更しない。更新案を作り終えてからcommitする。
+
+## 13. registryの再実行防止field
+
+actual passage wait registryへ、評価終了未観測確定を実行済みのtimestepを保存するfieldを1つ追加する。
+
+意味は次である。
+
+- `None`: まだ評価終了確定を実行していない
+- Python int: そのevaluation end timestepで確定済み
+
+field名は実装時に既存命名規則へ合わせてよい。defaultは `None` とする。既存のWaitRegistry生成箇所は、このdefaultにより空の未確定状態から始まる。
+
+このfieldは、評価終了timestepそのものの正本ではない。評価終了timestepの正本はWorld属性である。registry fieldは、その値を用いた終了処理が一度完了したことを表す。各observation recordへ同じtimestepを重複保存しない。
+
+TradeWaitごとのfinalized flagは追加しない。WaitEntryごとの別のfinalized flagは追加しない。`World.finalized` を流用しない。`World.finalized` はシナリオ準備済みである。専用結果registryは作らない。
+
+## 14. 正式API
+
+評価終了未観測確定の公開またはモジュール境界APIは、実World1つを入力として受け取る方向とする。
+
+Worldから次を取得する。
+
+- `order_control_tvt_evaluation_end_timestep`
+- 現在の `World.T`
+- baseline collector
+- actual passage wait registry
+- Node別実通過履歴registry
+
+評価終了timestepやregistryを別引数で重複して渡さない。同じ値の二重入力による不一致を作らない。上位driverが用意した別のproposalも、このAPIの入力にしない。driverは最終評価timestepの交通より前に走るので、未観測確定の呼出し元にしない。
+
+API内部はprepareとcommitに分ける。関数名、private helper名の細部は実装時に決めてよい。
+
+`exec_simulation` からの呼出しは、循環importを避けるため、既存のdriver importと同じく、必要な時点の局所importでよい。ファイル先頭でactual passageモジュールを新たに循環させる形にはしない。現行のWorld初期化が既にwait registry型をimportしている範囲は維持し、終了処理の関数までを先頭importに広げて循環を起こさない。
+
+## 15. prepareの責務
+
+prepareではlive状態を変更しない。
+
+少なくとも次を確認する。
+
+1. 入力が実Worldである
+2. baseline collectorが `None`
+3. evaluation end timestepが設定済み
+4. evaluation end timestepがboolではないPython int
+5. evaluation end timestepが0以上かつ `TSIZE` 未満
+6. `World.T == evaluation_end_timestep + 1`
+7. wait registryが正しい型
+8. history registryが正しい型
+9. registryの終了確定済みfieldが `None`
+10. entry dictがdict
+11. trade dictがdict
+12. 全tradeと全entryの一対一対応
+13. TradeWait内のrole列整合
+14. WaitEntryの取引識別整合
+15. WaitEntryのrole整合
+16. WaitEntryのstatusとrecord整合
+17. WaitEntryとNode履歴の整合
+18. candidate側statusとcandidate fieldの既存整合
+19. 同一entryが複数tradeに属さない
+20. 孤立entryがない
+21. 孤立TradeWaitがない
+
+4と5は、既存の `World._require_tvt_evaluation_end_timestep` が行う検査を使う。終了処理のために別の緩い検査を作らない。
+
+prepareで次を作る。
+
+- waiting entryごとの未観測observation record
+- 各entryへ反映するprepared update
+- registryの終了確定済みtimestep
+- commit前の成功結果が必要な場合はそのresult
+
+全tradeの検査と全更新案の作成が完了する前に、いずれのWaitEntryも変更しない。観測済みentryは更新案へ入れない。waiting entryだけを未観測更新案へ入れる。
+
+待ちのentryが0件でも、tradeとentryの対応が正常ならprepareは成功する。その場合の更新案は、観測済みentryを変えず、終了確定済みtimestepだけを書く。
+
+prepareは利得、参考金額、満足、順位差を計算しない。
+
+## 16. commitの責務
+
+commitでは、prepare済みの値（文字列なども含む）だけを反映する。
+
+各未観測entryについて、次の順で代入する。
+
+1. prepared observation recordを代入する
+2. wait statusを `ACTUAL_PASSAGE_UNOBSERVED_AT_EVALUATION_END` へ代入する
+
+全entryの代入後、registryの終了確定済みtimestepを代入する。
+
+commit中に次を行わない。
+
+- registry全体の再走査
+- trade検索
+- role分類
+- sort
+- candidate側fieldの再計算
+- actual差の計算
+- 順位推定
+- Node履歴検索
+- live Vehicle検索
+- `Vehicle.order_exchange_log` 検索
+- recordの再構築
+- 取引全体評価
+- 個別評価
+- 金額計算
+
+commitは複数代入である。commit途中の例外窓は残る。「失敗したら常にlive状態は不変」と一般化しない。物理移動後の既存例外窓を、この終了処理が解消するとは書かない。
+
+registryの終了確定fieldは最後に代入する。観測済みentry、TradeWaitの通知flag、Node履歴、`Vehicle.order_exchange_log` へは代入しない。
+
+## 17. 再実行と部分失敗
+
+正常完了後に同じ終了処理を再実行した場合は、registryの終了確定fieldにより拒否する。拒否時はlive状態を変えない。
+
+評価終了前に直接呼んだ場合は拒否する。`World.T` が `evaluation_end_timestep + 1` でないことが拒否理由である。
+
+fork Worldで呼んだ場合は拒否する。forkは評価終了timestepが `None` であり、baseline collectorも存在する。
+
+evaluation end timestepが `None` の場合は拒否する。bool、負値、`TSIZE` 以上は、既存helperの `ValueError` とする。
+
+評価終了後に `exec_simulation` を再度呼んだ場合は、既存のended checkが先に `return 1` する。未観測確定を再実行しない。交通も `simulation_terminated()` も再実行しない。
+
+commit途中で例外が発生した場合、次になり得る。
+
+- 一部entryだけが未観測状態
+- registryの終了確定fieldは `None`
+
+その状態を自動修復しない。次のprepareで、statusとrecordの不整合、または一括処理の前提が崩れている不整合として拒否する。完全なrollback機構や複合トランザクションは今回作らない。
+
+`exec_simulation` の分割実行は、最終評価timestepの交通が終わり `World.T` がその次になった呼出しだけが確定する。それより前の分割では確定しない。
+
+複数Worldは、Worldごとのregistryを持つ。一方の終了確定は、他方の旗を立てない。
+
+## 18. 未観測理由
+
+今回保存する理由は1つだけである。
+
+- 評価対象期間の終了までに実通過が観測されなかった
+
+この理由は、actual側status `ACTUAL_PASSAGE_UNOBSERVED_AT_EVALUATION_END` が表す。新しい未観測理由enumは追加しない。
+
+candidate側horizon未観測は、既存の `predicted_observation_status` で別に表す。未観測確定は、そのstatusを書き換えない。
+
+次は、今回の未観測理由enumへ追加しない。
+
+- capacity不足
+- clearance待ち
+- trip abort
+- trip-end
+- 例外終了
+- 異常終了
+- 対象外Visit
+
+理由を細分するために、live Vehicleや終了時の交通状態を検索しない。
+
+異常終了または例外終了で `World.T` がevaluation endの次へ到達していない場合は、未観測確定を実行しない。WaitEntryはwaitingのまま残る。
+
+trip-end Vehicleは研究対象外という既定方針を維持する。trade scopeのWaitEntryが通過せずに残った場合は、理由を細分せず、評価期間終了未観測として確定する。
+
+## 19. buyer・seller・nonparticipatingの扱い
+
+### buyer
+
+waitingなら未観測recordを作る。正式支払額、declared VOT、true VOTは、既存の金銭frozen入力とWaitEntryに残す。実績利得や満足判定は作らない。
+
+### seller
+
+waitingなら未観測recordを作る。正式補償額、declared VOT、true VOTは、既存の金銭frozen入力とWaitEntryに残す。実績利得や満足判定は作らない。
+
+### nonparticipating
+
+waitingなら同じ未観測recordを作る。金銭frozen入力は引き続き `None` である。外部効果の最終金額は計算しない。
+
+全roleで、actual側未観測の表現は同じである。roleによって未観測recordの形を分けない。
+
+## 20. 後続評価への受渡し
+
+この単位の完了後、後続処理は全WaitEntryについて、次のいずれかを読める。
+
+- actual passage observed
+- actual passage unobserved at evaluation end
+
+後続の取引全体評価は、buyerまたはsellerに未観測があれば、事後不成立ではなく評価不能として扱う。その評価resultは今回作らない。nonparticipatingの未観測を、取引全体の評価可能条件に含めるかどうかは、既に全体設計で「含めない」と確定している。その判定recordも今回は作らない。
+
+後続のbuyer・seller個別追加評価は、取引全体評価可能性、正式金額、declared VOT、true VOT、actual時間差、Node実通過順位を使う。未観測のactual時間差は `None` であり、0ではない。Node実通過順位は、履歴にそのVisitKeyがあるときだけ存在する。未観測Visitに順位は無い。実績利得や満足判定は今回作らない。
+
+nonparticipatingの外部効果評価も今回作らない。
+
+## 21. 反証結果
+
+少なくとも次を記録する。これらは実装を妨げるBLOCKERではない。
+
+- 全role観測済み: entryは変更せず、registryの終了確定fieldだけを設定する。
+- buyerだけ未観測: buyer entryだけ未観測確定する。
+- sellerだけ未観測: seller entryだけ未観測確定する。
+- nonparticipatingだけ未観測: nonparticipating entryだけ未観測確定する。
+- 全role未観測: 全entryを未観測確定する。
+- candidate観測済み・actual未観測: candidate側を維持し、actual側だけ未観測確定する。
+- candidate未観測・actual観測済み: 既存観測済みrecordを変更しない。
+- candidateもactualも未観測: candidate statusを維持し、actual側を未観測確定する。
+- 同一Vehicleの複数取引: VisitKeyとtrade keyで分離する。
+- 同一Node再訪: visit_idの違うVisitKeyで分離する。
+- buyer・seller通知済みでnonparticipating未観測: 通知flagを変えず、nonparticipatingだけ未観測確定する。
+- buyer・seller通知未通知: 通知flagに関係なく全roleを処理する。
+- observed entryに履歴なし: 重大不整合として拒否する。
+- waiting entryに履歴あり: 重大不整合として拒否する。
+- entryとTradeWait不一致: 重大不整合として拒否する。
+- 孤立entry: 重大不整合として拒否する。
+- 孤立TradeWait: 重大不整合として拒否する。
+- 同一entryが複数tradeに属する: 重大不整合として拒否する。
+- 再実行: registryの終了確定fieldにより拒否する。
+- 評価終了前: 時刻不一致として拒否する。
+- fork: 拒否する。
+- 最終評価timestepで通過: observedのままで未観測にしない。
+- 次timestepなら通過し得たVisit: 未観測確定する。実Worldはそのtimestepの交通へ進まない。
+- 異常終了: 評価終了の次の時刻へ到達していなければ確定しない。waitingのまま残す。
+
+同じNodeの複数trade、複数Nodeは、1回のWorld呼出しで固定順に処理する。正常である。
+
+## 22. テスト契約
+
+### actual passage型・prepare・commit
+
+少なくとも次を検証する。
+
+- 既存未観測enum値
+- 未観測recordのfield
+- actual側6 fieldがすべて `None`
+- actual passage timestepが `None`
+- actual routeが `None`
+- baseline対candidate fieldを保持
+- candidate observation statusを保持
+- buyerの未観測
+- sellerの未観測
+- nonparticipatingの未観測
+- candidate観測済み・actual未観測
+- candidate未観測・actual観測済み
+- candidateもactualも未観測
+- observed entryは変更しない
+- prepareだけではlive状態不変
+- 全trade prepare完了前にentryを変更しない
+- observedと履歴の整合
+- waitingと履歴の整合
+- observedなのに履歴なしを拒否
+- waitingなのに履歴ありを拒否
+- statusとrecordの不正組合せを拒否
+- entryとTradeWaitの不一致を拒否
+- 孤立entryを拒否
+- 孤立TradeWaitを拒否
+- 同一entryの複数trade所属を拒否
+- role列不一致を拒否
+- prepare失敗時にlive状態不変
+- commit後にwaiting entryだけが未観測へ変わる
+- 観測済みentryを変更しない
+- 通知flagを変更しない
+- `Vehicle.order_exchange_log` を変更しない
+- Node履歴を変更しない
+- registryの終了確定fieldを最後に設定
+- 再実行を拒否
+- 評価終了前を拒否
+- evaluation end未設定を拒否
+- bool、負値、`TSIZE` 以上を拒否
+- forkを拒否
+
+### exec_simulation終了境界
+
+少なくとも次を検証する。
+
+- 最終評価timestepのdriverと交通処理が完了してから未観測確定する
+- 最終評価timestepで通過したVisitはobserved
+- 最終評価timestep終了後もwaitingのVisitは未観測
+- 未観測確定は `simulation_terminated()` より前
+- 未観測確定は `Analyzer.basic_analysis()` より前
+- 実Worldは次の交通timestepへ進まない
+- 評価終了後の再呼出しで未観測確定を再実行しない
+- 途中停止では未観測確定しない
+- 分割実行の最後だけ未観測確定する
+- evaluation endが `None` の通常終了では未観測確定しない
+- 通常終了の既存 `simulation_terminated` 再呼出し契約を変えない
+- `World.T == TSIZE` とevaluation end後が一致する経路でも一度だけ確定する
+- horizon余白を実Worldで走行しない
+
+既存テストの削除、skip、xfail、assertの緩和で、この契約を通したことにしない。
+
+## 23. 変更予定ファイル
+
+本番変更予定は次である。
+
+- `uxsim/order_control_tvt_mp_actual_passage.py`
+- `uxsim/uxsim.py`
+
+`uxsim.py` の変更は、評価終了条件を満たすときの `simulation_terminated()` 直前の呼出しに限る。`simulation_terminated()` 本体、時刻の進み方、評価終了の切り詰め、forkの評価終了解除は変えない。
+
+テスト変更予定は次である。
+
+- `tests_order_control_tvt_mp_actual_passage.py`
+- `tests_order_control_tvt_mp_evaluation_end.py`
+
+変更しないものは次である。
+
+- TVT-MP driver
+- baseline driver
+- physical transfer
+- Node別実通過履歴のrecord構造
+- Node順位台帳
+- atomic apply
+- final rank
+- final consistency validation
+- payment
+- compensation
+- candidate選択
+- actual passageの3組9 field定義
+- 成立時frozen入力
+- buyer・seller初回通知
+- 取引全体評価
+- buyer・seller個別追加評価
+- 集計
+- 実験出力
+
+新しい本番モジュールは作らない。
+
+## 24. 実装後の回帰範囲
+
+実装後に確認する範囲は次である。
+
+- actual passage専用テスト
+- evaluation end専用テスト
+- physical transfer専用テスト
+- atomic apply専用テスト
+- final rank専用テスト
+- final consistency validation専用テスト
+- baseline driver専用テスト
+- 変更したPythonモジュールの `py_compile`
+
+actual passageの観測済み経路、Node履歴の通過成功経路、buyer・seller通知を壊していないことを確認する。
+
+## 25. 今回実装しない範囲
+
+- 取引全体の事後成立・不成立・評価不能result
+- 参考支払
+- 参考補償
+- buyer実績利得
+- seller実績利得
+- 満足判定
+- 理由分類
+- nonparticipating外部効果の最終評価
+- Node別割当順位と実通過順位の差
+- Vehicle別集計
+- 取引別集計
+- Node別集計
+- 実験出力
+- 未観測理由enumの追加
+- 未通過VisitのNode履歴record
+- 取引内順位
+- `Vehicle.order_exchange_log` への未観測record追加
+- 新しい本番モジュール
+- rollback機構
+- 完全な複合トランザクション
+
+## 26. BLOCKERと利用者判断
+
+- BLOCKERなし
+- 利用者判断事項なし
+- 実装時に決めてよい細部は、関数名、registryの終了確定field名、private helperの分割方法、テスト関数名だけ
+
+## 27. 次の作業
+
+今回の文書追記後は次の順で進む。
+
+1. Terminalで2文書の原文と差分を独立確認する。
+2. `document` を含むコミット名で文書をcommitする。
+3. commit結果、最新コミット、残存変更を確認する。
+4. 別の指示でpushする。
+5. push後に「評価終了時の未観測確定」の実装指示を作成する。
+6. それまではコード変更へ進まない。

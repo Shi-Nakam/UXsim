@@ -2192,3 +2192,117 @@ World初期化で、既存の`order_control_tvt_mp_actual_passage_wait_registry`
 4. pushは別指示で行う。
 5. push後に「Node別実通過履歴の記録」の実装指示を作成する。
 6. それまではコード変更へ進まない。
+
+# TVT-MP 評価終了時未観測確定 実装前詳細設計を確定（2026-10-05）
+
+正式な技術詳細の参照先:
+
+- `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_4.md`
+- 「TVT-MP 評価終了時未観測確定の実装前詳細設計（2026-10-05）」
+
+本節は進捗記録である。詳細設計第4巻の新節を全文複製しない。直前の大見出し「TVT-MP Node別実通過履歴 実装前詳細設計を確定（2026-10-05）」は削除、短縮、置換、書換えしない。成立時評価用入口の凍結はコミット `8625f47`、Node別実通過履歴はコミット `79f0d04` で実装・テスト・push済みである。
+
+今回の作業は文書追記のみである。コード、テスト、診断は変更していない。
+
+古いactual outcome設計に、未観測recordを `Vehicle.order_exchange_log` へ追加する記述が残っていても削除しない。最新方針では、後続評価の正本をWaitEntry内のactual passage observation recordとし、未観測recordをlogへ追加しない。
+
+### 1. 次の正式実装単位
+
+- **評価終了時の未観測確定**
+- 評価対象の最終timestepの交通処理が完了した後、actual passage registry内の全trade・全roleについて、観測済みVisitは変えず、まだ通過待ちのVisitを一度だけ評価期間終了未観測へ確定する。
+- 対象はbuyer、seller、nonparticipatingである。同じ終了処理で一括する。
+
+### 2. 実行境界
+
+- `order_control_tvt_evaluation_end_timestep` は、交通とTVT判断を行う最後のinclusiveなtimestepである。
+- 例として `T=9999` までが評価対象なら、そのtimestepのdriverと交通が終わったあと `World.T` は `10000` になる。
+- 未観測確定は `World.T == evaluation_end_timestep + 1` のときだけ実行する。
+- `simulation_terminated()` と `Analyzer.basic_analysis()` より前に実行する。
+- `World.T == TSIZE` が先に終了集計へ入る経路でも、その `simulation_terminated()` の直前で、同じ終了条件のときだけ実行する。
+- `simulation_terminated()` 本体へTVT処理を混ぜない。
+- 実Worldは評価終了後の交通timestepへ進まない。`World.T=10000` は制御上の時刻であり、最後に観測した交通時刻ではない。
+- `T=9999` で通過したVisitは観測済みである。そこまでに通過しなかったVisitは、次のtimestepなら通過し得た場合でも未観測である。
+- 評価終了timestepが `None` の通常UXsim終了では実行しない。その再入で `simulation_terminated()` を再度呼ぶ既存契約は維持する。
+- 途中停止では実行しない。分割実行では、最終評価timestepの交通が終わり `World.T` がその次になった呼出しだけが実行する。
+- baseline forkはcopy後に評価終了timestepを `None` にし、内部余白を計算する。未観測確定は実Worldだけである。forkでは実行しない。
+
+### 3. 正本とrecord
+
+- 新しい未観測結果型は作らない。既存の `OrderControlTvtMpActualPassageObservationRecord` を使う。
+- waiting entryだけに未観測recordを1件作り、`wait_status` を `ACTUAL_PASSAGE_UNOBSERVED_AT_EVALUATION_END` にする。
+- actual側の時刻、進路、actualが絡む6 fieldは `None` である。0は使わない。
+- baseline対candidateの保存済みfieldと、candidate側の `predicted_observation_status` はコピーし、確定時に変更しない。
+- 評価終了timestepは各recordへ重複保存しない。境界の正本はWorld属性である。
+- observed entryは変更しない。候補が未観測でもactualが観測済みなら、既存recordを残す。
+- 専用の終了結果registryは作らない。TradeWaitへ未観測結果を複製しない。Node履歴へ未通過recordを追加しない。`Vehicle.order_exchange_log` へ未観測recordを追加しない。
+
+正式な3状態は次だけである。
+
+- 通過待ち: wait statusが待ち、recordは `None`
+- 観測済み: wait statusとrecord statusが観測済み、actual時刻と進路がある
+- 評価終了未観測: wait statusとrecord statusが評価終了未観測、actual時刻と進路とactual側6 fieldは `None`
+
+それ以外は重大不整合として拒否する。
+
+### 4. 通知、履歴、全role
+
+- buyer・seller初回通知は変えない。未観測は初回観測完了に数えない。通知flagは立てず、既存のflagも変えない。対象選定に使わない。
+- 全tradeを再現可能な固定順で走査し、`all_visit_keys` のbuyer、seller、nonparticipatingを同じ処理で見る。
+- prepareで、role列の排他と和、entryとの一対一、取引識別、孤立entry、孤立TradeWait、1 entryが複数tradeに属することを検査する。
+- 観測済みで同じNode・VisitKeyの履歴があること、待ちで履歴が無いことは正常である。
+- 観測済みなのに履歴が無い、待ちなのに履歴がある、履歴のVisitKey重複、rankの非連続は重大不整合として拒否する。履歴からobservationを作り直さない。observationから履歴を作り直さない。
+- partition 4とfallbackはWaitEntryが無く、この確定の対象外である。
+
+### 5. prepare、commit、再実行
+
+- 公開またはモジュール境界のAPIは実World1つを受け取る。評価終了timestepとregistryを別引数で重複させない。
+- prepareはlive状態を変えない。実World、collectorが `None`、評価終了timestepの既存検査、`World.T` がその次、両registryの型、終了確定fieldが `None`、全tradeと全entryの対応、statusと履歴の整合を見てから、waiting entryの未観測recordだけを作る。
+- commitはprepared値の代入だけである。全未観測entryのrecordとwait statusを代入したあと、最後にregistryの終了確定済みtimestepを代入する。
+- registry fieldの `None` は未実行、Python intはその評価終了timestepで確定済み、を意味する。field名は実装時に既存命名へ合わせてよい。このfieldは評価終了timestepの正本ではない。
+- TradeWaitごとのflag、WaitEntryごとの別flag、`World.finalized` の流用、専用結果registryは使わない。
+- commitは複数代入である。途中失敗では、一部entryだけが未観測になり、終了確定fieldは `None` のままとなり得る。自動修復、rollback、複合トランザクションは作らない。次のprepareはその不整合を拒否する。
+- 正常完了後の再実行、評価終了前、fork、評価終了timestep未設定は拒否する。評価終了後の `exec_simulation` 再呼出しは、既存のended checkが先に戻る。
+- 今回の未観測理由は1つだけである。評価対象期間の終了までに実通過が観測されなかった、ということである。candidate側horizon未観測は既存のpredicted statusが別に表す。capacity、clearance、trip-end、異常終了の理由enumは追加しない。`World.T` が評価終了の次へ到達していない異常終了では確定しない。
+
+### 6. 今回実装しない範囲
+
+取引全体の事後成立・不成立・評価不能result、参考支払、参考補償、buyer実績利得、seller実績利得、満足判定、理由分類、nonparticipating外部効果の最終評価、Node別順位差、集計、実験出力、未観測理由enum、未通過Visitの履歴record、取引内順位、logへの未観測record追加、新しい本番モジュール、rollback、完全な複合トランザクション。
+
+後続は、全WaitEntryが観測済みか評価終了未観測かを読める。評価式のresultは今回作らない。
+
+### 7. 変更予定
+
+本番:
+
+- `uxsim/order_control_tvt_mp_actual_passage.py`
+- `uxsim/uxsim.py`（`simulation_terminated()` 直前の呼出しだけ。本体は変えない）
+
+テスト:
+
+- `tests_order_control_tvt_mp_actual_passage.py`
+- `tests_order_control_tvt_mp_evaluation_end.py`
+
+変更しないもの: TVT-MP driver、baseline driver、physical transfer、Node履歴のrecord構造、順位台帳、atomic apply、final rank、final consistency validation、payment、compensation、candidate選択、3組9 field定義、成立時frozen入力、buyer・seller初回通知。
+
+実装後の回帰には、actual passage、evaluation end、physical transfer、atomic apply、final rank、final consistency validation、baseline driver、変更モジュールの `py_compile` を含める。
+
+### 8. BLOCKERと利用者判断
+
+- BLOCKERなし
+- 利用者判断事項なし
+- 実装時に決めてよい細部は、関数名、registryの終了確定field名、private helperの分割、テスト関数名だけ
+
+### 9. 最新の再開地点
+
+**本節が、評価終了時未観測確定の実装前詳細設計確定後における最新再開地点である。**
+
+直前の「TVT-MP Node別実通過履歴 実装前詳細設計を確定（2026-10-05）」は、その時点の記録として残す。最新手順は本節§9を参照する。
+
+次の手順:
+
+1. Terminalで2文書の原文と差分を独立確認する。
+2. `document` を含むコミット名で文書をcommitする。
+3. commit結果、最新コミット、残存変更を確認する。
+4. pushは別指示で行う。
+5. push後に「評価終了時の未観測確定」の実装指示を作成する。
+6. それまではコード変更へ進まない。
