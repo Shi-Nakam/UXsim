@@ -2021,3 +2021,85 @@ Vehicle別総実績利得
 7. push後に後続実装全体の反証レビューと依存関係確認へ進む。
 8. 反証レビュー後に、最初の正式実装単位を確定する。
 9. コード、テスト、診断の変更はまだ開始しない。
+
+# TVT-MP成立時評価用入口 実装前詳細設計を確定（2026-10-04）
+
+正式な技術詳細の参照先:
+
+- `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_4.md`
+- 「TVT-MP全role一括実績評価 統合反証レビューと成立時評価用入口の実装前詳細設計（2026-10-04）」
+
+本節は進捗記録である。詳細設計第4巻の新節を全文複製しない。直前の大見出し「TVT-MP全role一括実績評価・順位分析・集計の完全実装前全体設計を確定（2026-10-04）」は削除、短縮、置換、書換えしない。
+
+今回の作業は文書追記のみである。コード、テスト、診断は変更していない。
+
+### 1. 統合反証レビュー
+
+- 成立時受渡し、Node別実通過順序、評価終了時未観測確定、取引全体事後評価、buyer・seller個別追加評価の5領域は矛盾なく接続できる。
+- 実装を妨げるBLOCKERはない。
+
+### 2. 最初の正式実装単位
+
+- **成立時評価用入口の凍結**
+- 目的: 後続評価が`Vehicle.order_exchange_log`を検索せず、成立時に確定した申告VOT・取引別正式金額・成立時局所順位・進路由来を`WaitEntry`から直接取得できるようにする。
+
+### 3. frozen入力とWaitEntry
+
+- `uxsim/order_control_tvt_mp_actual_passage.py`に、共通frozen入力とbuyer・seller用金銭frozen入力を2層で置く。新専用モジュールは作らない。
+- `WaitEntry`はmutable状態・actual observation recordに加え、共通frozen入力を必須で保持する。
+- buyer・sellerは金銭frozen入力を必須。nonparticipatingは金銭frozen入力を作らず、`WaitEntry`上でNoneのみが「金銭契約なし」を表す。
+- buyer・sellerの正式金額0は、金銭frozen入力内で正式な計算結果0として保存する（金額fieldにNoneは使わない）。
+
+共通frozen入力の最小field: `baseline_local_rank`, `post_trade_local_rank`, `rank_change`, `route_origin`。formal routeとNode別割当順位は順位台帳を正本とし、frozenへ二重保存しない。
+
+### 4. route_originと対象Visit
+
+- 受渡し: binding Visit → `FinalRankVisitRecord`（`route_origin`必須追加）→ atomic apply → 共通frozen入力。
+- baseline fallbackの`route_origin`は`BASELINE_TARGET_NODE_ARRIVAL_ROUTE`に固定。`RANK_LEDGER_FORMAL_ROUTE`と`SNAPSHOT_ROUTE_ALREADY_DECIDED`はfallbackでは使わない。
+- `route_origin` enumと進路名文字列は比較しない。
+- 評価用入口の対象は選択取引のtrade_scope（partition 3: buyer・seller・nonparticipating）のみ。
+- partition 4とbaseline fallbackには`WaitEntry`を作らない（`FinalRankVisitRecord`の`route_origin`保存は行う）。
+
+### 5. prepareとcommit
+
+- prepareで順位台帳案、成立時log、全frozen入力、含む`WaitEntry`、`TradeWait`、registry置換dict、成功結果を完成させる。全検査成功前はlive状態を変更しない。
+- 今回追加する検査失敗はすべてprepare中に発生させる。final consistency validationの結果型は拡張しない。
+- commitはprepare済み値の代入のみ（新commit段階は追加しない）。commit途中の既存例外窓は今回拡大しない。「apply失敗で常に一切変更なし」とは言い切らない。
+
+### 6. 変更予定と今回実装しない範囲
+
+本番変更予定:
+
+- `uxsim/order_control_tvt_mp_final_rank.py`
+- `uxsim/order_control_tvt_mp_actual_passage.py`
+- `uxsim/order_control_tvt_mp_atomic_apply.py`
+
+テスト変更予定:
+
+- `tests_order_control_tvt_mp_final_rank.py`
+- `tests_order_control_tvt_mp_actual_passage.py`
+- `tests_order_control_tvt_mp_atomic_apply.py`
+- `tests_order_control_tvt_mp_physical_transfer.py`
+- driver（`FinalRankVisitRecord`や`WaitEntry`を直接構築している場合のみ）
+
+今回実装しない: Node別実通過順序、評価終了時未観測確定、`simulation_terminated`接続、取引全体・個別事後評価、実績順位導出、集計、実験出力。
+
+### 7. BLOCKERと利用者判断
+
+- BLOCKERなし
+- 利用者判断事項なし
+
+### 8. 最新の再開地点
+
+**本節が、統合反証レビューおよび成立時評価用入口実装前詳細設計確定後における最新再開地点である。**
+
+直前の§18（完全実装前全体設計確定後の再開地点）は、その時点の記録として残す。実装全体の最新手順は本節§8を参照する。
+
+次の手順:
+
+1. Terminalで詳細設計第4巻・進捗第3巻の原文と差分を独立確認する。
+2. `document`を含むコミット名で文書だけをcommitする。
+3. commit結果、最新コミット、残存変更を確認する。
+4. pushは別指示で行う。
+5. push後に、最初の正式実装単位「成立時評価用入口の凍結」の実装指示を作成する。
+6. それまではコード、テスト、診断の変更に進まない。

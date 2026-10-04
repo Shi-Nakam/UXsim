@@ -8901,3 +8901,464 @@ true VOT=0を研究・実験条件として実際に許容するかは未確定�
 今回の最新方針では、buyer・seller初回通知を、参考金額を計算できる状態の目印として維持する。一方で、最終の実績評価は、評価終了時に、全roleを一括して行う。roleの間の違いは、評価を実行する時刻ではない。違いは、追加の評価項目が有るか無いかである。buyer・sellerには金銭、参考金額、実績利得、満足理由分類が追加される。nonparticipatingは共通のactual結果だけで実績を表す。
 
 したがって、過去記述と本節の両方がある。通知をいつ立てるかは、過去の実装契約を維持する。最終評価をいつ、どのroleまでまとめて行うかは、本節を最新の正式参照先とする。
+
+# TVT-MP全role一括実績評価 統合反証レビューと成立時評価用入口の実装前詳細設計（2026-10-04）
+
+本節は、TVT-MP全role一括実績評価・順位分析・集計について、分割して行った反証調査の結論を統合した整合レビューの記録と、最初の正式実装単位「成立時評価用入口の凍結」の実装前詳細設計である。実装完了記録ではない。
+
+本節を、統合反証レビュー結論および成立時評価用入口実装の最新の正式参照先とする。直前の大見出し「TVT-MP 全role一括実績評価・順位分析・集計 完全実装前全体設計（2026-10-04）」は削除、短縮、置換、書換えしない。両節を併せて読む。
+
+本節の追記作業では、Pythonコード、テスト、診断、指定外の文書、およびGit管理状態を変更しない。
+
+## 1. 統合反証レビューの結論
+
+次の5領域は、責務分担とデータの受渡し経路を守れば、矛盾なく接続できる。
+
+1. 成立時保存値の後続受渡し
+2. Node別実通過順序
+3. 評価終了時未観測確定
+4. 取引全体事後評価
+5. buyer・seller個別追加評価
+
+実装を妨げるBLOCKERはない。
+
+正本は責務ごとに分ける。同一の意味を複数の保存先に二重の正本として持たない。
+
+| 正本の種類 | 責務 |
+| --- | --- |
+| 成立時record | 成立時判断、declared VOT、正式金額、成立時局所順位、formal route |
+| actual observation record | 通過観測事実 |
+| Node別実通過履歴 | Node連続順位上の実通過順序 |
+| 取引全体評価record | 事後成立、事後不成立、評価不能、参考金額 |
+| buyer・seller個別追加評価record | 個別実績利得、満足判定、理由分類 |
+
+次の最新方針を維持する。
+
+- 順位評価の正本はNode連続順位である。
+- 取引内順位は作らない。
+- buyer実績利得0は不満足である。
+- seller実績利得0は満足である。
+- true VOT=0へのコード対応方針と、研究・実験条件として実際に許容するかを区別する。
+- 取引別集計でも、Node連続順位上の個別結果を抽出し、取引内で順位を付け直さない。
+
+## 2. 最初の正式実装単位
+
+最初の正式実装単位は次である。
+
+**成立時評価用入口の凍結**
+
+目的:
+
+後続評価が`Vehicle.order_exchange_log`を検索せず、成立時に確定した申告VOT、取引別正式金額、成立時局所順位、進路由来を`WaitEntry`から直接取得できるようにする。
+
+この単位では次を実装しない。
+
+- Node別実通過順序
+- 評価終了時未観測確定
+- `simulation_terminated`への接続
+- 取引全体事後評価
+- buyer・seller個別評価
+- Node連続順位上の実績順位導出
+- 集計
+- 実験出力
+
+## 3. frozen入力の配置
+
+`uxsim/order_control_tvt_mp_actual_passage.py`に、独立したfrozen入力型を2層で置く。新しい専用モジュールは作らない。
+
+概念構造:
+
+```
+WaitEntry
+├── mutableな通過待ち状態
+├── actual passage observation record
+├── 共通frozen入力（全trade_scope role）
+└── 金銭frozen入力（buyer・sellerのみ。nonparticipatingはNone）
+```
+
+既存のmutableな`WaitEntry`へ、成立時fieldを平らに多数追加しない。成立時record全体への参照を保存しない。後続評価に必要な値だけをfrozen入力へコピーする。
+
+## 4. 共通frozen入力
+
+選択された取引のtrade_scope内にある、次の全roleについて作る。
+
+- buyer
+- seller
+- nonparticipating
+
+共通frozen入力の最小fieldは次である。
+
+- `baseline_local_rank`
+- `post_trade_local_rank`
+- `rank_change`
+- `route_origin`
+
+次の値は`WaitEntry`に既に存在するため、共通frozen入力へ重複保存しない。
+
+- `tvt_decision_timestep`
+- `node_name`
+- `buyers_sorted`
+- VisitKey
+- `vehicle_name`
+- `role`
+- true VOT
+- baseline passage timestep
+- candidate passage timestep
+- predicted route name
+
+formal routeとNode別割当順位は、確定後のNode順位台帳を正本とする。共通frozen入力へformal routeとNode別割当順位を二重保存しない。
+
+## 5. 金銭frozen入力
+
+buyer・sellerだけについて作る。buyerとsellerで一つの共通型を使用する。
+
+最小fieldは次である。
+
+- `declared_vot_per_second`
+- `payment_paid_in_this_transaction`
+- `payment_received_in_this_transaction`
+
+buyer・sellerの正式金額が0の場合も、正式な計算結果0として保存する。金銭frozen入力内部の金額fieldにはNoneを使用しない。
+
+nonparticipatingには金銭frozen入力を作らない。`WaitEntry`上で金銭frozen入力がNoneであることだけが、「金銭契約が存在しない」ことを表す。
+
+次を明確に区別する。
+
+- buyerまたはsellerとして正式金額が0円
+- nonparticipatingであり、金銭契約自体が存在しない
+
+## 6. WaitEntryのconstructor契約
+
+- 共通frozen入力は必須fieldとする。defaultを設けない。
+- buyer・sellerでは金銭frozen入力が必須である。
+- nonparticipatingでは金銭frozen入力をNoneとする。
+- 金額field自体にはNoneを使用しない。
+- constructorは、そのオブジェクト内部の形状だけを検査する。
+- constructorから成立時record、final rank、順位台帳などを検索しない。
+- 成立時recordやfinal rankとの一致確認は、atomic applyのprepareで一度だけ行う。
+
+既存テストで`WaitEntry`を直接構築する箇所は、新しい必須入力へ追従させる。
+
+## 7. route_origin
+
+既存enumを使用する。新しいenumは作らない。
+
+- `RANK_LEDGER_FORMAL_ROUTE`
+- `SNAPSHOT_ROUTE_ALREADY_DECIDED`
+- `BASELINE_TARGET_NODE_ARRIVAL_ROUTE`
+
+`route_origin`は出口名ではなく、その出口名をどこから取得したかを示す。`route_origin`と進路名は別の情報である。`route_origin` enumとformal route文字列を比較しない。
+
+受渡し経路は次である。
+
+```
+LocalBindingRankVisit
+  → OrderControlTvtMpFinalRankVisitRecord
+  → atomic apply
+  → 共通frozen入力（WaitEntry内）
+```
+
+`OrderControlTvtMpFinalRankVisitRecord`へ、`route_origin`を必須fieldとして追加する。defaultは設けない。
+
+選択候補のpartition 3とpartition 4については、binding Visitの`route_origin`をそのままコピーする。formal routeは、binding Visitの`route_next_link_name`からコピーする。
+
+検査するもの:
+
+- `route_origin`が既存enumである。
+- formal routeが空でない文字列である。
+- final rankへ保存するformal routeが、コピー元binding Visitの`route_next_link_name`と一致する。
+
+## 8. baseline fallbackのroute_origin
+
+Terminalによるコード原典の独立確認では、baseline fallbackのformal routeは`_formal_route_from_collector`が、保存済みbaseline arrival routeから取得している。
+
+そのため、baseline fallbackで新たに確定するVisitの`route_origin`は、次で固定する。
+
+`BASELINE_TARGET_NODE_ARRIVAL_ROUTE`
+
+fallbackで次は使用しない。
+
+- `RANK_LEDGER_FORMAL_ROUTE`
+- `SNAPSHOT_ROUTE_ALREADY_DECIDED`
+
+fallback対象は未確定Visitであり、既存順位台帳のformal routeを読む経路ではない。
+
+fallbackの`FinalRankVisitRecord`にも`route_origin`を保存する。ただし、fallbackでは評価用`WaitEntry`を作らない。
+
+## 9. 保存対象Visit
+
+成立時評価用入口を作るのは、選択された取引のtrade_scope、すなわちpartition 3に属する次のVisitだけである。
+
+- buyer
+- seller
+- nonparticipating
+
+対象外:
+
+- partition 4
+- baseline fallbackで確定するVisit
+- 過去にNode順位台帳へ確定済みのVisit
+- まだ未確定で、将来の意思決定で確定されるVisit
+
+対象外Visitについて、過去分の評価用入口を作り直さない。
+
+partition 4とfallbackの`FinalRankVisitRecord`には`route_origin`を保存するが、`WaitEntry`は作らない。
+
+## 10. atomic applyの現在の境界
+
+`apply_tvt_mp_validated_result`は、既に成功したfinal consistency validation結果を入力として受け取る。prepareではlive状態を変更しない。
+
+prepareで現在行っている処理:
+
+1. final rank、支払、trade rank、候補Visit、局所計算等の保存済み列を取得する。
+2. Nodeごとに順位台帳の置換案を作る。
+3. selected candidateの場合だけ、buyer・sellerの更新後金額と成立時log listを作る。
+4. trade_scopeの`WaitEntry`と`TradeWait`を作る。
+5. 全Nodeのproposal完成後に、registryの置換dictを作る。
+6. commit前に成功結果オブジェクトを作る。
+
+最初のlive状態変更は、commitループ先頭の順位台帳commitである。
+
+その後、次を順に代入する。
+
+- `payment_paid`
+- `payment_received`
+- `Vehicle.order_exchange_log`
+- actual passage registryのentry dict
+- actual passage registryのtrade dict
+
+## 11. atomic apply prepareへの追加
+
+prepareで次を作る。
+
+1. 順位台帳置換案
+2. buyer・sellerの成立時log recordと更新後log list
+3. trade_scope全roleの共通frozen入力
+4. buyer・sellerの金銭frozen入力
+5. frozen入力を含む`WaitEntry`
+6. `TradeWait`
+7. registry置換dict
+8. atomic applyの成功結果
+
+全検査成功前に次を変更しない。
+
+- Node順位台帳
+- `payment_paid`
+- `payment_received`
+- `Vehicle.order_exchange_log`
+- actual passage registry
+
+`Vehicle.order_exchange_log`から成立時入力を検索しない。同じprepareで作った成立時recordへ保存する値と同じ入力値を、金銭frozen入力へコピーする。成立時record objectへの参照は保存しない。
+
+nonparticipatingについては成立時recordが存在しない。nonparticipatingの局所順位は候補Visitとgeneral trade rankから取得し、`route_origin`はfinal rank Visit recordから取得する。
+
+true VOTは保存済みtraffic observationから取得し、live Vehicleから読み直さない。
+
+## 12. proposal方針
+
+新しいproposal型は作らない。既存の`_PreparedActualPassageProposal`を利用する。
+
+このproposalは、prepare済み`WaitEntry`と`TradeWait`を保持する。共通frozen入力と金銭frozen入力は、prepare済み`WaitEntry`の内部に含める。
+
+prepare失敗時にはproposalを破棄するだけでよく、live状態に評価用入口は残らない。
+
+## 13. prepare時検査
+
+atomic applyのprepareで、少なくとも次を一度だけ検査する。
+
+1. traffic observationのVisitKey集合とtrade_scopeの一致
+2. buyer、seller、nonparticipatingの排他的分類
+3. `WaitEntry`の取引識別
+4. VisitKey
+5. `vehicle_name`
+6. `role`
+7. true VOT
+8. `route_origin`のenum型
+9. final rankのformal routeとbinding Visitのroute名の一致
+10. `baseline_local_rank`
+11. `post_trade_local_rank`
+12. `rank_change`
+13. buyer・sellerの成立時record対応
+14. declared VOT
+15. 取引別正式支払
+16. 取引別正式補償
+17. 金額0の正常許容
+18. buyer・sellerの金銭frozen入力の存在
+19. nonparticipatingの金銭frozen入力の不存在
+20. actual passage registryの重複
+21. `TradeWait`の取引キー重複
+
+`rank_change`は次である。
+
+```
+rank_change = baseline_local_rank - post_trade_local_rank
+```
+
+上流部品が既に保証した不変条件を無意味に再計算しない。登録時に一度保証した不変条件を、後続のactual passage観測や事後評価で毎回重複検査しない。
+
+## 14. atomic apply commit
+
+今回、新しいcommit段階を追加しない。共通frozen入力と金銭frozen入力は、prepare済み`WaitEntry`の内部に既に含まれる。
+
+commitでは既存どおり次を反映する。
+
+- Node順位台帳
+- `payment_paid`
+- `payment_received`
+- `Vehicle.order_exchange_log`
+- actual passage registryのentry dict
+- actual passage registryのtrade dict
+
+commit中に次を行わない。
+
+- 検索
+- sort
+- 再計算
+- 外部入力の再検査
+- frozen入力の新規構築
+
+今回追加する不整合検査は、すべてcommit前に実行する。
+
+正確な原子性の記述は次である。
+
+- prepare中の失敗ではlive状態は不変である。
+- 今回追加する検査失敗は、すべてprepare中に発生させる。
+- 既存commitは複数のlive代入からなるため、commit途中の既存例外窓は残る。
+- 今回の変更では新しいcommit段階を追加せず、既存の例外窓を拡大しない。
+
+「applyが失敗した場合は常に一切変更されない」と一般化しない。
+
+## 15. final consistency validationの責務
+
+final consistency validationの結果型は拡張しない。
+
+上流validationは、既存どおり列対応、selected candidateの成立、final rank等の整合を保証する。
+
+今回追加する次の整合は、atomic apply prepareで検査する。
+
+- frozen入力の存在
+- roleと金銭入力の対応
+- `route_origin`
+- 局所順位
+- 金額
+- 金額0の許容
+- partition 4とfallbackに`WaitEntry`が無いこと
+
+## 16. テスト契約
+
+### final rank
+
+- 三つの`route_origin`
+- binding Visitからのコピー
+- baseline fallbackでは`BASELINE_TARGET_NODE_ARRIVAL_ROUTE`
+- partition 3
+- partition 4
+- 不正型
+- 必須field
+- formal route
+- constructor直接利用
+
+### actual passage型
+
+- 共通frozen入力
+- 金銭frozen入力
+- frozenであること
+- `WaitEntry`の共通入力必須
+- buyer・sellerの金銭入力必須
+- nonparticipatingでは金銭入力なし
+- role不整合拒否
+- 金額0
+- true VOT=0かつdeclared VOT>0を値として保持可能
+
+### atomic apply
+
+- trade_scope全roleへの評価用入口保存
+- partition 4には入口なし
+- fallbackには入口なし
+- 同一Vehicleの複数取引
+- 同一Node再訪
+- registry重複
+- `TradeWait`重複
+- prepare失敗時にlive状態不変
+- 成功時に成立時log、順位台帳、`WaitEntry`が整合
+- `Vehicle.order_exchange_log`検索を後続評価の正規経路にしない
+
+### fixture追従
+
+- final rank
+- actual passage
+- atomic apply
+- physical transfer
+- 必要な場合だけdriver
+
+## 17. 変更対象ファイル
+
+本番で変更予定:
+
+- `uxsim/order_control_tvt_mp_final_rank.py`
+- `uxsim/order_control_tvt_mp_actual_passage.py`
+- `uxsim/order_control_tvt_mp_atomic_apply.py`
+
+テストで変更予定:
+
+- `tests_order_control_tvt_mp_final_rank.py`
+- `tests_order_control_tvt_mp_actual_passage.py`
+- `tests_order_control_tvt_mp_atomic_apply.py`
+- `tests_order_control_tvt_mp_physical_transfer.py`
+- driverは`FinalRankVisitRecord`や`WaitEntry`を直接構築している場合だけ
+
+今回変更しないもの:
+
+- physical transfer本処理
+- Node順位台帳の公開契約
+- `uxsim.py`
+- 評価終了時未観測確定
+- 取引全体事後評価
+- buyer・seller個別事後評価
+- 集計
+- 実験出力
+
+新しい本番モジュールは作らない。
+
+## 18. 実装後の回帰範囲
+
+- final rank専用テスト
+- actual passage専用テスト
+- atomic apply専用テスト
+- physical transferのfixture回帰
+- 直接影響するdriverテスト
+- 変更したPythonモジュールのpy_compile
+
+FCFS・BATCHは今回の新型を構築しないため、今回の変更に直接必要な専用回帰には含めない。既存の広域回帰運用が別途ある場合は、その運用を妨げない。
+
+## 19. 変更しない既定仕様
+
+- Node連続順位
+- actual observationの3組9 field
+- buyer・seller初回通知
+- buyer実績利得0は不満足
+- seller実績利得0は満足
+- true VOT=0のコード対応方針と研究条件の区別
+- 正式支払
+- 正式補償
+- candidate選択
+- final rankの順位意味
+- clearance
+- 実World交通動作
+
+## 20. BLOCKERと利用者判断
+
+- BLOCKERなし
+- 利用者判断事項なし
+- 実装指示内で決めてよい細部は、private helperの分割方法とテスト関数名だけ
+
+## 21. 次の作業
+
+今回の文書追記後は、次の順で進む。
+
+1. Terminalで2文書の原文と差分を独立確認する。
+2. `document`を含むコミット名で文書をcommitする。
+3. commit結果、最新コミット、残存変更を確認する。
+4. 別の指示でpushする。
+5. push後に、最初の正式実装単位「成立時評価用入口の凍結」の実装指示を作成する。
+6. それまではコード変更へ進まない。
