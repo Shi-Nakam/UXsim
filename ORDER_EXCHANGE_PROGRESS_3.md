@@ -2348,11 +2348,16 @@ status enumの細部名は実装時に既存命名へ合わせてよい。3状�
 
 評価不能では実績節約価値、合計、参考金額、個別利得、満足判定を計算しない。
 
+- `None`は、buyerまたはsellerのactual未観測による評価不能だけに使用する。
+- 評価不能では、合計とbuyer・seller record列を `None` とし、未計算と0を区別する。
+
 ## 5. buyerの判定値
 
 - declared VOTによる実績節約価値を使用
 - buyerが1人でも実績節約価値0以下なら事後不成立
 - true VOTによる値は後続の個別評価用
+- buyer・sellerが全員観測済みなら、事後成立・事後不成立にかかわらず、全buyer・sellerの個別実績値と両合計を計算・保存する
+- buyerが1人でも0以下でも、buyer合計、seller個別実績要求補償額、seller合計を計算・保存する
 
 実績節約秒は `baseline_minus_actual_passage_seconds` とdeclared VOTの積である。取引全体判定にtrue VOT time valueを使わない。
 
@@ -2371,12 +2376,14 @@ status enumの細部名は実装時に既存命名へ合わせてよい。3状�
 - buyer合計がseller合計以上なら事後成立
 - 等号は事後成立
 
-全buyerが正の節約価値であることを確認したうえで合計を比較する。完全比較である。
+buyer合計がseller合計未満で事後不成立になる場合も、全実績値と両合計を保存する。buyerが1人でも0以下なら、合計比較の結果にかかわらず事後不成立とする。完全比較である。
 
 ## 8. 参考金額
 
 - 事後不成立ではbuyer・seller全員の参考金額を0
 - 評価不能では参考金額を未計算とし、0にしない
+- 事後不成立では実績値を維持し、buyer参考支払とseller参考補償だけを全員0とする
+- `seller_actual_required_compensation` と `reference_compensation` を区別する（例: 実績要求補償500・事後不成立なら前者500、後者0）
 - 事後成立時のseller参考補償は自身の実績要求補償額
 - 事後成立時のbuyer参考支払は次の比例配分
 
@@ -2407,6 +2414,8 @@ status enumの細部名は実装時に既存命名へ合わせてよい。3状�
 - 取引全体のfrozen result
 - buyer別参考支払record
 - seller別参考補償record
+- 評価不能: 合計とbuyer・seller record列は `None`（未計算。0で保存しない）
+- 事後不成立: 個別実績値と両合計は計算値のまま保存し、参考金額recordだけ全員0
 - WaitEntryへ合計や参考金額を平坦に重複保存しない
 - TradeWaitへ多数の事後fieldを直接追加しない
 

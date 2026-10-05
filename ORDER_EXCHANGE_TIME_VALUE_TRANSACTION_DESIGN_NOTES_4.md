@@ -10685,24 +10685,30 @@ true VOTによる実績遅延損失は、後続のseller個別評価用である
 
 ## 8. 事後成立と事後不成立
 
-評価可能であることを前提に、次の順で判定する。順序を入れ替えない。
+評価可能であることを確認した後、次の順で判定する。順序を入れ替えない。
 
-1. 各buyerの実績節約価値を計算する。
-2. 1件でも0以下なら事後不成立とする。
-3. 全buyerが正ならbuyer合計を計算する。
-4. 各sellerの実績要求補償額を計算する。
-5. seller合計を計算する。
+1. 全buyerの実績節約価値を計算する。
+2. buyer実績節約価値合計を計算する。
+3. 全sellerの実績要求補償額を計算する。
+4. seller実績要求補償総額を計算する。
+5. buyerの実績節約価値が1件でも0以下か確認する。
 6. buyer合計とseller合計を比較する。
+7. statusを確定する。
+8. statusに応じて参考金額を確定する。
 
 buyer合計は、全buyerの `buyer_actual_declared_time_saving_value` の合計である。seller合計は、全sellerの `seller_actual_required_compensation` の合計である。
 
-buyer合計がseller合計未満なら事後不成立とする。
+buyerが1人以上0以下でも、sellerの個別実績要求補償額とseller合計まで計算して保存する。計算を途中で打ち切って、buyer合計またはseller合計を `None` にしない。
 
-buyer合計がseller合計以上なら事後成立とする。
+statusの確定では、buyerの実績節約価値が1件でも0以下なら、手順6の合計比較の結果にかかわらず `EX_POST_INFEASIBLE` とする。
+
+buyerが全員正のとき、buyer合計がseller合計未満なら `EX_POST_INFEASIBLE` とする。
+
+buyerが全員正のとき、buyer合計がseller合計以上なら `EX_POST_FEASIBLE` とする。
 
 等号は事後成立側である。buyer合計とseller合計が等しい場合を事後不成立にしない。
 
-手順2で事後不成立になった場合は、参考金額の確定に進む。その場合の参考金額は、次節の全員0である。buyer合計とseller合計の比較へは進まない。ただし、事後不成立という結果自体は確定する。評価不能へ戻さない。
+手順8では、確定したstatusに応じて参考金額を確定する。`EX_POST_INFEASIBLE` の参考金額は、次節の全員0である。`EX_POST_FEASIBLE` の参考金額は、後述の比例配分とseller自身の実績要求補償で確定する。評価不能へ戻さない。
 
 sellerが0件の取引は、本節の対象外である。正式候補のseller非空契約は既存の成立時契約として残る。本節は、buyerとsellerが存在する評価可能なTradeWaitの事後判定を定める。
 
@@ -10874,14 +10880,43 @@ nonparticipatingのactual結果と外部効果は、後続の個別評価で扱�
 - seller合計
 - buyer参考支払record列
 - seller参考補償record列
-- 評価不能の場合に計算値が存在しないこと
-- 事後不成立の場合に参考金額が正式な0であること
 
-評価不能時は、合計や参考金額へ0を入れない。未計算を表現できる構造にする。たとえば合計や参考金額列を「空」または「値なし」として持ち、0円recordと区別する。表現方法の正式な型は、コード原典とテスト契約の追加確認後に確定する。
+statusごとに、合計・実績record・参考金額の契約は次とする。
 
-事後不成立時の参考支払と参考補償は、全件0のrecordとして持つ。評価不能の「値なし」と同じ表現にしない。buyer実績節約価値が0以下で止まった事後不成立では、buyer合計とseller合計の比較を行っていない。合計比較まで進んで事後不成立になった場合は、その比較に使ったbuyer合計とseller合計を持てる。どちらの事後不成立でも、参考金額は正式な0である。
+### EVALUATION_UNAVAILABLE
 
-事後成立時は、buyer合計、seller合計、各buyerの参考支払、各sellerの参考補償を持つ。sellerの参考補償0は、そのsellerの実績要求補償が0であるrecordとして持つ。
+- buyer合計は `None`
+- seller合計は `None`
+- buyer参考支払record列は `None`
+- seller参考補償record列は `None`
+- 実績値と参考金額は未計算
+- 0として保存しない
+
+未計算を表現できる構造にする。たとえば合計や参考金額列を「空」または「値なし」として持ち、0円recordと区別する。表現方法の正式な型は、コード原典とテスト契約の追加確認後に確定する。
+
+### EX_POST_INFEASIBLE
+
+- buyer合計は実際の計算値
+- seller合計は実際の計算値
+- buyer全員分のrecordを保存
+- seller全員分のrecordを保存
+- `buyer_actual_declared_time_saving_value` は実際の計算値
+- `seller_actual_required_compensation` は実際の計算値
+- `reference_payment` は全buyerで0
+- `reference_compensation` は全sellerで0
+- 合計や実績値を `None` にしない
+- 実績値を0へ書き換えない
+
+参考支払と参考補償は、全件0のrecordとして持つ。評価不能の「値なし」と同じ表現にしない。参考金額0は、判定結果としての正式な0である。
+
+### EX_POST_FEASIBLE
+
+- buyer合計とseller合計は実際の計算値
+- buyer全員分とseller全員分のrecordを保存
+- buyer参考支払は比例配分の計算値
+- seller参考補償は自身の実績要求補償額
+
+sellerの参考補償0は、そのsellerの実績要求補償が0であるrecordとして持つ。事後不成立による全員0とは別である。
 
 buyer別recordとseller別recordは、取引全体resultの子として取引に紐づける。WaitEntryのobservation recordへ参考金額を追記して正本を二つにしない。
 
