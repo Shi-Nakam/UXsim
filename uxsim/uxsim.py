@@ -5054,16 +5054,20 @@ class World:
             return
         from uxsim.order_control_tvt_mp_actual_passage import (
             commit_tvt_mp_actual_passage_evaluation_end_unobserved_finalization,
+            commit_tvt_mp_trade_ex_post_evaluation,
             prepare_tvt_mp_actual_passage_evaluation_end_unobserved_finalization,
+            prepare_tvt_mp_trade_ex_post_evaluation,
         )
-        prepared_update = (
+        unobserved_prepared_update = (
             prepare_tvt_mp_actual_passage_evaluation_end_unobserved_finalization(
                 W,
             )
         )
         commit_tvt_mp_actual_passage_evaluation_end_unobserved_finalization(
-            prepared_update,
+            unobserved_prepared_update,
         )
+        ex_post_prepared_update = prepare_tvt_mp_trade_ex_post_evaluation(W)
+        commit_tvt_mp_trade_ex_post_evaluation(ex_post_prepared_update)
 
     def exec_simulation(W, until_t:float|None=None, duration_t:float|None=None, duration_t2:float|None=None):
         """

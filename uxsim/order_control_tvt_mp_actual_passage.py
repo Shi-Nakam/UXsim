@@ -37,6 +37,12 @@ class OrderControlTvtMpActualPassageWaitStatus(Enum):
     )
 
 
+class OrderControlTvtMpTradeExPostEvaluationStatus(Enum):
+    EVALUATION_UNAVAILABLE = "evaluation_unavailable"
+    EX_POST_INFEASIBLE = "ex_post_infeasible"
+    EX_POST_FEASIBLE = "ex_post_feasible"
+
+
 @dataclass(frozen=True)
 class OrderControlTvtMpActualPassageObservationRecord:
     tvt_decision_timestep: int
@@ -163,6 +169,455 @@ def _require_non_negative_money_number(value: object, field_name: str) -> None:
         )
 
 
+def _require_finite_number(value: object, field_name: str) -> None:
+    """Reject None, bool, and non-finite numbers. Negative and zero allowed."""
+    if value is None:
+        raise RuntimeError(
+            f"{field_name} must be a formal number, not None."
+        )
+    if isinstance(value, bool) or type(value) not in (int, float):
+        raise RuntimeError(
+            f"{field_name} must be a Python int or float, not bool; got "
+            f"{value!r}."
+        )
+    if not math.isfinite(value):
+        raise RuntimeError(
+            f"{field_name} must be finite; got {value!r}."
+        )
+
+
+def _require_positive_finite_number(value: object, field_name: str) -> None:
+    _require_finite_number(value, field_name)
+    if value <= 0:
+        raise RuntimeError(
+            f"{field_name} must be > 0; got {value!r}."
+        )
+
+
+def _require_ex_post_record_visit_key_and_vehicle_name(
+    visit_key: object,
+    vehicle_name: object,
+    *,
+    record_kind: str,
+) -> None:
+    _require_history_visit_key(visit_key)
+    if not isinstance(vehicle_name, str) or vehicle_name == "":
+        raise RuntimeError(
+            f"{record_kind} vehicle_name must be a non-empty str; got "
+            f"{vehicle_name!r}."
+        )
+    if visit_key[0] != vehicle_name:
+        raise RuntimeError(
+            f"{record_kind} VisitKey vehicle_name {visit_key[0]!r} does not "
+            f"match vehicle_name {vehicle_name!r}."
+        )
+
+
+@dataclass(frozen=True)
+class OrderControlTvtMpTradeExPostBuyerReferencePaymentRecord:
+    visit_key: OrderControlTvtVisitKey
+    vehicle_name: str
+    buyer_actual_declared_time_saving_value: int | float
+    reference_payment: int | float
+
+    def __post_init__(self) -> None:
+        _require_ex_post_record_visit_key_and_vehicle_name(
+            self.visit_key,
+            self.vehicle_name,
+            record_kind="buyer reference payment record",
+        )
+        _require_finite_number(
+            self.buyer_actual_declared_time_saving_value,
+            "buyer_actual_declared_time_saving_value",
+        )
+        _require_non_negative_money_number(
+            self.reference_payment,
+            "reference_payment",
+        )
+
+
+@dataclass(frozen=True)
+class OrderControlTvtMpTradeExPostSellerReferenceCompensationRecord:
+    visit_key: OrderControlTvtVisitKey
+    vehicle_name: str
+    seller_actual_required_compensation: int | float
+    reference_compensation: int | float
+
+    def __post_init__(self) -> None:
+        _require_ex_post_record_visit_key_and_vehicle_name(
+            self.visit_key,
+            self.vehicle_name,
+            record_kind="seller reference compensation record",
+        )
+        _require_non_negative_money_number(
+            self.seller_actual_required_compensation,
+            "seller_actual_required_compensation",
+        )
+        _require_non_negative_money_number(
+            self.reference_compensation,
+            "reference_compensation",
+        )
+
+
+@dataclass(frozen=True)
+class OrderControlTvtMpTradeExPostEvaluationResult:
+    tvt_decision_timestep: int
+    node_name: str
+    buyers_sorted: tuple[OrderControlTvtVisitKey, ...]
+    ex_post_evaluation_status: OrderControlTvtMpTradeExPostEvaluationStatus
+    buyer_actual_declared_time_saving_value_total: int | float | None
+    seller_actual_required_compensation_total: int | float | None
+    buyer_reference_payment_records: (
+        tuple[OrderControlTvtMpTradeExPostBuyerReferencePaymentRecord, ...] | None
+    )
+    seller_reference_compensation_records: (
+        tuple[OrderControlTvtMpTradeExPostSellerReferenceCompensationRecord, ...]
+        | None
+    )
+
+    def __post_init__(self) -> None:
+        if type(self.tvt_decision_timestep) is not int:
+            raise RuntimeError(
+                "tvt_decision_timestep must be a Python int, not bool; got "
+                f"{self.tvt_decision_timestep!r}."
+            )
+        if self.tvt_decision_timestep < 0:
+            raise RuntimeError(
+                "tvt_decision_timestep must be >= 0; got "
+                f"{self.tvt_decision_timestep!r}."
+            )
+        if not isinstance(self.node_name, str) or self.node_name == "":
+            raise RuntimeError(
+                "node_name must be a non-empty str; got "
+                f"{self.node_name!r}."
+            )
+        if not isinstance(self.buyers_sorted, tuple):
+            raise RuntimeError(
+                "buyers_sorted must be a tuple; got type "
+                f"{type(self.buyers_sorted).__name__}."
+            )
+        seen_buyers_sorted: set[OrderControlTvtVisitKey] = set()
+        for visit_key in self.buyers_sorted:
+            _require_history_visit_key(visit_key)
+            if visit_key in seen_buyers_sorted:
+                raise RuntimeError(
+                    "buyers_sorted must not contain duplicate VisitKey "
+                    f"{visit_key!r}."
+                )
+            seen_buyers_sorted.add(visit_key)
+        if not isinstance(
+            self.ex_post_evaluation_status,
+            OrderControlTvtMpTradeExPostEvaluationStatus,
+        ):
+            raise RuntimeError(
+                "ex_post_evaluation_status must be "
+                "OrderControlTvtMpTradeExPostEvaluationStatus; got type "
+                f"{type(self.ex_post_evaluation_status).__name__}."
+            )
+        status = self.ex_post_evaluation_status
+        if status is OrderControlTvtMpTradeExPostEvaluationStatus.EVALUATION_UNAVAILABLE:
+            _validate_ex_post_evaluation_unavailable_shape(self)
+            return
+        if status is OrderControlTvtMpTradeExPostEvaluationStatus.EX_POST_INFEASIBLE:
+            _validate_ex_post_evaluation_infeasible_shape(self)
+            return
+        if status is OrderControlTvtMpTradeExPostEvaluationStatus.EX_POST_FEASIBLE:
+            _validate_ex_post_evaluation_feasible_shape(self)
+            return
+        raise RuntimeError(
+            f"unsupported ex_post_evaluation_status {status!r}."
+        )
+
+
+def _validate_ex_post_evaluation_unavailable_shape(
+    result: OrderControlTvtMpTradeExPostEvaluationResult,
+) -> None:
+    if result.buyer_actual_declared_time_saving_value_total is not None:
+        raise RuntimeError(
+            "EVALUATION_UNAVAILABLE requires "
+            "buyer_actual_declared_time_saving_value_total to be None."
+        )
+    if result.seller_actual_required_compensation_total is not None:
+        raise RuntimeError(
+            "EVALUATION_UNAVAILABLE requires "
+            "seller_actual_required_compensation_total to be None."
+        )
+    if result.buyer_reference_payment_records is not None:
+        raise RuntimeError(
+            "EVALUATION_UNAVAILABLE requires buyer_reference_payment_records "
+            "to be None."
+        )
+    if result.seller_reference_compensation_records is not None:
+        raise RuntimeError(
+            "EVALUATION_UNAVAILABLE requires "
+            "seller_reference_compensation_records to be None."
+        )
+
+
+def _validate_ex_post_evaluation_infeasible_shape(
+    result: OrderControlTvtMpTradeExPostEvaluationResult,
+) -> None:
+    _require_ex_post_evaluated_totals_present(result)
+    _require_finite_number(
+        result.buyer_actual_declared_time_saving_value_total,
+        "buyer_actual_declared_time_saving_value_total",
+    )
+    _require_non_negative_money_number(
+        result.seller_actual_required_compensation_total,
+        "seller_actual_required_compensation_total",
+    )
+    buyer_records = _require_ex_post_buyer_record_tuple(result)
+    seller_records = _require_ex_post_seller_record_tuple(result)
+    for buyer_record in buyer_records:
+        if buyer_record.reference_payment != 0:
+            raise RuntimeError(
+                "EX_POST_INFEASIBLE requires every buyer reference_payment "
+                f"to be 0; got {buyer_record.reference_payment!r} for "
+                f"VisitKey {buyer_record.visit_key!r}."
+            )
+    for seller_record in seller_records:
+        if seller_record.reference_compensation != 0:
+            raise RuntimeError(
+                "EX_POST_INFEASIBLE requires every seller "
+                "reference_compensation to be 0; got "
+                f"{seller_record.reference_compensation!r} for VisitKey "
+                f"{seller_record.visit_key!r}."
+            )
+    buyer_value_total = 0
+    for buyer_record in buyer_records:
+        buyer_value_total += buyer_record.buyer_actual_declared_time_saving_value
+    if (
+        buyer_value_total
+        != result.buyer_actual_declared_time_saving_value_total
+    ):
+        raise RuntimeError(
+            "EX_POST_INFEASIBLE requires buyer_actual_declared_time_saving_"
+            "value_total to equal the sum of buyer record values; got "
+            f"{result.buyer_actual_declared_time_saving_value_total!r}, "
+            f"expected {buyer_value_total!r}."
+        )
+    seller_compensation_total = 0
+    for seller_record in seller_records:
+        seller_compensation_total += (
+            seller_record.seller_actual_required_compensation
+        )
+    if (
+        seller_compensation_total
+        != result.seller_actual_required_compensation_total
+    ):
+        raise RuntimeError(
+            "EX_POST_INFEASIBLE requires seller_actual_required_compensation_"
+            "total to equal the sum of seller record values; got "
+            f"{result.seller_actual_required_compensation_total!r}, "
+            f"expected {seller_compensation_total!r}."
+        )
+    _validate_ex_post_buyer_records_match_buyers_sorted(
+        result.buyers_sorted,
+        buyer_records,
+    )
+    _validate_ex_post_record_visit_keys_no_duplicates_or_overlap(
+        buyer_records,
+        seller_records,
+    )
+
+
+def _validate_ex_post_evaluation_feasible_shape(
+    result: OrderControlTvtMpTradeExPostEvaluationResult,
+) -> None:
+    _require_ex_post_evaluated_totals_present(result)
+    _require_positive_finite_number(
+        result.buyer_actual_declared_time_saving_value_total,
+        "buyer_actual_declared_time_saving_value_total",
+    )
+    _require_non_negative_money_number(
+        result.seller_actual_required_compensation_total,
+        "seller_actual_required_compensation_total",
+    )
+    buyer_records = _require_ex_post_buyer_record_tuple(result)
+    seller_records = _require_ex_post_seller_record_tuple(result)
+    buyer_value_total = 0
+    for buyer_record in buyer_records:
+        _require_positive_finite_number(
+            buyer_record.buyer_actual_declared_time_saving_value,
+            "buyer_actual_declared_time_saving_value",
+        )
+        _require_non_negative_money_number(
+            buyer_record.reference_payment,
+            "reference_payment",
+        )
+        buyer_value_total += buyer_record.buyer_actual_declared_time_saving_value
+    if (
+        buyer_value_total
+        != result.buyer_actual_declared_time_saving_value_total
+    ):
+        raise RuntimeError(
+            "EX_POST_FEASIBLE requires buyer_actual_declared_time_saving_"
+            "value_total to equal the sum of buyer record values; got "
+            f"{result.buyer_actual_declared_time_saving_value_total!r}, "
+            f"expected {buyer_value_total!r}."
+        )
+    seller_compensation_total = 0
+    for seller_record in seller_records:
+        if (
+            seller_record.reference_compensation
+            != seller_record.seller_actual_required_compensation
+        ):
+            raise RuntimeError(
+                "EX_POST_FEASIBLE requires reference_compensation to equal "
+                "seller_actual_required_compensation for every seller; "
+                f"VisitKey {seller_record.visit_key!r} has "
+                f"{seller_record.reference_compensation!r} and "
+                f"{seller_record.seller_actual_required_compensation!r}."
+            )
+        seller_compensation_total += (
+            seller_record.seller_actual_required_compensation
+        )
+    if (
+        seller_compensation_total
+        != result.seller_actual_required_compensation_total
+    ):
+        raise RuntimeError(
+            "EX_POST_FEASIBLE requires seller_actual_required_compensation_"
+            "total to equal the sum of seller record values; got "
+            f"{result.seller_actual_required_compensation_total!r}, "
+            f"expected {seller_compensation_total!r}."
+        )
+    _validate_ex_post_buyer_records_match_buyers_sorted(
+        result.buyers_sorted,
+        buyer_records,
+    )
+    _validate_ex_post_record_visit_keys_no_duplicates_or_overlap(
+        buyer_records,
+        seller_records,
+    )
+
+
+def _require_ex_post_evaluated_totals_present(
+    result: OrderControlTvtMpTradeExPostEvaluationResult,
+) -> None:
+    if result.buyer_actual_declared_time_saving_value_total is None:
+        raise RuntimeError(
+            "evaluated ex-post status requires "
+            "buyer_actual_declared_time_saving_value_total, not None."
+        )
+    if result.seller_actual_required_compensation_total is None:
+        raise RuntimeError(
+            "evaluated ex-post status requires "
+            "seller_actual_required_compensation_total, not None."
+        )
+
+
+def _require_ex_post_buyer_record_tuple(
+    result: OrderControlTvtMpTradeExPostEvaluationResult,
+) -> tuple[OrderControlTvtMpTradeExPostBuyerReferencePaymentRecord, ...]:
+    buyer_records = result.buyer_reference_payment_records
+    if buyer_records is None:
+        raise RuntimeError(
+            "evaluated ex-post status requires buyer_reference_payment_records "
+            "to be a tuple, not None."
+        )
+    if not isinstance(buyer_records, tuple):
+        raise RuntimeError(
+            "buyer_reference_payment_records must be a tuple; got type "
+            f"{type(buyer_records).__name__}."
+        )
+    for buyer_record in buyer_records:
+        if not isinstance(
+            buyer_record,
+            OrderControlTvtMpTradeExPostBuyerReferencePaymentRecord,
+        ):
+            raise RuntimeError(
+                "buyer_reference_payment_records must contain "
+                "OrderControlTvtMpTradeExPostBuyerReferencePaymentRecord "
+                "elements only."
+            )
+    return buyer_records
+
+
+def _require_ex_post_seller_record_tuple(
+    result: OrderControlTvtMpTradeExPostEvaluationResult,
+) -> tuple[OrderControlTvtMpTradeExPostSellerReferenceCompensationRecord, ...]:
+    seller_records = result.seller_reference_compensation_records
+    if seller_records is None:
+        raise RuntimeError(
+            "evaluated ex-post status requires "
+            "seller_reference_compensation_records to be a tuple, not None."
+        )
+    if not isinstance(seller_records, tuple):
+        raise RuntimeError(
+            "seller_reference_compensation_records must be a tuple; got type "
+            f"{type(seller_records).__name__}."
+        )
+    for seller_record in seller_records:
+        if not isinstance(
+            seller_record,
+            OrderControlTvtMpTradeExPostSellerReferenceCompensationRecord,
+        ):
+            raise RuntimeError(
+                "seller_reference_compensation_records must contain "
+                "OrderControlTvtMpTradeExPostSellerReferenceCompensationRecord "
+                "elements only."
+            )
+    return seller_records
+
+
+def _validate_ex_post_buyer_records_match_buyers_sorted(
+    buyers_sorted: tuple[OrderControlTvtVisitKey, ...],
+    buyer_records: tuple[
+        OrderControlTvtMpTradeExPostBuyerReferencePaymentRecord,
+        ...,
+    ],
+) -> None:
+    if len(buyer_records) != len(buyers_sorted):
+        raise RuntimeError(
+            "buyer_reference_payment_records length must match "
+            "buyers_sorted length; got "
+            f"{len(buyer_records)!r} records and "
+            f"{len(buyers_sorted)!r} buyers_sorted entries."
+        )
+    for index, expected_visit_key in enumerate(buyers_sorted):
+        buyer_record = buyer_records[index]
+        if buyer_record.visit_key != expected_visit_key:
+            raise RuntimeError(
+                "buyer_reference_payment_records must follow buyers_sorted "
+                f"order; index {index} expected VisitKey "
+                f"{expected_visit_key!r}, got {buyer_record.visit_key!r}."
+            )
+
+
+def _validate_ex_post_record_visit_keys_no_duplicates_or_overlap(
+    buyer_records: tuple[
+        OrderControlTvtMpTradeExPostBuyerReferencePaymentRecord,
+        ...,
+    ],
+    seller_records: tuple[
+        OrderControlTvtMpTradeExPostSellerReferenceCompensationRecord,
+        ...,
+    ],
+) -> None:
+    seen_buyer_visit_keys: set[OrderControlTvtVisitKey] = set()
+    for buyer_record in buyer_records:
+        if buyer_record.visit_key in seen_buyer_visit_keys:
+            raise RuntimeError(
+                "buyer_reference_payment_records must not contain duplicate "
+                f"VisitKey {buyer_record.visit_key!r}."
+            )
+        seen_buyer_visit_keys.add(buyer_record.visit_key)
+    seen_seller_visit_keys: set[OrderControlTvtVisitKey] = set()
+    for seller_record in seller_records:
+        if seller_record.visit_key in seen_seller_visit_keys:
+            raise RuntimeError(
+                "seller_reference_compensation_records must not contain "
+                f"duplicate VisitKey {seller_record.visit_key!r}."
+            )
+        if seller_record.visit_key in seen_buyer_visit_keys:
+            raise RuntimeError(
+                "buyer and seller reference records must not share VisitKey "
+                f"{seller_record.visit_key!r}."
+            )
+        seen_seller_visit_keys.add(seller_record.visit_key)
+
+
 @dataclass
 class OrderControlTvtMpActualPassageWaitEntry:
     tvt_decision_timestep: int
@@ -246,8 +701,14 @@ class OrderControlTvtMpActualPassageWaitRegistry:
         tuple[int, str, tuple[OrderControlTvtVisitKey, ...]],
         OrderControlTvtMpActualPassageTradeWait,
     ] = field(default_factory=dict)
+    trade_ex_post_evaluation_results_by_transaction_key: dict[
+        tuple[int, str, tuple[OrderControlTvtVisitKey, ...]],
+        OrderControlTvtMpTradeExPostEvaluationResult,
+    ] = field(default_factory=dict)
     # Not the evaluation-end timestep authority; prevents duplicate finalization.
     evaluation_end_unobserved_finalized_timestep: int | None = None
+    # Not the evaluation-end timestep authority; prevents duplicate ex-post runs.
+    trade_ex_post_evaluation_finalized_timestep: int | None = None
 
 
 @dataclass(frozen=True)
@@ -1902,4 +2363,395 @@ def commit_tvt_mp_actual_passage_evaluation_end_unobserved_finalization(
         wait_entry.wait_status = committed_status
     prepared_update.wait_registry.evaluation_end_unobserved_finalized_timestep = (
         prepared_update.evaluation_end_unobserved_finalized_timestep
+    )
+
+
+@dataclass(frozen=True)
+class _PreparedTvtMpTradeExPostEvaluation:
+    """Prepared trade ex-post evaluation results. Live registry unchanged."""
+
+    wait_registry: OrderControlTvtMpActualPassageWaitRegistry
+    trade_ex_post_evaluation_results_by_transaction_key: dict[
+        tuple[int, str, tuple[OrderControlTvtVisitKey, ...]],
+        OrderControlTvtMpTradeExPostEvaluationResult,
+    ]
+    trade_ex_post_evaluation_finalized_timestep: int
+
+
+def _require_evaluation_end_unobserved_finalized_for_ex_post(
+    registry: OrderControlTvtMpActualPassageWaitRegistry,
+    evaluation_end_timestep: int,
+) -> None:
+    finalized = registry.evaluation_end_unobserved_finalized_timestep
+    if type(finalized) is not int:
+        raise RuntimeError(
+            "evaluation_end_unobserved_finalized_timestep must be a Python "
+            f"int matching evaluation_end_timestep; got {finalized!r}."
+        )
+    if finalized != evaluation_end_timestep:
+        raise RuntimeError(
+            "trade ex-post evaluation requires "
+            "evaluation_end_unobserved_finalized_timestep to equal "
+            f"evaluation_end_timestep {evaluation_end_timestep!r}; got "
+            f"{finalized!r}."
+        )
+
+
+def _require_trade_ex_post_evaluation_not_started(
+    registry: OrderControlTvtMpActualPassageWaitRegistry,
+) -> None:
+    finalized = registry.trade_ex_post_evaluation_finalized_timestep
+    if finalized is not None:
+        if type(finalized) is not int:
+            raise RuntimeError(
+                "trade_ex_post_evaluation_finalized_timestep must be a Python "
+                f"int or None; got {finalized!r}."
+            )
+        raise RuntimeError(
+            "trade ex-post evaluation was already completed for "
+            f"timestep {finalized!r}."
+        )
+    if registry.trade_ex_post_evaluation_results_by_transaction_key:
+        raise RuntimeError(
+            "trade_ex_post_evaluation_results_by_transaction_key must be empty "
+            "before prepare; found partial saved results while "
+            "trade_ex_post_evaluation_finalized_timestep is still None."
+        )
+
+
+def _require_no_waiting_entries_for_trade_ex_post(
+    registry: OrderControlTvtMpActualPassageWaitRegistry,
+) -> None:
+    for entry_key, entry in registry.entries_by_node_name_and_visit_key.items():
+        node_name = entry_key[0]
+        visit_key = entry_key[1]
+        if (
+            entry.wait_status
+            is OrderControlTvtMpActualPassageWaitStatus.WAITING_FOR_ACTUAL_PASSAGE
+        ):
+            raise RuntimeError(
+                f"Node {node_name!r}: VisitKey {visit_key!r} is still "
+                "WAITING_FOR_ACTUAL_PASSAGE; trade ex-post evaluation requires "
+                "observed or evaluation-end unobserved entries only."
+            )
+
+
+def _wait_entry_for_trade_visit_key(
+    registry: OrderControlTvtMpActualPassageWaitRegistry,
+    trade_wait: OrderControlTvtMpActualPassageTradeWait,
+    visit_key: OrderControlTvtVisitKey,
+) -> OrderControlTvtMpActualPassageWaitEntry:
+    entry_key = (trade_wait.node_name, visit_key)
+    entry = registry.entries_by_node_name_and_visit_key.get(entry_key)
+    if entry is None:
+        raise RuntimeError(
+            f"Node {trade_wait.node_name!r}: TradeWait lists VisitKey "
+            f"{visit_key!r} but no WaitEntry exists."
+        )
+    return entry
+
+
+def _role_is_evaluation_end_unobserved(
+    entry: OrderControlTvtMpActualPassageWaitEntry,
+) -> bool:
+    return (
+        entry.wait_status
+        is OrderControlTvtMpActualPassageWaitStatus.ACTUAL_PASSAGE_UNOBSERVED_AT_EVALUATION_END
+    )
+
+
+def _trade_buyer_or_seller_is_evaluation_end_unobserved(
+    registry: OrderControlTvtMpActualPassageWaitRegistry,
+    trade_wait: OrderControlTvtMpActualPassageTradeWait,
+) -> bool:
+    for visit_key in trade_wait.buyer_visit_keys:
+        entry = _wait_entry_for_trade_visit_key(
+            registry,
+            trade_wait,
+            visit_key,
+        )
+        if _role_is_evaluation_end_unobserved(entry):
+            return True
+    for visit_key in trade_wait.seller_visit_keys:
+        entry = _wait_entry_for_trade_visit_key(
+            registry,
+            trade_wait,
+            visit_key,
+        )
+        if _role_is_evaluation_end_unobserved(entry):
+            return True
+    return False
+
+
+def _require_observed_entry_for_ex_post_calculation(
+    entry: OrderControlTvtMpActualPassageWaitEntry,
+    *,
+    node_name: str,
+    visit_key: OrderControlTvtVisitKey,
+    role_label: str,
+) -> OrderControlTvtMpActualPassageObservationRecord:
+    if (
+        entry.wait_status
+        is not OrderControlTvtMpActualPassageWaitStatus.ACTUAL_PASSAGE_OBSERVED
+    ):
+        raise RuntimeError(
+            f"Node {node_name!r}: VisitKey {visit_key!r} {role_label} must be "
+            "ACTUAL_PASSAGE_OBSERVED for ex-post calculation; got "
+            f"{entry.wait_status!r}."
+        )
+    record = entry.actual_passage_observation_record
+    if record is None:
+        raise RuntimeError(
+            f"Node {node_name!r}: VisitKey {visit_key!r} {role_label} is "
+            "observed but has no actual passage observation record."
+        )
+    if (
+        record.observation_status
+        is not OrderControlTvtMpActualPassageObservationStatus.ACTUAL_PASSAGE_OBSERVED
+    ):
+        raise RuntimeError(
+            f"Node {node_name!r}: VisitKey {visit_key!r} {role_label} "
+            "observation record status must be ACTUAL_PASSAGE_OBSERVED; got "
+            f"{record.observation_status!r}."
+        )
+    if record.baseline_minus_actual_passage_seconds is None:
+        raise RuntimeError(
+            f"Node {node_name!r}: VisitKey {visit_key!r} {role_label} "
+            "observation record baseline_minus_actual_passage_seconds must "
+            "not be None for ex-post calculation."
+        )
+    if not isinstance(
+        entry.monetary_frozen_input,
+        OrderControlTvtMpActualPassageMonetaryFrozenInput,
+    ):
+        raise RuntimeError(
+            f"Node {node_name!r}: VisitKey {visit_key!r} {role_label} requires "
+            "OrderControlTvtMpActualPassageMonetaryFrozenInput for ex-post "
+            "calculation."
+        )
+    return record
+
+
+def _buyer_actual_declared_time_saving_value_from_entry(
+    entry: OrderControlTvtMpActualPassageWaitEntry,
+    *,
+    node_name: str,
+    visit_key: OrderControlTvtVisitKey,
+) -> int | float:
+    record = _require_observed_entry_for_ex_post_calculation(
+        entry,
+        node_name=node_name,
+        visit_key=visit_key,
+        role_label="buyer",
+    )
+    monetary = entry.monetary_frozen_input
+    actual_time_saving_seconds = record.baseline_minus_actual_passage_seconds
+    declared_vot_per_second = monetary.declared_vot_per_second
+    return actual_time_saving_seconds * declared_vot_per_second
+
+
+def _seller_actual_required_compensation_from_entry(
+    entry: OrderControlTvtMpActualPassageWaitEntry,
+    *,
+    node_name: str,
+    visit_key: OrderControlTvtVisitKey,
+) -> int | float:
+    record = _require_observed_entry_for_ex_post_calculation(
+        entry,
+        node_name=node_name,
+        visit_key=visit_key,
+        role_label="seller",
+    )
+    monetary = entry.monetary_frozen_input
+    actual_delay_seconds = -record.baseline_minus_actual_passage_seconds
+    compensable_delay_seconds = 0
+    if actual_delay_seconds > 0:
+        compensable_delay_seconds = actual_delay_seconds
+    declared_vot_per_second = monetary.declared_vot_per_second
+    return compensable_delay_seconds * declared_vot_per_second
+
+
+def _build_trade_ex_post_evaluation_unavailable_result(
+    trade_wait: OrderControlTvtMpActualPassageTradeWait,
+) -> OrderControlTvtMpTradeExPostEvaluationResult:
+    return OrderControlTvtMpTradeExPostEvaluationResult(
+        tvt_decision_timestep=trade_wait.tvt_decision_timestep,
+        node_name=trade_wait.node_name,
+        buyers_sorted=trade_wait.buyers_sorted,
+        ex_post_evaluation_status=(
+            OrderControlTvtMpTradeExPostEvaluationStatus.EVALUATION_UNAVAILABLE
+        ),
+        buyer_actual_declared_time_saving_value_total=None,
+        seller_actual_required_compensation_total=None,
+        buyer_reference_payment_records=None,
+        seller_reference_compensation_records=None,
+    )
+
+
+def _build_trade_ex_post_evaluation_evaluated_result(
+    registry: OrderControlTvtMpActualPassageWaitRegistry,
+    trade_wait: OrderControlTvtMpActualPassageTradeWait,
+) -> OrderControlTvtMpTradeExPostEvaluationResult:
+    node_name = trade_wait.node_name
+    buyer_values_by_visit_key = {}
+    for visit_key in trade_wait.buyers_sorted:
+        entry = _wait_entry_for_trade_visit_key(registry, trade_wait, visit_key)
+        buyer_value = _buyer_actual_declared_time_saving_value_from_entry(
+            entry,
+            node_name=node_name,
+            visit_key=visit_key,
+        )
+        buyer_values_by_visit_key[visit_key] = buyer_value
+
+    seller_values_by_visit_key = {}
+    for visit_key in trade_wait.seller_visit_keys:
+        entry = _wait_entry_for_trade_visit_key(registry, trade_wait, visit_key)
+        seller_value = _seller_actual_required_compensation_from_entry(
+            entry,
+            node_name=node_name,
+            visit_key=visit_key,
+        )
+        seller_values_by_visit_key[visit_key] = seller_value
+
+    buyer_total = 0
+    for visit_key in trade_wait.buyers_sorted:
+        buyer_total += buyer_values_by_visit_key[visit_key]
+
+    seller_total = 0
+    for visit_key in trade_wait.seller_visit_keys:
+        seller_total += seller_values_by_visit_key[visit_key]
+
+    has_non_positive_buyer_value = False
+    for visit_key in trade_wait.buyers_sorted:
+        buyer_value = buyer_values_by_visit_key[visit_key]
+        if buyer_value <= 0:
+            has_non_positive_buyer_value = True
+            break
+
+    if has_non_positive_buyer_value:
+        status = OrderControlTvtMpTradeExPostEvaluationStatus.EX_POST_INFEASIBLE
+    elif buyer_total < seller_total:
+        status = OrderControlTvtMpTradeExPostEvaluationStatus.EX_POST_INFEASIBLE
+    else:
+        status = OrderControlTvtMpTradeExPostEvaluationStatus.EX_POST_FEASIBLE
+
+    buyer_reference_records = []
+    for visit_key in trade_wait.buyers_sorted:
+        entry = _wait_entry_for_trade_visit_key(registry, trade_wait, visit_key)
+        buyer_value = buyer_values_by_visit_key[visit_key]
+        if status is OrderControlTvtMpTradeExPostEvaluationStatus.EX_POST_INFEASIBLE:
+            reference_payment = 0
+        else:
+            reference_payment = (
+                seller_total * buyer_value / buyer_total
+            )
+        buyer_reference_records.append(
+            OrderControlTvtMpTradeExPostBuyerReferencePaymentRecord(
+                visit_key=visit_key,
+                vehicle_name=entry.vehicle_name,
+                buyer_actual_declared_time_saving_value=buyer_value,
+                reference_payment=reference_payment,
+            )
+        )
+
+    seller_reference_records = []
+    for visit_key in trade_wait.seller_visit_keys:
+        entry = _wait_entry_for_trade_visit_key(registry, trade_wait, visit_key)
+        seller_value = seller_values_by_visit_key[visit_key]
+        if status is OrderControlTvtMpTradeExPostEvaluationStatus.EX_POST_INFEASIBLE:
+            reference_compensation = 0
+        else:
+            reference_compensation = seller_value
+        seller_reference_records.append(
+            OrderControlTvtMpTradeExPostSellerReferenceCompensationRecord(
+                visit_key=visit_key,
+                vehicle_name=entry.vehicle_name,
+                seller_actual_required_compensation=seller_value,
+                reference_compensation=reference_compensation,
+            )
+        )
+
+    return OrderControlTvtMpTradeExPostEvaluationResult(
+        tvt_decision_timestep=trade_wait.tvt_decision_timestep,
+        node_name=trade_wait.node_name,
+        buyers_sorted=trade_wait.buyers_sorted,
+        ex_post_evaluation_status=status,
+        buyer_actual_declared_time_saving_value_total=buyer_total,
+        seller_actual_required_compensation_total=seller_total,
+        buyer_reference_payment_records=tuple(buyer_reference_records),
+        seller_reference_compensation_records=tuple(seller_reference_records),
+    )
+
+
+def _build_trade_ex_post_evaluation_result_for_trade(
+    registry: OrderControlTvtMpActualPassageWaitRegistry,
+    trade_wait: OrderControlTvtMpActualPassageTradeWait,
+) -> OrderControlTvtMpTradeExPostEvaluationResult:
+    if _trade_buyer_or_seller_is_evaluation_end_unobserved(registry, trade_wait):
+        return _build_trade_ex_post_evaluation_unavailable_result(trade_wait)
+    return _build_trade_ex_post_evaluation_evaluated_result(registry, trade_wait)
+
+
+def prepare_tvt_mp_trade_ex_post_evaluation(
+    world,
+) -> _PreparedTvtMpTradeExPostEvaluation:
+    """Prepare trade ex-post evaluation without changing live registry state."""
+    _require_real_world_for_evaluation_end_unobserved(world)
+    evaluation_end_timestep = _require_evaluation_end_timestep_for_unobserved(world)
+    _require_world_timestep_matches_evaluation_end_plus_one(
+        world,
+        evaluation_end_timestep,
+    )
+    wait_registry, history_registry = (
+        _require_wait_and_history_registries_for_evaluation_end(world)
+    )
+    if not isinstance(
+        wait_registry.trade_ex_post_evaluation_results_by_transaction_key,
+        dict,
+    ):
+        raise RuntimeError(
+            "trade_ex_post_evaluation_results_by_transaction_key must be a dict; "
+            "got type "
+            f"{type(wait_registry.trade_ex_post_evaluation_results_by_transaction_key).__name__}."
+        )
+    _require_evaluation_end_unobserved_finalized_for_ex_post(
+        wait_registry,
+        evaluation_end_timestep,
+    )
+    _require_trade_ex_post_evaluation_not_started(wait_registry)
+    _require_no_waiting_entries_for_trade_ex_post(wait_registry)
+    _validate_all_saved_node_passage_histories(history_registry)
+    _validate_registry_trade_and_entry_partition(wait_registry, history_registry)
+
+    prepared_results = {}
+    sorted_trades = _sorted_trade_items(wait_registry.trades_by_transaction_key)
+    for transaction_key, trade_wait in sorted_trades:
+        prepared_results[transaction_key] = (
+            _build_trade_ex_post_evaluation_result_for_trade(
+                wait_registry,
+                trade_wait,
+            )
+        )
+
+    return _PreparedTvtMpTradeExPostEvaluation(
+        wait_registry=wait_registry,
+        trade_ex_post_evaluation_results_by_transaction_key=prepared_results,
+        trade_ex_post_evaluation_finalized_timestep=evaluation_end_timestep,
+    )
+
+
+def commit_tvt_mp_trade_ex_post_evaluation(prepared_update) -> None:
+    """Assign prepared trade ex-post evaluation results only."""
+    if not isinstance(prepared_update, _PreparedTvtMpTradeExPostEvaluation):
+        raise RuntimeError(
+            "prepared trade ex-post evaluation update must be "
+            "_PreparedTvtMpTradeExPostEvaluation; got type "
+            f"{type(prepared_update).__name__}."
+        )
+    wait_registry = prepared_update.wait_registry
+    wait_registry.trade_ex_post_evaluation_results_by_transaction_key = (
+        prepared_update.trade_ex_post_evaluation_results_by_transaction_key
+    )
+    wait_registry.trade_ex_post_evaluation_finalized_timestep = (
+        prepared_update.trade_ex_post_evaluation_finalized_timestep
     )
