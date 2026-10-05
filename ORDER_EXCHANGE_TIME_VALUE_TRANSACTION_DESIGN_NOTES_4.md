@@ -10488,3 +10488,513 @@ actual passageの観測済み経路、Node履歴の通過成功経路、buyer・
 4. 別の指示でpushする。
 5. push後に「評価終了時の未観測確定」の実装指示を作成する。
 6. それまではコード変更へ進まない。
+
+# TVT-MP 取引全体事後評価の実装前詳細設計（2026-10-05）
+
+本節は、次の正式実装単位「取引全体の事後評価」の実装前詳細設計である。実装完了記録ではない。
+
+本節を、取引全体の事後評価の最新の正式参照先とする。直前の大見出し「TVT-MP 評価終了時未観測確定の実装前詳細設計（2026-10-05）」は削除、短縮、置換、書換えしない。次の既存節も削除、短縮、置換、書換えしない。
+
+- 「TVT-MP 全role一括実績評価・順位分析・集計 完全実装前全体設計（2026-10-04）」
+- 「TVT-MP全role一括実績評価 統合反証レビューと成立時評価用入口の実装前詳細設計（2026-10-04）」
+- 「TVT-MP 評価終了時未観測確定の実装前詳細設計（2026-10-05）」
+
+過去節と本節の表現が異なる場合も、過去節は当時の記録として残す。取引全体の事後評価を実装するときは、本節を最新の実装前詳細設計として読む。
+
+現在の実装済み状態は次である。
+
+- 成立時評価用入口の凍結: commit `8625f47`
+- Node別実通過履歴: commit `79f0d04`
+- 評価終了時未観測確定: commit `911940e`
+
+本節の追記作業では、Pythonコード、テスト、診断、進捗第3巻、指定外の文書、`diagnostics/order_control.zip`、およびGit管理状態を変更しない。
+
+## 1. 今回の正式実装単位
+
+評価終了時未観測確定が正常完了した後、各TradeWaitについて、buyerとsellerのactual結果を用い、次のいずれかを一度だけ確定する。
+
+- 評価不能
+- 事後不成立
+- 事後成立
+
+同時に、評価可能な取引について、buyer参考支払とseller参考補償を確定する。評価可能な取引とは、後述の評価不能に該当しない取引である。評価可能な取引のうち、事後不成立の取引は参考金額を全員0として確定する。事後成立の取引は、後述の比例配分とseller自身の実績要求補償で参考金額を確定する。
+
+1つのTradeWaitについて、この取引全体評価を複数回確定しない。評価終了時未観測確定の再実行を防いだのと同じく、取引全体評価も一度だけの確定とする。再実行防止の正式な方法は、後続の限定調査で確定する。本節では方法名を確定しない。
+
+今回実装しないものは次である。
+
+- buyer個別実績利得
+- seller個別実績利得
+- 満足判定
+- 理由分類
+- nonparticipating外部効果
+- 順位差
+- 集計
+- 実験出力
+
+これらは後続の個別評価、順位分析、集計の単位である。取引全体の3状態と参考金額が未確定のまま、個別利得や満足判定へ進まない。
+
+## 2. 評価時点
+
+取引全体事後評価は、評価終了時未観測確定が正常完了した後に行う。
+
+前提は次である。
+
+- actual passage wait registryの終了確定済みtimestepが、Worldのevaluation end timestepと一致する。
+- その終了確定が、対象TradeWaitの全roleについて完了している。
+
+buyer・seller初回観測完了通知を、取引全体事後評価の開始条件にしない。初回通知は、buyerとsellerのactual passageがそろい、参考金額を計算できる状態を識別する既存の目印として残す。その通知が届いた時点で取引全体評価を開始しない。評価期間の途中でbuyerとsellerが全員観測済みになっても、nonparticipatingの観測と評価終了時未観測確定が終わる前には、取引全体評価を確定しない。
+
+実行時点は、nonparticipatingを含む全roleの終了確定後である。終了確定には、観測済みと評価終了時未観測の両方を含む。通過待ちのWaitEntryが残っている状態では、取引全体評価を確定しない。
+
+全roleの終了確定後に実行することと、取引全体の評価可能性の判定対象は分ける。評価可能性はbuyerとsellerの観測状態だけで決める。nonparticipatingの未観測は、取引全体を評価不能にしない。
+
+## 3. 評価状態
+
+新しい取引全体評価status enumを設ける方向とする。
+
+最低限、次の3状態を区別する。
+
+- `EVALUATION_UNAVAILABLE`
+- `EX_POST_INFEASIBLE`
+- `EX_POST_FEASIBLE`
+
+意味は次である。
+
+| status | 意味 |
+| --- | --- |
+| `EVALUATION_UNAVAILABLE` | 評価不能。buyerまたはsellerのactualが未観測であり、実績節約価値、実績要求補償、参考金額を計算しない。 |
+| `EX_POST_INFEASIBLE` | 事後不成立。buyerとsellerは評価可能だが、事後成立条件を満たさない。参考金額は全員0として確定する。 |
+| `EX_POST_FEASIBLE` | 事後成立。参考buyer支払と参考seller補償を、後述の式で確定する。 |
+
+正式なenum名の細部は、実装時に既存命名規則へ合わせてよい。3状態の区別そのものは変えない。
+
+評価不能と事後不成立を同じ状態にしない。評価不能は入力不足である。事後不成立は、評価したうえで成立条件を満たさないという結果である。両者を一つのstatusへまとめると、参考金額を計算しなかったことと、参考金額を0と確定したことを区別できなくなる。
+
+事後不成立を、成立時の候補不成立やselected candidateが無いことと混同しない。本節の3状態は、すでに成立してactual passageへ入ったTradeWaitに対する事後評価である。
+
+## 4. 評価不能
+
+buyerまたはsellerが1件でもactual未観測なら、その取引は評価不能とする。
+
+actual未観測とは、評価終了時未観測確定後のWaitEntryが、評価終了時未観測のobservation statusを持つことである。観測済みのbuyerまたはsellerが他に何件あっても、1件でも未観測なら取引全体は評価不能である。
+
+評価不能では次を計算しない。
+
+- buyer実績節約価値
+- buyer合計
+- seller実績要求補償
+- seller合計
+- buyer参考支払
+- seller参考補償
+- buyer・seller個別実績利得
+- 満足判定
+
+評価不能時の参考金額を0として保存しない。未計算と0を区別する。0は、計算した結果が0円であることである。未計算は、評価に必要なactualが欠けているため式を適用していないことである。
+
+nonparticipatingだけが未観測でも、buyerとsellerが全員観測済みなら、取引全体は評価可能である。その場合は事後不成立または事後成立のいずれかを判定する。nonparticipatingの未観測を理由に `EVALUATION_UNAVAILABLE` へしない。
+
+## 5. buyer実績節約価値
+
+評価可能な取引について、各buyerの実績節約価値を計算する。共通の符号は次である。
+
+```text
+actual_signed_time_difference_timesteps
+= baseline_passage_timestep
+  - actual_passage_timestep
+```
+
+正ならactualはbaselineより早い。0なら同時刻である。負ならactualはbaselineより遅い。
+
+buyerについては次とする。
+
+```text
+actual_time_saving_timesteps
+= actual_signed_time_difference_timesteps
+
+actual_time_saving_seconds
+= baseline_minus_actual_passage_seconds
+```
+
+`actual_time_saving_seconds` は、actual passage observation recordに保存済みの `baseline_minus_actual_passage_seconds` をそのまま使う。秒差をtimestep差から本節の中で再定義しない。
+
+取引全体判定に用いるbuyer実績節約価値は次である。
+
+```text
+buyer_actual_declared_time_saving_value
+= actual_time_saving_seconds
+  × declared_vot_per_second
+```
+
+ここではdeclared VOTを使用する。declared VOTは、そのbuyerのmonetary frozen inputに凍結された `declared_vot_per_second` である。評価時にlive VehicleのVOTを読み直さない。
+
+true VOTによる実績時間節約価値は、後続のbuyer個別評価で使用する別の値である。取引全体の事後成立判定、buyer合計、参考支払の比例配分には使わない。buyerのtrue VOTが0でも、declared VOTが正なら、取引全体判定はdeclared VOTによる実績節約価値で行う。
+
+各buyerについて、実績節約価値が0以下なら事後不成立とする。0を事後成立側へ含めない。1件でも0以下なら、残りのbuyerが大きな正の節約価値を持っていても事後不成立である。
+
+## 6. seller実績遅延
+
+評価可能な取引について、各sellerのactual delayを次の意味で扱う。
+
+```text
+actual_delay_timesteps
+= actual_passage_timestep
+  - baseline_passage_timestep
+= -baseline_minus_actual_passage_timesteps
+
+actual_delay_seconds
+= -baseline_minus_actual_passage_seconds
+```
+
+`baseline_minus_actual_passage_timesteps` と `baseline_minus_actual_passage_seconds` は、actual passage observation recordの保存済み差である。actual delayは、その符号を反転した遅延である。
+
+actual delayの意味は次である。
+
+- 正: baselineより遅い
+- 0: baselineと同時刻
+- 負: baselineより早い
+
+時間評価、および後続のseller個別評価では、負のactual delayを自動的に0へ切り上げない。早い通過を「遅延0」として個別の時間評価へ渡すと、早期通過の事実が消える。
+
+ただし、取引全体の実績要求補償では、非負遅延だけを使用する。
+
+```text
+seller_actual_compensable_delay_seconds
+= max(actual_delay_seconds, 0)
+```
+
+この `max` は、取引全体の要求補償額を非負にするためのものである。個別評価用のactual delayそのものを0へ置換しない。
+
+## 7. seller実績要求補償
+
+sellerごとの実績要求補償額は次である。
+
+```text
+seller_actual_required_compensation
+= seller_actual_compensable_delay_seconds
+  × declared_vot_per_second
+```
+
+取引全体の要求補償にはdeclared VOTを使う。declared VOTは、そのsellerのmonetary frozen inputに凍結された `declared_vot_per_second` である。
+
+actual delayが0または負なら、`seller_actual_compensable_delay_seconds` は0であり、実績要求補償額も0である。
+
+早期通過したsellerをbuyerへ変更しない。そのsellerの実績要求補償額は0だが、seller roleのままである。参考補償の対象としてもsellerのまま扱う。buyerの参考支払式の分子側へ、早期sellerをbuyer価値として移さない。
+
+true VOTによる実績遅延損失は、後続のseller個別評価用である。取引全体の実績要求補償には使わない。sellerのtrue VOTが0でも、取引全体補償はdeclared VOTと非負のactual delayから計算する。declared VOTが0なら、遅延が正でも取引全体の実績要求補償額は0である。
+
+## 8. 事後成立と事後不成立
+
+評価可能であることを前提に、次の順で判定する。順序を入れ替えない。
+
+1. 各buyerの実績節約価値を計算する。
+2. 1件でも0以下なら事後不成立とする。
+3. 全buyerが正ならbuyer合計を計算する。
+4. 各sellerの実績要求補償額を計算する。
+5. seller合計を計算する。
+6. buyer合計とseller合計を比較する。
+
+buyer合計は、全buyerの `buyer_actual_declared_time_saving_value` の合計である。seller合計は、全sellerの `seller_actual_required_compensation` の合計である。
+
+buyer合計がseller合計未満なら事後不成立とする。
+
+buyer合計がseller合計以上なら事後成立とする。
+
+等号は事後成立側である。buyer合計とseller合計が等しい場合を事後不成立にしない。
+
+手順2で事後不成立になった場合は、参考金額の確定に進む。その場合の参考金額は、次節の全員0である。buyer合計とseller合計の比較へは進まない。ただし、事後不成立という結果自体は確定する。評価不能へ戻さない。
+
+sellerが0件の取引は、本節の対象外である。正式候補のseller非空契約は既存の成立時契約として残る。本節は、buyerとsellerが存在する評価可能なTradeWaitの事後判定を定める。
+
+## 9. 事後不成立時の参考金額
+
+事後不成立の場合は次とする。
+
+- 全buyerの参考支払額を0とする。
+- 全sellerの参考補償額を0とする。
+
+この0は、事後不成立を理由とする参考金額0である。式 `reference_payment_b` を適用した結果の0ではない。sellerの実績要求補償が個別に0であることでもない。判定結果として、その取引の全buyerと全sellerの参考金額を0で確定する。
+
+次と混同しない。
+
+- 正式支払額が0
+- 正式補償額が0
+- 事後成立したsellerの実績要求補償額が0
+- 評価不能で参考金額を計算しないこと
+
+事後不成立の0は、参考金額を計算して保存する正式な0である。評価不能の未計算とは別である。
+
+正式支払と正式補償は変更しない。事後不成立だからといって、成立時に凍結した `payment_paid_in_this_transaction` や `payment_received_in_this_transaction` を0へ書き換えない。
+
+## 10. 事後成立時の参考seller補償
+
+各sellerの参考補償額は、自身の実績要求補償額とする。
+
+```text
+reference_compensation_s
+= seller_actual_required_compensation_s
+```
+
+seller合計は、各seller参考補償額の合計である。事後成立時は、この合計がseller実績要求補償の合計と一致する。
+
+他sellerの遅延で配分し直さない。true VOTで配分し直さない。buyerの節約価値の比でseller補償を再配分しない。早期または同時刻で実績要求補償が0のsellerは、参考補償も0である。その0は事後成立のままのseller個別0であり、事後不成立による全員0とは別である。
+
+## 11. 事後成立時の参考buyer支払
+
+正式支払と同じ比例配分構造を、事後値へ適用する。
+
+buyer b の参考支払額は次である。
+
+```text
+reference_payment_b
+= seller_actual_required_compensation_total
+  × buyer_actual_declared_time_saving_value_b
+  ÷ buyer_actual_declared_time_saving_value_total
+```
+
+既存の正式支払式 `P_b = R × G_b / G` との対応は次である。
+
+| 正式支払 | 事後参考支払 |
+| --- | --- |
+| 正式支払 `P_b` | buyer b の参考支払 `reference_payment_b` |
+| 成立時seller必要補償総額 `R` | seller実績要求補償総額 `seller_actual_required_compensation_total` |
+| 成立時buyer価値 `G_b` | buyer b のdeclared VOTによる実績節約価値 `buyer_actual_declared_time_saving_value_b` |
+| 成立時buyer価値合計 `G` | buyer実績節約価値合計 `buyer_actual_declared_time_saving_value_total` |
+
+正式支払の既存fieldとの対応は次である。本節は事後側の概念名を定める。事後結果の正式field名は後続調査で確定する。
+
+- `P_b` は `payment_P_b`
+- `R` は `total_required_compensation_R`
+- `G_b` は `gross_time_value_G_b`
+- `G` は `total_buyer_value_G`
+
+事後成立では、全buyerの実績節約価値が正である。したがって分母 `buyer_actual_declared_time_saving_value_total` も正である。分母0の除算を、事後成立の計算パスに置かない。
+
+seller実績要求補償総額が0なら、全buyerの参考支払額は0である。これは比例配分式の分子が0であるためであり、事後不成立の全員0とは理由が異なる。取引は事後成立のままである。
+
+buyer合計とseller合計が等しい場合も、同じ式を適用する。等号のときに別式へ切り替えない。surplusをbuyerから追加徴収しない。buyer合計がseller合計より大きい場合も、参考支払の合計の基準はseller実績要求補償総額であり、buyer合計そのものではない。
+
+## 12. 数値計算方針
+
+既存の正式支払計算と同じ方針を維持する。
+
+- 丸めない
+- toleranceを導入しない
+- Decimalを導入しない
+- 最後のbuyerへ残差を載せない
+- buyer順に応じたfloat誤差補正を行わない
+- 完全比較を使用する
+
+各buyerへ比例配分式を独立に適用する。最後のbuyerの参考支払を、seller実績要求補償総額から先行buyerの参考支払を引いた残りにしない。
+
+buyer合計とseller合計の比較も完全比較である。`buyer合計 >= seller合計` を事後成立、`buyer合計 < seller合計` を事後不成立とする。toleranceで等号付近を成立側または不成立側へ寄せない。
+
+buyer実績節約価値が0以下かの判定も完全比較である。0を正とみなさない。
+
+浮動小数点により、参考buyer支払の合計とseller実績要求補償総額がbit完全一致しない可能性は残る。この理由で残差補正を導入しない。正式支払モジュールが `Σ payment_P_b` と `R` の事後一致を検証せず、各buyerへ `R * G_b / G` を独立適用しているのと同じ方針である。
+
+## 13. 正式金額との分離
+
+成立時の正式金額の正本は次である。
+
+- buyer: `payment_paid_in_this_transaction`
+- seller: `payment_received_in_this_transaction`
+
+これらはmonetary frozen inputに凍結された、その取引だけの正式金額である。事後評価で変更しない。事後成立、事後不成立、評価不能のいずれでも書き換えない。
+
+参考金額は、独立した事後評価結果として保存する。正式金額のfieldへ上書きしない。参考支払を `payment_paid_in_this_transaction` と呼ばない。参考補償を `payment_received_in_this_transaction` と呼ばない。
+
+Vehicleの累計 `payment_paid` と `payment_received` を、取引別正式金額として使用しない。累計には他取引の金額が混ざる。参考金額をVehicle累計へ加算しない。
+
+## 14. 入力の取得元
+
+取引識別はTradeWaitから取る。
+
+- `tvt_decision_timestep`
+- `node_name`
+- `buyers_sorted`
+
+role別VisitはTradeWaitから取る。
+
+- `buyer_visit_keys`
+- `seller_visit_keys`
+- `nonparticipating_visit_keys`
+- `all_visit_keys`
+
+actual結果はWaitEntryから取る。
+
+- actual passage observation record
+- observation status
+- `baseline_minus_actual_passage_seconds`
+- `baseline_minus_actual_time_value`
+
+`baseline_minus_actual_passage_seconds` は、buyer実績節約秒とseller実績遅延秒の元になる保存済み秒差である。`baseline_minus_actual_time_value` は、共通observation recordに保存された true VOT による時間価値である。取得元としてrecord上に存在するが、取引全体の実績節約価値と実績要求補償には使わない。取引全体判定は、秒差と monetary frozen input の declared VOT から行う。
+
+取引全体判定用のdeclared VOTは、buyerとsellerのmonetary frozen inputから取る。
+
+個別評価用のtrue VOTは、WaitEntryの `true_vot_per_second` に凍結済みである。本節の取引全体判定では使わない。取得元として存在することは記録するが、今回の計算入力にしない。
+
+正式金額は、monetary frozen inputの取引別支払と取引別受取から読む。読むだけで、変更しない。
+
+次は検索しない。
+
+- live Vehicle
+- `Vehicle.order_exchange_log`
+- Vehicle累計金額
+
+後続評価の正本は、WaitEntry、TradeWait、actual passage observation record、monetary frozen inputである。logを走査して取引を再発見しない。
+
+## 15. nonparticipating
+
+nonparticipatingは、次の計算対象にしない。
+
+- 取引全体の事後成立条件
+- buyer参考支払
+- seller参考補償
+
+nonparticipatingのactual観測状態は、取引全体の評価可能性を妨げない。buyerとsellerが全員観測済みなら、nonparticipatingが評価終了時未観測でも取引全体は評価可能である。
+
+nonparticipatingのactual結果と外部効果は、後続の個別評価で扱う。今回、nonparticipating向けの参考支払、参考補償、実績利得、満足判定を作らない。nonparticipatingをbuyerまたはsellerへ役割変更しない。
+
+## 16. 推奨する結果構造
+
+本節では概念構造を確定する。正式な型名、field名、field順序は確定しない。
+
+概念上の結果は次の3つである。
+
+- 取引全体のfrozen result
+- buyer別のfrozen参考支払record
+- seller別のfrozen参考補償record
+
+取引全体resultは、最低限、次を区別できる構造とする。
+
+- 取引識別
+- 評価status
+- buyer合計
+- seller合計
+- buyer参考支払record列
+- seller参考補償record列
+- 評価不能の場合に計算値が存在しないこと
+- 事後不成立の場合に参考金額が正式な0であること
+
+評価不能時は、合計や参考金額へ0を入れない。未計算を表現できる構造にする。たとえば合計や参考金額列を「空」または「値なし」として持ち、0円recordと区別する。表現方法の正式な型は、コード原典とテスト契約の追加確認後に確定する。
+
+事後不成立時の参考支払と参考補償は、全件0のrecordとして持つ。評価不能の「値なし」と同じ表現にしない。buyer実績節約価値が0以下で止まった事後不成立では、buyer合計とseller合計の比較を行っていない。合計比較まで進んで事後不成立になった場合は、その比較に使ったbuyer合計とseller合計を持てる。どちらの事後不成立でも、参考金額は正式な0である。
+
+事後成立時は、buyer合計、seller合計、各buyerの参考支払、各sellerの参考補償を持つ。sellerの参考補償0は、そのsellerの実績要求補償が0であるrecordとして持つ。
+
+buyer別recordとseller別recordは、取引全体resultの子として取引に紐づける。WaitEntryのobservation recordへ参考金額を追記して正本を二つにしない。
+
+正式な型名、field名、field順序は、コード原典とテスト契約の追加確認後に確定する。本節の概念名を、そのままPython識別子として確定したことにはしない。
+
+## 17. 保存場所
+
+取引全体評価resultは、actual passage wait registry、またはその責務に接続された独立した結果保存場所へ、transaction key単位で保存する方向とする。
+
+保存しない場所は次である。
+
+- 既存WaitEntryへの、取引全体の合計や参考金額の平坦な重複保存
+- TradeWaitへの、多数の事後評価fieldの直接追加
+
+WaitEntryはVisit単位の観測と凍結入力の正本である。取引全体の合計はVisit単位の値ではない。TradeWaitは成立時の取引構成の正本である。事後評価の合計と参考金額をそこに直接増やすと、成立時構造と事後結果が同じオブジェクトの責務になる。
+
+transaction keyは、TradeWaitの取引識別に対応する。同じ取引のresultを別keyで重複保存しない。
+
+正式な保存場所は、次のコード原典調査で確定する。本節ではregistry直下か独立保存場所かを断定しない。
+
+## 18. prepareとcommitの方向
+
+処理はprepareとcommitに分ける方向とする。
+
+prepareでは次を行う。
+
+- 評価終了未観測確定済みであることを確認する。
+- registryの終了確定済みtimestepが、Worldのevaluation end timestepと一致することを確認する。
+- 全trade、全roleの対応を確認する。
+- buyerとsellerの観測状態を確認する。
+- 評価不能、事後不成立、事後成立を判定する。
+- 必要な合計と参考金額を計算する。評価不能では計算しない。
+- frozen resultを全trade分作成する。
+- live状態を変更しない。
+
+prepareの途中で、WaitEntry、observation record、正式金額、Node履歴、Vehicleを更新しない。一部の取引だけを保存して残りを未保存のまま確定しない。全trade分のfrozen resultを揃えてからcommitする。
+
+commitでは次を行う。
+
+- transaction keyごとのprepared resultを保存する。
+- 検索、sort、再計算を行わない。
+- 正式金額、WaitEntry、observation record、Node履歴を変更しない。
+
+commitは、prepareが作ったfrozen resultを保存するだけである。commitの中で観測状態を読み直して判定をやり直さない。
+
+完全なrollbackや複合トランザクションは、今回導入しない方向とする。prepareが失敗した場合は、保存しない。commit開始後の部分失敗を自動で巻き戻す機構は、今回の単位に含めない。
+
+## 19. 反証結果
+
+少なくとも次を、実装時の反証項目として記録する。これらはBLOCKERではない。
+
+- buyer全員かつseller全員が観測済み: 評価可能である。事後不成立か事後成立かを、実績値で判定する。
+- buyerが1件未観測: 評価不能である。参考金額は未計算であり、0にしない。
+- sellerが1件未観測: 評価不能である。参考金額は未計算であり、0にしない。
+- nonparticipatingだけが未観測: 取引全体は評価可能である。buyerとsellerが全員観測済みなら、評価不能にしない。
+- buyer実績節約価値が0: 事後不成立である。0を事後成立側に含めない。
+- buyer実績節約価値が負: 事後不成立である。
+- sellerのactual delayが0: 実績要求補償は0である。
+- sellerのactual delayが負: 実績要求補償は0である。seller roleのままである。個別時間評価では負delayを0へ切り上げない。
+- sellerのtrue VOTが0: 取引全体補償はdeclared VOTを使う。true VOTの0を取引全体補償の入力にしない。
+- buyerのtrue VOTが0かつdeclared VOTが正: 取引全体はdeclared VOTで判定する。true VOTによる個別評価は別単位である。
+- buyer合計とseller合計が等しい: 事後成立である。等号を事後不成立にしない。
+- 事後不成立: 参考金額は全員0である。正式金額は維持する。
+- 評価不能: 参考金額は未計算である。0にしない。
+
+## 20. 今回実装しない範囲
+
+今回の実装単位に含めないものは次である。
+
+- buyer個別実績利得
+- seller個別実績利得
+- buyer満足判定
+- seller満足判定
+- 理由分類
+- nonparticipating外部効果の最終金額評価
+- Node順位差
+- Vehicle別集計
+- 取引別集計
+- Node別集計
+- 実験出力
+
+参考金額の確定までを今回の単位とする。参考金額を入力にする個別利得は、その次の単位である。
+
+## 21. 未確定事項
+
+次は、後続の限定コード調査で確定する。本節では確定しない。
+
+- 正式な型名
+- field名
+- field順序
+- status enum名
+- resultの正式保存場所
+- prepare・commit API名
+- result保存の再実行防止方法
+- テストファイル配置
+
+未確定事項を、本節の概念名や方向性から暗黙に決めたことにしない。実装指示では、これらの調査結果を別途確定してからコードへ進む。
+
+## 22. BLOCKERと利用者判断
+
+- BLOCKERなし
+- 利用者判断事項なし
+- 次の限定調査で、保存場所と型契約を確定する
+
+3状態の区別、declared VOTの使用、等号を事後成立側にすること、負delayの補償だけを0に切り上げること、評価不能の参考金額を0にしないこと、事後不成立の参考金額を全員0にすることは、本節で確定した。これらを利用者判断事項として残さない。
+
+## 23. 次の作業
+
+今回の文書追記後は次の順で進む。
+
+1. Terminalで本節の原文と差分を独立確認する。
+2. 詳細設計第4巻だけを、`document` を含むコミット名で保存する。
+3. commit結果確認後、別指示でpushする。
+4. push後、進捗第3巻へ短い要約を別作業で追記する。
+5. 両文書保存後、結果保存場所と型契約の限定調査へ進む。
+6. それまではコード実装へ進まない。
