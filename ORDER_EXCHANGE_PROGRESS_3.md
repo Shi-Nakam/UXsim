@@ -2595,3 +2595,69 @@ nonparticipating外部効果、Node順位差、Vehicle総合満足、Vehicle累�
 
 - 次は実装直前の限定コード調査
 - その調査と追加確認が完了するまでコード実装へ進まない
+
+# TVT-MP buyer・seller個別追加評価の実装・検証を完了（2026-10-06）
+
+正式参照先:
+
+- `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_4.md`
+- 「TVT-MP buyer・seller個別追加評価の実装・検証完了記録（2026-10-06）」
+
+## 1. 設計・実装コミットとリポジトリ状態
+
+- 実装前設計コミット: `dd274c0`（`document TVT-MP individual ex-post evaluation pre-implementation design`）
+- 実装コミット: `f73ff1a`（`implement and test TVT-MP individual ex-post evaluation`）
+- 実装コミットはpush済み
+- branch: `feature/intersection-order-control`
+- ローカルHEADとorigin一致、tracked未コミット変更なし
+- 未追跡: `diagnostics/order_control.zip`（既存のまま）
+
+## 2. 実装概要
+
+本番: `uxsim/order_control_tvt_mp_actual_passage.py`、`uxsim/uxsim.py`
+
+テスト: 新規 `tests_order_control_tvt_mp_individual_ex_post_evaluation.py`（117件）、更新 `tests_order_control_tvt_mp_evaluation_end.py`（接続後38件）
+
+enum: `OrderControlTvtMpIndividualSatisfactionStatus`（SATISFIED / UNSATISFIED）、`OrderControlTvtMpBuyerSatisfactionReason`（3 member）、`OrderControlTvtMpSellerSatisfactionReason`（3 member）
+
+registry: `individual_ex_post_evaluation_results_by_transaction_key`、`individual_ex_post_evaluation_finalized_timestep`（TradeWait・WaitEntry・World.__init__直接初期化は追加なし）
+
+## 3. 判定・保存契約（要約）
+
+- **EVALUATION_UNAVAILABLE**: buyer・seller個別record列は両方`None`。観測済み相手方だけrecordを作らない。
+- **EX_POST_INFEASIBLE / EX_POST_FEASIBLE**: 全buyer・全sellerを個別評価。参考金額0は満足判定に使わない。
+
+満足境界: buyer利得0は**不満足**（等号は不満足側）、seller利得0は**満足**（等号は満足側）。正式金額（`payment_paid_in_this_transaction` / `payment_received_in_this_transaction`）のみ使用。参考金額は満足判定に使わない。
+
+buyer理由: `TRIVIALLY_UNSATISFIED_NONPOSITIVE_REALIZED_TIME_VALUE`、`UNSATISFIED_BY_HIGH_PAYMENT_RATE`、`SATISFIED_APPROPRIATE_PAYMENT_RATE`
+
+seller理由: `TRIVIALLY_SATISFIED_NONPOSITIVE_ACTUAL_DELAY`、`UNSATISFIED_INSUFFICIENT_COMPENSATION_RATE`、`SATISFIED_BY_SUFFICIENT_COMPENSATION_RATE`
+
+## 4. prepare・commit・評価終了接続
+
+- `prepare_tvt_mp_individual_ex_post_evaluation(world)` — live変更なし。取引全体commit後の保存済みstatusを読む。
+- `commit_tvt_mp_individual_ex_post_evaluation(prepared_update)` — result dict代入の後、finalized timestep代入（非atomic、rollbackなし）。
+
+評価終了helper内の順: 未観測確定prepare → commit → 取引全体prepare → commit → **個別prepare → commit** → return → `simulation_terminated()` → `basic_analysis()`。`simulation_terminated` / `basic_analysis`本体は未変更。
+
+接続後テスト修正: `test_world_init_source_unchanged_for_individual_registry_fields` を `World.__init__` sourceのみ検査へ訂正（helper接続を誤って拒否しない）。
+
+## 5. テストと正式サンプル
+
+回帰合計 **614件成功、0失敗**（個別117、事後74、actual passage 97、evaluation end 38、physical transfer 59、atomic apply 53、final rank 48、final consistency 57、baseline driver 71）。
+
+`python demos_and_examples/example_00en_simple.py`: 1200 s・810台・正常完走。保存済み**7指標**（completed trips 735/810、average speed 11.7 m/s、total travel time 119475.0 s、average travel time 162.6 s、average delay 62.6 s、delay ratio 0.385、total distance 1632250.0 m）すべて一致。
+
+## 6. 次の領域・BLOCKER
+
+- 次の正式領域: **nonparticipating外部効果**、**Node実通過順位差**
+- BLOCKERなし
+- 利用者判断事項なし
+
+## 7. 最新再開地点
+
+**本節が、buyer・seller個別追加評価の実装・検証完了後における最新再開地点である。**
+
+直前の「TVT-MP buyer・seller個別追加評価 実装前詳細設計を確定（2026-10-06）」§10は、その時点の記録として残す。技術詳細は詳細設計第4巻の完了記録を正本とする。
+
+- 次は nonparticipating外部効果とNode実通過順位差へ進む前に、本完了記録の文書保存（commit・push）を完了する
