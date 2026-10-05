@@ -11391,3 +11391,633 @@ python demos_and_examples/example_00en_simple.py
 
 - BLOCKERなし
 - 利用者判断事項なし
+
+# TVT-MP buyer・seller個別追加評価の実装前詳細設計（2026-10-06）
+
+本節は、次の正式実装単位「buyer・seller個別追加評価」の実装前詳細設計である。実装完了記録ではない。
+
+本節を、buyer・seller個別追加評価の最新の正式参照先とする。直前までの大見出しは削除、短縮、置換、書換えしない。過去節と本節の表現が異なる場合も、過去節は当時の記録として残す。buyer・seller個別追加評価を実装するときは、本節を最新の実装前詳細設計として読む。
+
+現在の実装済み状態は次である。
+
+- 取引全体事後評価の実装コミット: `512eae1`
+- 取引全体事後評価の実装・検証完了記録: `e398684`
+- 取引全体事後評価は実装、491件の回帰、正式サンプル回帰、commit、pushまで完了
+- 次の正式領域はbuyer・seller個別追加評価
+
+本節の追記作業では、Pythonコード、テスト、診断、進捗第3巻以外の文書、`diagnostics/order_control.zip`、およびGit管理状態を変更しない。
+
+## 1. 今回の正式実装単位
+
+評価終了時未観測確定と取引全体事後評価が正常完了した後、評価可能な各取引について、全buyer・sellerの次を計算・保存する。
+
+- true VOTによる実績時間価値
+- 当該取引の正式支払または正式補償
+- 取引別実績利得
+- 満足または不満足
+- 満足・不満足理由
+- 条件を満たす場合だけ、1秒当たり正式支払額または正式補償額
+
+今回実装しないものは次である。
+
+- nonparticipating外部効果
+- Node実通過順位差
+- 全取引を通じたVehicle総合満足
+- Vehicle累計の1秒当たり評価
+- Vehicle単位集計
+- 取引集計
+- Node集計
+- welfare
+- 実験出力
+- 参考利得
+
+これらは後続の領域である。取引全体の3状態と参考金額が未確定のまま、個別利得や満足判定へ進まない。個別追加評価は、取引全体事後評価の完了後に行う。
+
+## 2. 取引全体statusとの関係
+
+### EVALUATION_UNAVAILABLE
+
+buyerまたはsellerが1件でもactual未観測である。
+
+この場合:
+
+- buyer個別評価record列は `None`
+- seller個別評価record列は `None`
+- 観測済みの相手方だけ個別recordを作らない
+- 個別実績利得を計算しない
+- 満足・不満足を判定しない
+- 理由分類を作らない
+- 未計算を0円または不満足として扱わない
+
+どのVisitが未観測だったかは、既存のTradeWaitとWaitEntryから後で確認できる。個別評価resultへ未観測情報を重複保存しない。
+
+### EX_POST_INFEASIBLE
+
+buyer・sellerは全員actual観測済みである。
+
+この場合:
+
+- 全buyer・sellerの個別評価を計算・保存する
+- 満足判定には正式支払・正式補償を使う
+- 取引全体事後不成立による参考金額0は満足判定に使わない
+- 取引全体事後不成立と個人の満足・不満足を別判定にする
+- 正式金額を変更しない
+
+取引全体が事後不成立でも、sellerが個別には満足、buyerが個別には満足となる可能性を正常に扱う。
+
+### EX_POST_FEASIBLE
+
+buyer・sellerは全員actual観測済みである。
+
+この場合も、全buyer・sellerの個別評価を計算・保存する。満足判定には正式金額を使う。参考金額は個別満足判定の入力にしない。
+
+## 3. 個別満足status
+
+次の共通enumを設ける方向とする。
+
+推奨型名: `OrderControlTvtMpIndividualSatisfactionStatus`
+
+member:
+
+- `SATISFIED`
+- `UNSATISFIED`
+
+中立状態は設けない。
+
+評価不能は個別record自体を作らないため、このenumへ `EVALUATION_UNAVAILABLE` を追加しない。
+
+## 4. buyerの時間と実績価値
+
+buyerのactual time saving:
+
+```text
+actual_time_saving_timesteps
+= baseline_passage_timestep - actual_passage_timestep
+
+actual_time_saving_seconds
+= baseline_minus_actual_passage_seconds
+```
+
+true VOTによる実績時間節約価値:
+
+```text
+buyer_realized_time_value
+= actual_time_saving_seconds
+  × true_vot_per_second
+```
+
+符号:
+
+- 正: true VOT上の時間節約価値が正
+- 0: 時間節約0、またはtrue VOTが0
+- 負: baselineより遅い場合など
+
+取引全体判定用のdeclared VOT実績節約価値とは別の値である。
+
+## 5. buyerの正式支払と実績利得
+
+正式支払:
+
+```text
+official_payment
+= payment_paid_in_this_transaction
+```
+
+buyer取引別実績利得:
+
+```text
+buyer_realized_gain
+= buyer_realized_time_value - official_payment
+```
+
+Vehicle累計 `payment_paid` を取引別正式支払として使わない。参考支払を実績利得の計算に使わない。参考支払による別の参考利得は今回作らない。
+
+## 6. buyerの満足判定
+
+- `buyer_realized_gain > 0` → `SATISFIED`
+- `buyer_realized_gain <= 0` → `UNSATISFIED`
+
+等号は不満足側である。中立状態を作らない。
+
+## 7. buyerの理由enum
+
+推奨型名: `OrderControlTvtMpBuyerSatisfactionReason`
+
+member:
+
+- `TRIVIALLY_UNSATISFIED_NONPOSITIVE_REALIZED_TIME_VALUE`
+- `UNSATISFIED_BY_HIGH_PAYMENT_RATE`
+- `SATISFIED_APPROPRIATE_PAYMENT_RATE`
+
+### TRIVIALLY_UNSATISFIED_NONPOSITIVE_REALIZED_TIME_VALUE
+
+次の場合: `buyer_realized_time_value <= 0`
+
+含むケース:
+
+- actual time savingが0
+- actual time savingが負
+- actual time savingは正だがtrue VOTが0
+- formal paymentが0でもrealized time valueが0以下
+
+この分岐では、1秒当たり正式支払額を計算しない。fieldは `None` とする。
+
+### UNSATISFIED_BY_HIGH_PAYMENT_RATE
+
+前提:
+
+- actual time saving secondsが正
+- buyer realized time valueが正
+
+1秒当たり正式支払額:
+
+```text
+official_payment_per_saved_second
+= official_payment / actual_time_saving_seconds
+```
+
+判定: `official_payment_per_saved_second >= true_vot_per_second`
+
+等号を含む。時間短縮できたが、正式支払率がtrue VOT以上であるため不満足である。
+
+### SATISFIED_APPROPRIATE_PAYMENT_RATE
+
+前提:
+
+- actual time saving secondsが正
+- buyer realized time valueが正
+
+判定: `official_payment_per_saved_second < true_vot_per_second`
+
+時間短縮でき、そのうえで正式支払率がtrue VOT未満であるため満足である。
+
+この理由は、支払率だけが単独で満足を生んだという意味ではない。時間短縮と適正な支払率の組合せによる満足である。そのためmember名へ `BY` を入れない。
+
+## 8. sellerの時間と実績遅延損失
+
+sellerのactual delay:
+
+```text
+actual_delay_timesteps
+= actual_passage_timestep - baseline_passage_timestep
+= -baseline_minus_actual_passage_timesteps
+
+actual_delay_seconds
+= -baseline_minus_actual_passage_seconds
+```
+
+true VOTによる実績遅延損失:
+
+```text
+seller_realized_delay_loss
+= actual_delay_seconds
+  × true_vot_per_second
+```
+
+負のactual delayを0へ切り上げない。
+
+- 正: baselineより遅く、遅延損失が正
+- 0: baselineと同時刻、またはtrue VOTが0
+- 負: baselineより早く、遅延損失も負
+
+早期通過してもsellerのまま扱う。buyerへ役割変更しない。declared VOTによる取引全体の実績要求補償とは別の値である。
+
+## 9. sellerの正式補償と実績利得
+
+正式補償:
+
+```text
+official_compensation
+= payment_received_in_this_transaction
+```
+
+seller取引別実績利得:
+
+```text
+seller_realized_gain
+= official_compensation - seller_realized_delay_loss
+```
+
+Vehicle累計 `payment_received` を取引別正式補償として使わない。参考補償を実績利得の計算に使わない。参考補償による別の参考利得は今回作らない。
+
+## 10. sellerの満足判定
+
+- `seller_realized_gain >= 0` → `SATISFIED`
+- `seller_realized_gain < 0` → `UNSATISFIED`
+
+等号は満足側である。中立状態を作らない。
+
+actual delayが0、正式補償が0なら、realized gainは0で満足である。
+
+## 11. sellerの理由enum
+
+推奨型名: `OrderControlTvtMpSellerSatisfactionReason`
+
+member:
+
+- `TRIVIALLY_SATISFIED_NONPOSITIVE_ACTUAL_DELAY`
+- `UNSATISFIED_INSUFFICIENT_COMPENSATION_RATE`
+- `SATISFIED_BY_SUFFICIENT_COMPENSATION_RATE`
+
+### TRIVIALLY_SATISFIED_NONPOSITIVE_ACTUAL_DELAY
+
+次の場合: `actual_delay_seconds <= 0`
+
+含むケース:
+
+- baselineと同時刻
+- baselineより早い
+- 正式補償が0
+- 後続のtrue VOT損失が0または負
+
+この分岐では1秒当たり正式補償額を計算しない。fieldは `None` とする。
+
+### UNSATISFIED_INSUFFICIENT_COMPENSATION_RATE
+
+前提: `actual_delay_seconds > 0`
+
+1秒当たり正式補償額:
+
+```text
+official_compensation_per_delayed_second
+= official_compensation / actual_delay_seconds
+```
+
+判定: `official_compensation_per_delayed_second < true_vot_per_second`
+
+実際に遅延し、そのうえで正式補償率がtrue VOT未満であるため不満足である。
+
+この理由は、補償率だけが単独で不満足を生んだという意味ではない。遅延と不十分な補償率の組合せによる不満足である。そのためmember名へ `BY` を入れない。
+
+### SATISFIED_BY_SUFFICIENT_COMPENSATION_RATE
+
+前提: `actual_delay_seconds > 0`
+
+判定: `official_compensation_per_delayed_second >= true_vot_per_second`
+
+等号を含む。遅延しても、正式補償率がtrue VOT以上なので満足である。
+
+## 12. buyer個別評価record
+
+推奨型名: `OrderControlTvtMpBuyerIndividualExPostEvaluationRecord`
+
+推奨field順:
+
+1. `visit_key`
+2. `vehicle_name`
+3. `realized_time_value`
+4. `official_payment`
+5. `realized_gain`
+6. `satisfaction_status`
+7. `satisfaction_reason`
+8. `official_payment_per_saved_second`
+
+契約:
+
+- frozen dataclass
+- `realized_time_value` は負、0、正を許容
+- `official_payment` は0以上
+- `realized_gain` は `realized_time_value - official_payment` と完全一致
+- `official_payment_per_saved_second` は必要な分岐だけ数値
+- 自明な不満足では `None`
+- 参考支払は複写しない
+- actual時間差、true VOT、declared VOTを複写しない
+
+## 13. seller個別評価record
+
+推奨型名: `OrderControlTvtMpSellerIndividualExPostEvaluationRecord`
+
+推奨field順:
+
+1. `visit_key`
+2. `vehicle_name`
+3. `realized_delay_loss`
+4. `official_compensation`
+5. `realized_gain`
+6. `satisfaction_status`
+7. `satisfaction_reason`
+8. `official_compensation_per_delayed_second`
+
+契約:
+
+- frozen dataclass
+- `realized_delay_loss` は負、0、正を許容
+- `official_compensation` は0以上
+- `realized_gain` は `official_compensation - realized_delay_loss` と完全一致
+- `official_compensation_per_delayed_second` はactual delayが正の場合だけ数値
+- delayが0以下なら `None`
+- 参考補償は複写しない
+- actual時間差、true VOT、declared VOTを複写しない
+
+## 14. transaction単位の個別評価result
+
+推奨型名: `OrderControlTvtMpIndividualExPostEvaluationResult`
+
+推奨field:
+
+1. `tvt_decision_timestep`
+2. `node_name`
+3. `buyers_sorted`
+4. `trade_ex_post_evaluation_status`
+5. `buyer_evaluation_records`
+6. `seller_evaluation_records`
+
+### EVALUATION_UNAVAILABLE
+
+- buyer record列は `None`
+- seller record列は `None`
+- 観測済みの相手方だけrecordを作らない
+- 未計算と0を区別する
+
+どのVisitが未観測だったかは、TradeWaitと各WaitEntryから確認する。
+
+### EX_POST_INFEASIBLE
+
+- buyer全件の個別評価recordを保存
+- seller全件の個別評価recordを保存
+- 参考金額0は満足判定に使用しない
+- 個人の満足と取引全体事後不成立を別判定にする
+
+### EX_POST_FEASIBLE
+
+- buyer全件の個別評価recordを保存
+- seller全件の個別評価recordを保存
+- 満足判定は正式金額で行う
+- 参考金額は満足判定に使用しない
+
+## 15. 保存場所
+
+`OrderControlTvtMpActualPassageWaitRegistry` へ、transaction key単位の独立dictを追加する方向とする。
+
+推奨field名: `individual_ex_post_evaluation_results_by_transaction_key`
+
+理由:
+
+- 取引全体resultと同じtransaction keyで対応
+- WaitEntryとTradeWaitを肥大化させない
+- 同一Vehicleの複数取引を混同しない
+- 後続集計で取引全体resultと個別resultを並べて参照できる
+- observation recordと評価結果を混在させない
+
+## 16. 再実行防止
+
+registryへ次を追加する方向とする。
+
+`individual_ex_post_evaluation_finalized_timestep`
+
+契約:
+
+- 型は `int | None`
+- 初期値は `None`
+- evaluation end timestepの正本ではない
+- 再実行防止だけを担当
+- commitの最後に代入
+- TradeWaitやWaitEntryへfinalized flagを追加しない
+
+prepare前提:
+
+```text
+evaluation_end_unobserved_finalized_timestep
+== trade_ex_post_evaluation_finalized_timestep
+== Worldのevaluation end timestep
+```
+
+さらに:
+
+- individual finalized fieldが `None`
+- individual result dictが空
+
+を確認する。
+
+dictが非空でfinalized fieldが `None` なら部分commit状態として拒否する。rollbackや自動修復は行わない。
+
+## 17. prepareの方向
+
+prepareは次を行う。
+
+- 実World確認
+- evaluation end境界確認
+- 未観測確定済み確認
+- 取引全体事後評価済み確認
+- 個別評価未実行確認
+- TradeWait、WaitEntry、取引全体resultの対応確認
+- 取引全体statusに応じた個別result作成
+- 評価可能な取引について全buyer・sellerの個別評価作成
+- live状態を変更しない
+
+使用する正本:
+
+- actual時間差: observation record
+- true VOT: WaitEntryまたはobservation record上の凍結値
+- 正式金額: monetary frozen input
+- 取引全体statusと参考金額: transaction key対応の取引全体result
+
+使用禁止:
+
+- live Vehicle
+- Vehicle.order_exchange_log
+- Vehicle累計金額
+- Node履歴からactual時間差を再計算
+- 正式金額の再計算
+- 参考金額を満足判定へ使用
+
+## 18. commitの方向
+
+commitはprepare済み個別result dictをregistryへ代入する。
+
+順序:
+
+1. individual result dictを代入
+2. 最後にindividual finalized timestepを代入
+
+commit中に検索、sort、計算、判定、record再構築を行わない。
+
+2代入は完全atomicではない。途中失敗時のrollbackは行わない。次回prepareが部分状態を拒否する。
+
+## 19. 評価終了処理への接続順
+
+正式な順序:
+
+1. 評価終了時未観測確定prepare
+2. 評価終了時未観測確定commit
+3. 取引全体事後評価prepare
+4. 取引全体事後評価commit
+5. buyer・seller個別評価prepare
+6. buyer・seller個別評価commit
+7. helperからreturn
+8. `simulation_terminated()`
+9. `basic_analysis()`
+
+## 20. Vehicle.order_exchange_logの扱い
+
+古い設計に個別評価recordをVehicle.order_exchange_logへ追加する方向が残っていても、今回の最新設計を優先する。
+
+正式方針:
+
+- 個別評価recordをVehicle.order_exchange_logへ追加しない
+- Vehicle.order_exchange_logを後続評価の正本にしない
+- 個別評価結果の正本はregistry上のtransaction単位result
+- live Vehicleやlogを検索しない
+- 同一Vehicleの複数取引をtransaction keyとVisitKeyで区別する
+
+古い記述は歴史的記録として削除しない。最新節への参照を優先する。
+
+## 21. 数値計算方針
+
+- 丸めなし
+- toleranceなし
+- Decimalなし
+- 完全比較
+- boolを数値として受け入れない
+- NaN、infinityを拒否
+- 0除算になる分岐でrateを計算しない
+- 高度なPython技法より、明示的なfor loopを優先
+
+## 22. true VOT=0
+
+コードは次を正常に扱う。
+
+### buyer
+
+true VOT=0かつdeclared VOT>0で、actual savingが正の場合:
+
+- realized time valueは0
+- realized gainは `0 - official_payment`
+- 自明な不満足
+- payment per saved secondを理由分類のために計算しない
+
+研究条件としてtrue VOT=0を実際に許容するかは未確定であり、コード対応方針と研究条件を区別する。
+
+### seller
+
+true VOT=0でactual delayが正の場合:
+
+- realized delay lossは0
+- official compensationは0以上
+- realized gainは0以上
+- compensation rateがtrue VOT以上なので満足
+- 理由は `SATISFIED_BY_SUFFICIENT_COMPENSATION_RATE`
+
+## 23. 参考利得
+
+今回、参考支払・参考補償を使った別の参考利得は作らない。
+
+理由:
+
+- 既存正式な個別実績利得は正式金額を使う
+- 参考金額は取引全体事後条件の分析用
+- 参考金額を正式金額の代替にしない
+- 参考利得の式は既存設計で確定していない
+
+## 24. 同一Vehicleの複数取引
+
+- transaction key単位で個別resultを保持
+- recordはVisitKey単位
+- 異なる取引を混ぜない
+- Vehicle累計から取引別利得を逆算しない
+- Vehicle全取引の総合満足判定は今回実装しない
+
+## 25. 今回実装しない範囲
+
+- nonparticipating外部効果
+- Node実通過順位差
+- 全取引を通じたVehicle総合満足
+- Vehicle累計の1秒当たり評価
+- transaction集計
+- Vehicle集計
+- Node集計
+- welfare
+- 実験出力
+- 参考利得
+
+## 26. 反証ケース
+
+- buyer actual未観測: 取引全体評価不能、個別record列 `None`
+- seller actual未観測: 同上
+- 観測済み相手方だけrecordを作らない
+- buyer realized gain正: 満足
+- buyer realized gain 0: 不満足
+- buyer realized gain負: 不満足
+- buyer saving 0または負: 自明な不満足、rate未計算
+- buyer true VOT 0: realized value 0、自明な不満足
+- seller realized gain正: 満足
+- seller realized gain 0: 満足
+- seller realized gain負: 不満足
+- seller delay 0または負: 自明な満足、rate未計算
+- seller true VOT 0かつdelay正: rateは0以上、満足
+- 取引全体事後不成立: 個別評価を全件計算、参考0は使用しない
+- 取引全体事後成立: 個別評価を全件計算
+- 正式金額0: buyerとsellerで各既定に従う
+- 同一Vehicle複数取引: transaction key別に分離
+
+## 27. 未確定事項
+
+次は実装直前の限定調査で確定する。
+
+- 正式なfield型注釈
+- enumの文字列value
+- dataclass constructor検査の詳細
+- transaction resultのfield順序の最終確認
+- prepared型名
+- prepare・commit API名
+- テストファイル配置
+- uxsim.pyでのhelper名を維持するか
+- 既存helper再利用範囲
+
+これらを利用者判断事項にしない。既存コード構造と可読性を基準に実装時に最適な方法を選ぶ。
+
+## 28. BLOCKERと利用者判断
+
+- BLOCKERなし
+- 利用者判断事項なし
+- 高度な実装上の選択は、正しさ、既存構造との整合、初学者が追える可読性を基準にCopilot側で決定する
+
+## 29. 次の作業
+
+1. 両文書の追記をTerminalで独立確認する。
+2. 第4巻と第3巻を1回の `document` コミットにまとめる。
+3. commit結果を確認する。
+4. pushは別指示で行う。
+5. push後に限定コード調査を行う。
+6. その後、型・registry field・専用テストから分割実装する。
+7. コード実装完了前にnonparticipating、順位差、集計へ進まない。

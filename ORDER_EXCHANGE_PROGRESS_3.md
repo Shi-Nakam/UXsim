@@ -2516,3 +2516,82 @@ buyer: `baseline_minus_actual_passage_seconds × declared_vot`。seller: `max(-�
 直前の「TVT-MP 取引全体事後評価 実装前詳細設計を確定（2026-10-05）」§15は、その時点の記録として残す。技術詳細は詳細設計第4巻の完了記録を正本とする。
 
 - 次は buyer・seller個別追加評価の設計・実装へ進む前に、本完了記録の文書保存（commit・push）を完了する
+
+# TVT-MP buyer・seller個別追加評価 実装前詳細設計を確定（2026-10-06）
+
+本節は、buyer・seller個別追加評価について、詳細設計第4巻へ追記した実装前詳細設計の進捗要約である。実装完了記録ではない。
+
+正式な詳細設計の正本は、次の節である。
+
+- `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_4.md`
+- 「TVT-MP buyer・seller個別追加評価の実装前詳細設計（2026-10-06）」
+
+全文は第4巻を参照する。本節は要約のみとする。
+
+現在の実装済み状態:
+
+- 取引全体事後評価の実装コミット: `512eae1`
+- 取引全体事後評価の実装・検証完了記録: `e398684`
+- 取引全体事後評価は実装、491件の回帰、正式サンプル回帰、commit、pushまで完了
+
+## 1. 次の正式実装単位
+
+評価終了時未観測確定と取引全体事後評価の後、評価可能な各取引について、全buyer・sellerのtrue VOT実績時間価値、正式金額、取引別実績利得、満足または不満足、理由、条件付きの1秒当たり正式額を計算・保存する。
+
+## 2. 取引全体statusとの関係
+
+- 評価不能: buyer・seller個別record列は `None`。観測済みの相手方だけrecordを作らない。未計算を0または不満足にしない。
+- 事後不成立・事後成立: 全buyer・sellerを個別評価する。参考金額0は満足判定に使わない。個人満足と取引全体判定は別である。
+
+## 3. 満足境界
+
+- buyerは利得0を不満足（等号は不満足側）
+- sellerは利得0を満足（等号は満足側）
+- 満足判定は正式金額を使用する
+- 参考金額は満足判定へ使わない
+- 参考利得は今回作らない
+- 中立状態は設けない
+
+## 4. buyer理由enum
+
+- `TRIVIALLY_UNSATISFIED_NONPOSITIVE_REALIZED_TIME_VALUE`
+- `UNSATISFIED_BY_HIGH_PAYMENT_RATE`
+- `SATISFIED_APPROPRIATE_PAYMENT_RATE`
+
+buyer realized time valueが0以下なら自明な不満足でrateは未計算。時間短縮かつ支払率がtrue VOT以上なら不満足、未満なら満足。
+
+## 5. seller理由enum
+
+- `TRIVIALLY_SATISFIED_NONPOSITIVE_ACTUAL_DELAY`
+- `UNSATISFIED_INSUFFICIENT_COMPENSATION_RATE`
+- `SATISFIED_BY_SUFFICIENT_COMPENSATION_RATE`
+
+actual delayが0以下なら自明な満足でrateは未計算。遅延かつ補償率がtrue VOT未満なら不満足、以上なら満足。負delayは0へ切り上げない。seller roleは変更しない。
+
+## 6. 保存場所と再実行防止
+
+registryへ独立dict `individual_ex_post_evaluation_results_by_transaction_key` を追加する方向とする。再実行防止は `individual_ex_post_evaluation_finalized_timestep`。TradeWaitとWaitEntryへ事後fieldを追加しない。Vehicle.order_exchange_logへ個別評価recordを追加しない。logを後続評価の正本にしない。
+
+## 7. prepare・commit・接続順
+
+prepareはliveを変更せず、observation record、凍結true VOT、monetary frozen input、取引全体resultから計算する。commitはindividual result dict代入の後、finalized timestepを最後に代入する。
+
+評価終了helper内の順: 未観測確定prepare → commit → 取引全体prepare → commit → 個別評価prepare → commit → return → `simulation_terminated()` → `basic_analysis()`。
+
+## 8. 今回実装しない範囲
+
+nonparticipating外部効果、Node順位差、Vehicle総合満足、Vehicle累計の1秒当たり評価、集計、welfare、実験出力、参考利得。
+
+## 9. BLOCKERと利用者判断
+
+- BLOCKERなし
+- 利用者判断事項なし
+
+## 10. 最新再開地点
+
+**本節が、buyer・seller個別追加評価の実装前詳細設計確定後における最新再開地点である。**
+
+直前の「TVT-MP 取引全体事後評価の実装・検証を完了（2026-10-05）」§7は、その時点の記録として残す。技術詳細は第4巻の本節対応設計を正本とする。
+
+- 次は実装直前の限定コード調査
+- その調査と追加確認が完了するまでコード実装へ進まない
