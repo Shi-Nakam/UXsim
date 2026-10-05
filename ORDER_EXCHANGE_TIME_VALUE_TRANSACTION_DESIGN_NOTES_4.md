@@ -11033,3 +11033,361 @@ commitは、prepareが作ったfrozen resultを保存するだけである。com
 4. push後、進捗第3巻へ短い要約を別作業で追記する。
 5. 両文書保存後、結果保存場所と型契約の限定調査へ進む。
 6. それまではコード実装へ進まない。
+
+# TVT-MP 取引全体事後評価の実装・検証完了記録（2026-10-05）
+
+本節は、正式実装単位「取引全体の事後評価」の実装・検証完了記録である。直前の大見出し「TVT-MP 取引全体事後評価の実装前詳細設計（2026-10-05）」は削除、短縮、置換、書換えしない。実装前詳細設計と本節の記述が異なる場合も、実装前節は当時の設計記録として残す。
+
+## 1. 実装コミットとリポジトリ状態
+
+- 実装コミット: `512eae1`
+- コミット名: `implement and test TVT-MP ex-post transaction evaluation`
+- push済み
+- branch: `feature/intersection-order-control`
+- ローカルHEADとoriginが一致
+- trackedファイルの未コミット変更なし
+- 既存の未追跡ファイル: `diagnostics/order_control.zip`
+
+## 2. 実装した本番ファイル
+
+- `uxsim/order_control_tvt_mp_actual_passage.py`
+- `uxsim/uxsim.py`
+
+## 3. 実装したテストファイル
+
+- `tests_order_control_tvt_mp_trade_ex_post_evaluation.py`（新規）
+- `tests_order_control_tvt_mp_evaluation_end.py`（更新）
+
+## 4. 実装した公開型
+
+### 4.1 status enum
+
+型名: `OrderControlTvtMpTradeExPostEvaluationStatus`
+
+member:
+
+- `EVALUATION_UNAVAILABLE`
+- `EX_POST_INFEASIBLE`
+- `EX_POST_FEASIBLE`
+
+### 4.2 buyer reference record
+
+型名: `OrderControlTvtMpTradeExPostBuyerReferencePaymentRecord`
+
+field順:
+
+1. `visit_key`
+2. `vehicle_name`
+3. `buyer_actual_declared_time_saving_value`
+4. `reference_payment`
+
+### 4.3 seller reference record
+
+型名: `OrderControlTvtMpTradeExPostSellerReferenceCompensationRecord`
+
+field順:
+
+1. `visit_key`
+2. `vehicle_name`
+3. `seller_actual_required_compensation`
+4. `reference_compensation`
+
+### 4.4 transaction result
+
+型名: `OrderControlTvtMpTradeExPostEvaluationResult`
+
+field順:
+
+1. `tvt_decision_timestep`
+2. `node_name`
+3. `buyers_sorted`
+4. `ex_post_evaluation_status`
+5. `buyer_actual_declared_time_saving_value_total`
+6. `seller_actual_required_compensation_total`
+7. `buyer_reference_payment_records`
+8. `seller_reference_compensation_records`
+
+公開recordとresultはfrozen dataclassである。
+
+## 5. registryへ追加したfield
+
+`OrderControlTvtMpActualPassageWaitRegistry`へ、次を追加した。
+
+- `trade_ex_post_evaluation_results_by_transaction_key`
+- `trade_ex_post_evaluation_finalized_timestep`
+
+前者は既存transaction keyからfrozen resultを取得するdictである。後者は再実行防止用であり、evaluation end timestepの正本ではない。
+
+TradeWaitへ事後評価resultやfinalized flagを追加していない。WaitEntryへ事後評価fieldを追加していない。
+
+## 6. 3状態の保存契約
+
+### 6.1 EVALUATION_UNAVAILABLE
+
+buyerまたはsellerが1件でもactual未観測の場合である。
+
+- buyer合計は `None`
+- seller合計は `None`
+- buyer record列は `None`
+- seller record列は `None`
+- 実績値と参考金額は未計算
+- 0として保存しない
+- nonparticipatingだけの未観測では評価不能にしない
+
+### 6.2 EX_POST_INFEASIBLE
+
+buyer・sellerは全員actual観測済みである。
+
+- buyer個別実績節約価値を全件計算・保存
+- buyer合計を計算・保存
+- seller個別実績要求補償額を全件計算・保存
+- seller合計を計算・保存
+- buyer参考支払を全員0
+- seller参考補償を全員0
+- 実績値を0へ書き換えない
+- 合計を `None` にしない
+
+buyer価値が0以下の場合でもseller側の実績計算を省略しない。
+
+例:
+
+- `seller_actual_required_compensation = 500`
+- `reference_compensation = 0`
+
+### 6.3 EX_POST_FEASIBLE
+
+- buyer個別実績節約価値とbuyer合計を保存
+- seller個別実績要求補償額とseller合計を保存
+- buyer参考支払を比例配分で保存
+- seller参考補償は自身の実績要求補償額
+- seller要求補償が0なら、そのsellerの参考補償も0
+- seller合計が0ならbuyer参考支払も全員0
+
+## 7. buyer計算
+
+buyerごとの取引全体判定値:
+
+```text
+buyer_actual_declared_time_saving_value
+= baseline_minus_actual_passage_seconds
+  × declared_vot_per_second
+```
+
+declared VOTはmonetary frozen inputから取得する。true VOTによるtime valueを取引全体判定に使用しない。
+
+次のいずれかなら事後不成立:
+
+- buyer実績節約価値が1件でも0以下
+- buyer全員正だがbuyer合計がseller合計未満
+
+## 8. seller計算
+
+sellerのactual delay:
+
+```text
+actual_delay_seconds
+= -baseline_minus_actual_passage_seconds
+```
+
+実績要求補償:
+
+```text
+seller_actual_required_compensation
+= max(actual_delay_seconds, 0)
+  × declared_vot_per_second
+```
+
+早期通過sellerはsellerのままであり、実績要求補償は0である。
+
+## 9. 事後成立条件
+
+次の両方を満たす場合に事後成立とする。
+
+- buyer全員の実績節約価値が正
+- buyer合計がseller合計以上
+
+等号は事後成立である。
+
+## 10. 参考buyer支払
+
+事後成立時:
+
+```text
+reference_payment_b
+= seller_actual_required_compensation_total
+  × buyer_actual_declared_time_saving_value_b
+  ÷ buyer_actual_declared_time_saving_value_total
+```
+
+事後不成立時は全buyerで0。評価不能時は未計算である。
+
+## 11. 参考seller補償
+
+事後成立時:
+
+```text
+reference_compensation_s
+= seller_actual_required_compensation_s
+```
+
+事後不成立時は全sellerで0。評価不能時は未計算である。
+
+## 12. 数値計算方針
+
+次を維持した。
+
+- 丸めなし
+- toleranceなし
+- Decimalなし
+- 最後のbuyerへの残差配分なし
+- float誤差の順序補正なし
+- 完全比較
+
+## 13. 正式金額との分離
+
+次の正式金額は変更していない。
+
+- `payment_paid_in_this_transaction`
+- `payment_received_in_this_transaction`
+
+Vehicleの累計金額を取引別正式額として使用していない。参考金額をVehicle累計へ加算していない。正式支払・正式補償を再計算していない。
+
+## 14. prepare
+
+追加したAPI: `prepare_tvt_mp_trade_ex_post_evaluation(world)`
+
+prepareは次を行う。
+
+- 実Worldであることの確認
+- evaluation end境界の確認
+- 評価終了時未観測確定済みtimestepの一致確認
+- 事後評価の未実行確認
+- result dictが空であることの確認
+- 全TradeWaitとWaitEntryの対応確認
+- waiting entryが存在しないことの確認
+- 全tradeの3状態判定
+- 個別実績値と合計の計算
+- 参考金額の計算
+- 全trade分のfrozen result作成
+
+prepare中にlive状態を変更しない。live Vehicle、Vehicle.order_exchange_log、Vehicle累計金額を検索しない。Node履歴からactual時間差を再計算しない。
+
+## 15. commit
+
+追加したAPI: `commit_tvt_mp_trade_ex_post_evaluation(prepared_update)`
+
+commit順:
+
+1. prepared済みresult dictをregistryへ代入
+2. 最後にfinalized timestepを代入
+
+commit中に検索、sort、判定、計算、再構築を行わない。
+
+commitは2代入であり、完全atomicではない。result dict代入後、finalized timestep代入前の例外窓は残る。rollbackや自動修復は実装していない。
+
+## 16. 評価終了処理への接続
+
+`World._maybe_finalize_tvt_mp_evaluation_end_unobserved_passages`内で、次の順に実行する。
+
+1. 評価終了時未観測確定prepare
+2. 評価終了時未観測確定commit
+3. 取引全体事後評価prepare
+4. 取引全体事後評価commit
+5. helperからreturn
+6. `simulation_terminated()`
+7. `basic_analysis()`
+
+未観測確定後の正式状態を事後評価prepareが読む。
+
+`simulation_terminated()`本体と`basic_analysis()`本体へTVT固有処理を追加していない。
+
+通常UXsim終了、途中停止、分割実行、終了後再呼出し、TSIZE一致経路の既存契約を維持した。
+
+## 17. テスト結果
+
+次の回帰テストを実行し、すべて成功した。
+
+| 対象 | 件数 |
+| --- | --- |
+| 取引全体事後評価 | 74 |
+| actual passage | 97 |
+| evaluation end | 32 |
+| physical transfer | 59 |
+| atomic apply | 53 |
+| final rank | 48 |
+| final consistency validation | 57 |
+| baseline driver | 71 |
+
+合計: 491件成功、失敗0件。
+
+変更した本番モジュールのpy_compileも成功した。
+
+## 18. 正式サンプル回帰
+
+実行コマンド:
+
+```text
+python demos_and_examples/example_00en_simple.py
+```
+
+実行結果:
+
+- simulation duration: 1200 s
+- number of vehicles: 810
+- 1200秒まで正常完走
+- `simulation finished`を表示
+- 例外なし
+- 異常終了なし
+
+保存済み基準値と一致した主要交通結果:
+
+| 指標 | 値 |
+| --- | --- |
+| completed trips | 735 / 810 |
+| average speed | 11.7 m/s |
+| total travel time | 119475.0 s |
+| average travel time | 162.6 s |
+| average delay | 62.6 s |
+| delay ratio | 0.385 |
+| total distance traveled | 1632250.0 m |
+
+今回のsetup timeは14.38 s、computation timeは0.03 sだった。これらは環境依存なので回帰判定に使用しない。
+
+結論:
+
+- TVTを使用しない通常UXsim経路への回帰は検出されなかった
+- 公式サンプルは正常終了した
+- 保存済み7指標はすべて一致した
+
+## 19. 今回変更しなかったもの
+
+- WaitEntryの既存識別field
+- TradeWaitの既存field
+- buyer・seller初回通知
+- actual passage observation recordのfield定義
+- Node別実通過履歴
+- 正式支払・正式補償
+- Vehicle累計
+- Vehicle.order_exchange_log
+- payment
+- compensation
+- candidate選択
+- final rank
+- final consistency validation
+- physical transfer
+- buyer・seller個別評価
+- 満足判定
+- 理由分類
+- nonparticipating外部効果
+- Node順位差
+- 集計
+- 実験出力
+
+## 20. 次の正式領域
+
+次の正式領域は、buyer・seller個別追加評価である。
+
+## 21. BLOCKERと利用者判断
+
+- BLOCKERなし
+- 利用者判断事項なし

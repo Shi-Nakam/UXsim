@@ -2454,3 +2454,65 @@ buyer合計がseller合計未満で事後不成立になる場合も、全実績
 
 - 結果保存場所と型契約の限定調査
 - その調査と追加設計が完了するまでコード実装へ進まない
+
+# TVT-MP 取引全体事後評価の実装・検証を完了（2026-10-05）
+
+正式参照先:
+
+- `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_4.md`
+- 「TVT-MP 取引全体事後評価の実装・検証完了記録（2026-10-05）」
+
+## 1. 実装コミットとリポジトリ状態
+
+- 実装コミット: `512eae1`
+- コミット名: `implement and test TVT-MP ex-post transaction evaluation`
+- push済み、branch `feature/intersection-order-control`
+- ローカルHEADとorigin一致、tracked未コミット変更なし
+- 未追跡: `diagnostics/order_control.zip`（既存のまま）
+
+## 2. 実装概要
+
+本番: `uxsim/order_control_tvt_mp_actual_passage.py`、`uxsim/uxsim.py`
+
+テスト: 新規 `tests_order_control_tvt_mp_trade_ex_post_evaluation.py`（74件）、更新 `tests_order_control_tvt_mp_evaluation_end.py`
+
+公開型: `OrderControlTvtMpTradeExPostEvaluationStatus`（3状態）、buyer/seller参考record、frozen `OrderControlTvtMpTradeExPostEvaluationResult`
+
+registry field: `trade_ex_post_evaluation_results_by_transaction_key`、`trade_ex_post_evaluation_finalized_timestep`（TradeWait・WaitEntryへは追加なし）
+
+## 3. 3状態と保存契約（要約）
+
+- **EVALUATION_UNAVAILABLE**: buyerまたはseller未観測。合計・record列は `None`。0で保存しない。nonparticipatingのみ未観測では評価可能。
+- **EX_POST_INFEASIBLE**: 全員観測済み。実績値と両合計は計算値のまま。参考金額のみ全員0。実績500・参考0を区別して保持。
+- **EX_POST_FEASIBLE**: 実績と合計を保存。buyer参考支払は比例配分、seller参考補償は自身の実績要求補償額。
+
+buyer: `baseline_minus_actual_passage_seconds × declared_vot`。seller: `max(-秒差, 0) × declared_vot`。true VOTは取引全体判定に使わない。
+
+事後成立: buyer全員正かつ buyer合計 ≥ seller合計（等号含む）。
+
+## 4. prepare・commit・接続
+
+- `prepare_tvt_mp_trade_ex_post_evaluation(world)` — 判定・計算・frozen result作成。live変更なし。
+- `commit_tvt_mp_trade_ex_post_evaluation(prepared_update)` — result dict代入の後、finalized timestep代入。commit中の再計算なし。2代入は非atomic（部分状態は次回prepareが拒否）。
+
+評価終了helper内の順: 未観測確定prepare → commit → 事後評価prepare → commit → return → `simulation_terminated()` → `basic_analysis()`。`simulation_terminated`/`basic_analysis`本体は未変更。
+
+## 5. テストと正式サンプル
+
+回帰合計 **491件成功、0失敗**（事後評価74、actual passage 97、evaluation end 32、他）。
+
+`python demos_and_examples/example_00en_simple.py`: 1200 s・810台・正常完走。保存済み7指標（completed trips 735/810、average speed 11.7 m/s、total/average travel time、average delay 62.6 s、delay ratio 0.385、total distance 1632250.0 m）すべて一致。TVT非使用経路の回帰なし。
+
+## 6. 次の領域・BLOCKER
+
+- 次の正式領域: **buyer・seller個別追加評価**
+- BLOCKERなし
+- 利用者判断事項なし
+
+## 7. 最新再開地点
+
+**本節が、取引全体事後評価の実装・検証完了後における最新再開地点である。**
+
+直前の「TVT-MP 取引全体事後評価 実装前詳細設計を確定（2026-10-05）」§15は、その時点の記録として残す。技術詳細は詳細設計第4巻の完了記録を正本とする。
+
+- 次は buyer・seller個別追加評価の設計・実装へ進む前に、本完了記録の文書保存（commit・push）を完了する
