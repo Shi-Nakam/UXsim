@@ -2306,3 +2306,142 @@ World初期化で、既存の`order_control_tvt_mp_actual_passage_wait_registry`
 4. pushは別指示で行う。
 5. push後に「評価終了時の未観測確定」の実装指示を作成する。
 6. それまではコード変更へ進まない。
+
+# TVT-MP 取引全体事後評価 実装前詳細設計を確定（2026-10-05）
+
+本節は、取引全体の事後評価について、詳細設計第4巻へ追記した実装前詳細設計の進捗要約である。実装完了記録ではない。
+
+正式な詳細設計の正本は、コミット `7d0ce67` に保存された次の節である。
+
+- `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_4.md`
+- 「TVT-MP 取引全体事後評価の実装前詳細設計（2026-10-05）」
+
+全文は第4巻を参照する。本節は要約のみとする。
+
+## 1. 次の正式実装単位
+
+- 取引全体の事後評価
+
+評価終了時未観測確定の後、各TradeWaitについて、buyer・sellerのactual結果から、評価不能・事後不成立・事後成立のいずれかを一度だけ確定する。同時に、評価可能な取引についてbuyer参考支払とseller参考補償を確定する。
+
+## 2. 評価時点
+
+- 評価終了時未観測確定の正常完了後
+- 全tradeを対象とする
+- buyer・seller初回通知を開始条件にしない
+
+registryの終了確定済みtimestepがWorldのevaluation end timestepと一致することを前提とする。nonparticipatingを含む全roleの終了確定後に実行するが、評価可能性はbuyer・sellerの観測状態だけで決める。
+
+## 3. 評価状態
+
+- 評価不能
+- 事後不成立
+- 事後成立
+- 評価不能と事後不成立を区別する
+
+status enumの細部名は実装時に既存命名へ合わせてよい。3状態を同一にしない。
+
+## 4. 評価可能性
+
+- buyerまたはsellerが1件でもactual未観測なら評価不能
+- nonparticipatingだけの未観測は、取引全体を評価不能にしない
+
+評価不能では実績節約価値、合計、参考金額、個別利得、満足判定を計算しない。
+
+## 5. buyerの判定値
+
+- declared VOTによる実績節約価値を使用
+- buyerが1人でも実績節約価値0以下なら事後不成立
+- true VOTによる値は後続の個別評価用
+
+実績節約秒は `baseline_minus_actual_passage_seconds` とdeclared VOTの積である。取引全体判定にtrue VOT time valueを使わない。
+
+## 6. sellerの判定値
+
+- actual delayはbaselineより遅い場合に正
+- 実績要求補償は `max(actual_delay_seconds, 0) × declared VOT`
+- 早期通過sellerの実績要求補償は0
+- seller roleは変更しない
+
+個別時間評価では負のactual delayを自動的に0へ切り上げない。取引全体の要求補償だけ非負遅延を使う。
+
+## 7. 取引全体の比較
+
+- buyer合計がseller実績要求補償総額未満なら事後不成立
+- buyer合計がseller合計以上なら事後成立
+- 等号は事後成立
+
+全buyerが正の節約価値であることを確認したうえで合計を比較する。完全比較である。
+
+## 8. 参考金額
+
+- 事後不成立ではbuyer・seller全員の参考金額を0
+- 評価不能では参考金額を未計算とし、0にしない
+- 事後成立時のseller参考補償は自身の実績要求補償額
+- 事後成立時のbuyer参考支払は次の比例配分
+
+`seller実績要求補償総額 × buyer個別実績節約価値 ÷ buyer実績節約価値合計`
+
+正式支払と同型の比例配分である。残差を最後のbuyerへ載せない。
+
+## 9. 正式金額との分離
+
+- 正式支払と正式補償は変更しない
+- Vehicle累計を取引別正式額として使わない
+- 参考金額をVehicle累計へ加算しない
+
+正本はmonetary frozen inputの `payment_paid_in_this_transaction` と `payment_received_in_this_transaction` である。
+
+## 10. 数値計算
+
+- 丸めなし
+- toleranceなし
+- Decimalなし
+- 最後のbuyerへの残差配分なし
+- 完全比較
+
+各buyerへ比例配分式を独立に適用する。参考buyer支払合計とseller実績要求補償総額のbit一致は検証しない。
+
+## 11. 結果構造の方向
+
+- 取引全体のfrozen result
+- buyer別参考支払record
+- seller別参考補償record
+- WaitEntryへ合計や参考金額を平坦に重複保存しない
+- TradeWaitへ多数の事後fieldを直接追加しない
+
+保存場所はactual passage wait registryまたは接続された独立保存場所の方向とする。transaction key単位で保存する。
+
+## 12. 今回まだ未確定の事項
+
+- 正式な型名
+- field名とfield順序
+- status enum名
+- resultの正式保存場所
+- prepare・commit API名
+- 再実行防止方法
+- テスト配置
+
+## 13. 今回実装しない範囲
+
+- buyer・seller個別実績利得
+- 満足判定
+- 理由分類
+- nonparticipating外部効果の最終評価
+- Node順位差
+- 集計
+- 実験出力
+
+## 14. BLOCKERと利用者判断
+
+- BLOCKERなし
+- 利用者判断事項なし
+
+## 15. 最新再開地点
+
+**本節が、取引全体事後評価の実装前詳細設計確定後における最新再開地点である。**
+
+直前の「TVT-MP 評価終了時未観測確定 実装前詳細設計を確定（2026-10-05）」§9は、その時点の記録として残す。最新手順は本節§15を参照する。
+
+- 結果保存場所と型契約の限定調査
+- その調査と追加設計が完了するまでコード実装へ進まない
