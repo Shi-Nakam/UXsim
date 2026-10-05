@@ -26,6 +26,8 @@ from uxsim.order_control_tvt_mp_actual_passage import (
     prepare_tvt_mp_actual_passage_evaluation_end_unobserved_finalization,
     commit_tvt_mp_trade_ex_post_evaluation,
     prepare_tvt_mp_trade_ex_post_evaluation,
+    prepare_tvt_mp_individual_ex_post_evaluation,
+    commit_tvt_mp_individual_ex_post_evaluation,
     OrderControlTvtMpTradeExPostEvaluationStatus,
 )
 from uxsim.order_control_tvt_mp_candidate_local_virtual_calculation import (
@@ -131,11 +133,22 @@ def _hook_monetary_frozen():
     )
 
 
-def _hook_observed_record(visit_key, role):
+def _hook_observed_record(
+    visit_key,
+    role,
+    *,
+    node_name="node_a",
+    buyers_sorted=None,
+    baseline_minus_actual_passage_seconds=180,
+):
+    if buyers_sorted is None:
+        buyers_sorted = (_hook_visit_key("buyer_1", 1),)
+    timesteps = baseline_minus_actual_passage_seconds // 60
+    time_value = baseline_minus_actual_passage_seconds * 0.5
     return OrderControlTvtMpActualPassageObservationRecord(
         tvt_decision_timestep=_HOOK_DECISION_TIMESTEP,
-        node_name="node_a",
-        buyers_sorted=(_hook_visit_key("buyer_1", 1),),
+        node_name=node_name,
+        buyers_sorted=buyers_sorted,
         visit_key=visit_key,
         vehicle_name=visit_key[0],
         role=role,
@@ -152,9 +165,9 @@ def _hook_observed_record(visit_key, role):
         baseline_minus_candidate_passage_timesteps=2,
         baseline_minus_candidate_passage_seconds=120,
         baseline_minus_candidate_time_value=60.0,
-        baseline_minus_actual_passage_timesteps=3,
-        baseline_minus_actual_passage_seconds=180,
-        baseline_minus_actual_time_value=90.0,
+        baseline_minus_actual_passage_timesteps=timesteps,
+        baseline_minus_actual_passage_seconds=baseline_minus_actual_passage_seconds,
+        baseline_minus_actual_time_value=time_value,
         candidate_minus_actual_passage_timesteps=1,
         candidate_minus_actual_passage_seconds=60,
         candidate_minus_actual_time_value=30.0,
@@ -180,11 +193,15 @@ def _register_hook_trade(
     *,
     node_name="node_a",
     observed_buyer=False,
+    observed_seller=False,
+    buyer_vehicle_name="buyer_a",
+    seller_vehicle_name="seller_a",
+    sorted_buyer_vehicle_name="buyer_1",
 ):
     registry = world.order_control_tvt_mp_actual_passage_wait_registry
-    buyers_sorted = (_hook_visit_key("buyer_1", 1),)
-    buyer_key = _hook_visit_key("buyer_a", 1)
-    seller_key = _hook_visit_key("seller_a", 1)
+    buyers_sorted = (_hook_visit_key(sorted_buyer_vehicle_name, 1),)
+    buyer_key = _hook_visit_key(buyer_vehicle_name, 1)
+    seller_key = _hook_visit_key(seller_vehicle_name, 1)
     buyer_status = (
         OrderControlTvtMpActualPassageWaitStatus.ACTUAL_PASSAGE_OBSERVED
         if observed_buyer
@@ -195,6 +212,8 @@ def _register_hook_trade(
         buyer_record = _hook_observed_record(
             buyer_key,
             OrderControlTvtMpActualPassageRole.BUYER,
+            node_name=node_name,
+            buyers_sorted=buyers_sorted,
         )
         _append_hook_node_history(world, node_name, buyer_key)
     buyer_entry = OrderControlTvtMpActualPassageWaitEntry(
@@ -202,7 +221,7 @@ def _register_hook_trade(
         node_name=node_name,
         buyers_sorted=buyers_sorted,
         visit_key=buyer_key,
-        vehicle_name="buyer_a",
+        vehicle_name=buyer_vehicle_name,
         role=OrderControlTvtMpActualPassageRole.BUYER,
         wait_status=buyer_status,
         baseline_passage_timestep=_HOOK_BASELINE_TIMESTEP,
@@ -219,14 +238,29 @@ def _register_hook_trade(
         monetary_frozen_input=_hook_monetary_frozen(),
         actual_passage_observation_record=buyer_record,
     )
+    seller_status = (
+        OrderControlTvtMpActualPassageWaitStatus.ACTUAL_PASSAGE_OBSERVED
+        if observed_seller
+        else OrderControlTvtMpActualPassageWaitStatus.WAITING_FOR_ACTUAL_PASSAGE
+    )
+    seller_record = None
+    if observed_seller:
+        seller_record = _hook_observed_record(
+            seller_key,
+            OrderControlTvtMpActualPassageRole.SELLER,
+            node_name=node_name,
+            buyers_sorted=buyers_sorted,
+            baseline_minus_actual_passage_seconds=-120,
+        )
+        _append_hook_node_history(world, node_name, seller_key)
     seller_entry = OrderControlTvtMpActualPassageWaitEntry(
         tvt_decision_timestep=_HOOK_DECISION_TIMESTEP,
         node_name=node_name,
         buyers_sorted=buyers_sorted,
         visit_key=seller_key,
-        vehicle_name="seller_a",
+        vehicle_name=seller_vehicle_name,
         role=OrderControlTvtMpActualPassageRole.SELLER,
-        wait_status=OrderControlTvtMpActualPassageWaitStatus.WAITING_FOR_ACTUAL_PASSAGE,
+        wait_status=seller_status,
         baseline_passage_timestep=_HOOK_BASELINE_TIMESTEP,
         candidate_passage_timestep=_HOOK_CANDIDATE_TIMESTEP,
         true_vot_per_second=0.5,
@@ -239,7 +273,7 @@ def _register_hook_trade(
         predicted_route_next_link_name="link_pred",
         common_frozen_input=_hook_common_frozen(),
         monetary_frozen_input=_hook_monetary_frozen(),
-        actual_passage_observation_record=None,
+        actual_passage_observation_record=seller_record,
     )
     registry.entries_by_node_name_and_visit_key[(node_name, buyer_key)] = buyer_entry
     registry.entries_by_node_name_and_visit_key[(node_name, seller_key)] = seller_entry
@@ -278,6 +312,8 @@ def test_exec_simulation_unobserved_finalize_order_before_termination_and_analys
     )
     original_ex_post_prepare = prepare_tvt_mp_trade_ex_post_evaluation
     original_ex_post_commit = commit_tvt_mp_trade_ex_post_evaluation
+    original_individual_prepare = prepare_tvt_mp_individual_ex_post_evaluation
+    original_individual_commit = commit_tvt_mp_individual_ex_post_evaluation
     original_terminated = World.simulation_terminated
     original_analysis = Analyzer.basic_analysis
 
@@ -296,6 +332,14 @@ def test_exec_simulation_unobserved_finalize_order_before_termination_and_analys
     def tracking_ex_post_commit(prepared_update):
         events.append("ex_post_commit")
         return original_ex_post_commit(prepared_update)
+
+    def tracking_individual_prepare(current_world):
+        events.append("individual_ex_post_prepare")
+        return original_individual_prepare(current_world)
+
+    def tracking_individual_commit(prepared_update):
+        events.append("individual_ex_post_commit")
+        return original_individual_commit(prepared_update)
 
     def tracking_terminated(current_world):
         events.append("terminated")
@@ -321,22 +365,32 @@ def test_exec_simulation_unobserved_finalize_order_before_termination_and_analys
                     "uxsim.order_control_tvt_mp_actual_passage.commit_tvt_mp_trade_ex_post_evaluation",
                     tracking_ex_post_commit,
                 ):
-                    with patch.object(
-                        World,
-                        "simulation_terminated",
-                        tracking_terminated,
+                    with patch(
+                        "uxsim.order_control_tvt_mp_actual_passage.prepare_tvt_mp_individual_ex_post_evaluation",
+                        tracking_individual_prepare,
                     ):
-                        with patch.object(
-                            Analyzer,
-                            "basic_analysis",
-                            tracking_analysis,
+                        with patch(
+                            "uxsim.order_control_tvt_mp_actual_passage.commit_tvt_mp_individual_ex_post_evaluation",
+                            tracking_individual_commit,
                         ):
-                            _run_exec_with_driver_patched(world)
+                            with patch.object(
+                                World,
+                                "simulation_terminated",
+                                tracking_terminated,
+                            ):
+                                with patch.object(
+                                    Analyzer,
+                                    "basic_analysis",
+                                    tracking_analysis,
+                                ):
+                                    _run_exec_with_driver_patched(world)
     assert events == [
         "unobserved_prepare",
         "unobserved_commit",
         "ex_post_prepare",
         "ex_post_commit",
+        "individual_ex_post_prepare",
+        "individual_ex_post_commit",
         "terminated",
         "analysis",
     ]
@@ -379,6 +433,13 @@ def test_exec_simulation_unobserved_finalize_sets_waiting_entries_after_last_tra
         ex_post_result.ex_post_evaluation_status
         is OrderControlTvtMpTradeExPostEvaluationStatus.EVALUATION_UNAVAILABLE
     )
+    assert registry.individual_ex_post_evaluation_finalized_timestep == 9
+    assert len(registry.individual_ex_post_evaluation_results_by_transaction_key) == 1
+    individual_result = next(
+        iter(registry.individual_ex_post_evaluation_results_by_transaction_key.values())
+    )
+    assert individual_result.buyer_evaluation_records is None
+    assert individual_result.seller_evaluation_records is None
 
 
 def test_exec_simulation_ex_post_prepare_reads_seller_after_unobserved_commit():
@@ -405,10 +466,239 @@ def test_exec_simulation_ex_post_prepare_reads_seller_after_unobserved_commit():
     ]
 
 
+def test_exec_simulation_individual_prepare_reads_trade_ex_post_after_commit():
+    world = _plain_world("individual_after_ex_post", 40)
+    world.order_control_tvt_evaluation_end_timestep = 9
+    _register_hook_trade(world, observed_buyer=True)
+    trade_ex_post_finalized_at_individual_prepare = []
+    trade_ex_post_result_count_at_individual_prepare = []
+    original_individual_prepare = prepare_tvt_mp_individual_ex_post_evaluation
+
+    def tracking_individual_prepare(current_world):
+        registry = current_world.order_control_tvt_mp_actual_passage_wait_registry
+        trade_ex_post_finalized_at_individual_prepare.append(
+            registry.trade_ex_post_evaluation_finalized_timestep,
+        )
+        trade_ex_post_result_count_at_individual_prepare.append(
+            len(registry.trade_ex_post_evaluation_results_by_transaction_key),
+        )
+        return original_individual_prepare(current_world)
+
+    with patch(
+        "uxsim.order_control_tvt_mp_actual_passage.prepare_tvt_mp_individual_ex_post_evaluation",
+        tracking_individual_prepare,
+    ):
+        _run_exec_with_driver_patched(world)
+    assert trade_ex_post_finalized_at_individual_prepare == [9]
+    assert trade_ex_post_result_count_at_individual_prepare == [1]
+
+
+def test_exec_simulation_individual_finalize_persists_evaluable_and_unavailable_results():
+    world = _plain_world("individual_hook_results", 40)
+    world.order_control_tvt_evaluation_end_timestep = 9
+    _register_hook_trade(world, node_name="node_unavail", observed_buyer=True)
+    _register_hook_trade(
+        world,
+        node_name="node_eval",
+        observed_buyer=True,
+        observed_seller=True,
+        buyer_vehicle_name="buyer_b",
+        seller_vehicle_name="seller_b",
+        sorted_buyer_vehicle_name="buyer_b",
+    )
+    _run_exec_with_driver_patched(world)
+    registry = world.order_control_tvt_mp_actual_passage_wait_registry
+    assert registry.individual_ex_post_evaluation_finalized_timestep == 9
+    assert len(registry.individual_ex_post_evaluation_results_by_transaction_key) == 2
+    for individual_result in (
+        registry.individual_ex_post_evaluation_results_by_transaction_key.values()
+    ):
+        if (
+            individual_result.trade_ex_post_evaluation_status
+            is OrderControlTvtMpTradeExPostEvaluationStatus.EVALUATION_UNAVAILABLE
+        ):
+            assert individual_result.buyer_evaluation_records is None
+            assert individual_result.seller_evaluation_records is None
+        else:
+            assert individual_result.buyer_evaluation_records is not None
+            assert individual_result.seller_evaluation_records is not None
+
+
+def test_evaluation_end_helper_delegates_individual_ex_post_to_existing_apis():
+    source = inspect.getsource(
+        World._maybe_finalize_tvt_mp_evaluation_end_unobserved_passages,
+    )
+    assert "prepare_tvt_mp_individual_ex_post_evaluation" in source
+    assert "commit_tvt_mp_individual_ex_post_evaluation" in source
+    assert source.index("commit_tvt_mp_trade_ex_post_evaluation") < source.index(
+        "prepare_tvt_mp_individual_ex_post_evaluation",
+    )
+    assert "individual_ex_post_evaluation_results_by_transaction_key" not in source
+    assert "order_exchange_log" not in source.lower()
+    assert "Vehicle" not in source
+
+
+def test_exec_simulation_ex_post_prepare_failure_skips_individual_and_termination():
+    world = _plain_world("ex_post_prepare_fail", 40)
+    world.order_control_tvt_evaluation_end_timestep = 9
+    individual_prepare_calls = []
+    individual_commit_calls = []
+    termination_calls = []
+    analysis_calls = []
+    original_individual_prepare = prepare_tvt_mp_individual_ex_post_evaluation
+    original_individual_commit = commit_tvt_mp_individual_ex_post_evaluation
+    original_terminated = World.simulation_terminated
+    original_analysis = Analyzer.basic_analysis
+
+    def failing_ex_post_prepare(current_world):
+        raise RuntimeError("ex_post_prepare_failed")
+
+    def tracking_individual_prepare(current_world):
+        individual_prepare_calls.append(current_world.T)
+        return original_individual_prepare(current_world)
+
+    def tracking_individual_commit(prepared_update):
+        individual_commit_calls.append(1)
+        return original_individual_commit(prepared_update)
+
+    def tracking_terminated(current_world):
+        termination_calls.append(current_world.T)
+        return original_terminated(current_world)
+
+    def tracking_analysis(analyzer):
+        analysis_calls.append(analyzer.W.T)
+        return original_analysis(analyzer)
+
+    with patch(
+        "uxsim.order_control_tvt_mp_actual_passage.prepare_tvt_mp_trade_ex_post_evaluation",
+        failing_ex_post_prepare,
+    ):
+        with patch(
+            "uxsim.order_control_tvt_mp_actual_passage.prepare_tvt_mp_individual_ex_post_evaluation",
+            tracking_individual_prepare,
+        ):
+            with patch(
+                "uxsim.order_control_tvt_mp_actual_passage.commit_tvt_mp_individual_ex_post_evaluation",
+                tracking_individual_commit,
+            ):
+                with patch.object(
+                    World,
+                    "simulation_terminated",
+                    tracking_terminated,
+                ):
+                    with patch.object(
+                        Analyzer,
+                        "basic_analysis",
+                        tracking_analysis,
+                    ):
+                        _assert_raises(
+                            RuntimeError,
+                            lambda: _run_exec_with_driver_patched(world),
+                        )
+    assert individual_prepare_calls == []
+    assert individual_commit_calls == []
+    assert termination_calls == []
+    assert analysis_calls == []
+
+
+def test_exec_simulation_individual_prepare_failure_skips_commit_termination_and_analysis():
+    world = _plain_world("individual_prepare_fail", 40)
+    world.order_control_tvt_evaluation_end_timestep = 9
+    individual_commit_calls = []
+    termination_calls = []
+    analysis_calls = []
+    original_individual_commit = commit_tvt_mp_individual_ex_post_evaluation
+    original_terminated = World.simulation_terminated
+    original_analysis = Analyzer.basic_analysis
+
+    def failing_individual_prepare(current_world):
+        raise RuntimeError("individual_prepare_failed")
+
+    def tracking_individual_commit(prepared_update):
+        individual_commit_calls.append(1)
+        return original_individual_commit(prepared_update)
+
+    def tracking_terminated(current_world):
+        termination_calls.append(current_world.T)
+        return original_terminated(current_world)
+
+    def tracking_analysis(analyzer):
+        analysis_calls.append(analyzer.W.T)
+        return original_analysis(analyzer)
+
+    with patch(
+        "uxsim.order_control_tvt_mp_actual_passage.prepare_tvt_mp_individual_ex_post_evaluation",
+        failing_individual_prepare,
+    ):
+        with patch(
+            "uxsim.order_control_tvt_mp_actual_passage.commit_tvt_mp_individual_ex_post_evaluation",
+            tracking_individual_commit,
+        ):
+            with patch.object(
+                World,
+                "simulation_terminated",
+                tracking_terminated,
+            ):
+                with patch.object(
+                    Analyzer,
+                    "basic_analysis",
+                    tracking_analysis,
+                ):
+                    _assert_raises(
+                        RuntimeError,
+                        lambda: _run_exec_with_driver_patched(world),
+                    )
+    assert individual_commit_calls == []
+    assert termination_calls == []
+    assert analysis_calls == []
+
+
+def test_exec_simulation_individual_commit_failure_skips_termination_and_analysis():
+    world = _plain_world("individual_commit_fail", 40)
+    world.order_control_tvt_evaluation_end_timestep = 9
+    termination_calls = []
+    analysis_calls = []
+    original_terminated = World.simulation_terminated
+    original_analysis = Analyzer.basic_analysis
+
+    def failing_individual_commit(prepared_update):
+        raise RuntimeError("individual_commit_failed")
+
+    def tracking_terminated(current_world):
+        termination_calls.append(current_world.T)
+        return original_terminated(current_world)
+
+    def tracking_analysis(analyzer):
+        analysis_calls.append(analyzer.W.T)
+        return original_analysis(analyzer)
+
+    with patch(
+        "uxsim.order_control_tvt_mp_actual_passage.commit_tvt_mp_individual_ex_post_evaluation",
+        failing_individual_commit,
+    ):
+        with patch.object(
+            World,
+            "simulation_terminated",
+            tracking_terminated,
+        ):
+            with patch.object(
+                Analyzer,
+                "basic_analysis",
+                tracking_analysis,
+            ):
+                _assert_raises(
+                    RuntimeError,
+                    lambda: _run_exec_with_driver_patched(world),
+                )
+    assert termination_calls == []
+    assert analysis_calls == []
+
+
 def test_simulation_terminated_does_not_call_trade_ex_post_hooks():
     source = inspect.getsource(World.simulation_terminated)
     assert "trade_ex_post" not in source
     assert "unobserved" not in source
+    assert "individual_ex_post" not in source
 
 
 def test_exec_simulation_unobserved_finalize_does_not_run_traffic_after_evaluation_end():
@@ -433,10 +723,12 @@ def test_exec_simulation_unobserved_finalize_not_called_on_mid_stop():
     world.order_control_tvt_evaluation_end_timestep = 9
     unobserved_prepare_calls = []
     ex_post_prepare_calls = []
+    individual_prepare_calls = []
     original_unobserved_prepare = (
         prepare_tvt_mp_actual_passage_evaluation_end_unobserved_finalization
     )
     original_ex_post_prepare = prepare_tvt_mp_trade_ex_post_evaluation
+    original_individual_prepare = prepare_tvt_mp_individual_ex_post_evaluation
 
     def tracking_unobserved_prepare(current_world):
         unobserved_prepare_calls.append(current_world.T)
@@ -446,6 +738,10 @@ def test_exec_simulation_unobserved_finalize_not_called_on_mid_stop():
         ex_post_prepare_calls.append(current_world.T)
         return original_ex_post_prepare(current_world)
 
+    def tracking_individual_prepare(current_world):
+        individual_prepare_calls.append(current_world.T)
+        return original_individual_prepare(current_world)
+
     with patch(
         "uxsim.order_control_tvt_mp_actual_passage.prepare_tvt_mp_actual_passage_evaluation_end_unobserved_finalization",
         tracking_unobserved_prepare,
@@ -454,11 +750,16 @@ def test_exec_simulation_unobserved_finalize_not_called_on_mid_stop():
             "uxsim.order_control_tvt_mp_actual_passage.prepare_tvt_mp_trade_ex_post_evaluation",
             tracking_ex_post_prepare,
         ):
-            code = _run_exec_with_driver_patched(world, duration_t2=5)
+            with patch(
+                "uxsim.order_control_tvt_mp_actual_passage.prepare_tvt_mp_individual_ex_post_evaluation",
+                tracking_individual_prepare,
+            ):
+                code = _run_exec_with_driver_patched(world, duration_t2=5)
     assert code == 0
     assert world.T == 5
     assert unobserved_prepare_calls == []
     assert ex_post_prepare_calls == []
+    assert individual_prepare_calls == []
 
 
 def test_exec_simulation_unobserved_finalize_runs_once_on_split_resume():
@@ -466,10 +767,12 @@ def test_exec_simulation_unobserved_finalize_runs_once_on_split_resume():
     world.order_control_tvt_evaluation_end_timestep = 9
     unobserved_prepare_calls = []
     ex_post_prepare_calls = []
+    individual_prepare_calls = []
     original_unobserved_prepare = (
         prepare_tvt_mp_actual_passage_evaluation_end_unobserved_finalization
     )
     original_ex_post_prepare = prepare_tvt_mp_trade_ex_post_evaluation
+    original_individual_prepare = prepare_tvt_mp_individual_ex_post_evaluation
 
     def tracking_unobserved_prepare(current_world):
         unobserved_prepare_calls.append(current_world.T)
@@ -479,6 +782,10 @@ def test_exec_simulation_unobserved_finalize_runs_once_on_split_resume():
         ex_post_prepare_calls.append(current_world.T)
         return original_ex_post_prepare(current_world)
 
+    def tracking_individual_prepare(current_world):
+        individual_prepare_calls.append(current_world.T)
+        return original_individual_prepare(current_world)
+
     with patch(
         "uxsim.order_control_tvt_mp_actual_passage.prepare_tvt_mp_actual_passage_evaluation_end_unobserved_finalization",
         tracking_unobserved_prepare,
@@ -487,12 +794,17 @@ def test_exec_simulation_unobserved_finalize_runs_once_on_split_resume():
             "uxsim.order_control_tvt_mp_actual_passage.prepare_tvt_mp_trade_ex_post_evaluation",
             tracking_ex_post_prepare,
         ):
-            first = _run_exec_with_driver_patched(world, duration_t2=5)
-            second = _run_exec_with_driver_patched(world)
+            with patch(
+                "uxsim.order_control_tvt_mp_actual_passage.prepare_tvt_mp_individual_ex_post_evaluation",
+                tracking_individual_prepare,
+            ):
+                first = _run_exec_with_driver_patched(world, duration_t2=5)
+                second = _run_exec_with_driver_patched(world)
     assert first == 0
     assert second == 1
     assert unobserved_prepare_calls == [10]
     assert ex_post_prepare_calls == [10]
+    assert individual_prepare_calls == [10]
 
 
 def test_exec_simulation_unobserved_finalize_not_called_on_rerun_after_finish():
@@ -500,10 +812,12 @@ def test_exec_simulation_unobserved_finalize_not_called_on_rerun_after_finish():
     world.order_control_tvt_evaluation_end_timestep = 9
     unobserved_prepare_calls = []
     ex_post_prepare_calls = []
+    individual_prepare_calls = []
     original_unobserved_prepare = (
         prepare_tvt_mp_actual_passage_evaluation_end_unobserved_finalization
     )
     original_ex_post_prepare = prepare_tvt_mp_trade_ex_post_evaluation
+    original_individual_prepare = prepare_tvt_mp_individual_ex_post_evaluation
 
     def tracking_unobserved_prepare(current_world):
         unobserved_prepare_calls.append(current_world.T)
@@ -513,6 +827,10 @@ def test_exec_simulation_unobserved_finalize_not_called_on_rerun_after_finish():
         ex_post_prepare_calls.append(current_world.T)
         return original_ex_post_prepare(current_world)
 
+    def tracking_individual_prepare(current_world):
+        individual_prepare_calls.append(current_world.T)
+        return original_individual_prepare(current_world)
+
     with patch(
         "uxsim.order_control_tvt_mp_actual_passage.prepare_tvt_mp_actual_passage_evaluation_end_unobserved_finalization",
         tracking_unobserved_prepare,
@@ -521,22 +839,29 @@ def test_exec_simulation_unobserved_finalize_not_called_on_rerun_after_finish():
             "uxsim.order_control_tvt_mp_actual_passage.prepare_tvt_mp_trade_ex_post_evaluation",
             tracking_ex_post_prepare,
         ):
-            first = _run_exec_with_driver_patched(world)
-            second = _run_exec_with_driver_patched(world)
+            with patch(
+                "uxsim.order_control_tvt_mp_actual_passage.prepare_tvt_mp_individual_ex_post_evaluation",
+                tracking_individual_prepare,
+            ):
+                first = _run_exec_with_driver_patched(world)
+                second = _run_exec_with_driver_patched(world)
     assert first == 1
     assert second == 1
     assert unobserved_prepare_calls == [10]
     assert ex_post_prepare_calls == [10]
+    assert individual_prepare_calls == [10]
 
 
 def test_exec_simulation_unobserved_finalize_not_called_when_evaluation_end_is_none():
     world = _plain_world("unobserved_hook_none", 5)
     unobserved_prepare_calls = []
     ex_post_prepare_calls = []
+    individual_prepare_calls = []
     original_unobserved_prepare = (
         prepare_tvt_mp_actual_passage_evaluation_end_unobserved_finalization
     )
     original_ex_post_prepare = prepare_tvt_mp_trade_ex_post_evaluation
+    original_individual_prepare = prepare_tvt_mp_individual_ex_post_evaluation
 
     def tracking_unobserved_prepare(current_world):
         unobserved_prepare_calls.append(current_world.T)
@@ -546,6 +871,10 @@ def test_exec_simulation_unobserved_finalize_not_called_when_evaluation_end_is_n
         ex_post_prepare_calls.append(current_world.T)
         return original_ex_post_prepare(current_world)
 
+    def tracking_individual_prepare(current_world):
+        individual_prepare_calls.append(current_world.T)
+        return original_individual_prepare(current_world)
+
     with patch(
         "uxsim.order_control_tvt_mp_actual_passage.prepare_tvt_mp_actual_passage_evaluation_end_unobserved_finalization",
         tracking_unobserved_prepare,
@@ -554,9 +883,14 @@ def test_exec_simulation_unobserved_finalize_not_called_when_evaluation_end_is_n
             "uxsim.order_control_tvt_mp_actual_passage.prepare_tvt_mp_trade_ex_post_evaluation",
             tracking_ex_post_prepare,
         ):
-            world.exec_simulation()
+            with patch(
+                "uxsim.order_control_tvt_mp_actual_passage.prepare_tvt_mp_individual_ex_post_evaluation",
+                tracking_individual_prepare,
+            ):
+                world.exec_simulation()
     assert unobserved_prepare_calls == []
     assert ex_post_prepare_calls == []
+    assert individual_prepare_calls == []
 
 
 def test_exec_simulation_unobserved_finalize_on_tsize_equals_evaluation_end_plus_one():
@@ -564,10 +898,12 @@ def test_exec_simulation_unobserved_finalize_on_tsize_equals_evaluation_end_plus
     world.order_control_tvt_evaluation_end_timestep = 9
     unobserved_prepare_calls = []
     ex_post_prepare_calls = []
+    individual_prepare_calls = []
     original_unobserved_prepare = (
         prepare_tvt_mp_actual_passage_evaluation_end_unobserved_finalization
     )
     original_ex_post_prepare = prepare_tvt_mp_trade_ex_post_evaluation
+    original_individual_prepare = prepare_tvt_mp_individual_ex_post_evaluation
 
     def tracking_unobserved_prepare(current_world):
         unobserved_prepare_calls.append(current_world.T)
@@ -577,6 +913,10 @@ def test_exec_simulation_unobserved_finalize_on_tsize_equals_evaluation_end_plus
         ex_post_prepare_calls.append(current_world.T)
         return original_ex_post_prepare(current_world)
 
+    def tracking_individual_prepare(current_world):
+        individual_prepare_calls.append(current_world.T)
+        return original_individual_prepare(current_world)
+
     with patch(
         "uxsim.order_control_tvt_mp_actual_passage.prepare_tvt_mp_actual_passage_evaluation_end_unobserved_finalization",
         tracking_unobserved_prepare,
@@ -585,17 +925,26 @@ def test_exec_simulation_unobserved_finalize_on_tsize_equals_evaluation_end_plus
             "uxsim.order_control_tvt_mp_actual_passage.prepare_tvt_mp_trade_ex_post_evaluation",
             tracking_ex_post_prepare,
         ):
-            code = _run_exec_with_driver_patched(world)
+            with patch(
+                "uxsim.order_control_tvt_mp_actual_passage.prepare_tvt_mp_individual_ex_post_evaluation",
+                tracking_individual_prepare,
+            ):
+                code = _run_exec_with_driver_patched(world)
     assert code == 1
     assert world.T == world.TSIZE == 10
     assert unobserved_prepare_calls == [10]
     assert ex_post_prepare_calls == [10]
+    assert individual_prepare_calls == [10]
     assert (
         world.order_control_tvt_mp_actual_passage_wait_registry.evaluation_end_unobserved_finalized_timestep
         == 9
     )
     assert (
         world.order_control_tvt_mp_actual_passage_wait_registry.trade_ex_post_evaluation_finalized_timestep
+        == 9
+    )
+    assert (
+        world.order_control_tvt_mp_actual_passage_wait_registry.individual_ex_post_evaluation_finalized_timestep
         == 9
     )
 

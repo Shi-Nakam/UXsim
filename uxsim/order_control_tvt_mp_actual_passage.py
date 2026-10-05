@@ -43,6 +43,31 @@ class OrderControlTvtMpTradeExPostEvaluationStatus(Enum):
     EX_POST_FEASIBLE = "ex_post_feasible"
 
 
+class OrderControlTvtMpIndividualSatisfactionStatus(Enum):
+    SATISFIED = "satisfied"
+    UNSATISFIED = "unsatisfied"
+
+
+class OrderControlTvtMpBuyerSatisfactionReason(Enum):
+    TRIVIALLY_UNSATISFIED_NONPOSITIVE_REALIZED_TIME_VALUE = (
+        "trivially_unsatisfied_nonpositive_realized_time_value"
+    )
+    UNSATISFIED_BY_HIGH_PAYMENT_RATE = "unsatisfied_by_high_payment_rate"
+    SATISFIED_APPROPRIATE_PAYMENT_RATE = "satisfied_appropriate_payment_rate"
+
+
+class OrderControlTvtMpSellerSatisfactionReason(Enum):
+    TRIVIALLY_SATISFIED_NONPOSITIVE_ACTUAL_DELAY = (
+        "trivially_satisfied_nonpositive_actual_delay"
+    )
+    UNSATISFIED_INSUFFICIENT_COMPENSATION_RATE = (
+        "unsatisfied_insufficient_compensation_rate"
+    )
+    SATISFIED_BY_SUFFICIENT_COMPENSATION_RATE = (
+        "satisfied_by_sufficient_compensation_rate"
+    )
+
+
 @dataclass(frozen=True)
 class OrderControlTvtMpActualPassageObservationRecord:
     tvt_decision_timestep: int
@@ -618,6 +643,511 @@ def _validate_ex_post_record_visit_keys_no_duplicates_or_overlap(
         seen_seller_visit_keys.add(seller_record.visit_key)
 
 
+@dataclass(frozen=True)
+class OrderControlTvtMpBuyerIndividualExPostEvaluationRecord:
+    visit_key: OrderControlTvtVisitKey
+    vehicle_name: str
+    realized_time_value: int | float
+    official_payment: int | float
+    realized_gain: int | float
+    satisfaction_status: OrderControlTvtMpIndividualSatisfactionStatus
+    satisfaction_reason: OrderControlTvtMpBuyerSatisfactionReason
+    official_payment_per_saved_second: int | float | None
+
+    def __post_init__(self) -> None:
+        _require_ex_post_record_visit_key_and_vehicle_name(
+            self.visit_key,
+            self.vehicle_name,
+            record_kind="buyer individual ex-post evaluation record",
+        )
+        _require_finite_number(
+            self.realized_time_value,
+            "realized_time_value",
+        )
+        _require_non_negative_money_number(
+            self.official_payment,
+            "official_payment",
+        )
+        _require_finite_number(
+            self.realized_gain,
+            "realized_gain",
+        )
+        expected_realized_gain = (
+            self.realized_time_value - self.official_payment
+        )
+        if self.realized_gain != expected_realized_gain:
+            raise RuntimeError(
+                "realized_gain must equal realized_time_value minus "
+                "official_payment; got "
+                f"{self.realized_gain!r}, expected {expected_realized_gain!r}."
+            )
+        if not isinstance(
+            self.satisfaction_status,
+            OrderControlTvtMpIndividualSatisfactionStatus,
+        ):
+            raise RuntimeError(
+                "satisfaction_status must be "
+                "OrderControlTvtMpIndividualSatisfactionStatus; got type "
+                f"{type(self.satisfaction_status).__name__}."
+            )
+        if not isinstance(
+            self.satisfaction_reason,
+            OrderControlTvtMpBuyerSatisfactionReason,
+        ):
+            raise RuntimeError(
+                "satisfaction_reason must be "
+                "OrderControlTvtMpBuyerSatisfactionReason; got type "
+                f"{type(self.satisfaction_reason).__name__}."
+            )
+        if self.realized_gain > 0:
+            if (
+                self.satisfaction_status
+                is not OrderControlTvtMpIndividualSatisfactionStatus.SATISFIED
+            ):
+                raise RuntimeError(
+                    "buyer individual record with positive realized_gain "
+                    "requires satisfaction_status SATISFIED; got "
+                    f"{self.satisfaction_status!r}."
+                )
+        else:
+            if (
+                self.satisfaction_status
+                is not OrderControlTvtMpIndividualSatisfactionStatus.UNSATISFIED
+            ):
+                raise RuntimeError(
+                    "buyer individual record with zero or negative "
+                    "realized_gain requires satisfaction_status UNSATISFIED; "
+                    f"got {self.satisfaction_status!r}."
+                )
+        _validate_buyer_individual_satisfaction_reason_contract(self)
+
+
+def _validate_buyer_individual_satisfaction_reason_contract(
+    record: OrderControlTvtMpBuyerIndividualExPostEvaluationRecord,
+) -> None:
+    reason = record.satisfaction_reason
+    status = record.satisfaction_status
+    rate = record.official_payment_per_saved_second
+    satisfied = OrderControlTvtMpIndividualSatisfactionStatus.SATISFIED
+    unsatisfied = OrderControlTvtMpIndividualSatisfactionStatus.UNSATISFIED
+    trivial_reason = (
+        OrderControlTvtMpBuyerSatisfactionReason
+        .TRIVIALLY_UNSATISFIED_NONPOSITIVE_REALIZED_TIME_VALUE
+    )
+    high_payment_reason = (
+        OrderControlTvtMpBuyerSatisfactionReason.UNSATISFIED_BY_HIGH_PAYMENT_RATE
+    )
+    appropriate_reason = (
+        OrderControlTvtMpBuyerSatisfactionReason.SATISFIED_APPROPRIATE_PAYMENT_RATE
+    )
+
+    if reason is trivial_reason:
+        if status is not unsatisfied:
+            raise RuntimeError(
+                "TRIVIALLY_UNSATISFIED_NONPOSITIVE_REALIZED_TIME_VALUE requires "
+                "satisfaction_status UNSATISFIED."
+            )
+        if record.realized_time_value > 0:
+            raise RuntimeError(
+                "TRIVIALLY_UNSATISFIED_NONPOSITIVE_REALIZED_TIME_VALUE requires "
+                "realized_time_value <= 0; got "
+                f"{record.realized_time_value!r}."
+            )
+        if rate is not None:
+            raise RuntimeError(
+                "TRIVIALLY_UNSATISFIED_NONPOSITIVE_REALIZED_TIME_VALUE requires "
+                "official_payment_per_saved_second to be None; got "
+                f"{rate!r}."
+            )
+        return
+
+    if reason is high_payment_reason:
+        if status is not unsatisfied:
+            raise RuntimeError(
+                "UNSATISFIED_BY_HIGH_PAYMENT_RATE requires satisfaction_status "
+                "UNSATISFIED."
+            )
+        if record.realized_time_value <= 0:
+            raise RuntimeError(
+                "UNSATISFIED_BY_HIGH_PAYMENT_RATE requires realized_time_value "
+                f"> 0; got {record.realized_time_value!r}."
+            )
+        _require_non_negative_money_number(
+            rate,
+            "official_payment_per_saved_second",
+        )
+        return
+
+    if reason is appropriate_reason:
+        if status is not satisfied:
+            raise RuntimeError(
+                "SATISFIED_APPROPRIATE_PAYMENT_RATE requires satisfaction_status "
+                "SATISFIED."
+            )
+        if record.realized_time_value <= 0:
+            raise RuntimeError(
+                "SATISFIED_APPROPRIATE_PAYMENT_RATE requires realized_time_value "
+                f"> 0; got {record.realized_time_value!r}."
+            )
+        _require_non_negative_money_number(
+            rate,
+            "official_payment_per_saved_second",
+        )
+        return
+
+    raise RuntimeError(
+        f"unsupported buyer satisfaction_reason {reason!r}."
+    )
+
+
+@dataclass(frozen=True)
+class OrderControlTvtMpSellerIndividualExPostEvaluationRecord:
+    visit_key: OrderControlTvtVisitKey
+    vehicle_name: str
+    realized_delay_loss: int | float
+    official_compensation: int | float
+    realized_gain: int | float
+    satisfaction_status: OrderControlTvtMpIndividualSatisfactionStatus
+    satisfaction_reason: OrderControlTvtMpSellerSatisfactionReason
+    official_compensation_per_delayed_second: int | float | None
+
+    def __post_init__(self) -> None:
+        _require_ex_post_record_visit_key_and_vehicle_name(
+            self.visit_key,
+            self.vehicle_name,
+            record_kind="seller individual ex-post evaluation record",
+        )
+        _require_finite_number(
+            self.realized_delay_loss,
+            "realized_delay_loss",
+        )
+        _require_non_negative_money_number(
+            self.official_compensation,
+            "official_compensation",
+        )
+        _require_finite_number(
+            self.realized_gain,
+            "realized_gain",
+        )
+        expected_realized_gain = (
+            self.official_compensation - self.realized_delay_loss
+        )
+        if self.realized_gain != expected_realized_gain:
+            raise RuntimeError(
+                "realized_gain must equal official_compensation minus "
+                "realized_delay_loss; got "
+                f"{self.realized_gain!r}, expected {expected_realized_gain!r}."
+            )
+        if not isinstance(
+            self.satisfaction_status,
+            OrderControlTvtMpIndividualSatisfactionStatus,
+        ):
+            raise RuntimeError(
+                "satisfaction_status must be "
+                "OrderControlTvtMpIndividualSatisfactionStatus; got type "
+                f"{type(self.satisfaction_status).__name__}."
+            )
+        if not isinstance(
+            self.satisfaction_reason,
+            OrderControlTvtMpSellerSatisfactionReason,
+        ):
+            raise RuntimeError(
+                "satisfaction_reason must be "
+                "OrderControlTvtMpSellerSatisfactionReason; got type "
+                f"{type(self.satisfaction_reason).__name__}."
+            )
+        if self.realized_gain >= 0:
+            if (
+                self.satisfaction_status
+                is not OrderControlTvtMpIndividualSatisfactionStatus.SATISFIED
+            ):
+                raise RuntimeError(
+                    "seller individual record with non-negative realized_gain "
+                    "requires satisfaction_status SATISFIED; got "
+                    f"{self.satisfaction_status!r}."
+                )
+        else:
+            if (
+                self.satisfaction_status
+                is not OrderControlTvtMpIndividualSatisfactionStatus.UNSATISFIED
+            ):
+                raise RuntimeError(
+                    "seller individual record with negative realized_gain "
+                    "requires satisfaction_status UNSATISFIED; got "
+                    f"{self.satisfaction_status!r}."
+                )
+        _validate_seller_individual_satisfaction_reason_contract(self)
+
+
+def _validate_seller_individual_satisfaction_reason_contract(
+    record: OrderControlTvtMpSellerIndividualExPostEvaluationRecord,
+) -> None:
+    reason = record.satisfaction_reason
+    status = record.satisfaction_status
+    rate = record.official_compensation_per_delayed_second
+    satisfied = OrderControlTvtMpIndividualSatisfactionStatus.SATISFIED
+    unsatisfied = OrderControlTvtMpIndividualSatisfactionStatus.UNSATISFIED
+    trivial_reason = (
+        OrderControlTvtMpSellerSatisfactionReason
+        .TRIVIALLY_SATISFIED_NONPOSITIVE_ACTUAL_DELAY
+    )
+    insufficient_reason = (
+        OrderControlTvtMpSellerSatisfactionReason
+        .UNSATISFIED_INSUFFICIENT_COMPENSATION_RATE
+    )
+    sufficient_reason = (
+        OrderControlTvtMpSellerSatisfactionReason
+        .SATISFIED_BY_SUFFICIENT_COMPENSATION_RATE
+    )
+
+    if reason is trivial_reason:
+        if status is not satisfied:
+            raise RuntimeError(
+                "TRIVIALLY_SATISFIED_NONPOSITIVE_ACTUAL_DELAY requires "
+                "satisfaction_status SATISFIED."
+            )
+        if rate is not None:
+            raise RuntimeError(
+                "TRIVIALLY_SATISFIED_NONPOSITIVE_ACTUAL_DELAY requires "
+                "official_compensation_per_delayed_second to be None; got "
+                f"{rate!r}."
+            )
+        return
+
+    if reason is insufficient_reason:
+        if status is not unsatisfied:
+            raise RuntimeError(
+                "UNSATISFIED_INSUFFICIENT_COMPENSATION_RATE requires "
+                "satisfaction_status UNSATISFIED."
+            )
+        _require_non_negative_money_number(
+            rate,
+            "official_compensation_per_delayed_second",
+        )
+        return
+
+    if reason is sufficient_reason:
+        if status is not satisfied:
+            raise RuntimeError(
+                "SATISFIED_BY_SUFFICIENT_COMPENSATION_RATE requires "
+                "satisfaction_status SATISFIED."
+            )
+        _require_non_negative_money_number(
+            rate,
+            "official_compensation_per_delayed_second",
+        )
+        return
+
+    raise RuntimeError(
+        f"unsupported seller satisfaction_reason {reason!r}."
+    )
+
+
+@dataclass(frozen=True)
+class OrderControlTvtMpIndividualExPostEvaluationResult:
+    tvt_decision_timestep: int
+    node_name: str
+    buyers_sorted: tuple[OrderControlTvtVisitKey, ...]
+    trade_ex_post_evaluation_status: OrderControlTvtMpTradeExPostEvaluationStatus
+    buyer_evaluation_records: (
+        tuple[OrderControlTvtMpBuyerIndividualExPostEvaluationRecord, ...] | None
+    )
+    seller_evaluation_records: (
+        tuple[OrderControlTvtMpSellerIndividualExPostEvaluationRecord, ...] | None
+    )
+
+    def __post_init__(self) -> None:
+        if type(self.tvt_decision_timestep) is not int:
+            raise RuntimeError(
+                "tvt_decision_timestep must be a Python int, not bool; got "
+                f"{self.tvt_decision_timestep!r}."
+            )
+        if self.tvt_decision_timestep < 0:
+            raise RuntimeError(
+                "tvt_decision_timestep must be >= 0; got "
+                f"{self.tvt_decision_timestep!r}."
+            )
+        if not isinstance(self.node_name, str) or self.node_name == "":
+            raise RuntimeError(
+                "node_name must be a non-empty str; got "
+                f"{self.node_name!r}."
+            )
+        if not isinstance(self.buyers_sorted, tuple):
+            raise RuntimeError(
+                "buyers_sorted must be a tuple; got type "
+                f"{type(self.buyers_sorted).__name__}."
+            )
+        seen_buyers_sorted: set[OrderControlTvtVisitKey] = set()
+        for visit_key in self.buyers_sorted:
+            _require_history_visit_key(visit_key)
+            if visit_key in seen_buyers_sorted:
+                raise RuntimeError(
+                    "buyers_sorted must not contain duplicate VisitKey "
+                    f"{visit_key!r}."
+                )
+            seen_buyers_sorted.add(visit_key)
+        if not isinstance(
+            self.trade_ex_post_evaluation_status,
+            OrderControlTvtMpTradeExPostEvaluationStatus,
+        ):
+            raise RuntimeError(
+                "trade_ex_post_evaluation_status must be "
+                "OrderControlTvtMpTradeExPostEvaluationStatus; got type "
+                f"{type(self.trade_ex_post_evaluation_status).__name__}."
+            )
+        status = self.trade_ex_post_evaluation_status
+        if status is OrderControlTvtMpTradeExPostEvaluationStatus.EVALUATION_UNAVAILABLE:
+            _validate_individual_ex_post_evaluation_unavailable_shape(self)
+            return
+        if status is OrderControlTvtMpTradeExPostEvaluationStatus.EX_POST_INFEASIBLE:
+            _validate_individual_ex_post_evaluation_evaluated_shape(self)
+            return
+        if status is OrderControlTvtMpTradeExPostEvaluationStatus.EX_POST_FEASIBLE:
+            _validate_individual_ex_post_evaluation_evaluated_shape(self)
+            return
+        raise RuntimeError(
+            f"unsupported trade_ex_post_evaluation_status {status!r}."
+        )
+
+
+def _validate_individual_ex_post_evaluation_unavailable_shape(
+    result: OrderControlTvtMpIndividualExPostEvaluationResult,
+) -> None:
+    if result.buyer_evaluation_records is not None:
+        raise RuntimeError(
+            "EVALUATION_UNAVAILABLE requires buyer_evaluation_records to be None."
+        )
+    if result.seller_evaluation_records is not None:
+        raise RuntimeError(
+            "EVALUATION_UNAVAILABLE requires seller_evaluation_records to be None."
+        )
+
+
+def _validate_individual_ex_post_evaluation_evaluated_shape(
+    result: OrderControlTvtMpIndividualExPostEvaluationResult,
+) -> None:
+    buyer_records = _require_individual_buyer_record_tuple(result)
+    seller_records = _require_individual_seller_record_tuple(result)
+    _validate_individual_buyer_records_match_buyers_sorted(
+        result.buyers_sorted,
+        buyer_records,
+    )
+    _validate_individual_record_visit_keys_no_duplicates_or_overlap(
+        buyer_records,
+        seller_records,
+    )
+
+
+def _require_individual_buyer_record_tuple(
+    result: OrderControlTvtMpIndividualExPostEvaluationResult,
+) -> tuple[OrderControlTvtMpBuyerIndividualExPostEvaluationRecord, ...]:
+    buyer_records = result.buyer_evaluation_records
+    if buyer_records is None:
+        raise RuntimeError(
+            "evaluated individual ex-post status requires "
+            "buyer_evaluation_records to be a tuple, not None."
+        )
+    if not isinstance(buyer_records, tuple):
+        raise RuntimeError(
+            "buyer_evaluation_records must be a tuple; got type "
+            f"{type(buyer_records).__name__}."
+        )
+    for buyer_record in buyer_records:
+        if not isinstance(
+            buyer_record,
+            OrderControlTvtMpBuyerIndividualExPostEvaluationRecord,
+        ):
+            raise RuntimeError(
+                "buyer_evaluation_records must contain "
+                "OrderControlTvtMpBuyerIndividualExPostEvaluationRecord "
+                "elements only."
+            )
+    return buyer_records
+
+
+def _require_individual_seller_record_tuple(
+    result: OrderControlTvtMpIndividualExPostEvaluationResult,
+) -> tuple[OrderControlTvtMpSellerIndividualExPostEvaluationRecord, ...]:
+    seller_records = result.seller_evaluation_records
+    if seller_records is None:
+        raise RuntimeError(
+            "evaluated individual ex-post status requires "
+            "seller_evaluation_records to be a tuple, not None."
+        )
+    if not isinstance(seller_records, tuple):
+        raise RuntimeError(
+            "seller_evaluation_records must be a tuple; got type "
+            f"{type(seller_records).__name__}."
+        )
+    for seller_record in seller_records:
+        if not isinstance(
+            seller_record,
+            OrderControlTvtMpSellerIndividualExPostEvaluationRecord,
+        ):
+            raise RuntimeError(
+                "seller_evaluation_records must contain "
+                "OrderControlTvtMpSellerIndividualExPostEvaluationRecord "
+                "elements only."
+            )
+    return seller_records
+
+
+def _validate_individual_buyer_records_match_buyers_sorted(
+    buyers_sorted: tuple[OrderControlTvtVisitKey, ...],
+    buyer_records: tuple[
+        OrderControlTvtMpBuyerIndividualExPostEvaluationRecord,
+        ...,
+    ],
+) -> None:
+    if len(buyer_records) != len(buyers_sorted):
+        raise RuntimeError(
+            "buyer_evaluation_records length must match buyers_sorted length; "
+            f"got {len(buyer_records)!r} records and "
+            f"{len(buyers_sorted)!r} buyers_sorted entries."
+        )
+    for index, expected_visit_key in enumerate(buyers_sorted):
+        buyer_record = buyer_records[index]
+        if buyer_record.visit_key != expected_visit_key:
+            raise RuntimeError(
+                "buyer_evaluation_records must follow buyers_sorted order; "
+                f"index {index} expected VisitKey {expected_visit_key!r}, "
+                f"got {buyer_record.visit_key!r}."
+            )
+
+
+def _validate_individual_record_visit_keys_no_duplicates_or_overlap(
+    buyer_records: tuple[
+        OrderControlTvtMpBuyerIndividualExPostEvaluationRecord,
+        ...,
+    ],
+    seller_records: tuple[
+        OrderControlTvtMpSellerIndividualExPostEvaluationRecord,
+        ...,
+    ],
+) -> None:
+    seen_buyer_visit_keys: set[OrderControlTvtVisitKey] = set()
+    for buyer_record in buyer_records:
+        if buyer_record.visit_key in seen_buyer_visit_keys:
+            raise RuntimeError(
+                "buyer_evaluation_records must not contain duplicate VisitKey "
+                f"{buyer_record.visit_key!r}."
+            )
+        seen_buyer_visit_keys.add(buyer_record.visit_key)
+    seen_seller_visit_keys: set[OrderControlTvtVisitKey] = set()
+    for seller_record in seller_records:
+        if seller_record.visit_key in seen_seller_visit_keys:
+            raise RuntimeError(
+                "seller_evaluation_records must not contain duplicate VisitKey "
+                f"{seller_record.visit_key!r}."
+            )
+        if seller_record.visit_key in seen_buyer_visit_keys:
+            raise RuntimeError(
+                "buyer and seller individual evaluation records must not share "
+                f"VisitKey {seller_record.visit_key!r}."
+            )
+        seen_seller_visit_keys.add(seller_record.visit_key)
+
+
 @dataclass
 class OrderControlTvtMpActualPassageWaitEntry:
     tvt_decision_timestep: int
@@ -709,6 +1239,12 @@ class OrderControlTvtMpActualPassageWaitRegistry:
     evaluation_end_unobserved_finalized_timestep: int | None = None
     # Not the evaluation-end timestep authority; prevents duplicate ex-post runs.
     trade_ex_post_evaluation_finalized_timestep: int | None = None
+    individual_ex_post_evaluation_results_by_transaction_key: dict[
+        tuple[int, str, tuple[OrderControlTvtVisitKey, ...]],
+        OrderControlTvtMpIndividualExPostEvaluationResult,
+    ] = field(default_factory=dict)
+    # Not the evaluation-end timestep authority; prevents duplicate individual runs.
+    individual_ex_post_evaluation_finalized_timestep: int | None = None
 
 
 @dataclass(frozen=True)
@@ -2754,4 +3290,581 @@ def commit_tvt_mp_trade_ex_post_evaluation(prepared_update) -> None:
     )
     wait_registry.trade_ex_post_evaluation_finalized_timestep = (
         prepared_update.trade_ex_post_evaluation_finalized_timestep
+    )
+
+
+@dataclass(frozen=True)
+class _PreparedTvtMpIndividualExPostEvaluation:
+    """Prepared buyer/seller individual ex-post evaluation. Live registry unchanged."""
+
+    wait_registry: OrderControlTvtMpActualPassageWaitRegistry
+    individual_ex_post_evaluation_results_by_transaction_key: dict[
+        tuple[int, str, tuple[OrderControlTvtVisitKey, ...]],
+        OrderControlTvtMpIndividualExPostEvaluationResult,
+    ]
+    individual_ex_post_evaluation_finalized_timestep: int
+
+
+def _require_trade_ex_post_evaluation_completed_for_individual(
+    registry: OrderControlTvtMpActualPassageWaitRegistry,
+    evaluation_end_timestep: int,
+) -> None:
+    finalized = registry.trade_ex_post_evaluation_finalized_timestep
+    if type(finalized) is not int:
+        raise RuntimeError(
+            "trade_ex_post_evaluation_finalized_timestep must be a Python "
+            f"int matching evaluation_end_timestep; got {finalized!r}."
+        )
+    if finalized != evaluation_end_timestep:
+        raise RuntimeError(
+            "individual ex-post evaluation requires "
+            "trade_ex_post_evaluation_finalized_timestep to equal "
+            f"evaluation_end_timestep {evaluation_end_timestep!r}; got "
+            f"{finalized!r}."
+        )
+    trade_results = registry.trade_ex_post_evaluation_results_by_transaction_key
+    if not isinstance(trade_results, dict):
+        raise RuntimeError(
+            "trade_ex_post_evaluation_results_by_transaction_key must be a dict; "
+            "got type "
+            f"{type(trade_results).__name__}."
+        )
+
+
+def _require_individual_ex_post_evaluation_not_started(
+    registry: OrderControlTvtMpActualPassageWaitRegistry,
+) -> None:
+    finalized = registry.individual_ex_post_evaluation_finalized_timestep
+    if finalized is not None:
+        if type(finalized) is not int:
+            raise RuntimeError(
+                "individual_ex_post_evaluation_finalized_timestep must be a "
+                f"Python int or None; got {finalized!r}."
+            )
+        raise RuntimeError(
+            "individual ex-post evaluation was already completed for "
+            f"timestep {finalized!r}."
+        )
+    if registry.individual_ex_post_evaluation_results_by_transaction_key:
+        raise RuntimeError(
+            "individual_ex_post_evaluation_results_by_transaction_key must be "
+            "empty before prepare; found partial saved results while "
+            "individual_ex_post_evaluation_finalized_timestep is still None."
+        )
+
+
+def _validate_trade_ex_post_results_match_all_trades(
+    registry: OrderControlTvtMpActualPassageWaitRegistry,
+) -> None:
+    trade_keys = set(registry.trades_by_transaction_key.keys())
+    result_keys = set(
+        registry.trade_ex_post_evaluation_results_by_transaction_key.keys()
+    )
+    if trade_keys == result_keys:
+        return
+    missing_keys = trade_keys - result_keys
+    if missing_keys:
+        missing_example = sorted(missing_keys)[0]
+        raise RuntimeError(
+            f"TradeWait {missing_example!r} has no saved trade ex-post "
+            "evaluation result."
+        )
+    extra_keys = result_keys - trade_keys
+    extra_example = sorted(extra_keys)[0]
+    raise RuntimeError(
+        f"trade_ex_post_evaluation_results_by_transaction_key contains "
+        f"unexpected transaction key {extra_example!r}."
+    )
+
+
+def _validate_trade_ex_post_result_identity_for_transaction_key(
+    transaction_key: tuple[int, str, tuple[OrderControlTvtVisitKey, ...]],
+    trade_wait: OrderControlTvtMpActualPassageTradeWait,
+    trade_result: OrderControlTvtMpTradeExPostEvaluationResult,
+) -> None:
+    _validate_trade_transaction_key_matches_trade_wait(
+        transaction_key,
+        trade_wait,
+    )
+    if trade_result.tvt_decision_timestep != trade_wait.tvt_decision_timestep:
+        raise RuntimeError(
+            "trade ex-post evaluation result tvt_decision_timestep must match "
+            f"TradeWait; got {trade_result.tvt_decision_timestep!r}, expected "
+            f"{trade_wait.tvt_decision_timestep!r}."
+        )
+    if trade_result.node_name != trade_wait.node_name:
+        raise RuntimeError(
+            "trade ex-post evaluation result node_name must match TradeWait; "
+            f"got {trade_result.node_name!r}, expected {trade_wait.node_name!r}."
+        )
+    if trade_result.buyers_sorted != trade_wait.buyers_sorted:
+        raise RuntimeError(
+            "trade ex-post evaluation result buyers_sorted must match "
+            "TradeWait; got "
+            f"{trade_result.buyers_sorted!r}, expected "
+            f"{trade_wait.buyers_sorted!r}."
+        )
+
+
+def _require_stored_trade_ex_post_status_matches_trade_wait(
+    registry: OrderControlTvtMpActualPassageWaitRegistry,
+    trade_wait: OrderControlTvtMpActualPassageTradeWait,
+    trade_result: OrderControlTvtMpTradeExPostEvaluationResult,
+) -> None:
+    unobserved = _trade_buyer_or_seller_is_evaluation_end_unobserved(
+        registry,
+        trade_wait,
+    )
+    status = trade_result.ex_post_evaluation_status
+    if unobserved:
+        if (
+            status
+            is not OrderControlTvtMpTradeExPostEvaluationStatus.EVALUATION_UNAVAILABLE
+        ):
+            raise RuntimeError(
+                "stored trade ex-post evaluation status must be "
+                "EVALUATION_UNAVAILABLE when a buyer or seller is "
+                "evaluation-end unobserved; got "
+                f"{status!r}."
+            )
+        return
+    if status is OrderControlTvtMpTradeExPostEvaluationStatus.EVALUATION_UNAVAILABLE:
+        raise RuntimeError(
+            "stored trade ex-post evaluation status must not be "
+            "EVALUATION_UNAVAILABLE when all buyer and seller entries are "
+            "ACTUAL_PASSAGE_OBSERVED; got EVALUATION_UNAVAILABLE."
+        )
+
+
+def _validate_wait_entry_observation_record_identity_for_individual(
+    entry: OrderControlTvtMpActualPassageWaitEntry,
+    record: OrderControlTvtMpActualPassageObservationRecord,
+    *,
+    node_name: str,
+    visit_key: OrderControlTvtVisitKey,
+) -> None:
+    if record.visit_key != visit_key:
+        raise RuntimeError(
+            f"Node {node_name!r}: VisitKey {visit_key!r} observation record "
+            f"visit_key {record.visit_key!r} does not match WaitEntry."
+        )
+    if record.vehicle_name != entry.vehicle_name:
+        raise RuntimeError(
+            f"Node {node_name!r}: VisitKey {visit_key!r} observation record "
+            f"vehicle_name {record.vehicle_name!r} does not match WaitEntry "
+            f"{entry.vehicle_name!r}."
+        )
+    if record.tvt_decision_timestep != entry.tvt_decision_timestep:
+        raise RuntimeError(
+            f"Node {node_name!r}: VisitKey {visit_key!r} observation record "
+            "tvt_decision_timestep does not match WaitEntry."
+        )
+    if record.node_name != entry.node_name:
+        raise RuntimeError(
+            f"Node {node_name!r}: VisitKey {visit_key!r} observation record "
+            "node_name does not match WaitEntry."
+        )
+    if record.buyers_sorted != entry.buyers_sorted:
+        raise RuntimeError(
+            f"Node {node_name!r}: VisitKey {visit_key!r} observation record "
+            "buyers_sorted does not match WaitEntry."
+        )
+
+
+def _require_observed_buyer_entry_for_individual_evaluation(
+    entry: OrderControlTvtMpActualPassageWaitEntry,
+    *,
+    node_name: str,
+    visit_key: OrderControlTvtVisitKey,
+) -> OrderControlTvtMpActualPassageObservationRecord:
+    if entry.role is not OrderControlTvtMpActualPassageRole.BUYER:
+        raise RuntimeError(
+            f"Node {node_name!r}: VisitKey {visit_key!r} must be buyer for "
+            f"individual buyer evaluation; got {entry.role!r}."
+        )
+    record = _require_observed_entry_for_ex_post_calculation(
+        entry,
+        node_name=node_name,
+        visit_key=visit_key,
+        role_label="buyer",
+    )
+    if record.baseline_minus_actual_time_value is None:
+        raise RuntimeError(
+            f"Node {node_name!r}: VisitKey {visit_key!r} buyer observation "
+            "record baseline_minus_actual_time_value must not be None for "
+            "individual evaluation."
+        )
+    if entry.true_vot_per_second != record.true_vot_per_second:
+        raise RuntimeError(
+            f"Node {node_name!r}: VisitKey {visit_key!r} buyer WaitEntry "
+            "true_vot_per_second must match observation record; got "
+            f"WaitEntry {entry.true_vot_per_second!r}, record "
+            f"{record.true_vot_per_second!r}."
+        )
+    _validate_wait_entry_observation_record_identity_for_individual(
+        entry,
+        record,
+        node_name=node_name,
+        visit_key=visit_key,
+    )
+    return record
+
+
+def _require_observed_seller_entry_for_individual_evaluation(
+    entry: OrderControlTvtMpActualPassageWaitEntry,
+    *,
+    node_name: str,
+    visit_key: OrderControlTvtVisitKey,
+) -> OrderControlTvtMpActualPassageObservationRecord:
+    if entry.role is not OrderControlTvtMpActualPassageRole.SELLER:
+        raise RuntimeError(
+            f"Node {node_name!r}: VisitKey {visit_key!r} must be seller for "
+            f"individual seller evaluation; got {entry.role!r}."
+        )
+    record = _require_observed_entry_for_ex_post_calculation(
+        entry,
+        node_name=node_name,
+        visit_key=visit_key,
+        role_label="seller",
+    )
+    if record.baseline_minus_actual_time_value is None:
+        raise RuntimeError(
+            f"Node {node_name!r}: VisitKey {visit_key!r} seller observation "
+            "record baseline_minus_actual_time_value must not be None for "
+            "individual evaluation."
+        )
+    if entry.true_vot_per_second != record.true_vot_per_second:
+        raise RuntimeError(
+            f"Node {node_name!r}: VisitKey {visit_key!r} seller WaitEntry "
+            "true_vot_per_second must match observation record; got "
+            f"WaitEntry {entry.true_vot_per_second!r}, record "
+            f"{record.true_vot_per_second!r}."
+        )
+    _validate_wait_entry_observation_record_identity_for_individual(
+        entry,
+        record,
+        node_name=node_name,
+        visit_key=visit_key,
+    )
+    return record
+
+
+def _build_buyer_individual_ex_post_evaluation_record(
+    entry: OrderControlTvtMpActualPassageWaitEntry,
+    record: OrderControlTvtMpActualPassageObservationRecord,
+    monetary: OrderControlTvtMpActualPassageMonetaryFrozenInput,
+) -> OrderControlTvtMpBuyerIndividualExPostEvaluationRecord:
+    realized_time_value = record.baseline_minus_actual_time_value
+    official_payment = monetary.payment_paid_in_this_transaction
+    true_vot_per_second = record.true_vot_per_second
+    realized_gain = realized_time_value - official_payment
+
+    if realized_time_value <= 0:
+        return OrderControlTvtMpBuyerIndividualExPostEvaluationRecord(
+            visit_key=entry.visit_key,
+            vehicle_name=entry.vehicle_name,
+            realized_time_value=realized_time_value,
+            official_payment=official_payment,
+            realized_gain=realized_gain,
+            satisfaction_status=(
+                OrderControlTvtMpIndividualSatisfactionStatus.UNSATISFIED
+            ),
+            satisfaction_reason=(
+                OrderControlTvtMpBuyerSatisfactionReason
+                .TRIVIALLY_UNSATISFIED_NONPOSITIVE_REALIZED_TIME_VALUE
+            ),
+            official_payment_per_saved_second=None,
+        )
+
+    actual_time_saving_seconds = record.baseline_minus_actual_passage_seconds
+    if actual_time_saving_seconds <= 0:
+        raise RuntimeError(
+            f"Node {entry.node_name!r}: VisitKey {entry.visit_key!r} buyer "
+            "with positive realized_time_value requires positive "
+            "actual_time_saving_seconds; got "
+            f"{actual_time_saving_seconds!r}."
+        )
+
+    official_payment_per_saved_second = (
+        official_payment / actual_time_saving_seconds
+    )
+    if official_payment_per_saved_second >= true_vot_per_second:
+        satisfaction_status = (
+            OrderControlTvtMpIndividualSatisfactionStatus.UNSATISFIED
+        )
+        satisfaction_reason = (
+            OrderControlTvtMpBuyerSatisfactionReason.UNSATISFIED_BY_HIGH_PAYMENT_RATE
+        )
+    else:
+        satisfaction_status = (
+            OrderControlTvtMpIndividualSatisfactionStatus.SATISFIED
+        )
+        satisfaction_reason = (
+            OrderControlTvtMpBuyerSatisfactionReason.SATISFIED_APPROPRIATE_PAYMENT_RATE
+        )
+
+    return OrderControlTvtMpBuyerIndividualExPostEvaluationRecord(
+        visit_key=entry.visit_key,
+        vehicle_name=entry.vehicle_name,
+        realized_time_value=realized_time_value,
+        official_payment=official_payment,
+        realized_gain=realized_gain,
+        satisfaction_status=satisfaction_status,
+        satisfaction_reason=satisfaction_reason,
+        official_payment_per_saved_second=official_payment_per_saved_second,
+    )
+
+
+def _build_seller_individual_ex_post_evaluation_record(
+    entry: OrderControlTvtMpActualPassageWaitEntry,
+    record: OrderControlTvtMpActualPassageObservationRecord,
+    monetary: OrderControlTvtMpActualPassageMonetaryFrozenInput,
+) -> OrderControlTvtMpSellerIndividualExPostEvaluationRecord:
+    realized_delay_loss = -record.baseline_minus_actual_time_value
+    official_compensation = monetary.payment_received_in_this_transaction
+    true_vot_per_second = record.true_vot_per_second
+    actual_delay_seconds = -record.baseline_minus_actual_passage_seconds
+    realized_gain = official_compensation - realized_delay_loss
+
+    if actual_delay_seconds <= 0:
+        return OrderControlTvtMpSellerIndividualExPostEvaluationRecord(
+            visit_key=entry.visit_key,
+            vehicle_name=entry.vehicle_name,
+            realized_delay_loss=realized_delay_loss,
+            official_compensation=official_compensation,
+            realized_gain=realized_gain,
+            satisfaction_status=(
+                OrderControlTvtMpIndividualSatisfactionStatus.SATISFIED
+            ),
+            satisfaction_reason=(
+                OrderControlTvtMpSellerSatisfactionReason
+                .TRIVIALLY_SATISFIED_NONPOSITIVE_ACTUAL_DELAY
+            ),
+            official_compensation_per_delayed_second=None,
+        )
+
+    official_compensation_per_delayed_second = (
+        official_compensation / actual_delay_seconds
+    )
+    if official_compensation_per_delayed_second < true_vot_per_second:
+        satisfaction_status = (
+            OrderControlTvtMpIndividualSatisfactionStatus.UNSATISFIED
+        )
+        satisfaction_reason = (
+            OrderControlTvtMpSellerSatisfactionReason
+            .UNSATISFIED_INSUFFICIENT_COMPENSATION_RATE
+        )
+    else:
+        satisfaction_status = (
+            OrderControlTvtMpIndividualSatisfactionStatus.SATISFIED
+        )
+        satisfaction_reason = (
+            OrderControlTvtMpSellerSatisfactionReason
+            .SATISFIED_BY_SUFFICIENT_COMPENSATION_RATE
+        )
+
+    return OrderControlTvtMpSellerIndividualExPostEvaluationRecord(
+        visit_key=entry.visit_key,
+        vehicle_name=entry.vehicle_name,
+        realized_delay_loss=realized_delay_loss,
+        official_compensation=official_compensation,
+        realized_gain=realized_gain,
+        satisfaction_status=satisfaction_status,
+        satisfaction_reason=satisfaction_reason,
+        official_compensation_per_delayed_second=(
+            official_compensation_per_delayed_second
+        ),
+    )
+
+
+def _build_individual_ex_post_evaluation_unavailable_result(
+    trade_wait: OrderControlTvtMpActualPassageTradeWait,
+    trade_result: OrderControlTvtMpTradeExPostEvaluationResult,
+) -> OrderControlTvtMpIndividualExPostEvaluationResult:
+    return OrderControlTvtMpIndividualExPostEvaluationResult(
+        tvt_decision_timestep=trade_wait.tvt_decision_timestep,
+        node_name=trade_wait.node_name,
+        buyers_sorted=trade_wait.buyers_sorted,
+        trade_ex_post_evaluation_status=trade_result.ex_post_evaluation_status,
+        buyer_evaluation_records=None,
+        seller_evaluation_records=None,
+    )
+
+
+def _build_individual_ex_post_evaluation_evaluated_result(
+    registry: OrderControlTvtMpActualPassageWaitRegistry,
+    trade_wait: OrderControlTvtMpActualPassageTradeWait,
+    trade_result: OrderControlTvtMpTradeExPostEvaluationResult,
+) -> OrderControlTvtMpIndividualExPostEvaluationResult:
+    node_name = trade_wait.node_name
+    buyer_records = []
+    for visit_key in trade_wait.buyers_sorted:
+        entry = _wait_entry_for_trade_visit_key(
+            registry,
+            trade_wait,
+            visit_key,
+        )
+        record = _require_observed_buyer_entry_for_individual_evaluation(
+            entry,
+            node_name=node_name,
+            visit_key=visit_key,
+        )
+        monetary = entry.monetary_frozen_input
+        buyer_record = _build_buyer_individual_ex_post_evaluation_record(
+            entry,
+            record,
+            monetary,
+        )
+        buyer_records.append(buyer_record)
+
+    seller_records = []
+    for visit_key in trade_wait.seller_visit_keys:
+        entry = _wait_entry_for_trade_visit_key(
+            registry,
+            trade_wait,
+            visit_key,
+        )
+        record = _require_observed_seller_entry_for_individual_evaluation(
+            entry,
+            node_name=node_name,
+            visit_key=visit_key,
+        )
+        monetary = entry.monetary_frozen_input
+        seller_record = _build_seller_individual_ex_post_evaluation_record(
+            entry,
+            record,
+            monetary,
+        )
+        seller_records.append(seller_record)
+
+    return OrderControlTvtMpIndividualExPostEvaluationResult(
+        tvt_decision_timestep=trade_wait.tvt_decision_timestep,
+        node_name=trade_wait.node_name,
+        buyers_sorted=trade_wait.buyers_sorted,
+        trade_ex_post_evaluation_status=trade_result.ex_post_evaluation_status,
+        buyer_evaluation_records=tuple(buyer_records),
+        seller_evaluation_records=tuple(seller_records),
+    )
+
+
+def _build_individual_ex_post_evaluation_result_for_trade(
+    registry: OrderControlTvtMpActualPassageWaitRegistry,
+    trade_wait: OrderControlTvtMpActualPassageTradeWait,
+    trade_result: OrderControlTvtMpTradeExPostEvaluationResult,
+) -> OrderControlTvtMpIndividualExPostEvaluationResult:
+    status = trade_result.ex_post_evaluation_status
+    if status is OrderControlTvtMpTradeExPostEvaluationStatus.EVALUATION_UNAVAILABLE:
+        return _build_individual_ex_post_evaluation_unavailable_result(
+            trade_wait,
+            trade_result,
+        )
+    if status is OrderControlTvtMpTradeExPostEvaluationStatus.EX_POST_INFEASIBLE:
+        return _build_individual_ex_post_evaluation_evaluated_result(
+            registry,
+            trade_wait,
+            trade_result,
+        )
+    if status is OrderControlTvtMpTradeExPostEvaluationStatus.EX_POST_FEASIBLE:
+        return _build_individual_ex_post_evaluation_evaluated_result(
+            registry,
+            trade_wait,
+            trade_result,
+        )
+    raise RuntimeError(
+        f"unsupported trade ex-post evaluation status {status!r}."
+    )
+
+
+def prepare_tvt_mp_individual_ex_post_evaluation(
+    world,
+) -> _PreparedTvtMpIndividualExPostEvaluation:
+    """Prepare buyer/seller individual ex-post evaluation without live changes."""
+    _require_real_world_for_evaluation_end_unobserved(world)
+    evaluation_end_timestep = _require_evaluation_end_timestep_for_unobserved(world)
+    _require_world_timestep_matches_evaluation_end_plus_one(
+        world,
+        evaluation_end_timestep,
+    )
+    wait_registry, history_registry = (
+        _require_wait_and_history_registries_for_evaluation_end(world)
+    )
+    if not isinstance(
+        wait_registry.trade_ex_post_evaluation_results_by_transaction_key,
+        dict,
+    ):
+        raise RuntimeError(
+            "trade_ex_post_evaluation_results_by_transaction_key must be a dict; "
+            "got type "
+            f"{type(wait_registry.trade_ex_post_evaluation_results_by_transaction_key).__name__}."
+        )
+    if not isinstance(
+        wait_registry.individual_ex_post_evaluation_results_by_transaction_key,
+        dict,
+    ):
+        raise RuntimeError(
+            "individual_ex_post_evaluation_results_by_transaction_key must be a "
+            "dict; got type "
+            f"{type(wait_registry.individual_ex_post_evaluation_results_by_transaction_key).__name__}."
+        )
+    _require_evaluation_end_unobserved_finalized_for_ex_post(
+        wait_registry,
+        evaluation_end_timestep,
+    )
+    _require_trade_ex_post_evaluation_completed_for_individual(
+        wait_registry,
+        evaluation_end_timestep,
+    )
+    _require_individual_ex_post_evaluation_not_started(wait_registry)
+    _validate_trade_ex_post_results_match_all_trades(wait_registry)
+    _require_no_waiting_entries_for_trade_ex_post(wait_registry)
+    _validate_all_saved_node_passage_histories(history_registry)
+    _validate_registry_trade_and_entry_partition(wait_registry, history_registry)
+
+    prepared_results = {}
+    sorted_trades = _sorted_trade_items(wait_registry.trades_by_transaction_key)
+    for transaction_key, trade_wait in sorted_trades:
+        trade_result = (
+            wait_registry.trade_ex_post_evaluation_results_by_transaction_key[
+                transaction_key
+            ]
+        )
+        _validate_trade_ex_post_result_identity_for_transaction_key(
+            transaction_key,
+            trade_wait,
+            trade_result,
+        )
+        _require_stored_trade_ex_post_status_matches_trade_wait(
+            wait_registry,
+            trade_wait,
+            trade_result,
+        )
+        prepared_results[transaction_key] = (
+            _build_individual_ex_post_evaluation_result_for_trade(
+                wait_registry,
+                trade_wait,
+                trade_result,
+            )
+        )
+
+    return _PreparedTvtMpIndividualExPostEvaluation(
+        wait_registry=wait_registry,
+        individual_ex_post_evaluation_results_by_transaction_key=prepared_results,
+        individual_ex_post_evaluation_finalized_timestep=evaluation_end_timestep,
+    )
+
+
+def commit_tvt_mp_individual_ex_post_evaluation(prepared_update) -> None:
+    """Assign prepared buyer/seller individual ex-post evaluation results only."""
+    if not isinstance(prepared_update, _PreparedTvtMpIndividualExPostEvaluation):
+        raise RuntimeError(
+            "prepared individual ex-post evaluation update must be "
+            "_PreparedTvtMpIndividualExPostEvaluation; got type "
+            f"{type(prepared_update).__name__}."
+        )
+    wait_registry = prepared_update.wait_registry
+    wait_registry.individual_ex_post_evaluation_results_by_transaction_key = (
+        prepared_update.individual_ex_post_evaluation_results_by_transaction_key
+    )
+    wait_registry.individual_ex_post_evaluation_finalized_timestep = (
+        prepared_update.individual_ex_post_evaluation_finalized_timestep
     )
