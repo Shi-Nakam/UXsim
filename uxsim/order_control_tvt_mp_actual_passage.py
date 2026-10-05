@@ -246,6 +246,8 @@ class OrderControlTvtMpActualPassageWaitRegistry:
         tuple[int, str, tuple[OrderControlTvtVisitKey, ...]],
         OrderControlTvtMpActualPassageTradeWait,
     ] = field(default_factory=dict)
+    # Not the evaluation-end timestep authority; prevents duplicate finalization.
+    evaluation_end_unobserved_finalized_timestep: int | None = None
 
 
 @dataclass(frozen=True)
@@ -1018,27 +1020,116 @@ def _validate_saved_wait_entry_observation_consistency(
     node_name: str,
     visit_key: OrderControlTvtVisitKey,
 ) -> None:
-    observed = (
-        entry.wait_status
-        is OrderControlTvtMpActualPassageWaitStatus.ACTUAL_PASSAGE_OBSERVED
-    )
-    has_record = entry.actual_passage_observation_record is not None
+    _validate_wait_entry_formal_three_state(entry, node_name, visit_key)
+
+
+def _validate_wait_entry_formal_three_state(
+    entry: OrderControlTvtMpActualPassageWaitEntry,
+    node_name: str,
+    visit_key: OrderControlTvtVisitKey,
+) -> None:
+    """Accept only waiting, observed, or evaluation-end unobserved."""
     waiting = (
         entry.wait_status
         is OrderControlTvtMpActualPassageWaitStatus.WAITING_FOR_ACTUAL_PASSAGE
     )
-    if observed and not has_record:
-        raise RuntimeError(
-            f"Node {node_name!r}: VisitKey {visit_key!r} is "
-            "ACTUAL_PASSAGE_OBSERVED but has no actual passage observation "
-            "record."
+    observed = (
+        entry.wait_status
+        is OrderControlTvtMpActualPassageWaitStatus.ACTUAL_PASSAGE_OBSERVED
+    )
+    evaluation_end_unobserved = (
+        entry.wait_status
+        is OrderControlTvtMpActualPassageWaitStatus.ACTUAL_PASSAGE_UNOBSERVED_AT_EVALUATION_END
+    )
+    record = entry.actual_passage_observation_record
+    if waiting:
+        if record is not None:
+            raise RuntimeError(
+                f"Node {node_name!r}: VisitKey {visit_key!r} is "
+                "WAITING_FOR_ACTUAL_PASSAGE but already has an actual passage "
+                "observation record."
+            )
+        return
+    if observed:
+        if record is None:
+            raise RuntimeError(
+                f"Node {node_name!r}: VisitKey {visit_key!r} is "
+                "ACTUAL_PASSAGE_OBSERVED but has no actual passage observation "
+                "record."
+            )
+        if (
+            record.observation_status
+            is not OrderControlTvtMpActualPassageObservationStatus.ACTUAL_PASSAGE_OBSERVED
+        ):
+            raise RuntimeError(
+                f"Node {node_name!r}: VisitKey {visit_key!r} wait_status is "
+                "ACTUAL_PASSAGE_OBSERVED but observation record status is "
+                f"{record.observation_status!r}."
+            )
+        if type(record.actual_passage_timestep) is not int:
+            raise RuntimeError(
+                f"Node {node_name!r}: VisitKey {visit_key!r} observed record "
+                "actual_passage_timestep must be a Python int; got "
+                f"{record.actual_passage_timestep!r}."
+            )
+        if (
+            not isinstance(record.actual_route_next_link_name, str)
+            or record.actual_route_next_link_name == ""
+        ):
+            raise RuntimeError(
+                f"Node {node_name!r}: VisitKey {visit_key!r} observed record "
+                "actual_route_next_link_name must be a non-empty str; got "
+                f"{record.actual_route_next_link_name!r}."
+            )
+        return
+    if evaluation_end_unobserved:
+        if record is None:
+            raise RuntimeError(
+                f"Node {node_name!r}: VisitKey {visit_key!r} is "
+                "ACTUAL_PASSAGE_UNOBSERVED_AT_EVALUATION_END but has no "
+                "actual passage observation record."
+            )
+        if (
+            record.observation_status
+            is not OrderControlTvtMpActualPassageObservationStatus.ACTUAL_PASSAGE_UNOBSERVED_AT_EVALUATION_END
+        ):
+            raise RuntimeError(
+                f"Node {node_name!r}: VisitKey {visit_key!r} wait_status is "
+                "ACTUAL_PASSAGE_UNOBSERVED_AT_EVALUATION_END but observation "
+                f"record status is {record.observation_status!r}."
+            )
+        if record.actual_passage_timestep is not None:
+            raise RuntimeError(
+                f"Node {node_name!r}: VisitKey {visit_key!r} evaluation-end "
+                "unobserved record actual_passage_timestep must be None; got "
+                f"{record.actual_passage_timestep!r}."
+            )
+        if record.actual_route_next_link_name is not None:
+            raise RuntimeError(
+                f"Node {node_name!r}: VisitKey {visit_key!r} evaluation-end "
+                "unobserved record actual_route_next_link_name must be None; "
+                f"got {record.actual_route_next_link_name!r}."
+            )
+        actual_side_fields = (
+            record.baseline_minus_actual_passage_timesteps,
+            record.baseline_minus_actual_passage_seconds,
+            record.baseline_minus_actual_time_value,
+            record.candidate_minus_actual_passage_timesteps,
+            record.candidate_minus_actual_passage_seconds,
+            record.candidate_minus_actual_time_value,
         )
-    if waiting and has_record:
-        raise RuntimeError(
-            f"Node {node_name!r}: VisitKey {visit_key!r} is "
-            "WAITING_FOR_ACTUAL_PASSAGE but already has an actual passage "
-            "observation record."
-        )
+        for field_value in actual_side_fields:
+            if field_value is not None:
+                raise RuntimeError(
+                    f"Node {node_name!r}: VisitKey {visit_key!r} evaluation-end "
+                    "unobserved record actual-side field must be None; got "
+                    f"{field_value!r}."
+                )
+        return
+    raise RuntimeError(
+        f"Node {node_name!r}: VisitKey {visit_key!r} has unknown wait_status "
+        f"{entry.wait_status!r}."
+    )
 
 
 def _all_buyer_seller_visits_complete_after_commit(
@@ -1425,4 +1516,390 @@ def commit_tvt_mp_actual_node_passage_history(prepared_update) -> None:
         )
     prepared_update.registry.records_by_node_name[prepared_update.node_name] = (
         prepared_update.updated_node_records
+    )
+
+
+@dataclass(frozen=True)
+class _PreparedTvtMpActualPassageEvaluationEndUnobservedFinalization:
+    """Prepared evaluation-end unobserved updates. Live registry unchanged."""
+
+    wait_registry: OrderControlTvtMpActualPassageWaitRegistry
+    waiting_entry_updates: tuple[
+        tuple[
+            OrderControlTvtMpActualPassageWaitEntry,
+            OrderControlTvtMpActualPassageObservationRecord,
+        ],
+        ...,
+    ]
+    evaluation_end_unobserved_finalized_timestep: int
+
+
+def _require_real_world_for_evaluation_end_unobserved(world) -> None:
+    baseline_collector = getattr(world, "_order_control_baseline_collector", None)
+    if baseline_collector is not None:
+        raise RuntimeError(
+            "evaluation-end unobserved finalization runs on the real world only; "
+            "a baseline fork must not finalize unobserved waits."
+        )
+
+
+def _require_evaluation_end_timestep_for_unobserved(world) -> int:
+    require_timestep = getattr(world, "_require_tvt_evaluation_end_timestep", None)
+    if require_timestep is None:
+        raise RuntimeError(
+            "World is missing _require_tvt_evaluation_end_timestep."
+        )
+    evaluation_end_timestep = require_timestep()
+    if evaluation_end_timestep is None:
+        raise ValueError(
+            "order_control_tvt_evaluation_end_timestep must be None or a "
+            "Python int greater than or equal to 0 and less than TSIZE; "
+            f"got None, TSIZE={world.TSIZE}."
+        )
+    return evaluation_end_timestep
+
+
+def _require_world_timestep_matches_evaluation_end_plus_one(
+    world,
+    evaluation_end_timestep: int,
+) -> None:
+    if type(world.T) is not int:
+        raise RuntimeError(
+            f"World.T must be a Python int, not bool; got {world.T!r}."
+        )
+    expected_timestep = evaluation_end_timestep + 1
+    if world.T != expected_timestep:
+        raise RuntimeError(
+            "evaluation-end unobserved finalization requires "
+            f"World.T == evaluation_end_timestep + 1; got World.T={world.T!r}, "
+            f"evaluation_end_timestep={evaluation_end_timestep!r}."
+        )
+
+
+def _require_wait_registry_not_already_finalized(
+    registry: OrderControlTvtMpActualPassageWaitRegistry,
+) -> None:
+    finalized = registry.evaluation_end_unobserved_finalized_timestep
+    if finalized is not None:
+        if type(finalized) is not int:
+            raise RuntimeError(
+                "evaluation_end_unobserved_finalized_timestep must be a Python "
+                f"int or None; got {finalized!r}."
+            )
+        raise RuntimeError(
+            "evaluation-end unobserved finalization was already completed for "
+            f"timestep {finalized!r}."
+        )
+
+
+def _require_no_partial_evaluation_end_unobserved_entries(
+    registry: OrderControlTvtMpActualPassageWaitRegistry,
+) -> None:
+    for entry_key, entry in registry.entries_by_node_name_and_visit_key.items():
+        node_name = entry_key[0]
+        visit_key = entry_key[1]
+        if (
+            entry.wait_status
+            is OrderControlTvtMpActualPassageWaitStatus.ACTUAL_PASSAGE_UNOBSERVED_AT_EVALUATION_END
+        ):
+            raise RuntimeError(
+                f"Node {node_name!r}: VisitKey {visit_key!r} is already "
+                "ACTUAL_PASSAGE_UNOBSERVED_AT_EVALUATION_END but "
+                "evaluation_end_unobserved_finalized_timestep is still None."
+            )
+
+
+def _require_wait_and_history_registries_for_evaluation_end(world):
+    wait_registry = getattr(
+        world,
+        "order_control_tvt_mp_actual_passage_wait_registry",
+        None,
+    )
+    if not isinstance(wait_registry, OrderControlTvtMpActualPassageWaitRegistry):
+        raise RuntimeError(
+            "order_control_tvt_mp_actual_passage_wait_registry must be "
+            "OrderControlTvtMpActualPassageWaitRegistry; got type "
+            f"{type(wait_registry).__name__}."
+        )
+    history_registry = getattr(
+        world,
+        "order_control_tvt_mp_actual_node_passage_history_registry",
+        None,
+    )
+    if not isinstance(history_registry, OrderControlTvtMpActualNodePassageHistoryRegistry):
+        raise RuntimeError(
+            "order_control_tvt_mp_actual_node_passage_history_registry must be "
+            "OrderControlTvtMpActualNodePassageHistoryRegistry; got type "
+            f"{type(history_registry).__name__}."
+        )
+    if not isinstance(
+        wait_registry.entries_by_node_name_and_visit_key,
+        dict,
+    ):
+        raise RuntimeError(
+            "entries_by_node_name_and_visit_key must be a dict; got type "
+            f"{type(wait_registry.entries_by_node_name_and_visit_key).__name__}."
+        )
+    if not isinstance(wait_registry.trades_by_transaction_key, dict):
+        raise RuntimeError(
+            "trades_by_transaction_key must be a dict; got type "
+            f"{type(wait_registry.trades_by_transaction_key).__name__}."
+        )
+    return wait_registry, history_registry
+
+
+def _validate_all_saved_node_passage_histories(
+    history_registry: OrderControlTvtMpActualNodePassageHistoryRegistry,
+) -> None:
+    node_names = sorted(history_registry.records_by_node_name.keys())
+    for node_name in node_names:
+        stored_records = history_registry.records_by_node_name[node_name]
+        _require_existing_node_passage_records(node_name, stored_records)
+
+
+def _node_history_contains_visit_key(
+    history_registry: OrderControlTvtMpActualNodePassageHistoryRegistry,
+    node_name: str,
+    visit_key: OrderControlTvtVisitKey,
+) -> bool:
+    stored_records = history_registry.records_by_node_name.get(node_name, ())
+    for record in stored_records:
+        if record.visit_key == visit_key:
+            return True
+    return False
+
+
+def _validate_wait_entry_matches_node_passage_history(
+    entry: OrderControlTvtMpActualPassageWaitEntry,
+    node_name: str,
+    visit_key: OrderControlTvtVisitKey,
+    history_registry: OrderControlTvtMpActualNodePassageHistoryRegistry,
+) -> None:
+    has_history = _node_history_contains_visit_key(
+        history_registry,
+        node_name,
+        visit_key,
+    )
+    waiting = (
+        entry.wait_status
+        is OrderControlTvtMpActualPassageWaitStatus.WAITING_FOR_ACTUAL_PASSAGE
+    )
+    observed = (
+        entry.wait_status
+        is OrderControlTvtMpActualPassageWaitStatus.ACTUAL_PASSAGE_OBSERVED
+    )
+    if observed and not has_history:
+        raise RuntimeError(
+            f"Node {node_name!r}: VisitKey {visit_key!r} is observed but has "
+            "no matching node passage history record."
+        )
+    if waiting and has_history:
+        raise RuntimeError(
+            f"Node {node_name!r}: VisitKey {visit_key!r} is waiting but "
+            "already has a node passage history record."
+        )
+
+
+def _sorted_trade_items(
+    trades_by_transaction_key: dict[
+        tuple[int, str, tuple[OrderControlTvtVisitKey, ...]],
+        OrderControlTvtMpActualPassageTradeWait,
+    ],
+):
+    transaction_keys = list(trades_by_transaction_key.keys())
+    transaction_keys.sort()
+    sorted_items = []
+    for transaction_key in transaction_keys:
+        trade_wait = trades_by_transaction_key[transaction_key]
+        sorted_items.append((transaction_key, trade_wait))
+    return sorted_items
+
+
+def _validate_trade_transaction_key_matches_trade_wait(
+    transaction_key: tuple[int, str, tuple[OrderControlTvtVisitKey, ...]],
+    trade_wait: OrderControlTvtMpActualPassageTradeWait,
+) -> None:
+    expected_key = (
+        trade_wait.tvt_decision_timestep,
+        trade_wait.node_name,
+        trade_wait.buyers_sorted,
+    )
+    if transaction_key != expected_key:
+        raise RuntimeError(
+            f"TradeWait transaction key {transaction_key!r} does not match "
+            f"TradeWait identity {expected_key!r}."
+        )
+
+
+def _validate_registry_trade_and_entry_partition(
+    registry: OrderControlTvtMpActualPassageWaitRegistry,
+    history_registry: OrderControlTvtMpActualNodePassageHistoryRegistry,
+) -> None:
+    entry_keys_from_registry = set(registry.entries_by_node_name_and_visit_key.keys())
+    entry_keys_from_trades = set()
+    entry_owner_by_key = {}
+
+    sorted_trades = _sorted_trade_items(registry.trades_by_transaction_key)
+    for transaction_key, trade_wait in sorted_trades:
+        _validate_trade_transaction_key_matches_trade_wait(
+            transaction_key,
+            trade_wait,
+        )
+        _validate_trade_wait_buyer_seller_visit_keys(
+            trade_wait,
+            trade_wait.node_name,
+        )
+        _validate_role_visit_keys_for_trade(
+            registry,
+            trade_wait,
+            trade_wait.node_name,
+        )
+        node_name = trade_wait.node_name
+        for visit_key in trade_wait.all_visit_keys:
+            entry_key = (node_name, visit_key)
+            entry_keys_from_trades.add(entry_key)
+            if entry_key not in registry.entries_by_node_name_and_visit_key:
+                raise RuntimeError(
+                    f"Node {node_name!r}: TradeWait lists VisitKey {visit_key!r} "
+                    "but no WaitEntry exists."
+                )
+            if entry_key in entry_owner_by_key:
+                raise RuntimeError(
+                    f"Node {node_name!r}: VisitKey {visit_key!r} belongs to more "
+                    "than one TradeWait."
+                )
+            entry_owner_by_key[entry_key] = transaction_key
+            entry = registry.entries_by_node_name_and_visit_key[entry_key]
+            _validate_wait_entry_identity_matches_trade(
+                trade_wait,
+                entry,
+                node_name,
+            )
+            _validate_current_visit_trade_membership(
+                trade_wait,
+                entry,
+                node_name,
+                visit_key,
+            )
+            _validate_wait_entry_formal_three_state(entry, node_name, visit_key)
+            _validate_wait_entry_matches_node_passage_history(
+                entry,
+                node_name,
+                visit_key,
+                history_registry,
+            )
+
+    if entry_keys_from_registry != entry_keys_from_trades:
+        orphan_entry_keys = entry_keys_from_registry - entry_keys_from_trades
+        if orphan_entry_keys:
+            orphan_example = sorted(orphan_entry_keys)[0]
+            raise RuntimeError(
+                f"Node {orphan_example[0]!r}: WaitEntry for VisitKey "
+                f"{orphan_example[1]!r} is not listed in any TradeWait."
+            )
+        orphan_trade_only = entry_keys_from_trades - entry_keys_from_registry
+        orphan_example = sorted(orphan_trade_only)[0]
+        raise RuntimeError(
+            f"Node {orphan_example[0]!r}: TradeWait lists VisitKey "
+            f"{orphan_example[1]!r} without a matching WaitEntry."
+        )
+
+
+def _build_evaluation_end_unobserved_observation_record(
+    wait_entry: OrderControlTvtMpActualPassageWaitEntry,
+) -> OrderControlTvtMpActualPassageObservationRecord:
+    return OrderControlTvtMpActualPassageObservationRecord(
+        tvt_decision_timestep=wait_entry.tvt_decision_timestep,
+        node_name=wait_entry.node_name,
+        buyers_sorted=wait_entry.buyers_sorted,
+        visit_key=wait_entry.visit_key,
+        vehicle_name=wait_entry.vehicle_name,
+        role=wait_entry.role,
+        observation_status=(
+            OrderControlTvtMpActualPassageObservationStatus.ACTUAL_PASSAGE_UNOBSERVED_AT_EVALUATION_END
+        ),
+        baseline_passage_timestep=wait_entry.baseline_passage_timestep,
+        candidate_passage_timestep=wait_entry.candidate_passage_timestep,
+        true_vot_per_second=wait_entry.true_vot_per_second,
+        predicted_observation_status=wait_entry.predicted_observation_status,
+        predicted_route_next_link_name=wait_entry.predicted_route_next_link_name,
+        baseline_minus_candidate_passage_timesteps=(
+            wait_entry.baseline_minus_candidate_passage_timesteps
+        ),
+        baseline_minus_candidate_passage_seconds=(
+            wait_entry.baseline_minus_candidate_passage_seconds
+        ),
+        baseline_minus_candidate_time_value=(
+            wait_entry.baseline_minus_candidate_time_value
+        ),
+        baseline_minus_actual_passage_timesteps=None,
+        baseline_minus_actual_passage_seconds=None,
+        baseline_minus_actual_time_value=None,
+        candidate_minus_actual_passage_timesteps=None,
+        candidate_minus_actual_passage_seconds=None,
+        candidate_minus_actual_time_value=None,
+        actual_passage_timestep=None,
+        actual_route_next_link_name=None,
+    )
+
+
+def prepare_tvt_mp_actual_passage_evaluation_end_unobserved_finalization(
+    world,
+) -> _PreparedTvtMpActualPassageEvaluationEndUnobservedFinalization:
+    """Prepare evaluation-end unobserved finalization without changing live state."""
+    _require_real_world_for_evaluation_end_unobserved(world)
+    evaluation_end_timestep = _require_evaluation_end_timestep_for_unobserved(world)
+    _require_world_timestep_matches_evaluation_end_plus_one(
+        world,
+        evaluation_end_timestep,
+    )
+    wait_registry, history_registry = _require_wait_and_history_registries_for_evaluation_end(
+        world,
+    )
+    _require_wait_registry_not_already_finalized(wait_registry)
+    _require_no_partial_evaluation_end_unobserved_entries(wait_registry)
+    _validate_all_saved_node_passage_histories(history_registry)
+    _validate_registry_trade_and_entry_partition(wait_registry, history_registry)
+
+    waiting_entry_updates = []
+    for entry_key in sorted(wait_registry.entries_by_node_name_and_visit_key.keys()):
+        node_name = entry_key[0]
+        visit_key = entry_key[1]
+        entry = wait_registry.entries_by_node_name_and_visit_key[entry_key]
+        if (
+            entry.wait_status
+            is not OrderControlTvtMpActualPassageWaitStatus.WAITING_FOR_ACTUAL_PASSAGE
+        ):
+            continue
+        unobserved_record = _build_evaluation_end_unobserved_observation_record(entry)
+        waiting_entry_updates.append((entry, unobserved_record))
+
+    return _PreparedTvtMpActualPassageEvaluationEndUnobservedFinalization(
+        wait_registry=wait_registry,
+        waiting_entry_updates=tuple(waiting_entry_updates),
+        evaluation_end_unobserved_finalized_timestep=evaluation_end_timestep,
+    )
+
+
+def commit_tvt_mp_actual_passage_evaluation_end_unobserved_finalization(
+    prepared_update,
+) -> None:
+    """Assign prepared evaluation-end unobserved updates only."""
+    if not isinstance(
+        prepared_update,
+        _PreparedTvtMpActualPassageEvaluationEndUnobservedFinalization,
+    ):
+        raise RuntimeError(
+            "prepared evaluation-end unobserved update must be "
+            "_PreparedTvtMpActualPassageEvaluationEndUnobservedFinalization; "
+            f"got type {type(prepared_update).__name__}."
+        )
+    committed_status = (
+        OrderControlTvtMpActualPassageWaitStatus.ACTUAL_PASSAGE_UNOBSERVED_AT_EVALUATION_END
+    )
+    for wait_entry, observation_record in prepared_update.waiting_entry_updates:
+        wait_entry.actual_passage_observation_record = observation_record
+        wait_entry.wait_status = committed_status
+    prepared_update.wait_registry.evaluation_end_unobserved_finalized_timestep = (
+        prepared_update.evaluation_end_unobserved_finalized_timestep
     )

@@ -5045,6 +5045,26 @@ class World:
             return False
         return W.T > evaluation_end_timestep
 
+    def _maybe_finalize_tvt_mp_evaluation_end_unobserved_passages(W) -> None:
+        """Finalize waiting actual passages when evaluation has just ended."""
+        evaluation_end_timestep = W._require_tvt_evaluation_end_timestep()
+        if evaluation_end_timestep is None:
+            return
+        if W.T != evaluation_end_timestep + 1:
+            return
+        from uxsim.order_control_tvt_mp_actual_passage import (
+            commit_tvt_mp_actual_passage_evaluation_end_unobserved_finalization,
+            prepare_tvt_mp_actual_passage_evaluation_end_unobserved_finalization,
+        )
+        prepared_update = (
+            prepare_tvt_mp_actual_passage_evaluation_end_unobserved_finalization(
+                W,
+            )
+        )
+        commit_tvt_mp_actual_passage_evaluation_end_unobserved_finalization(
+            prepared_update,
+        )
+
     def exec_simulation(W, until_t:float|None=None, duration_t:float|None=None, duration_t2:float|None=None):
         """
         Execute the main loop of the simulation.
@@ -5191,6 +5211,7 @@ class World:
         if W.T == W.TSIZE:
             if W.print_mode and W.show_progress:
                 W.analyzer.show_simulation_progress()
+            W._maybe_finalize_tvt_mp_evaluation_end_unobserved_passages()
             W.simulation_terminated()
             return 1
         # T is evaluation_end_timestep + 1 here, and TSIZE is still ahead.
@@ -5199,6 +5220,7 @@ class World:
             evaluation_end_timestep is not None
             and W.T == evaluation_end_timestep + 1
         ):
+            W._maybe_finalize_tvt_mp_evaluation_end_unobserved_passages()
             W.simulation_terminated()
             return 1
 

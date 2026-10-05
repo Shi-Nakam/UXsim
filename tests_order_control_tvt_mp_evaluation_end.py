@@ -12,9 +12,28 @@ from unittest.mock import patch
 
 from uxsim.analyzer import Analyzer
 from uxsim.order_control_baseline_driver import run_snapshot_fixed_baseline_fork
+from uxsim.order_control_tvt_mp_actual_passage import (
+    OrderControlTvtMpActualPassageCommonFrozenInput,
+    OrderControlTvtMpActualPassageMonetaryFrozenInput,
+    OrderControlTvtMpActualPassageObservationRecord,
+    OrderControlTvtMpActualPassageObservationStatus,
+    OrderControlTvtMpActualPassageRole,
+    OrderControlTvtMpActualPassageTradeWait,
+    OrderControlTvtMpActualPassageWaitEntry,
+    OrderControlTvtMpActualPassageWaitStatus,
+    OrderControlTvtMpActualNodePassageRecord,
+    commit_tvt_mp_actual_passage_evaluation_end_unobserved_finalization,
+    prepare_tvt_mp_actual_passage_evaluation_end_unobserved_finalization,
+)
+from uxsim.order_control_tvt_mp_candidate_local_virtual_calculation import (
+    OrderControlTvtMpCandidatePassageObservationStatus,
+)
 from uxsim.order_control_tvt_mp_driver import (
     OrderControlTvtMpDriverResult,
     run_tvt_mp_driver,
+)
+from uxsim.order_control_tvt_mp_local_binding_rank_sequence import (
+    OrderControlTvtMpLocalBindingRouteOrigin,
 )
 from uxsim.uxsim import Link, Node, World
 from tests_order_control_baseline_driver import (
@@ -71,6 +90,379 @@ def _assert_raises(error_type, function):
     except error_type as error:
         return error
     raise AssertionError(f"Expected {error_type.__name__}")
+
+
+def _assert_raises(error_type, function):
+    try:
+        function()
+    except error_type as error:
+        return error
+    raise AssertionError(f"Expected {error_type.__name__}")
+
+
+_ROUTE_ORIGIN = OrderControlTvtMpLocalBindingRouteOrigin.RANK_LEDGER_FORMAL_ROUTE
+_HOOK_DECISION_TIMESTEP = 10
+_HOOK_BASELINE_TIMESTEP = 10
+_HOOK_CANDIDATE_TIMESTEP = 8
+_HOOK_ACTUAL_TIMESTEP = 7
+
+
+def _hook_visit_key(vehicle_name, visit_index=1):
+    return (vehicle_name, visit_index)
+
+
+def _hook_common_frozen():
+    return OrderControlTvtMpActualPassageCommonFrozenInput(
+        baseline_local_rank=2,
+        post_trade_local_rank=1,
+        rank_change=1,
+        route_origin=_ROUTE_ORIGIN,
+    )
+
+
+def _hook_monetary_frozen():
+    return OrderControlTvtMpActualPassageMonetaryFrozenInput(
+        declared_vot_per_second=1.0,
+        payment_paid_in_this_transaction=0,
+        payment_received_in_this_transaction=0,
+    )
+
+
+def _hook_observed_record(visit_key, role):
+    return OrderControlTvtMpActualPassageObservationRecord(
+        tvt_decision_timestep=_HOOK_DECISION_TIMESTEP,
+        node_name="node_a",
+        buyers_sorted=(_hook_visit_key("buyer_1", 1),),
+        visit_key=visit_key,
+        vehicle_name=visit_key[0],
+        role=role,
+        observation_status=(
+            OrderControlTvtMpActualPassageObservationStatus.ACTUAL_PASSAGE_OBSERVED
+        ),
+        baseline_passage_timestep=_HOOK_BASELINE_TIMESTEP,
+        candidate_passage_timestep=_HOOK_CANDIDATE_TIMESTEP,
+        true_vot_per_second=0.5,
+        predicted_observation_status=(
+            OrderControlTvtMpCandidatePassageObservationStatus.OBSERVED
+        ),
+        predicted_route_next_link_name="link_pred",
+        baseline_minus_candidate_passage_timesteps=2,
+        baseline_minus_candidate_passage_seconds=120,
+        baseline_minus_candidate_time_value=60.0,
+        baseline_minus_actual_passage_timesteps=3,
+        baseline_minus_actual_passage_seconds=180,
+        baseline_minus_actual_time_value=90.0,
+        candidate_minus_actual_passage_timesteps=1,
+        candidate_minus_actual_passage_seconds=60,
+        candidate_minus_actual_time_value=30.0,
+        actual_passage_timestep=_HOOK_ACTUAL_TIMESTEP,
+        actual_route_next_link_name="link_actual",
+    )
+
+
+def _append_hook_node_history(world, node_name, visit_key):
+    history_registry = world.order_control_tvt_mp_actual_node_passage_history_registry
+    existing = history_registry.records_by_node_name.get(node_name, ())
+    record = OrderControlTvtMpActualNodePassageRecord(
+        visit_key=visit_key,
+        actual_passage_timestep=_HOOK_ACTUAL_TIMESTEP,
+        actual_route_next_link_name="link_actual",
+        actual_node_passage_rank=len(existing) + 1,
+    )
+    history_registry.records_by_node_name[node_name] = existing + (record,)
+
+
+def _register_hook_trade(
+    world,
+    *,
+    node_name="node_a",
+    observed_buyer=False,
+):
+    registry = world.order_control_tvt_mp_actual_passage_wait_registry
+    buyers_sorted = (_hook_visit_key("buyer_1", 1),)
+    buyer_key = _hook_visit_key("buyer_a", 1)
+    seller_key = _hook_visit_key("seller_a", 1)
+    buyer_status = (
+        OrderControlTvtMpActualPassageWaitStatus.ACTUAL_PASSAGE_OBSERVED
+        if observed_buyer
+        else OrderControlTvtMpActualPassageWaitStatus.WAITING_FOR_ACTUAL_PASSAGE
+    )
+    buyer_record = None
+    if observed_buyer:
+        buyer_record = _hook_observed_record(
+            buyer_key,
+            OrderControlTvtMpActualPassageRole.BUYER,
+        )
+        _append_hook_node_history(world, node_name, buyer_key)
+    buyer_entry = OrderControlTvtMpActualPassageWaitEntry(
+        tvt_decision_timestep=_HOOK_DECISION_TIMESTEP,
+        node_name=node_name,
+        buyers_sorted=buyers_sorted,
+        visit_key=buyer_key,
+        vehicle_name="buyer_a",
+        role=OrderControlTvtMpActualPassageRole.BUYER,
+        wait_status=buyer_status,
+        baseline_passage_timestep=_HOOK_BASELINE_TIMESTEP,
+        candidate_passage_timestep=_HOOK_CANDIDATE_TIMESTEP,
+        true_vot_per_second=0.5,
+        baseline_minus_candidate_passage_timesteps=2,
+        baseline_minus_candidate_passage_seconds=120,
+        baseline_minus_candidate_time_value=60.0,
+        predicted_observation_status=(
+            OrderControlTvtMpCandidatePassageObservationStatus.OBSERVED
+        ),
+        predicted_route_next_link_name="link_pred",
+        common_frozen_input=_hook_common_frozen(),
+        monetary_frozen_input=_hook_monetary_frozen(),
+        actual_passage_observation_record=buyer_record,
+    )
+    seller_entry = OrderControlTvtMpActualPassageWaitEntry(
+        tvt_decision_timestep=_HOOK_DECISION_TIMESTEP,
+        node_name=node_name,
+        buyers_sorted=buyers_sorted,
+        visit_key=seller_key,
+        vehicle_name="seller_a",
+        role=OrderControlTvtMpActualPassageRole.SELLER,
+        wait_status=OrderControlTvtMpActualPassageWaitStatus.WAITING_FOR_ACTUAL_PASSAGE,
+        baseline_passage_timestep=_HOOK_BASELINE_TIMESTEP,
+        candidate_passage_timestep=_HOOK_CANDIDATE_TIMESTEP,
+        true_vot_per_second=0.5,
+        baseline_minus_candidate_passage_timesteps=2,
+        baseline_minus_candidate_passage_seconds=120,
+        baseline_minus_candidate_time_value=60.0,
+        predicted_observation_status=(
+            OrderControlTvtMpCandidatePassageObservationStatus.OBSERVED
+        ),
+        predicted_route_next_link_name="link_pred",
+        common_frozen_input=_hook_common_frozen(),
+        monetary_frozen_input=_hook_monetary_frozen(),
+        actual_passage_observation_record=None,
+    )
+    registry.entries_by_node_name_and_visit_key[(node_name, buyer_key)] = buyer_entry
+    registry.entries_by_node_name_and_visit_key[(node_name, seller_key)] = seller_entry
+    trade = OrderControlTvtMpActualPassageTradeWait(
+        tvt_decision_timestep=_HOOK_DECISION_TIMESTEP,
+        node_name=node_name,
+        buyers_sorted=buyers_sorted,
+        all_visit_keys=(buyer_key, seller_key),
+        buyer_visit_keys=(buyer_key,),
+        seller_visit_keys=(seller_key,),
+        nonparticipating_visit_keys=(),
+        buyer_seller_actual_passage_completion_notified=False,
+    )
+    transaction_key = (_HOOK_DECISION_TIMESTEP, node_name, buyers_sorted)
+    registry.trades_by_transaction_key[transaction_key] = trade
+    return buyer_entry, seller_entry, trade
+
+
+def _run_exec_with_driver_patched(world, **exec_kwargs):
+    with patch(
+        "uxsim.order_control_tvt_mp_driver.run_tvt_mp_driver",
+        _recording_driver([]),
+    ):
+        return world.exec_simulation(**exec_kwargs)
+
+
+def test_exec_simulation_unobserved_finalize_order_before_termination_and_analysis():
+    world = _plain_world("unobserved_hook_order", 40)
+    world.order_control_tvt_evaluation_end_timestep = 9
+    events = []
+    original_prepare = (
+        prepare_tvt_mp_actual_passage_evaluation_end_unobserved_finalization
+    )
+    original_commit = (
+        commit_tvt_mp_actual_passage_evaluation_end_unobserved_finalization
+    )
+    original_terminated = World.simulation_terminated
+    original_analysis = Analyzer.basic_analysis
+
+    def tracking_prepare(current_world):
+        events.append("prepare")
+        return original_prepare(current_world)
+
+    def tracking_commit(prepared_update):
+        events.append("commit")
+        return original_commit(prepared_update)
+
+    def tracking_terminated(current_world):
+        events.append("terminated")
+        return original_terminated(current_world)
+
+    def tracking_analysis(analyzer):
+        events.append("analysis")
+        return original_analysis(analyzer)
+
+    with patch(
+        "uxsim.order_control_tvt_mp_actual_passage.prepare_tvt_mp_actual_passage_evaluation_end_unobserved_finalization",
+        tracking_prepare,
+    ):
+        with patch(
+            "uxsim.order_control_tvt_mp_actual_passage.commit_tvt_mp_actual_passage_evaluation_end_unobserved_finalization",
+            tracking_commit,
+        ):
+            with patch.object(World, "simulation_terminated", tracking_terminated):
+                with patch.object(Analyzer, "basic_analysis", tracking_analysis):
+                    _run_exec_with_driver_patched(world)
+    assert events == ["prepare", "commit", "terminated", "analysis"]
+    assert world.T == 10
+
+
+def test_exec_simulation_unobserved_finalize_sets_waiting_entries_after_last_traffic():
+    world = _plain_world("unobserved_hook_waiting", 40)
+    world.order_control_tvt_evaluation_end_timestep = 9
+    buyer_entry, seller_entry, trade = _register_hook_trade(
+        world,
+        observed_buyer=True,
+    )
+    buyer_record_before = buyer_entry.actual_passage_observation_record
+    flag_before = trade.buyer_seller_actual_passage_completion_notified
+    _run_exec_with_driver_patched(world)
+    assert world.T == 10
+    assert buyer_entry.actual_passage_observation_record is buyer_record_before
+    assert (
+        buyer_entry.wait_status
+        is OrderControlTvtMpActualPassageWaitStatus.ACTUAL_PASSAGE_OBSERVED
+    )
+    assert (
+        seller_entry.wait_status
+        is OrderControlTvtMpActualPassageWaitStatus.ACTUAL_PASSAGE_UNOBSERVED_AT_EVALUATION_END
+    )
+    assert seller_entry.actual_passage_observation_record is not None
+    assert trade.buyer_seller_actual_passage_completion_notified is flag_before
+    assert (
+        world.order_control_tvt_mp_actual_passage_wait_registry.evaluation_end_unobserved_finalized_timestep
+        == 9
+    )
+
+
+def test_exec_simulation_unobserved_finalize_does_not_run_traffic_after_evaluation_end():
+    world = _plain_world("unobserved_hook_no_traffic", 40)
+    world.order_control_tvt_evaluation_end_timestep = 9
+    link_timesteps = []
+    original_update = Link.update
+
+    def tracking_update(link):
+        link_timesteps.append(link.W.T)
+        return original_update(link)
+
+    with patch.object(Link, "update", tracking_update):
+        _run_exec_with_driver_patched(world)
+    assert max(link_timesteps) == 9
+    assert 10 not in link_timesteps
+    assert world.T == 10
+
+
+def test_exec_simulation_unobserved_finalize_not_called_on_mid_stop():
+    world = _plain_world("unobserved_hook_mid_stop", 40)
+    world.order_control_tvt_evaluation_end_timestep = 9
+    prepare_calls = []
+    original_prepare = (
+        prepare_tvt_mp_actual_passage_evaluation_end_unobserved_finalization
+    )
+
+    def tracking_prepare(current_world):
+        prepare_calls.append(current_world.T)
+        return original_prepare(current_world)
+
+    with patch(
+        "uxsim.order_control_tvt_mp_actual_passage.prepare_tvt_mp_actual_passage_evaluation_end_unobserved_finalization",
+        tracking_prepare,
+    ):
+        code = _run_exec_with_driver_patched(world, duration_t2=5)
+    assert code == 0
+    assert world.T == 5
+    assert prepare_calls == []
+
+
+def test_exec_simulation_unobserved_finalize_runs_once_on_split_resume():
+    world = _plain_world("unobserved_hook_split", 40)
+    world.order_control_tvt_evaluation_end_timestep = 9
+    prepare_calls = []
+    original_prepare = (
+        prepare_tvt_mp_actual_passage_evaluation_end_unobserved_finalization
+    )
+
+    def tracking_prepare(current_world):
+        prepare_calls.append(current_world.T)
+        return original_prepare(current_world)
+
+    with patch(
+        "uxsim.order_control_tvt_mp_actual_passage.prepare_tvt_mp_actual_passage_evaluation_end_unobserved_finalization",
+        tracking_prepare,
+    ):
+        first = _run_exec_with_driver_patched(world, duration_t2=5)
+        second = _run_exec_with_driver_patched(world)
+    assert first == 0
+    assert second == 1
+    assert prepare_calls == [10]
+
+
+def test_exec_simulation_unobserved_finalize_not_called_on_rerun_after_finish():
+    world = _plain_world("unobserved_hook_rerun", 40)
+    world.order_control_tvt_evaluation_end_timestep = 9
+    prepare_calls = []
+    original_prepare = (
+        prepare_tvt_mp_actual_passage_evaluation_end_unobserved_finalization
+    )
+
+    def tracking_prepare(current_world):
+        prepare_calls.append(current_world.T)
+        return original_prepare(current_world)
+
+    with patch(
+        "uxsim.order_control_tvt_mp_actual_passage.prepare_tvt_mp_actual_passage_evaluation_end_unobserved_finalization",
+        tracking_prepare,
+    ):
+        first = _run_exec_with_driver_patched(world)
+        second = _run_exec_with_driver_patched(world)
+    assert first == 1
+    assert second == 1
+    assert prepare_calls == [10]
+
+
+def test_exec_simulation_unobserved_finalize_not_called_when_evaluation_end_is_none():
+    world = _plain_world("unobserved_hook_none", 5)
+    prepare_calls = []
+    original_prepare = (
+        prepare_tvt_mp_actual_passage_evaluation_end_unobserved_finalization
+    )
+
+    def tracking_prepare(current_world):
+        prepare_calls.append(current_world.T)
+        return original_prepare(current_world)
+
+    with patch(
+        "uxsim.order_control_tvt_mp_actual_passage.prepare_tvt_mp_actual_passage_evaluation_end_unobserved_finalization",
+        tracking_prepare,
+    ):
+        world.exec_simulation()
+    assert prepare_calls == []
+
+
+def test_exec_simulation_unobserved_finalize_on_tsize_equals_evaluation_end_plus_one():
+    world = _plain_world("unobserved_hook_tsize_path", 10)
+    world.order_control_tvt_evaluation_end_timestep = 9
+    prepare_calls = []
+    original_prepare = (
+        prepare_tvt_mp_actual_passage_evaluation_end_unobserved_finalization
+    )
+
+    def tracking_prepare(current_world):
+        prepare_calls.append(current_world.T)
+        return original_prepare(current_world)
+
+    with patch(
+        "uxsim.order_control_tvt_mp_actual_passage.prepare_tvt_mp_actual_passage_evaluation_end_unobserved_finalization",
+        tracking_prepare,
+    ):
+        code = _run_exec_with_driver_patched(world)
+    assert code == 1
+    assert world.T == world.TSIZE == 10
+    assert prepare_calls == [10]
+    assert (
+        world.order_control_tvt_mp_actual_passage_wait_registry.evaluation_end_unobserved_finalized_timestep
+        == 9
+    )
 
 
 def test_evaluation_end_timestep_initial_value_is_none():

@@ -26,8 +26,10 @@ from uxsim.order_control_tvt_mp_actual_passage import (
     _PreparedTvtMpActualNodePassageHistoryUpdate,
     commit_tvt_mp_actual_node_passage_history,
     commit_tvt_mp_actual_passage_observation,
+    commit_tvt_mp_actual_passage_evaluation_end_unobserved_finalization,
     prepare_tvt_mp_actual_node_passage_history,
     prepare_tvt_mp_actual_passage_observation,
+    prepare_tvt_mp_actual_passage_evaluation_end_unobserved_finalization,
 )
 from uxsim.order_control_tvt_mp_local_binding_rank_sequence import (
     OrderControlTvtMpLocalBindingRouteOrigin,
@@ -585,6 +587,7 @@ def test_registry_dicts_start_empty():
     registry = OrderControlTvtMpActualPassageWaitRegistry()
     assert registry.entries_by_node_name_and_visit_key == {}
     assert registry.trades_by_transaction_key == {}
+    assert registry.evaluation_end_unobserved_finalized_timestep is None
 
 
 def test_two_registry_instances_do_not_share_dicts():
@@ -2649,3 +2652,609 @@ def test_commit_node_passage_history_assigns_prepared_values_only():
     assert registry.records_by_node_name["unsorted_node"][0] is late
     with pytest.raises(RuntimeError):
         commit_tvt_mp_actual_node_passage_history(prepared.record)
+
+
+_EVALUATION_END_TIMESTEP = 9
+_EVALUATION_END_WORLD_T = 10
+_EVALUATION_END_TSIZE = 40
+
+
+def _evaluation_end_world():
+    world = World(
+        name="evaluation_end_finalize",
+        deltan=1,
+        tmax=_EVALUATION_END_TSIZE,
+        print_mode=0,
+        save_mode=0,
+        show_mode=0,
+        show_progress=0,
+        random_seed=0,
+    )
+    world.finalize_scenario()
+    world.order_control_tvt_evaluation_end_timestep = _EVALUATION_END_TIMESTEP
+    world.T = _EVALUATION_END_WORLD_T
+    return world
+
+
+def _observed_record_for_visit_key(visit_key, role):
+    return OrderControlTvtMpActualPassageObservationRecord(
+        **_base_observation_record_kwargs(
+            visit_key,
+            role,
+            OrderControlTvtMpActualPassageObservationStatus.ACTUAL_PASSAGE_OBSERVED,
+            actual_passage_timestep=_PREPARE_ACTUAL_TIMESTEP,
+            actual_route_next_link_name="link_actual",
+            baseline_minus_actual_passage_timesteps=-2,
+            baseline_minus_actual_passage_seconds=-120,
+            baseline_minus_actual_time_value=-60.0,
+            candidate_minus_actual_passage_timesteps=-4,
+            candidate_minus_actual_passage_seconds=-240,
+            candidate_minus_actual_time_value=-120.0,
+        )
+    )
+
+
+def _append_node_passage_history(world, node_name, visit_key, rank):
+    registry = world.order_control_tvt_mp_actual_node_passage_history_registry
+    record = OrderControlTvtMpActualNodePassageRecord(
+        visit_key=visit_key,
+        actual_passage_timestep=_PREPARE_ACTUAL_TIMESTEP,
+        actual_route_next_link_name="link_actual",
+        actual_node_passage_rank=rank,
+    )
+    existing = registry.records_by_node_name.get(node_name, ())
+    registry.records_by_node_name[node_name] = existing + (record,)
+
+
+def _register_trade_entries_for_evaluation_end(
+    world,
+    *,
+    node_name="node_a",
+    decision_timestep=_PREPARE_DECISION_TIMESTEP,
+    buyers_sorted=None,
+    roles_and_names,
+    observed_visit_keys=(),
+    candidate_passage_timestep=_PREPARE_CANDIDATE_PASSAGE_TIMESTEP,
+    predicted_observation_status=(
+        OrderControlTvtMpCandidatePassageObservationStatus.OBSERVED
+    ),
+    baseline_minus_candidate=_COPIED_BASELINE_MINUS_CANDIDATE,
+):
+    if buyers_sorted is None:
+        buyers_sorted = (_sample_visit_key("buyer_1", 1),)
+    registry = world.order_control_tvt_mp_actual_passage_wait_registry
+    buyer_keys = []
+    seller_keys = []
+    nonpart_keys = []
+    entries = {}
+    vehicles = {}
+    observed_set = set(observed_visit_keys)
+    history_rank = 1
+    for role, vehicle_name in roles_and_names:
+        visit_key = _sample_visit_key(vehicle_name, 1)
+        if baseline_minus_candidate is None:
+            copied_timesteps = None
+            copied_seconds = None
+            copied_value = None
+        else:
+            copied_timesteps, copied_seconds, copied_value = baseline_minus_candidate
+        if visit_key in observed_set:
+            wait_status = (
+                OrderControlTvtMpActualPassageWaitStatus.ACTUAL_PASSAGE_OBSERVED
+            )
+            observation_record = _observed_record_for_visit_key(visit_key, role)
+            _append_node_passage_history(
+                world,
+                node_name,
+                visit_key,
+                history_rank,
+            )
+            history_rank = history_rank + 1
+        else:
+            wait_status = (
+                OrderControlTvtMpActualPassageWaitStatus.WAITING_FOR_ACTUAL_PASSAGE
+            )
+            observation_record = None
+        entry = OrderControlTvtMpActualPassageWaitEntry(
+            tvt_decision_timestep=decision_timestep,
+            node_name=node_name,
+            buyers_sorted=buyers_sorted,
+            visit_key=visit_key,
+            vehicle_name=vehicle_name,
+            role=role,
+            wait_status=wait_status,
+            baseline_passage_timestep=_PREPARE_BASELINE_PASSAGE_TIMESTEP,
+            candidate_passage_timestep=candidate_passage_timestep,
+            true_vot_per_second=_TEST_TRUE_VOT_PER_SECOND,
+            baseline_minus_candidate_passage_timesteps=copied_timesteps,
+            baseline_minus_candidate_passage_seconds=copied_seconds,
+            baseline_minus_candidate_time_value=copied_value,
+            predicted_observation_status=predicted_observation_status,
+            predicted_route_next_link_name="link_pred",
+            actual_passage_observation_record=observation_record,
+            **_frozen_fields(role),
+        )
+        registry.entries_by_node_name_and_visit_key[(node_name, visit_key)] = entry
+        entries[visit_key] = entry
+        vehicles[visit_key] = _ObservationVehicle(vehicle_name, ["log_before"])
+        if role is OrderControlTvtMpActualPassageRole.BUYER:
+            buyer_keys.append(visit_key)
+        elif role is OrderControlTvtMpActualPassageRole.SELLER:
+            seller_keys.append(visit_key)
+        else:
+            nonpart_keys.append(visit_key)
+    trade, transaction_key = _register_formal_trade_wait(
+        world,
+        decision_timestep=decision_timestep,
+        node_name=node_name,
+        buyers_sorted=buyers_sorted,
+        buyer_visit_keys=tuple(buyer_keys),
+        seller_visit_keys=tuple(seller_keys),
+        nonparticipating_visit_keys=tuple(nonpart_keys),
+    )
+    return trade, entries, vehicles, transaction_key
+
+
+def _prepare_and_commit_evaluation_end(world):
+    prepared = prepare_tvt_mp_actual_passage_evaluation_end_unobserved_finalization(
+        world,
+    )
+    commit_tvt_mp_actual_passage_evaluation_end_unobserved_finalization(prepared)
+    return prepared
+
+
+def test_evaluation_end_registry_field_defaults_to_none():
+    registry = OrderControlTvtMpActualPassageWaitRegistry()
+    assert registry.evaluation_end_unobserved_finalized_timestep is None
+
+
+def test_evaluation_end_finalizes_all_roles_waiting():
+    world = _evaluation_end_world()
+    trade, entries, vehicles, _transaction_key = _register_trade_entries_for_evaluation_end(
+        world,
+        roles_and_names=[
+            (OrderControlTvtMpActualPassageRole.BUYER, "buyer_a"),
+            (OrderControlTvtMpActualPassageRole.SELLER, "seller_a"),
+            (OrderControlTvtMpActualPassageRole.NONPARTICIPATING, "watcher"),
+        ],
+    )
+    flag_before = trade.buyer_seller_actual_passage_completion_notified
+    logs_before = {
+        visit_key: list(vehicles[visit_key].order_exchange_log)
+        for visit_key in vehicles
+    }
+    history_before = dict(
+        world.order_control_tvt_mp_actual_node_passage_history_registry.records_by_node_name
+    )
+    _prepare_and_commit_evaluation_end(world)
+    for visit_key, entry in entries.items():
+        record = entry.actual_passage_observation_record
+        assert (
+            entry.wait_status
+            is OrderControlTvtMpActualPassageWaitStatus.ACTUAL_PASSAGE_UNOBSERVED_AT_EVALUATION_END
+        )
+        assert (
+            record.observation_status
+            is OrderControlTvtMpActualPassageObservationStatus.ACTUAL_PASSAGE_UNOBSERVED_AT_EVALUATION_END
+        )
+        assert record.actual_passage_timestep is None
+        assert record.actual_route_next_link_name is None
+        assert record.baseline_minus_actual_passage_timesteps is None
+        assert record.baseline_minus_actual_passage_seconds is None
+        assert record.baseline_minus_actual_time_value is None
+        assert record.candidate_minus_actual_passage_timesteps is None
+        assert record.candidate_minus_actual_passage_seconds is None
+        assert record.candidate_minus_actual_time_value is None
+        assert record.baseline_minus_candidate_passage_timesteps == 41
+        assert vehicles[visit_key].order_exchange_log == logs_before[visit_key]
+    assert trade.buyer_seller_actual_passage_completion_notified is flag_before
+    assert (
+        world.order_control_tvt_mp_actual_node_passage_history_registry.records_by_node_name
+        == history_before
+    )
+    assert (
+        world.order_control_tvt_mp_actual_passage_wait_registry.evaluation_end_unobserved_finalized_timestep
+        == _EVALUATION_END_TIMESTEP
+    )
+
+
+def test_evaluation_end_leaves_observed_entries_unchanged():
+    world = _evaluation_end_world()
+    buyer_key = _sample_visit_key("buyer_a", 1)
+    seller_key = _sample_visit_key("seller_a", 1)
+    _register_trade_entries_for_evaluation_end(
+        world,
+        roles_and_names=[
+            (OrderControlTvtMpActualPassageRole.BUYER, "buyer_a"),
+            (OrderControlTvtMpActualPassageRole.SELLER, "seller_a"),
+        ],
+        observed_visit_keys=(buyer_key, seller_key),
+    )
+    buyer_entry = world.order_control_tvt_mp_actual_passage_wait_registry.entries_by_node_name_and_visit_key[
+        ("node_a", buyer_key)
+    ]
+    seller_entry = world.order_control_tvt_mp_actual_passage_wait_registry.entries_by_node_name_and_visit_key[
+        ("node_a", seller_key)
+    ]
+    buyer_record_before = buyer_entry.actual_passage_observation_record
+    seller_record_before = seller_entry.actual_passage_observation_record
+    _prepare_and_commit_evaluation_end(world)
+    assert buyer_entry.actual_passage_observation_record is buyer_record_before
+    assert seller_entry.actual_passage_observation_record is seller_record_before
+    assert (
+        buyer_entry.wait_status
+        is OrderControlTvtMpActualPassageWaitStatus.ACTUAL_PASSAGE_OBSERVED
+    )
+
+
+def test_evaluation_end_candidate_observed_actual_unobserved():
+    world = _evaluation_end_world()
+    _register_trade_entries_for_evaluation_end(
+        world,
+        roles_and_names=[
+            (OrderControlTvtMpActualPassageRole.BUYER, "buyer_a"),
+            (OrderControlTvtMpActualPassageRole.SELLER, "seller_a"),
+        ],
+        candidate_passage_timestep=_PREPARE_CANDIDATE_PASSAGE_TIMESTEP,
+        predicted_observation_status=(
+            OrderControlTvtMpCandidatePassageObservationStatus.OBSERVED
+        ),
+    )
+    _prepare_and_commit_evaluation_end(world)
+    buyer_key = _sample_visit_key("buyer_a", 1)
+    entry = world.order_control_tvt_mp_actual_passage_wait_registry.entries_by_node_name_and_visit_key[
+        ("node_a", buyer_key)
+    ]
+    record = entry.actual_passage_observation_record
+    assert record.candidate_passage_timestep == _PREPARE_CANDIDATE_PASSAGE_TIMESTEP
+    assert (
+        record.predicted_observation_status
+        is OrderControlTvtMpCandidatePassageObservationStatus.OBSERVED
+    )
+
+
+def test_evaluation_end_candidate_unobserved_actual_observed():
+    world = _evaluation_end_world()
+    buyer_key = _sample_visit_key("buyer_a", 1)
+    seller_key = _sample_visit_key("seller_a", 1)
+    _register_trade_entries_for_evaluation_end(
+        world,
+        roles_and_names=[
+            (OrderControlTvtMpActualPassageRole.BUYER, "buyer_a"),
+            (OrderControlTvtMpActualPassageRole.SELLER, "seller_a"),
+        ],
+        observed_visit_keys=(buyer_key,),
+        candidate_passage_timestep=None,
+        predicted_observation_status=(
+            OrderControlTvtMpCandidatePassageObservationStatus.UNOBSERVED_AT_HORIZON
+        ),
+        baseline_minus_candidate=None,
+    )
+    buyer_entry = world.order_control_tvt_mp_actual_passage_wait_registry.entries_by_node_name_and_visit_key[
+        ("node_a", buyer_key)
+    ]
+    assert buyer_entry.actual_passage_observation_record is not None
+    _prepare_and_commit_evaluation_end(world)
+    seller_key_entry = world.order_control_tvt_mp_actual_passage_wait_registry.entries_by_node_name_and_visit_key[
+        ("node_a", seller_key)
+    ]
+    seller_record = seller_key_entry.actual_passage_observation_record
+    assert seller_record.candidate_passage_timestep is None
+    assert seller_record.baseline_minus_candidate_passage_timesteps is None
+
+
+def test_evaluation_end_both_candidate_and_actual_unobserved():
+    world = _evaluation_end_world()
+    _register_trade_entries_for_evaluation_end(
+        world,
+        roles_and_names=[
+            (OrderControlTvtMpActualPassageRole.BUYER, "buyer_a"),
+            (OrderControlTvtMpActualPassageRole.SELLER, "seller_a"),
+        ],
+        candidate_passage_timestep=None,
+        predicted_observation_status=(
+            OrderControlTvtMpCandidatePassageObservationStatus.UNOBSERVED_AT_HORIZON
+        ),
+        baseline_minus_candidate=None,
+    )
+    _prepare_and_commit_evaluation_end(world)
+    buyer_key = _sample_visit_key("buyer_a", 1)
+    entry = world.order_control_tvt_mp_actual_passage_wait_registry.entries_by_node_name_and_visit_key[
+        ("node_a", buyer_key)
+    ]
+    record = entry.actual_passage_observation_record
+    assert record.candidate_passage_timestep is None
+    assert (
+        record.observation_status
+        is OrderControlTvtMpActualPassageObservationStatus.ACTUAL_PASSAGE_UNOBSERVED_AT_EVALUATION_END
+    )
+
+
+def test_evaluation_end_rejects_observed_without_history():
+    world = _evaluation_end_world()
+    buyer_key = _sample_visit_key("buyer_a", 1)
+    _register_trade_entries_for_evaluation_end(
+        world,
+        roles_and_names=[
+            (OrderControlTvtMpActualPassageRole.BUYER, "buyer_a"),
+            (OrderControlTvtMpActualPassageRole.SELLER, "seller_a"),
+        ],
+    )
+    buyer_entry = world.order_control_tvt_mp_actual_passage_wait_registry.entries_by_node_name_and_visit_key[
+        ("node_a", buyer_key)
+    ]
+    buyer_entry.wait_status = (
+        OrderControlTvtMpActualPassageWaitStatus.ACTUAL_PASSAGE_OBSERVED
+    )
+    buyer_entry.actual_passage_observation_record = _observed_record_for_visit_key(
+        buyer_key,
+        OrderControlTvtMpActualPassageRole.BUYER,
+    )
+    with pytest.raises(RuntimeError, match="no matching node passage history"):
+        prepare_tvt_mp_actual_passage_evaluation_end_unobserved_finalization(world)
+
+
+def test_evaluation_end_rejects_waiting_with_history():
+    world = _evaluation_end_world()
+    visit_key = _sample_visit_key("buyer_a", 1)
+    _register_trade_entries_for_evaluation_end(
+        world,
+        roles_and_names=[
+            (OrderControlTvtMpActualPassageRole.BUYER, "buyer_a"),
+            (OrderControlTvtMpActualPassageRole.SELLER, "seller_a"),
+        ],
+    )
+    _append_node_passage_history(world, "node_a", visit_key, 1)
+    with pytest.raises(RuntimeError, match="waiting but already has a node passage"):
+        prepare_tvt_mp_actual_passage_evaluation_end_unobserved_finalization(world)
+
+
+def test_evaluation_end_allows_history_only_partition_visit():
+    world = _evaluation_end_world()
+    orphan_visit_key = _sample_visit_key("partition_four", 1)
+    _append_node_passage_history(world, "node_a", orphan_visit_key, 1)
+    _register_trade_entries_for_evaluation_end(
+        world,
+        roles_and_names=[
+            (OrderControlTvtMpActualPassageRole.BUYER, "buyer_a"),
+            (OrderControlTvtMpActualPassageRole.SELLER, "seller_a"),
+        ],
+    )
+    _prepare_and_commit_evaluation_end(world)
+
+
+def test_evaluation_end_rejects_orphan_entry():
+    world = _evaluation_end_world()
+    _register_trade_entries_for_evaluation_end(
+        world,
+        roles_and_names=[
+            (OrderControlTvtMpActualPassageRole.BUYER, "buyer_a"),
+            (OrderControlTvtMpActualPassageRole.SELLER, "seller_a"),
+        ],
+    )
+    orphan_key = _sample_visit_key("orphan", 1)
+    world.order_control_tvt_mp_actual_passage_wait_registry.entries_by_node_name_and_visit_key[
+        ("node_a", orphan_key)
+    ] = OrderControlTvtMpActualPassageWaitEntry(
+        tvt_decision_timestep=_PREPARE_DECISION_TIMESTEP,
+        node_name="node_a",
+        buyers_sorted=(_sample_visit_key("buyer_1", 1),),
+        visit_key=orphan_key,
+        vehicle_name="orphan",
+        role=OrderControlTvtMpActualPassageRole.NONPARTICIPATING,
+        wait_status=OrderControlTvtMpActualPassageWaitStatus.WAITING_FOR_ACTUAL_PASSAGE,
+        baseline_passage_timestep=_PREPARE_BASELINE_PASSAGE_TIMESTEP,
+        candidate_passage_timestep=_PREPARE_CANDIDATE_PASSAGE_TIMESTEP,
+        true_vot_per_second=_TEST_TRUE_VOT_PER_SECOND,
+        baseline_minus_candidate_passage_timesteps=_COPIED_BASELINE_MINUS_CANDIDATE[0],
+        baseline_minus_candidate_passage_seconds=_COPIED_BASELINE_MINUS_CANDIDATE[1],
+        baseline_minus_candidate_time_value=_COPIED_BASELINE_MINUS_CANDIDATE[2],
+        predicted_observation_status=(
+            OrderControlTvtMpCandidatePassageObservationStatus.OBSERVED
+        ),
+        predicted_route_next_link_name="link_pred",
+        **_frozen_fields(OrderControlTvtMpActualPassageRole.NONPARTICIPATING),
+    )
+    with pytest.raises(RuntimeError, match="not listed in any TradeWait"):
+        prepare_tvt_mp_actual_passage_evaluation_end_unobserved_finalization(world)
+
+
+def test_evaluation_end_rejects_orphan_trade_visit_key():
+    world = _evaluation_end_world()
+    trade, _entries, _vehicles, _key = _register_trade_entries_for_evaluation_end(
+        world,
+        roles_and_names=[
+            (OrderControlTvtMpActualPassageRole.BUYER, "buyer_a"),
+            (OrderControlTvtMpActualPassageRole.SELLER, "seller_a"),
+        ],
+    )
+    missing_key = _sample_visit_key("missing", 1)
+    trade.nonparticipating_visit_keys = (missing_key,)
+    trade.all_visit_keys = trade.all_visit_keys + (missing_key,)
+    with pytest.raises(RuntimeError, match="no WaitEntry exists"):
+        prepare_tvt_mp_actual_passage_evaluation_end_unobserved_finalization(world)
+
+
+def test_evaluation_end_rejects_invalid_status_record_combination():
+    world = _evaluation_end_world()
+    visit_key = _sample_visit_key("buyer_a", 1)
+    _register_trade_entries_for_evaluation_end(
+        world,
+        roles_and_names=[
+            (OrderControlTvtMpActualPassageRole.BUYER, "buyer_a"),
+            (OrderControlTvtMpActualPassageRole.SELLER, "seller_a"),
+        ],
+    )
+    entry = world.order_control_tvt_mp_actual_passage_wait_registry.entries_by_node_name_and_visit_key[
+        ("node_a", visit_key)
+    ]
+    entry.wait_status = OrderControlTvtMpActualPassageWaitStatus.ACTUAL_PASSAGE_OBSERVED
+    with pytest.raises(RuntimeError, match="ACTUAL_PASSAGE_OBSERVED but has no"):
+        prepare_tvt_mp_actual_passage_evaluation_end_unobserved_finalization(world)
+
+
+def test_evaluation_end_prepare_leaves_live_state_unchanged():
+    world = _evaluation_end_world()
+    trade, entries, vehicles, _key = _register_trade_entries_for_evaluation_end(
+        world,
+        roles_and_names=[
+            (OrderControlTvtMpActualPassageRole.BUYER, "buyer_a"),
+            (OrderControlTvtMpActualPassageRole.SELLER, "seller_a"),
+        ],
+    )
+    status_before = {
+        visit_key: entries[visit_key].wait_status for visit_key in entries
+    }
+    record_before = {
+        visit_key: entries[visit_key].actual_passage_observation_record
+        for visit_key in entries
+    }
+    logs_before = {
+        visit_key: list(vehicles[visit_key].order_exchange_log)
+        for visit_key in vehicles
+    }
+    flag_before = trade.buyer_seller_actual_passage_completion_notified
+    history_before = dict(
+        world.order_control_tvt_mp_actual_node_passage_history_registry.records_by_node_name
+    )
+    finalized_before = (
+        world.order_control_tvt_mp_actual_passage_wait_registry.evaluation_end_unobserved_finalized_timestep
+    )
+    prepared = prepare_tvt_mp_actual_passage_evaluation_end_unobserved_finalization(
+        world,
+    )
+    assert prepared is not None
+    for visit_key in entries:
+        assert entries[visit_key].wait_status is status_before[visit_key]
+        assert (
+            entries[visit_key].actual_passage_observation_record
+            is record_before[visit_key]
+        )
+        assert vehicles[visit_key].order_exchange_log == logs_before[visit_key]
+    assert trade.buyer_seller_actual_passage_completion_notified is flag_before
+    assert (
+        world.order_control_tvt_mp_actual_node_passage_history_registry.records_by_node_name
+        == history_before
+    )
+    assert finalized_before is None
+
+
+def test_evaluation_end_prepare_failure_does_not_change_first_trade():
+    world = _evaluation_end_world()
+    first_buyers = (_sample_visit_key("buyer_1", 1),)
+    second_buyers = (_sample_visit_key("buyer_2", 1),)
+    _register_trade_entries_for_evaluation_end(
+        world,
+        node_name="node_a",
+        decision_timestep=_PREPARE_DECISION_TIMESTEP,
+        buyers_sorted=first_buyers,
+        roles_and_names=[
+            (OrderControlTvtMpActualPassageRole.BUYER, "buyer_a"),
+            (OrderControlTvtMpActualPassageRole.SELLER, "seller_a"),
+        ],
+    )
+    _register_trade_entries_for_evaluation_end(
+        world,
+        node_name="node_b",
+        decision_timestep=_PREPARE_DECISION_TIMESTEP + 1,
+        buyers_sorted=second_buyers,
+        roles_and_names=[
+            (OrderControlTvtMpActualPassageRole.BUYER, "buyer_b"),
+            (OrderControlTvtMpActualPassageRole.SELLER, "seller_b"),
+        ],
+    )
+    first_buyer_key = _sample_visit_key("buyer_a", 1)
+    first_entry = world.order_control_tvt_mp_actual_passage_wait_registry.entries_by_node_name_and_visit_key[
+        ("node_a", first_buyer_key)
+    ]
+    status_before = first_entry.wait_status
+    record_before = first_entry.actual_passage_observation_record
+    second_trade_key = (
+        _PREPARE_DECISION_TIMESTEP + 1,
+        "node_b",
+        second_buyers,
+    )
+    second_trade = world.order_control_tvt_mp_actual_passage_wait_registry.trades_by_transaction_key[
+        second_trade_key
+    ]
+    second_trade.seller_visit_keys = ()
+    with pytest.raises(RuntimeError):
+        prepare_tvt_mp_actual_passage_evaluation_end_unobserved_finalization(world)
+    assert first_entry.wait_status is status_before
+    assert first_entry.actual_passage_observation_record is record_before
+    assert (
+        world.order_control_tvt_mp_actual_passage_wait_registry.evaluation_end_unobserved_finalized_timestep
+        is None
+    )
+
+
+def test_evaluation_end_zero_waiting_entries_still_sets_registry_field():
+    world = _evaluation_end_world()
+    buyer_key = _sample_visit_key("buyer_a", 1)
+    seller_key = _sample_visit_key("seller_a", 1)
+    _register_trade_entries_for_evaluation_end(
+        world,
+        roles_and_names=[
+            (OrderControlTvtMpActualPassageRole.BUYER, "buyer_a"),
+            (OrderControlTvtMpActualPassageRole.SELLER, "seller_a"),
+        ],
+        observed_visit_keys=(buyer_key, seller_key),
+    )
+    prepared = prepare_tvt_mp_actual_passage_evaluation_end_unobserved_finalization(
+        world,
+    )
+    assert prepared.waiting_entry_updates == ()
+    commit_tvt_mp_actual_passage_evaluation_end_unobserved_finalization(prepared)
+    assert (
+        world.order_control_tvt_mp_actual_passage_wait_registry.evaluation_end_unobserved_finalized_timestep
+        == _EVALUATION_END_TIMESTEP
+    )
+
+
+def test_evaluation_end_rejects_second_run():
+    world = _evaluation_end_world()
+    _register_trade_entries_for_evaluation_end(
+        world,
+        roles_and_names=[
+            (OrderControlTvtMpActualPassageRole.BUYER, "buyer_a"),
+            (OrderControlTvtMpActualPassageRole.SELLER, "seller_a"),
+        ],
+    )
+    _prepare_and_commit_evaluation_end(world)
+    with pytest.raises(RuntimeError, match="already completed"):
+        prepare_tvt_mp_actual_passage_evaluation_end_unobserved_finalization(world)
+
+
+def test_evaluation_end_rejects_unset_evaluation_end_timestep():
+    world = _evaluation_end_world()
+    world.order_control_tvt_evaluation_end_timestep = None
+    with pytest.raises(ValueError):
+        prepare_tvt_mp_actual_passage_evaluation_end_unobserved_finalization(world)
+
+
+def test_evaluation_end_rejects_wrong_world_timestep():
+    world = _evaluation_end_world()
+    world.T = _EVALUATION_END_TIMESTEP
+    _register_trade_entries_for_evaluation_end(
+        world,
+        roles_and_names=[
+            (OrderControlTvtMpActualPassageRole.BUYER, "buyer_a"),
+            (OrderControlTvtMpActualPassageRole.SELLER, "seller_a"),
+        ],
+    )
+    with pytest.raises(RuntimeError, match="World.T =="):
+        prepare_tvt_mp_actual_passage_evaluation_end_unobserved_finalization(world)
+
+
+def test_evaluation_end_rejects_baseline_fork():
+    world = _evaluation_end_world()
+    _register_trade_entries_for_evaluation_end(
+        world,
+        roles_and_names=[
+            (OrderControlTvtMpActualPassageRole.BUYER, "buyer_a"),
+            (OrderControlTvtMpActualPassageRole.SELLER, "seller_a"),
+        ],
+    )
+    _as_fork(world)
+    with pytest.raises(RuntimeError, match="real world only"):
+        prepare_tvt_mp_actual_passage_evaluation_end_unobserved_finalization(world)
