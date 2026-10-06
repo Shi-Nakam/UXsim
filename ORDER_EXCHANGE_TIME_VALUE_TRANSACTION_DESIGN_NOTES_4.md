@@ -13169,3 +13169,420 @@ Node ごと: rank state → 確定 VisitKey 列 → `assigned_rank` → 履歴 r
 
 - 次: 本契約の文書保存（commit・push）後、集計・welfare・実験出力へ進む前に利用者指示に従う
 - 本節では rank difference の本番 prepare/commit・evaluation end 接続は行わない
+
+# TVT-MP 集計・研究出力の実装前詳細設計（2026-10-06）
+
+本節は、固定10工程の工程1である。技術的正本とする。直前の「TVT-MP Node実通過順位差の正本・評価契約確定（2026-10-06）」は削除、短縮、置換、書換えしない。
+
+本節の追記作業では、Python本番コード、テスト、診断、指定外の文書、Git管理状態、および `diagnostics/order_control.zip` を変更しない。
+
+原典確認したファイル:
+
+- `uxsim/order_control_tvt_mp_actual_passage.py`
+- `uxsim/order_control_tvt_node_rank_state.py`
+- `tests_order_control_tvt_mp_trade_ex_post_evaluation.py`
+- `tests_order_control_tvt_mp_individual_ex_post_evaluation.py`
+- `tests_order_control_tvt_mp_nonparticipating_external_effect.py`
+- `tests_order_control_tvt_mp_node_actual_rank_difference.py`
+- `tests_order_control_tvt_mp_evaluation_end.py`
+
+## 1. 位置づけと固定工程
+
+最新コミット `8a6f203` まで、個別正本と評価契約は完了済みである。再実装しない。
+
+固定総工程数は **10** である。
+
+1. 集計・研究出力の実装前詳細設計と文書追記（本節）
+2. 設計文書の document コミット
+3. 設計文書の push と確認
+4. 集計・研究出力の本番実装、専用テスト、関連回帰
+5. 正式サンプル回帰と保存済み7指標確認
+6. 実装コミット
+7. 実装コミットの push と確認
+8. 実装・検証完了記録の文書追記
+9. 完了記録の document コミット
+10. 完了記録の push、origin 一致、tracked clean 確認
+
+工程1完了後の残工程数は **9**。次は工程2。
+
+## 2. 実装単位
+
+新しい本番モジュール: `uxsim/order_control_tvt_mp_research_output.py`
+
+新しい専用テスト: `tests_order_control_tvt_mp_research_output.py`
+
+既存正本を読み、次の5表を Python の行データとして構築する。
+
+1. transaction table
+2. Visit-level outcome table
+3. Vehicle summary table
+4. Node summary table
+5. scenario summary table
+
+CSV 書出しは行構築と別の公開 API とする。
+
+確定方針:
+
+- pandas を本番依存にしない
+- Python 標準ライブラリ `csv` を使用する
+- Analyzer へ統合しない
+- `uxsim.py` へ自動接続しない
+- evaluation end helper へ自動接続しない
+- `simulation_terminated()` を変更しない
+- `basic_analysis()` を変更しない
+- evaluation end 完了後、研究用 script または利用者が公開 API を明示的に呼ぶ
+- 集計結果を新しい正本として registry へ保存しない
+- 同一 World から複数回 build しても live 状態を変更せず、同じ結果を返す
+- `actual_passage.py` / `uxsim.py` / `analyzer.py` へ集計処理を追加しない
+- `uxsim/__init__.py` の package export は工程4で既存慣行を確認し、必要な場合だけ最小変更。本節では必須と決めない
+
+## 3. 現行完了条件から除外するもの
+
+次は含めない。列も作らない。
+
+- welfare の正式式、predicted / actual / reference welfare
+- buyer・seller・NP 金額を合計して welfare と呼ぶ列
+- Vehicle 全取引の総合満足
+- Analyzer 統合、evaluation end での自動 CSV
+- route 差の新しい分析指標、candidate 予測誤差の追加指標
+- 平均・分位点の網羅的実装、可視化、論文図表、感度分析
+- 虚偽申告、strategy-proofness、centrality Node 選定、複車線
+- Decimal / tolerance、UI
+
+buyer 利得、seller 利得、nonparticipating 外部効果は出力する。各取引の buyer・seller 満足は出力する。同一 Vehicle の複数取引を統合した総合満足は作らない。
+
+## 4. 共通出力契約
+
+識別:
+
+- `scenario_name`: 公開 API の明示引数。World 名から曖昧に推測しない
+- transaction identity: `(tvt_decision_timestep, node_name, buyers_sorted)`。WaitRegistry の `trades_by_transaction_key` の key と同一
+- `tvt_decision_timestep`、`node_name`、`buyers_sorted`
+- `vehicle_name`、`visit_id`（VisitKey を分割。Python tuple の repr だけを唯一の識別子にしない）
+- `role`: `OrderControlTvtMpActualPassageRole.value`
+
+欠損:
+
+- 実際の数値 0 は数値 0
+- 未観測または未計算は `None`
+- 該当しない role の field は `None`
+- CSV では `None` を空欄。文字列 `"None"` を保存しない
+- 未観測を 0 へ変換しない
+- candidate 予測不能と actual 未観測を別 status 列で区別する
+- `EVALUATION_UNAVAILABLE` を 0 金額として扱わない
+- nonparticipating の monetary 契約不存在を 0 支払として扱わない
+
+enum は CSV で `.value` の文字列。bool は CSV で `true` / `false`（本表に bool 列が必要な場合のみ）。
+
+`buyers_sorted` の CSV 表現: 各 VisitKey を `vehicle_name:visit_id` とし、`|` で保存順に連結する。空 tuple は空欄。Python repr を使わない。
+
+区別する列: official と reference、true VOT と declared VOT、predicted / actual / formal route、assigned rank / actual rank / actual rank change。
+
+`final_local_rank` を assigned rank の代わりに使わない。取引内で actual 順位を付け直さない。
+
+## 5. 合計の None 契約
+
+- 対象 0 件: 件数 0。定義された空集合の合計は数値 0
+- 対象あり、全件 `None`: observed または evaluated 件数 0、missing 件数を保持、合計は `None`
+- 数値 0 のみ: 合計は数値 0
+- 数値と `None` が混在: 観測済みまたは計算済みの数値だけを合計。observed 件数と missing 件数を併記
+
+区別: 該当なし（`None`）、値 0、actual 未観測、candidate 予測不能、EVALUATION_UNAVAILABLE による未計算、monetary 契約不存在。
+
+## 6. transaction table
+
+1 transaction につき 1 行。走査元は `trades_by_transaction_key`。transaction identity を持たない台帳 Visit を架空 transaction へ入れない。
+
+行ソート: `(tvt_decision_timestep, node_name, buyers_sorted)` の昇順。
+
+| 列名 | 取得元 | 型 | None 契約 |
+| --- | --- | --- | --- |
+| `scenario_name` | API 引数 | str | 必須。空にしない |
+| `tvt_decision_timestep` | TradeWait | int | 必須 |
+| `node_name` | TradeWait | str | 必須 |
+| `buyers_sorted` | TradeWait | tuple。CSV は上記連結 | 空 tuple 可 |
+| `buyer_visit_count` | `buyer_visit_keys` 長 | int | 0 可 |
+| `seller_visit_count` | `seller_visit_keys` 長 | int | 0 可 |
+| `nonparticipating_visit_count` | `nonparticipating_visit_keys` 長 | int | 0 可 |
+| `trade_scope_visit_count` | `all_visit_keys` 長 | int | 0 可 |
+| `trade_ex_post_evaluation_status` | `OrderControlTvtMpTradeExPostEvaluationResult` | enum `.value` | 必須（前提充足後） |
+| `buyer_actual_declared_time_saving_value_total` | 同 result | number \| None | UNAVAILABLE は None |
+| `seller_actual_required_compensation_total` | 同 result | number \| None | UNAVAILABLE は None |
+| `buyer_official_payment_total` | individual buyer `official_payment` の合計。UNAVAILABLE 時は WaitEntry `monetary_frozen_input.payment_paid_in_this_transaction` の合計 | number | trade_scope buyer 0 件なら 0。UNAVAILABLE でも成立時正式額は存在するので数値 |
+| `seller_official_compensation_total` | individual seller `official_compensation`、または `payment_received_in_this_transaction` | number | seller 0 件なら 0 |
+| `buyer_reference_payment_total` | buyer reference records の `reference_payment` 合計 | number \| None | UNAVAILABLE は None。INFEASIBLE は保存済み 0。FEASIBLE は保存値 |
+| `seller_reference_compensation_total` | seller reference records の `reference_compensation` 合計 | number \| None | 同上 |
+| `buyer_evaluated_count` | individual `buyer_evaluation_records` 長 | int | UNAVAILABLE で records が None のとき 0。`buyer_unevaluated_count` と対 |
+| `buyer_satisfied_count` | SATISFIED 件数 | int | 未評価時 0 |
+| `buyer_unsatisfied_count` | UNSATISFIED 件数 | int | 未評価時 0 |
+| `buyer_unevaluated_count` | UNAVAILABLE なら `buyer_visit_count`。それ以外 0 | int | 対象 0 件かつ評価可能なら 0。対象あり UNAVAILABLE なら buyer 件数 |
+| `seller_evaluated_count` | 同様 | int | |
+| `seller_satisfied_count` | 同様 | int | |
+| `seller_unsatisfied_count` | 同様 | int | |
+| `seller_unevaluated_count` | 同様 | int | |
+| `buyer_realized_gain_total` | individual `realized_gain` 合計 | number \| None | 対象 0 件なら 0。UNAVAILABLE なら None |
+| `seller_realized_gain_total` | 同様 | number \| None | 同様 |
+| `buyer_actual_observed_count` | WaitEntry observation_status OBSERVED | int | |
+| `buyer_actual_unobserved_count` | UNOBSERVED_AT_EVALUATION_END | int | |
+| `seller_actual_observed_count` | 同様 | int | |
+| `seller_actual_unobserved_count` | 同様 | int | |
+| `nonparticipating_actual_observed_count` | 同様 | int | NP 0 件なら 0 |
+| `nonparticipating_actual_unobserved_count` | 同様 | int | |
+| `nonparticipating_candidate_predictable_count` | predicted_observation_status が予測済み | int | 工程4で enum 原典確認 |
+| `nonparticipating_candidate_unpredictable_count` | 予測不能 | int | 同上 |
+| `nonparticipating_predicted_external_effect_total` | `baseline_minus_candidate_time_value` | number \| None | NP 0 件は 0。対象あり全 None は None |
+| `nonparticipating_actual_external_effect_total` | `baseline_minus_actual_time_value` | number \| None | 同上。true VOT のみ |
+| `nonparticipating_candidate_minus_actual_total` | `candidate_minus_actual_time_value` | number \| None | 同上 |
+| `rank_difference_evaluated_count` | 当該 transaction の WaitEntry Visit で actual rank がある件数 | int | |
+| `rank_difference_unavailable_count` | 同集合で actual rank が無い件数 | int | |
+| `moved_earlier_count` | actual_rank_change > 0 | int | |
+| `rank_exact_count` | == 0 | int | |
+| `moved_later_count` | < 0 | int | |
+| `rank_difference_total` | 評価済み差の合計 | number \| None | 評価 0 件かつ対象 0 なら 0。対象あり全未通過なら None |
+
+取引全体 status: buyer または seller が 1 件でも actual 未観測なら EVALUATION_UNAVAILABLE。NP だけ未観測では UNAVAILABLE にしない。事後成立判定は declared VOT（既存 result を読む。再計算しない）。
+
+満足: buyer は realized gain > 0 が SATISFIED、<= 0 が UNSATISFIED（0 は不満足）。seller は >= 0 が SATISFIED、< 0 が UNSATISFIED（0 は満足）。正式金額を使い、参考金額は使わない。既存 individual record を読む。
+
+NP 外部効果は observation の 3 値。declared VOT・正式・参考・route 差を加算しない。
+
+順位: `actual_rank_change = assigned_rank - actual_node_passage_rank`。assigned は `OrderControlTvtNodeRankState.assigned_rank(visit_key)`。actual は履歴 record。当該 transaction の WaitEntry Visit だけを抽出して集計する。
+
+## 7. Visit-level outcome table
+
+selected trade の WaitEntry を持つ buyer、seller、trade_scope NP。1 transaction 内の 1 Visit につき 1 行。
+
+台帳確定だが WaitEntry が無い Visit（partition 4、fallback、先行確定等）は **この表に入れない**。Node / scenario の順位母集団で扱う。
+
+行ソート: transaction 行と同じ key、続けて role（buyer, seller, nonparticipating）、`visit_id`、`vehicle_name`。
+
+| 列名 | 取得元 | 型 | None 契約 |
+| --- | --- | --- | --- |
+| `scenario_name` | API 引数 | str | 必須 |
+| `tvt_decision_timestep` | WaitEntry | int | |
+| `node_name` | WaitEntry | str | |
+| `buyers_sorted` | WaitEntry | 連結文字列 | |
+| `vehicle_name` | VisitKey[0] | str | |
+| `visit_id` | VisitKey[1] | int | |
+| `role` | WaitEntry.role.value | str | |
+| `actual_observation_status` | observation.observation_status.value | str | 前提後は必須 |
+| `predicted_observation_status` | observation または WaitEntry の predicted_observation_status.value | str | |
+| `baseline_passage_timestep` | observation | int \| None | |
+| `candidate_passage_timestep` | observation | int \| None | 予測不能は None |
+| `actual_passage_timestep` | observation | int \| None | 未観測は None |
+| `baseline_minus_candidate_passage_seconds` | observation | number \| None | |
+| `baseline_minus_actual_passage_seconds` | observation | number \| None | |
+| `candidate_minus_actual_passage_seconds` | observation | number \| None | |
+| `baseline_minus_candidate_time_value` | observation | number \| None | true VOT |
+| `baseline_minus_actual_time_value` | observation | number \| None | |
+| `candidate_minus_actual_time_value` | observation | number \| None | 新しい prediction error field は作らない |
+| `predicted_route_next_link_name` | observation | str | |
+| `actual_route_next_link_name` | observation | str \| None | 未観測は None |
+| `formal_route_next_link_name` | `rank_state.formal_route_next_link_name(visit_key)` | str \| None | confirm_visits_in_order のみの確定では台帳が None を返す。推測しない。必須列として残し、取得できないとき None |
+| `true_vot_per_second` | observation / WaitEntry | float | 0 は数値 0 |
+| `declared_vot_per_second` | monetary_frozen_input | float \| None | NP は契約なし None。buyer/seller の 0 は数値 0 |
+| `official_payment` | monetary `payment_paid_in_this_transaction` または buyer individual | number \| None | buyer 以外は None。buyer の 0 円は 0 |
+| `official_compensation` | monetary `payment_received_in_this_transaction` または seller individual | number \| None | seller 以外は None |
+| `reference_payment` | trade ex-post buyer reference の当該 Visit | number \| None | UNAVAILABLE または非 buyer は None |
+| `reference_compensation` | seller reference の当該 Visit | number \| None | UNAVAILABLE または非 seller は None |
+| `realized_time_value` | buyer individual | number \| None | 非 buyer または UNAVAILABLE は None |
+| `realized_delay_loss` | seller individual | number \| None | 非 seller または UNAVAILABLE は None |
+| `realized_gain` | individual | number \| None | NP または UNAVAILABLE は None |
+| `satisfaction_status` | individual `.value` | str \| None | 同上 |
+| `satisfaction_reason` | individual `.value` | str \| None | 同上 |
+| `assigned_rank` | rank_state.assigned_rank | int \| None | 確定済みなら数値。未確定は重大不整合として例外 |
+| `actual_node_passage_rank` | 履歴 | int \| None | 未通過は None |
+| `actual_rank_change` | assigned − actual | int \| None | actual なしは None |
+
+route 差を金額・順位差へ加算しない。
+
+## 8. Vehicle summary table
+
+1 `vehicle_name` につき 1 行。Visit 表に現れる車両に加え、当該 World の TVT 台帳確定 Visit にだけ現れる車両も含める（partition 4 等）。総合満足 status は作らない。
+
+列を2母集団に分ける。
+
+**trade_scope 母集団:** Visit 表の行（WaitEntry あり）。
+
+**assigned 母集団:** 各 Node の `confirmed_visit_keys_in_order` のうち当該 `vehicle_name`。
+
+| 列名 | 定義 | None 契約 |
+| --- | --- | --- |
+| `scenario_name` | API 引数 | |
+| `vehicle_name` | | |
+| `trade_scope_visit_count` | Visit 表の当該車両行数 | 0 可 |
+| `transaction_count` | distinct transaction identity 件数（Visit 表） | 0 可 |
+| `buyer_count` | role buyer の Visit 行数 | |
+| `seller_count` | seller | |
+| `nonparticipating_count` | NP | |
+| `buyer_evaluated_count` | buyer で realized_gain が数値 | |
+| `buyer_unevaluated_count` | buyer で realized_gain が None | |
+| `seller_evaluated_count` | 同様 | |
+| `seller_unevaluated_count` | 同様 | |
+| `buyer_satisfied_count` | | |
+| `buyer_unsatisfied_count` | | |
+| `seller_satisfied_count` | | |
+| `seller_unsatisfied_count` | | |
+| `buyer_realized_gain_total` | 評価済み合計 | 対象 0 は 0。buyer あり全未評価は None |
+| `seller_realized_gain_total` | 同様 | |
+| `nonparticipating_predicted_external_effect_total` | NP の predicted time value | §5 |
+| `nonparticipating_actual_external_effect_total` | | |
+| `nonparticipating_candidate_minus_actual_total` | | |
+| `trade_scope_actual_observed_count` | Visit 表 | |
+| `trade_scope_actual_unobserved_count` | | |
+| `trade_scope_rank_difference_evaluated_count` | Visit 表で rank change が数値 | |
+| `trade_scope_rank_difference_unavailable_count` | Visit 表で None | |
+| `trade_scope_moved_earlier_count` | | |
+| `trade_scope_rank_exact_count` | | |
+| `trade_scope_moved_later_count` | | |
+| `trade_scope_rank_difference_total` | | §5 |
+| `assigned_visit_count` | 台帳確定のうち当該車両 | 0 可 |
+| `assigned_actual_passed_count` | 履歴あり | |
+| `assigned_actual_unpassed_count` | 履歴なし | |
+| `assigned_rank_difference_evaluated_count` | | |
+| `assigned_rank_difference_unavailable_count` | | |
+| `assigned_moved_earlier_count` | | |
+| `assigned_rank_exact_count` | | |
+| `assigned_moved_later_count` | | |
+| `assigned_rank_difference_total` | | §5 |
+
+行ソート: `vehicle_name` 昇順。NP 外部効果を総合満足へ変換しない。
+
+## 9. Node summary table
+
+TVT-MP 対象 Node ごとに 1 行。対象 Node は `order_control_tvt_rank_states_by_node_name` の key。取引が無く台帳だけある Node も含める。
+
+順位母集団は台帳確定 Visit 全体（buyer / seller / trade_scope NP / partition 4 / fallback / 過去確定 / leading NP）。P3 や selected transaction だけへ縮小しない。
+
+FCFS、BATCH、`order_control` none の通常通過を TVT assigned へ混ぜない。履歴・台帳は確定 Visit のみ、という既存契約に従う。他方式 Node が `rank_states_by_node_name` に入るかは、指定読み取り対象だけでは確定できない。**工程4開始時の限定確認事項**とする。確認するまで、存在する rank state の Node だけを行にする。
+
+| 列名 | 定義 |
+| --- | --- |
+| `scenario_name` | API 引数 |
+| `node_name` | |
+| `transaction_count` | 当該 node の TradeWait 件数 |
+| `feasible_count` / `infeasible_count` / `unavailable_count` | 当該 node の trade ex-post status |
+| `buyer_visit_count` / `seller_visit_count` / `nonparticipating_visit_count` | 当該 node の WaitEntry role 件数 |
+| `assigned_visit_count` | `k_confirmed()` |
+| `actual_passed_assigned_visit_count` | 履歴に VisitKey がある確定 Visit |
+| `actual_unpassed_assigned_visit_count` | ない確定 Visit |
+| `rank_difference_evaluated_count` および moved_earlier / exact / moved_later | 台帳全体 |
+| `rank_difference_total` | §5 |
+| `buyer_realized_gain_total` 等 | 当該 node の WaitEntry / individual / NP observation。§5 |
+
+行ソート: `node_name` 昇順。
+
+## 10. scenario summary table
+
+1 World につき 1 行。
+
+| 列名 | 定義 |
+| --- | --- |
+| `scenario_name` | API 明示引数 |
+| `evaluation_end_timestep` | `World.order_control_tvt_evaluation_end_timestep` |
+| `transaction_count` | TradeWait 件数 |
+| `feasible_count` / `infeasible_count` / `unavailable_count` | |
+| `buyer_visit_count` / `seller_visit_count` / `nonparticipating_visit_count` | WaitEntry |
+| `actual_observed_count` / `actual_unobserved_count` | WaitEntry 全 role |
+| `candidate_predictable_count` / `candidate_unpredictable_count` | WaitEntry 全 role の predicted status |
+| `buyer_evaluated_count` 等、満足件数、realized gain 合計、NP 外部効果3合計 | Visit / transaction から集約。§5 |
+| `assigned_visit_count` | 全 Node の k_confirmed 合計 |
+| `actual_passed_assigned_visit_count` / `actual_unpassed_assigned_visit_count` | 台帳全体 |
+| `rank_difference_evaluated_count`、moved_earlier / exact / moved_later、`rank_difference_total` | 台帳全体 |
+
+welfare 列は作らない。average speed、travel time、delay は Analyzer 側。研究 script で結合する。
+
+## 11. 公開 API
+
+候補名（工程4で既存命名に合わせてよい。意味は固定）:
+
+- `build_tvt_mp_research_output(world, scenario_name)` → 一時的な行コンテナ
+- `write_tvt_mp_research_output_csv(output, directory, *, overwrite=False)`
+
+コンテナ（frozen dataclass 想定。live オブジェクトを保持しない）:
+
+- `scenario_name: str`
+- `transactions: tuple[dict, ...]`
+- `visits: tuple[dict, ...]`
+- `vehicles: tuple[dict, ...]`
+- `nodes: tuple[dict, ...]`
+- `scenario: tuple[dict, ...]`（長さ 1）
+
+各表への個別アクセスはこれらの属性。DataFrame は返さない。dict の key 順は本節の列順に固定する。
+
+同一 World、同一 `scenario_name`、同一評価終了状態から複数回 build すると、同じ内容・同じ行順。ソート契約は各表に記載した固定順。
+
+## 12. CSV 契約
+
+ファイル:
+
+- `tvt_mp_transactions.csv`
+- `tvt_mp_visits.csv`
+- `tvt_mp_vehicles.csv`
+- `tvt_mp_nodes.csv`
+- `tvt_mp_scenario.csv`
+
+- UTF-8、header あり、列順は本節の表順で固定
+- `csv.writer`、`newline=""` で開く（Python csv の推奨）
+- enum は `.value`、`None` は空欄
+- `overwrite=False` が default。5 ファイルの 1 つでも存在すれば書出し前に拒否し、既存を変更しない
+- `overwrite=True` のときだけ上書き許可
+- directory が無い場合: 親が存在するなら directory を作成してよい。親が無い・path がファイルなら例外
+- 再 export: False なら拒否、True なら上書き
+- 完全な 5 ファイル一括 atomic write は必須としない
+- 各 CSV は一時ファイルへ書き切り、成功後に対象名へ置換する。途中失敗時、すでに置換したファイルは残り得るが、対象名への途中書込みで壊さない
+
+## 13. 呼出前提
+
+build / write の前に検査する。未充足なら部分結果を返さず、原因が分かる `RuntimeError` または `ValueError`。
+
+- 実 World。`_order_control_baseline_collector` があれば baseline fork として拒否
+- `order_control_tvt_evaluation_end_timestep` が Python int（`None` の通常 UXsim は呼べない）
+- `World.T == evaluation_end_timestep + 1`
+- wait registry の `evaluation_end_unobserved_finalized_timestep`、`trade_ex_post_evaluation_finalized_timestep`、`individual_ex_post_evaluation_finalized_timestep` がいずれも evaluation end timestep と一致する int
+- wait registry、Node passage history registry、`order_control_tvt_rank_states_by_node_name` の型
+- 各対象 Node の rank state が `OrderControlTvtNodeRankState`
+
+正常な `None`（未観測・未計算）と重大不整合を区別する。登録時保証済みの不変条件を全行で重複検証しない。誤集計につながるものだけ検出する例: TradeWait に WaitEntry が無い、buyer/seller なのに monetary が無い、OBSERVED なのに履歴が無い。
+
+## 14. 再 export と live 不変
+
+行は既存正本から毎回構築し、registry へ保存しない。build / write は次を変更しない: WaitEntry、TradeWait、observation、trade ex-post result、individual result、rank state、履歴、Vehicle、累計、`order_exchange_log`、analyzer、World 終了状態、finalized timestep。
+
+## 15. 専用テスト設計
+
+ファイル: `tests_order_control_tvt_mp_research_output.py`（工程4で作成。本節では作らない）
+
+前提拒否: fork、evaluation end 未設定 / 未完了、unobserved / trade / individual 未完了、finalized 不一致、registry / history / rank state 型不正または欠落。
+
+5表: 3つの trade status、数値 0 と None、official と reference、true と declared VOT、3 role、candidate 予測不能、actual 未観測、realized gain と satisfaction、external effect、assigned / actual / change、同一 Vehicle の複数 transaction と複数 Visit、transaction の無い assigned Visit が Visit 表に入らず Node 表に入る、順位母集団を P3 だけへ縮小しない、welfare 列と Vehicle 総合満足が無い。
+
+CSV: 5 ファイル、header、固定列順、UTF-8、None は空欄、enum は value、overwrite 拒否と許可、directory、途中失敗時の既存保護。
+
+live 不変: build 前後・export 前後で正本不変、2 回 build の一致、evaluation end と Analyzer へ自動接続されていない（`uxsim.py` の helper と `simulation_terminated` に研究出力 API 名が無い）。
+
+既存テストファイルは変更しない。関連回帰は工程4で evaluation_end、trade ex-post、individual、NP、順位差、actual passage を実行する。
+
+## 16. 工程4開始時の限定確認事項
+
+推測で確定しない。
+
+1. `OrderControlTvtMpCandidatePassageObservationStatus` の member 名と `.value`（predicted 列と predictable 件数）
+2. FCFS / BATCH / `order_control` none の Node が `order_control_tvt_rank_states_by_node_name` に載るか。載るなら Node 表の対象集合を既存契約どおり絞る
+3. `uxsim/__init__.py` がサブモジュールを export しているか。している場合だけ最小追記
+
+## 17. BLOCKERと利用者判断
+
+- BLOCKERなし
+- 利用者判断事項なし
+
+次は判断済みであり再提示しない: welfare を完了条件に含めない、export の自動接続なし、Vehicle 総合満足なし、Analyzer 非統合、DataFrame 非返却。
+
+## 18. 最新再開地点
+
+**本節が、集計・研究出力の実装前詳細設計確定後における最新再開地点である。**
+
+- 固定総工程数 10。工程1完了。残工程数 9
+- 次は工程2: 本2文書の 1 回の `document` コミット
+- 工程4まで本番実装・テスト作成に進まない
+- 工程2・3の Git 操作は利用者 Terminal。Cursor では Git しない

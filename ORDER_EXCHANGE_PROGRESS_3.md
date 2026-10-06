@@ -2771,3 +2771,68 @@ seller理由: `TRIVIALLY_SATISFIED_NONPOSITIVE_ACTUAL_DELAY`、`UNSATISFIED_INSU
 
 - 本契約の文書保存（commit・push）後、集計・welfare・実験出力へは利用者指示まで進まない
 - rank differenceの新しい本番計算・result・evaluation end接続は追加しない方針であり、既存のNode順位台帳と実通過履歴を後続集計で結合して導出する
+
+# TVT-MP 集計・研究出力の実装前詳細設計を確定（2026-10-06）
+
+正式参照先:
+
+- `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_4.md`
+- 「TVT-MP 集計・研究出力の実装前詳細設計（2026-10-06）」
+
+## 1. 工程1の目的
+
+固定10工程の工程1。既存正本から研究用5表とCSVを出す実装前詳細設計を両文書へ残す。本番コード・テスト・Git は行わない。
+
+## 2. 原典確認したファイル
+
+- `uxsim/order_control_tvt_mp_actual_passage.py`
+- `uxsim/order_control_tvt_node_rank_state.py`
+- `tests_order_control_tvt_mp_trade_ex_post_evaluation.py`
+- `tests_order_control_tvt_mp_individual_ex_post_evaluation.py`
+- `tests_order_control_tvt_mp_nonparticipating_external_effect.py`
+- `tests_order_control_tvt_mp_node_actual_rank_difference.py`
+- `tests_order_control_tvt_mp_evaluation_end.py`
+
+## 3. 主要契約
+
+- 5表: transaction、Visit、Vehicle、Node、scenario
+- 新規本番: `uxsim/order_control_tvt_mp_research_output.py`
+- 新規専用テスト: `tests_order_control_tvt_mp_research_output.py`
+- 行構築と CSV 書出しを分離。pandas 非依存。標準 `csv`
+- evaluation end 完了後の明示呼出し。`uxsim.py` / helper / `simulation_terminated` / `basic_analysis` / Analyzer へ自動接続しない
+- 集計結果を registry へ保存しない。複数回 build は決定的で live 不変
+- `None` と数値 0 を区別。official と reference、true VOT と declared VOT、assigned rank と actual rank を別列
+- transaction identity の無い Visit を架空 transaction へ入れない。Visit 表は WaitEntry のみ。順位母集団の全体は Node / scenario
+- welfare 列なし。Vehicle 総合満足なし
+- CSV: `tvt_mp_transactions.csv`、`tvt_mp_visits.csv`、`tvt_mp_vehicles.csv`、`tvt_mp_nodes.csv`、`tvt_mp_scenario.csv`
+- `overwrite=False` が default。1 ファイルでも存在すれば拒否
+
+## 4. 固定工程表
+
+総工程数 **10**。
+
+1. 集計・研究出力の実装前詳細設計と文書追記
+2. 設計文書の document コミット
+3. 設計文書の push と確認
+4. 集計・研究出力の本番実装、専用テスト、関連回帰
+5. 正式サンプル回帰と保存済み7指標確認
+6. 実装コミット
+7. 実装コミットの push と確認
+8. 実装・検証完了記録の文書追記
+9. 完了記録の document コミット
+10. 完了記録の push、origin 一致、tracked clean 確認
+
+## 5. BLOCKERと利用者判断
+
+- BLOCKERなし
+- 利用者判断事項なし
+
+## 6. 最新再開地点
+
+**本節が、集計・研究出力の実装前詳細設計確定後における最新再開地点である。**
+
+- 工程1完了
+- 残工程数 **9**
+- 次は工程2: 両文書を1回の `document` コミットにまとめる
+- Git は利用者 Terminal。Cursor では実行しない
+- 工程4まで本番実装・テスト作成に進まない
