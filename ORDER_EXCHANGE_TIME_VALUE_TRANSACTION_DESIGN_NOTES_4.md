@@ -12728,3 +12728,341 @@ setup timeとcomputation timeは環境依存のため、回帰判定に使用し
 
 - 次は nonparticipating外部効果とNode実通過順位差の設計・実装へ進む前に、本完了記録の文書保存（commit・push）を完了する
 - コード実装完了前に集計、welfare、実験出力へ進まない
+
+# TVT-MP nonparticipating外部効果の正本・評価契約確定（2026-10-06）
+
+## 1. 位置づけ
+
+- buyer・seller個別追加評価は実装コミット `f73ff1a`、完了記録 `ada268e` まで完了済み
+- 今回の正式領域は **nonparticipating外部効果** の評価契約確定である
+- 予測外部効果、実績外部効果、予測対実績差は、既存 `OrderControlTvtMpActualPassageObservationRecord` へ既に保存済み
+- 新しい計算本番コード、result型、registry field、prepare、commit、evaluation end接続は **追加しない**
+
+## 2. 評価対象
+
+評価対象は、選ばれたTVT取引の trade_scope 内で nonparticipating role を持つ Visit である。
+
+対象集合の正本:
+
+`OrderControlTvtMpActualPassageTradeWait.nonparticipating_visit_keys`
+
+各 Visit は、次で対応する。
+
+- transaction key
+- node name
+- VisitKey
+- WaitEntry
+- actual passage observation record
+
+次は対象外である。
+
+- trade_scope 外の nonparticipating Visit
+- partition 4
+- TVT検討前に先行確定された decision window 先頭の nonparticipating Visit
+- fallback だけで確定した Visit
+- 選ばれた TVT 取引に関係しない nonparticipating Vehicle
+
+対象外であることは「外部効果が0」という意味ではない。今回の TVT 取引に巻き込まれた評価対象ではない、という意味である。
+
+同一 Vehicle が複数の transaction または Node 訪問を持つ場合も、transaction key と VisitKey で区別する。
+
+## 3. nonparticipating の役割契約
+
+- nonparticipating は `participates_in_order_exchange=False` で明示される（正本は live Vehicle の参加表）
+- 同一 Vehicle は走行中に participating / nonparticipating を切り替えない
+- nonparticipating を buyer または seller へ役割変更しない
+- candidate 選択へ含めない
+- 支払・補償へ含めない
+- 参考支払・参考補償へ含めない
+- 取引全体事後成立判定へ含めない
+- buyer・seller 満足判定へ含めない
+- TVT 取引が生じさせた外部効果として別に評価する
+
+formal trade の buyer・seller 非空契約とは独立している。nonparticipating が0件の取引は正常である。
+
+## 4. 唯一の正本
+
+nonparticipating 外部効果の唯一の正本は、既存の
+
+`OrderControlTvtMpActualPassageObservationRecord`
+
+である。
+
+新しく次を作らない方針を正式に記録する。
+
+- nonparticipating external effect result 型
+- transaction 単位 external effect result
+- external effect registry dict
+- external effect finalized timestep
+- external effect prepare API
+- external effect commit API
+- external effect status enum
+- external effect reason enum
+- WaitEntry への external effect field
+- TradeWait への external effect field
+- Vehicle.order_exchange_log への external effect record
+
+理由:
+
+- 予測外部効果は既に保存済み
+- 実績外部効果は既に保存済み
+- 予測対実績差は既に保存済み
+- candidate 予測不能と actual 未観測も既存 status と None で区別済み
+- 第二 record へ複写すると正本が分裂する
+- 新しい prepare・commit を追加しても新しい情報が増えない
+
+後続集計は、TradeWait の `nonparticipating_visit_keys` から WaitEntry を引き、その observation record を読む。
+
+## 5. 予測外部効果
+
+予測時間差:
+
+`baseline_minus_candidate_passage_timesteps`
+`= baseline_passage_timestep - candidate_passage_timestep`
+
+予測時間差の秒換算:
+
+`baseline_minus_candidate_passage_seconds`
+
+予測外部効果額:
+
+`baseline_minus_candidate_time_value`
+`= baseline_minus_candidate_passage_seconds × true_vot_per_second`
+
+保存済み field:
+
+- `baseline_minus_candidate_passage_timesteps`
+- `baseline_minus_candidate_passage_seconds`
+- `baseline_minus_candidate_time_value`
+
+符号:
+
+- 正: candidate 予測では baseline より早い
+- 0: candidate 予測では baseline と同時刻
+- 負: candidate 予測では baseline より遅い
+- None: candidate horizon 内で通過を予測できない
+
+candidate 予測不能は、時間差0や金額0ではない。
+
+candidate 予測不能時は、candidate passage timestep と baseline minus candidate の3値を None とする。
+
+予測不能を失敗とは扱わない。
+
+予測外部効果には true VOT を使用する。declared VOT、正式金額、参考金額を使用しない。
+
+## 6. 実績外部効果
+
+共通 actual signed time difference:
+
+`actual_signed_time_difference_timesteps`
+`= baseline_passage_timestep - actual_passage_timestep`
+
+保存済み field:
+
+`baseline_minus_actual_passage_timesteps`
+
+秒換算:
+
+`baseline_minus_actual_passage_seconds`
+
+実績外部効果額:
+
+`baseline_minus_actual_time_value`
+`= baseline_minus_actual_passage_seconds × true_vot_per_second`
+
+符号:
+
+- 正: 実際に baseline より早く通過した
+- 0: 実際に baseline と同時刻に通過した
+- 負: 実際に baseline より遅く通過した
+- None: 評価終了までに actual passage を観測できなかった
+
+nonparticipating では、共通 actual signed time difference の符号をそのまま使用する。buyer や seller のような role 別符号変換をしない。
+
+true VOT=0 で actual 観測済みの場合、時間差があっても実績外部効果額は数値0である。これは未観測の None とは異なる。
+
+実績外部効果には true VOT を使用する。declared VOT、正式金額、参考金額を使用しない。
+
+## 7. 予測対実績差
+
+保存済み定義:
+
+`candidate_minus_actual_passage_timesteps`
+`= candidate_passage_timestep - actual_passage_timestep`
+
+秒換算:
+
+`candidate_minus_actual_passage_seconds`
+
+true VOT 金額換算:
+
+`candidate_minus_actual_time_value`
+`= candidate_minus_actual_passage_seconds × true_vot_per_second`
+
+符号:
+
+- 正: actual は candidate 予測より早かった
+- 0: actual は candidate 予測どおりだった
+- 負: actual は candidate 予測より遅かった
+- None: candidate passage または actual passage のいずれかが得られない
+
+新しい曖昧な prediction error field を作らない。
+
+`predicted_external_effect - actual_external_effect` のような逆向きの別 field も作らない。
+
+既存の candidate minus actual 値を正本として使用する。
+
+## 8. 取引全体 status との独立性
+
+nonparticipating 外部効果は、取引全体事後評価 status の入力ではない。
+
+### nonparticipating だけが actual 未観測
+
+- 取引全体を EVALUATION_UNAVAILABLE にしない
+- buyer・seller が全員観測済みなら、取引全体は評価可能
+- nonparticipating の未観測 Visit だけ、実績外部効果が None
+
+### 取引全体 EVALUATION_UNAVAILABLE
+
+buyer または seller の未観測により取引全体評価不能となっても、観測済み nonparticipating Visit の予測・実績外部効果は有効である。
+
+取引全体 status によって、観測済み nonparticipating の値を None へ変更しない。
+
+各 nonparticipating Visit を独立して扱う。
+
+### EX_POST_INFEASIBLE
+
+- 観測済み nonparticipating の外部効果をそのまま使用
+- 取引全体事後不成立による参考金額0を使用しない
+- 外部効果値を0へ変更しない
+
+### EX_POST_FEASIBLE
+
+- 観測済み nonparticipating の外部効果をそのまま使用
+- 取引全体事後成立判定へ外部効果を加えない
+
+## 9. actual 未観測
+
+評価終了時までに nonparticipating Visit の actual passage を観測できない場合:
+
+- wait status: `ACTUAL_PASSAGE_UNOBSERVED_AT_EVALUATION_END`
+- observation status: `ACTUAL_PASSAGE_UNOBSERVED_AT_EVALUATION_END`
+- actual passage timestep: `None`
+- baseline minus actual の3値: `None`
+- candidate minus actual の3値: `None`
+- actual route: `None`
+
+candidate 予測値は、candidate 側で得られていれば保持する。
+
+未観測を次として扱わない: 時間差0、外部効果額0、candidate 予測どおり、route 一致、route 不一致。
+
+どの nonparticipating Visit が未観測だったかは、TradeWait.nonparticipating_visit_keys と WaitEntry から後日確認できる。
+
+## 10. candidate 予測不能
+
+candidate observation status が `UNOBSERVED_AT_HORIZON` の場合:
+
+- candidate passage timestep: `None`
+- baseline minus candidate の3値: `None`
+- candidate minus actual の3値: `None`
+
+actual passage が後で観測された場合:
+
+- baseline minus actual の3値は数値
+- actual route は取得可能
+- 予測外部効果は None
+- 実績外部効果は数値
+- 予測対実績差は None
+
+candidate 予測不能を actual 未観測と混同しない。
+
+## 11. predicted route と actual route
+
+既存 field:
+
+- `predicted_route_next_link_name`
+- `actual_route_next_link_name`
+
+route 差は、外部効果金額へ直接加算しない。
+
+外部効果金額は通過時刻差と true VOT のみで評価する。
+
+predicted route と actual route の一致・不一致は、後続の進路分析で扱う。
+
+route 差を外部効果金額へ加算しない理由:
+
+- route 差自体の金銭換算式が確定していない
+- 時間差へ既に表れた影響との二重計上を避ける
+- 金額評価と交通挙動・予測精度の分析を分離する
+
+Node 実通過順位差も別領域として扱う。
+
+## 12. 後続集計の読み方
+
+後続集計では、transaction key ごとに次を行う。
+
+1. TradeWait を取得
+2. `nonparticipating_visit_keys` を保存順で走査
+3. `(node_name, visit_key)` で WaitEntry を取得
+4. WaitEntry の actual passage observation record を取得
+5. predicted observation status と actual observation status を確認
+6. 保存済みの予測外部効果、実績外部効果、予測対実績差を読む
+
+再計算しない値:
+
+- baseline minus candidate の3値
+- baseline minus actual の3値
+- candidate minus actual の3値
+
+後続集計の実装時に、保存済み field を再計算して一致させる方式を正規経路にしません。
+
+## 13. 同一 Vehicle の複数取引
+
+同一 Vehicle が複数の selected TVT transaction で nonparticipating として関係する場合:
+
+- transaction key ごとに区別
+- VisitKey ごとに区別
+- Vehicle 名だけで集約しない
+- 取引別外部効果を混ぜない
+
+Vehicle 単位集計は後続領域である。今回、Vehicle 全取引の合計外部効果を作らない。
+
+## 14. 今回新規実装しないもの
+
+- 新しい本番計算
+- external effect result 型
+- external effect registry
+- external effect finalized timestep
+- external effect prepare/commit
+- uxsim.py 接続
+- external effect status enum
+- external effect reason enum
+- transaction 単位の第二 record
+- WaitEntry への追加 field
+- TradeWait への追加 field
+- Vehicle.order_exchange_log への追加
+- route 差の金銭換算
+- Node 順位差
+- transaction 集計
+- Vehicle 集計
+- Node 集計
+- welfare
+- 実験出力
+
+## 15. 専用テスト
+
+- `tests_order_control_tvt_mp_nonparticipating_external_effect.py`（新規）
+- 本番コードを変更せず、既存 field の契約を固定する
+
+## 16. BLOCKERと利用者判断
+
+- BLOCKERなし
+- 利用者判断事項なし
+
+## 17. 最新再開地点
+
+**本節が、nonparticipating外部効果の評価契約確定後における最新再開地点である。**
+
+- 次の正式領域: **Node実通過順位差**
+- 本契約確定の文書保存（commit・push）後に Node 順位差の設計・実装へ進む
+- 集計・welfare・実験出力へは進まない

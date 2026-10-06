@@ -2661,3 +2661,67 @@ seller理由: `TRIVIALLY_SATISFIED_NONPOSITIVE_ACTUAL_DELAY`、`UNSATISFIED_INSU
 直前の「TVT-MP buyer・seller個別追加評価 実装前詳細設計を確定（2026-10-06）」§10は、その時点の記録として残す。技術詳細は詳細設計第4巻の完了記録を正本とする。
 
 - 次は nonparticipating外部効果とNode実通過順位差へ進む前に、本完了記録の文書保存（commit・push）を完了する
+
+# TVT-MP nonparticipating外部効果の評価契約を確定（2026-10-06）
+
+正式参照先:
+
+- `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_4.md`
+- 「TVT-MP nonparticipating外部効果の正本・評価契約確定（2026-10-06）」
+
+## 1. 位置づけ
+
+- buyer・seller個別追加評価は実装コミット `f73ff1a`、完了記録 `ada268e` まで完了
+- 今回は **nonparticipating外部効果** の評価契約を確定する
+- 予測・実績・予測対実績差は既存 `OrderControlTvtMpActualPassageObservationRecord` に保存済み
+- **新しい本番計算、result型、registry field、prepare、commit、evaluation end接続は追加しない**
+
+## 2. 評価対象と正本
+
+- 対象: 選ばれたTVT取引の trade_scope 内 nonparticipating Visit
+- 集合の正本: `TradeWait.nonparticipating_visit_keys`
+- 唯一の正本: `OrderControlTvtMpActualPassageObservationRecord`（9 field の3組）
+- 第二 record、external effect registry、専用 enum・API は作らない
+
+## 3. 外部効果の定義（要約）
+
+- **予測:** `baseline_minus_candidate_*`（正=予測短縮、None=candidate予測不能）
+- **実績:** `baseline_minus_actual_*`（正=早着、None=actual未観測）
+- **差:** `candidate_minus_actual_*`（正=actualが予測より早い）
+- true VOT のみ。declared VOT・正式金額・参考金額は使わない
+- route差は金額へ加算しない
+
+## 4. 取引全体statusとの独立性
+
+- NP だけ未観測でも取引全体を `EVALUATION_UNAVAILABLE` にしない
+- 取引全体が UNAVAILABLE でも、観測済み NP の保存値を None にしない
+- INFEASIBLE / FEASIBLE でも NP 外部効果 field を 0 へ書き換えない
+
+## 5. 後続集計
+
+- transaction key → `nonparticipating_visit_keys` → WaitEntry → observation record
+- 保存済み 3組9 field を再計算しない
+
+## 6. 今回新規実装しないもの
+
+本番計算、external effect 型・registry・prepare/commit、uxsim 接続、集計・welfare・Node順位差・実験出力
+
+## 7. 専用テスト
+
+- `tests_order_control_tvt_mp_nonparticipating_external_effect.py`（新規）
+- 既存 field 契約と status 独立性を固定
+
+## 8. BLOCKERと利用者判断
+
+- BLOCKERなし
+- 利用者判断事項なし
+
+## 9. 最新再開地点
+
+**本節が、nonparticipating外部効果の評価契約確定後における最新再開地点である。**
+
+直前の buyer・seller 個別追加評価完了記録は当時の記録として残す。技術詳細は詳細設計第4巻の本節を正本とする。
+
+- 次の正式領域: **Node実通過順位差**
+- 本契約確定の文書保存（commit・push）後に Node 順位差の設計・実装へ進む
+- 集計・welfare・実験出力へは進まない
