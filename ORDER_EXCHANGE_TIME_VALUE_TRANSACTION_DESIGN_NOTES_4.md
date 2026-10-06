@@ -13586,3 +13586,265 @@ live 不変: build 前後・export 前後で正本不変、2 回 build の一致
 - 次は工程2: 本2文書の 1 回の `document` コミット
 - 工程4まで本番実装・テスト作成に進まない
 - 工程2・3の Git 操作は利用者 Terminal。Cursor では Git しない
+
+# TVT-MP 集計・研究出力の実装・検証完了（2026-10-06）
+
+本節は、固定10工程の工程8である。正式実装単位「TVT-MP 集計・研究出力」の実装・検証完了記録である。直前の大見出し「TVT-MP 集計・研究出力の実装前詳細設計（2026-10-06）」は削除、短縮、置換、書換えしない。実装前詳細設計と本節の記述が異なる場合も、実装前節は当時の設計記録として残す。
+
+## 1. 位置づけと固定工程
+
+- branch: `feature/intersection-order-control`
+- 固定総工程数: **10**
+- 工程8完了
+- 残工程数: **2**
+- 次は工程9: 本2文書の完了記録を 1 回の `document` コミットにまとめる
+- 工程10: push、origin 一致、tracked clean 確認
+- 工程8では Git 操作を行わない
+
+## 2. Git 履歴
+
+設計文書コミット:
+
+- `6fdc7c5`
+- `document TVT-MP research aggregation and output pre-implementation design`
+
+実装コミット:
+
+- `a964b75`
+- `implement and test TVT-MP research aggregation and output`
+
+両方とも `origin/feature/intersection-order-control` へ push 済み。工程8時点でローカル HEAD と origin は一致。tracked ファイルは clean。既存の未追跡ファイルは `diagnostics/order_control.zip` のみ。
+
+## 3. 実装した本番ファイル
+
+- `uxsim/order_control_tvt_mp_research_output.py`（新規）
+
+## 4. 実装したテストファイル
+
+- `tests_order_control_tvt_mp_research_output.py`（新規、専用37件）
+
+## 5. 公開 API と返却型
+
+公開 API:
+
+- `build_tvt_mp_research_output(world, scenario_name)`
+- `write_tvt_mp_research_output_csv(output, directory, *, overwrite=False)`
+
+返却型:
+
+- `OrderControlTvtMpResearchOutputBundle`
+
+5 つの frozen row 型:
+
+- `OrderControlTvtMpResearchOutputTransactionRow`
+- `OrderControlTvtMpResearchOutputVisitRow`
+- `OrderControlTvtMpResearchOutputVehicleRow`
+- `OrderControlTvtMpResearchOutputNodeRow`
+- `OrderControlTvtMpResearchOutputScenarioRow`
+
+bundle は各表を `tuple` で保持する。live な World、Vehicle、Node、registry、mutable record を保持しない。
+
+## 6. 5 表
+
+1. transaction table
+2. Visit-level outcome table
+3. Vehicle summary table
+4. Node summary table
+5. scenario summary table
+
+実装前詳細設計（2026-10-06）の列契約、None 契約、合計契約、固定ソートに従う。
+
+## 7. 実装済み契約
+
+- 行構築と CSV 書出しを分離
+- pandas 非依存
+- Python 標準ライブラリ `csv` を使用
+- frozen dataclass と tuple による独立した行データ
+- live な World、Vehicle、Node、registry を bundle へ保持しない
+- 集計結果を registry へ保存しない
+- 同一 World と同一 `scenario_name` からの再 build は決定的
+- evaluation end 完了後の明示呼出し
+- `uxsim.py`、evaluation end helper、`simulation_terminated()`、`basic_analysis()`、Analyzer へ自動接続しない
+- `uxsim/__init__.py` は変更不要（サブモジュール直接 import で足りる）
+- 数値 0 と `None` を区別
+- official と reference を区別
+- true VOT と declared VOT を区別
+- assigned rank と actual rank を区別
+- `final_local_rank` を assigned rank に使用しない
+- transaction identity のない Visit を架空 transaction へ入れない
+- welfare 列なし
+- Vehicle 総合満足なし
+- 通常 UXsim 交通指標を scenario summary へ重複実装しない
+
+## 8. CSV 契約
+
+出力ファイル:
+
+- `tvt_mp_transactions.csv`
+- `tvt_mp_visits.csv`
+- `tvt_mp_vehicles.csv`
+- `tvt_mp_nodes.csv`
+- `tvt_mp_scenario.csv`
+
+契約:
+
+- UTF-8
+- header あり
+- dataclass field 順の固定列順
+- `None` は空欄
+- enum は `.value`
+- `overwrite=False` が default
+- 対象 5 ファイルの 1 つでも存在すれば書出し前に拒否
+- `overwrite=True` の場合だけ置換
+- 各ファイルは一時ファイルから `os.replace`
+- 出力先 directory は親が存在する場合に 1 段作成
+- 5 ファイル全体の完全な all-or-nothing は保証しない
+
+## 9. 呼出前提検査
+
+`build_tvt_mp_research_output` / `write_tvt_mp_research_output_csv` の前に検査する。
+
+- baseline fork を拒否
+- evaluation end 未設定を拒否
+- `World.T` と evaluation end の不一致を拒否
+- unobserved finalization 未完了または finalized timestep 不一致を拒否
+- trade ex-post 未完了または finalized timestep 不一致を拒否
+- individual ex-post 未完了または finalized timestep 不一致を拒否
+- wait registry 型不正を拒否
+- Node passage history registry 型不正を拒否
+- rank state 欠落または型不正を拒否
+- 空 `scenario_name` を拒否
+
+## 10. live 不変と決定性
+
+- build / write は既存正本（WaitEntry、TradeWait、observation、ex-post result、individual result、rank state、履歴、Vehicle 累計、`order_exchange_log` 等）を変更しない
+- 同一 World、同一 `scenario_name`、同一評価終了状態から複数回 build しても bundle 全体が等しい
+- 集計結果を registry へ保存しない
+
+## 11. 検証結果
+
+### 11.1 py_compile
+
+成功:
+
+- `uxsim/order_control_tvt_mp_research_output.py`
+- `tests_order_control_tvt_mp_research_output.py`
+
+### 11.2 専用テスト
+
+- `tests_order_control_tvt_mp_research_output.py`
+- 37 件成功
+- 失敗 0 件
+
+### 11.3 主要関連回帰（6 ファイル）
+
+- `tests_order_control_tvt_mp_evaluation_end.py`
+- `tests_order_control_tvt_mp_trade_ex_post_evaluation.py`
+- `tests_order_control_tvt_mp_individual_ex_post_evaluation.py`
+- `tests_order_control_tvt_mp_nonparticipating_external_effect.py`
+- `tests_order_control_tvt_mp_node_actual_rank_difference.py`
+- `tests_order_control_tvt_mp_actual_passage.py`
+
+結果: 400 件成功、失敗 0 件
+
+### 11.4 追加関連回帰（4 ファイル）
+
+- `tests_order_control_tvt_mp_physical_transfer.py`
+- `tests_order_control_tvt_mp_atomic_apply.py`
+- `tests_order_control_tvt_mp_final_rank.py`
+- `tests_order_control_tvt_mp_final_consistency_validation.py`
+
+結果: 217 件成功、失敗 0 件
+
+### 11.5 実装に対する検証合計
+
+- 654 件成功
+- 失敗 0 件
+
+内訳: 37 + 400 + 217 = 654
+
+### 11.6 baseline 関連追加確認（参考・完成条件外）
+
+名前に baseline を含む 10 ファイルでも追加確認した。
+
+- 382 件成功
+- 3 件失敗
+
+失敗した 3 件:
+
+- `tests_order_control_baseline_snapshot.py::test_registration_does_not_add_later_inlink_vehicle_to_collector`
+- `tests_order_control_baseline_snapshot.py::test_collector_validation_failure_leaves_real_collector_empty`
+- `tests_order_control_baseline_snapshot.py::test_exec_simulation_arrived_vehicle_registers_as_arrived_at_snapshot`
+
+共通の停止理由:
+
+- `RuntimeError: Node junction: TVT rank ledger is missing.`
+
+記録上の整理:
+
+- 新規研究出力モジュールは stack trace に現れていない
+- 新規研究出力モジュールは既存実行経路へ自動接続されていない
+- baseline snapshot テストを修正する試みは、fixture の意味を変える過大な修正だったため完全に `git restore` した
+- `tests_order_control_baseline_snapshot.py` には最終的な変更を残していない
+- 上記 3 件を今回の研究出力実装の修正対象へ含めていない
+- 上記 3 件を「成功」または「解決済み」とは記録しない
+- 新規研究出力実装の回帰失敗と断定もしない
+- 今回の実装関連 654 件は失敗 0 件
+
+## 12. 正式サンプル
+
+実行:
+
+- `python demos_and_examples/example_00en_simple.py`
+
+保存済み 7 指標と完全一致:
+
+- completed trips: 735 / 810
+- average speed: 11.7 m/s
+- total travel time: 119475.0 s
+- average travel time: 162.6 s
+- average delay: 62.6 s
+- delay ratio: 0.385
+- total distance traveled: 1632250.0 m
+
+setup time と computation time は環境依存のため比較対象外。
+
+## 13. 完了条件と工程状態
+
+- 集計・研究出力の本番実装完了
+- 専用テスト完了
+- 関連回帰完了
+- py_compile 完了
+- 正式サンプル 7 指標一致
+- 実装コミットと push 完了
+- origin 一致
+- tracked clean
+- `diagnostics/order_control.zip` のみ従来どおり未追跡
+- 工程8完了
+- 固定総工程数 10
+- 残工程数 2
+- 次は工程9
+- 工程9では両文書を 1 回の `document` コミットにまとめる
+- 工程10では push、origin 一致、tracked clean を確認する
+
+## 14. BLOCKERと利用者判断
+
+現行の集計・研究出力完成に関する BLOCKER:
+
+- なし
+
+利用者判断事項:
+
+- なし
+
+baseline snapshot の 3 件失敗は事実として記録するが、今回の研究出力完成を止める BLOCKER としては扱わない。
+
+## 15. 最新再開地点
+
+**本節が、集計・研究出力の実装・検証完了後における最新再開地点である。**
+
+- 工程8完了
+- 残工程数 **2**
+- 次は工程9: 両文書を 1 回の `document` コミットにまとめる
+- 工程9後に工程10の push と最終確認を行う
+- Cursor では Git 操作を行わない

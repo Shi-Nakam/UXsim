@@ -2836,3 +2836,86 @@ seller理由: `TRIVIALLY_SATISFIED_NONPOSITIVE_ACTUAL_DELAY`、`UNSATISFIED_INSU
 - 次は工程2: 両文書を1回の `document` コミットにまとめる
 - Git は利用者 Terminal。Cursor では実行しない
 - 工程4まで本番実装・テスト作成に進まない
+
+# TVT-MP 集計・研究出力の実装・検証完了を記録（2026-10-06）
+
+正式参照先:
+
+- `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_4.md`
+- 「TVT-MP 集計・研究出力の実装・検証完了（2026-10-06）」
+
+## 1. 工程8の目的
+
+固定10工程の工程8。集計・研究出力の本番実装、専用テスト、関連回帰、正式サンプル確認、実装コミット・push 完了後の記録を両文書へ残す。
+
+## 2. 実装結果（要約）
+
+新規本番: `uxsim/order_control_tvt_mp_research_output.py`
+
+新規専用テスト: `tests_order_control_tvt_mp_research_output.py`
+
+公開 API:
+
+- `build_tvt_mp_research_output(world, scenario_name)`
+- `write_tvt_mp_research_output_csv(output, directory, *, overwrite=False)`
+
+返却型: `OrderControlTvtMpResearchOutputBundle`（5 表を frozen row の `tuple` で保持）
+
+5 表: transaction、Visit-level outcome、Vehicle summary、Node summary、scenario summary
+
+主要契約: 行構築と CSV 分離、pandas 非依存、evaluation end 後の明示呼出し、Analyzer / `uxsim.py` 等へ自動接続なし、registry へ集計結果を保存しない、決定的再 build、welfare 列なし、Vehicle 総合満足なし
+
+CSV: 5 ファイル（`tvt_mp_*.csv`）、UTF-8、header、固定列順、`overwrite=False` default、一時ファイルから `os.replace`
+
+設計コミット `6fdc7c5`、実装コミット `a964b75`（いずれも origin へ push 済み）
+
+## 3. 検証結果（要約）
+
+| 区分 | 件数 | 失敗 |
+| --- | ---: | ---: |
+| 専用テスト | 37 | 0 |
+| 主要関連回帰（6 ファイル） | 400 | 0 |
+| 追加関連回帰（4 ファイル） | 217 | 0 |
+| **実装関連合計** | **654** | **0** |
+
+37 + 400 + 217 = 654
+
+py_compile: 新規本番・新規専用テストとも成功
+
+正式サンプル `example_00en_simple.py`: 保存済み 7 指標と完全一致（setup / computation time は比較対象外）
+
+### baseline 追加確認（完成条件外・事実記録）
+
+baseline 名を含む 10 ファイルでも追加確認: **382 成功、3 失敗**
+
+失敗はいずれも `tests_order_control_baseline_snapshot.py` の 3 件。共通理由 `RuntimeError: Node junction: TVT rank ledger is missing.`。研究出力モジュールは stack trace に現れず、自動接続もなし。snapshot テスト修正は過大だったため `git restore` し、`tests_order_control_baseline_snapshot.py` に変更は残していない。3 件は研究出力の修正対象に含めず、成功・解決済みとも記録しない。実装関連 654 件は失敗 0 件。
+
+## 4. 固定工程表（更新）
+
+総工程数 **10**。
+
+1. 集計・研究出力の実装前詳細設計と文書追記 — 完了
+2. 設計文書の document コミット — 完了
+3. 設計文書の push と確認 — 完了
+4. 集計・研究出力の本番実装、専用テスト、関連回帰 — 完了
+5. 正式サンプル回帰と保存済み7指標確認 — 完了
+6. 実装コミット — 完了
+7. 実装コミットの push と確認 — 完了
+8. 実装・検証完了記録の文書追記 — **完了（本節）**
+9. 完了記録の document コミット — 次
+10. 完了記録の push、origin 一致、tracked clean 確認
+
+## 5. BLOCKERと利用者判断
+
+- BLOCKERなし（baseline snapshot 3 件失敗は完成 BLOCKER としない）
+- 利用者判断事項なし
+
+## 6. 最新再開地点
+
+**本節が、集計・研究出力の実装・検証完了後における最新再開地点である。**
+
+- 工程8完了
+- 残工程数 **2**
+- 次は工程9: 両文書を 1 回の `document` コミットにまとめる
+- 工程10: push、origin 一致、tracked clean 確認
+- Git は利用者 Terminal。Cursor では Git 操作を行わない
