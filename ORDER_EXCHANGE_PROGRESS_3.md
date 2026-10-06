@@ -2725,3 +2725,49 @@ seller理由: `TRIVIALLY_SATISFIED_NONPOSITIVE_ACTUAL_DELAY`、`UNSATISFIED_INSU
 - 次の正式領域: **Node実通過順位差**
 - 本契約確定の文書保存（commit・push）後に Node 順位差の設計・実装へ進む
 - 集計・welfare・実験出力へは進まない
+
+# TVT-MP Node実通過順位差の評価契約を確定（2026-10-06）
+
+正式参照先:
+
+- `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_4.md`
+- 「TVT-MP Node実通過順位差の正本・評価契約確定（2026-10-06）」
+
+## 1. 位置づけ
+
+- nonparticipating外部効果は `b6e991b` まで完了
+- 今回 **Node実通過順位差** の評価契約を確定
+- 台帳 `assigned_rank` と履歴 `actual_node_passage_rank` を正本とし、**新 result・registry・prepare/commit・evaluation end 接続は追加しない**
+
+## 2. 正式式と正本
+
+- `actual_rank_change = assigned_rank - actual_node_passage_rank`
+- 割当: `OrderControlTvtNodeRankState.assigned_rank`
+- 実通過: `OrderControlTvtMpActualNodePassageRecord.actual_node_passage_rank`（registry 経由）
+- `final_local_rank` を順位差へ直接使わない
+
+## 3. 対象と未通過
+
+- 台帳確定 Visit 全体（role/partition で母集団を縮小しない）
+- 未通過: 差 `None`（末尾推定・差 0・relative rank 付け直し・一括評価不能にしない）
+
+## 4. 後続
+
+- 後続集計で `(node_name, VisitKey)` 結合導出
+- route 差は rank change へ加算しない
+
+## 5. 専用テスト
+
+- `tests_order_control_tvt_mp_node_actual_rank_difference.py`（新規）
+
+## 6. BLOCKERと利用者判断
+
+- BLOCKERなし
+- 利用者判断事項なし
+
+## 7. 最新再開地点
+
+**本節が、Node実通過順位差の評価契約確定後における最新再開地点である。**
+
+- 本契約の文書保存（commit・push）後、集計・welfare・実験出力へは利用者指示まで進まない
+- rank differenceの新しい本番計算・result・evaluation end接続は追加しない方針であり、既存のNode順位台帳と実通過履歴を後続集計で結合して導出する

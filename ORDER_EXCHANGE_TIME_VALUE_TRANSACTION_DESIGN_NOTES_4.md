@@ -13066,3 +13066,106 @@ Vehicle 単位集計は後続領域である。今回、Vehicle 全取引の合�
 - 次の正式領域: **Node実通過順位差**
 - 本契約確定の文書保存（commit・push）後に Node 順位差の設計・実装へ進む
 - 集計・welfare・実験出力へは進まない
+
+# TVT-MP Node実通過順位差の正本・評価契約確定（2026-10-06）
+
+## 1. 位置づけ
+
+- nonparticipating外部効果はコミット `b6e991b` まで契約確定・専用テスト・文書化済み
+- 今回の正式領域は **Node実通過順位差** の評価契約確定である
+- 既存 Node 順位台帳と Node 実通過履歴を正本とし、**新しい本番計算、result 型、registry field、prepare、commit、evaluation end 接続は追加しない**
+
+## 2. 評価目的
+
+TVT-MP の Node 順位台帳へ割り当てられた順位と、実 World で Node 通過へ成功した順位を比較する。
+
+正式な式:
+
+`actual_rank_change = assigned_rank - actual_node_passage_rank`
+
+符号:
+
+- 正: 割当順位より早く実通過
+- 0: 割当順位どおり実通過
+- 負: 割当順位より遅く実通過
+- `None`: 評価終了時点でまだ Node 通過へ成功しておらず actual rank が存在しない
+
+## 3. 割当順位の正本
+
+唯一の正本: `OrderControlTvtNodeRankState.assigned_rank(visit_key)`
+
+内部: `_confirmed_rank_by_visit_key`、`_confirmed_visit_keys_in_order`
+
+契約: Node 単位、1 始まり、decision / transaction ごとにリセットしない、累積連番、欠番なし、rank 重複なし、VisitKey 重複なし、通過後も削除しない、skip・容量・入口・clearance 待ちでも変更しない、actual 未通過でも確定済みなら保持、後続が先に通過しても assigned rank は変更しない。未確定 Visit では `None`。
+
+## 4. final local rank との違い
+
+`OrderControlTvtMpFinalRankVisitRecord.final_local_rank` はその decision の新規確定 Visit の局所連番。順位差へ **直接使用しない**。
+
+既存 3 件確定後に local 1,2,3 を確定すると assigned rank は 4,5,6。考え方 `assigned_rank = k_confirmed_before + final_local_rank` だが、**正式正本は台帳の `assigned_rank(visit_key)`**（再計算を正規経路にしない）。
+
+## 5. 実通過順位の正本
+
+唯一の正本: `OrderControlTvtMpActualNodePassageRecord.actual_node_passage_rank`
+
+保存: `OrderControlTvtMpActualNodePassageHistoryRegistry.records_by_node_name`
+
+契約: Node key、1 始まり、tuple 順と rank 一致、成功順に連続、同一 timestep でも成功順で異なる rank、再訪は VisitKey、別 Node は 1 から、欠番・tuple/rank 不一致・同一 Node×VisitKey 重複を許さない。TVT 台帳確定かつ物理成功 Visit の Node 連続順位。FCFS、BATCH、`none`、baseline fork、trip-end、未確定 ordinary は含めない。
+
+## 6. 評価対象集合
+
+Node 順位台帳へ確定登録された Visit 全体。buyer、seller、trade_scope NP、partition 4、fallback、過去確定、leading NP、将来 decision 後の通過を含む。role で母集団を分けない。trade_scope だけへ縮小しない。取引別は Node 全体結果から VisitKey で抽出。取引内 actual 順位の付け直しはしない。
+
+## 7. 一部未通過時
+
+通過済み: 台帳 assigned、履歴 actual、差を計算。未通過: assigned はあり得る、actual なし、差 `None`。末尾推定、差 0、未通過履歴 record、観測済みだけの relative rank、Node/transaction 一括評価不能は禁止。
+
+例: A=1,B=2,C=3 で B=1,C=2 のみ通過 → A=`None`, B=+1, C=+1。
+
+## 8. temporary skip 等
+
+台帳から削除しない。後続先通過時 assigned は維持、actual は成功順、差に前進・後退が表れる。clearance 未充足で Node 処理終了する既存契約は変更しない。
+
+## 9. partition と fallback
+
+- partition 3: trade_scope（buyer/seller/NP）
+- partition 4: trade 外 baseline 確定。WaitEntry なしでも台帳×履歴で対象
+- partition 1・2: 先行確定。final 新規列に含まれないが台帳 assigned を持ち通過すれば履歴へ
+- fallback: baseline 順確定。actual 差は 0 以外になり得る
+- no visits: 今回新規確定 0。過去確定の後続通過は履歴側で継続
+
+## 10. route 差
+
+同一 Node 通過なら outlink 違いでも rank 比較可能。route 差を actual rank change へ加算しない。別分析。
+
+## 11. 新しい順位差 result を作らない
+
+actual rank change result、rank comparison registry/finalized、prepare/commit、status/reason enum、ObservationRecord/WaitEntry/individual ex-post への rank 追加、履歴への assigned 複写、uxsim 評価終了 hook を **作らない**。理由: 正本は台帳と履歴、`(node_name, VisitKey)` で結合可能、複写は正本分裂、final local と混同防止、新 prepare/commit でも新情報は増えない。後続集計で結合導出。
+
+## 12. 後続集計の読み方
+
+Node ごと: rank state → 確定 VisitKey 列 → `assigned_rank` → 履歴 record → actual rank → 差（record なしなら `None`）。取引別は VisitKey 抽出。final local を absolute の代わりに使わない。
+
+## 13. 数値例
+
+既存 3 件後 local 1,2,3 → assigned 4,5,6。差: (4,4)=0、(5,4)=+1、(6,5)=+1、(4,未通過)=`None`。
+
+## 14. 今回新規実装しないもの
+
+本番計算、result、registry、prepare/commit、evaluation end、enum、route 差分析、transaction/Vehicle/Node 集計、welfare、実験出力
+
+## 15. 専用テスト
+
+- `tests_order_control_tvt_mp_node_actual_rank_difference.py`（新規）
+
+## 16. BLOCKERと利用者判断
+
+- BLOCKERなし
+- 利用者判断事項なし
+
+## 17. 最新再開地点
+
+**本節が、Node実通過順位差の評価契約確定後における最新再開地点である。**
+
+- 次: 本契約の文書保存（commit・push）後、集計・welfare・実験出力へ進む前に利用者指示に従う
+- 本節では rank difference の本番 prepare/commit・evaluation end 接続は行わない
