@@ -2955,3 +2955,171 @@ baseline 名を含む 10 ファイルでも追加確認: **382 成功、3 失敗
 - 次: 利用者と Copilot で **`TVT_MP_EXPERIMENT_DESIGN_NOTES.md` を Terminal 独立確認** → 確認後 **document コミットと push**（利用者 Terminal）→ 小規模実行 script 実装前条件の最終確認。
 - **コード、テスト、実験 script、出力 directory、`.gitignore`、Git は本節作成時点では変更していない**（3 文書の作成・追記のみ）。
 - **`diagnostics/order_control.zip` には触れていない。**
+
+---
+
+# 初期小規模trialからparticipation mapping修正設計へ移行（2026-10-07）
+
+## 1. trial の結果
+
+- trial script: `research_scripts/run_tvt_mp_small_scale_initial.py`
+- script の `py_compile` は **成功**
+- World、ネットワーク、Vehicle、VOT 生成、finalize までは **成功**
+- `exec_simulation()` 中に **停止**
+- 実際の停止 timestep は **T=13**
+- progress 表示の `0 s` 直後だったため、初回報告では T=0 停止に見えた
+- 読み取り専用再現確認により **T=13 停止**と確定（**T=0 停止とは記録しない**）
+- **evaluation end 未到達**
+- research output build **未実行**
+- 研究用 CSV 5 ファイル **未生成**
+- `vehicle_vot.csv`、`manifest.json`、`run_summary.txt` **未生成**
+- seed 用 trial 出力 directory **未作成**
+- `research_outputs/` と `research_outputs/trial/` の **空 directory だけ**が存在
+- **trial script は変更していない**
+
+## 2. 例外
+
+```text
+ValueError: participates_by_visit_key is missing candidate VisitKey ('veh_a2', 1).
+```
+
+呼出経路:
+
+```text
+run_tvt_mp_driver
+→ build_tvt_mp_concrete_buyer_candidate_sets
+→ _validate_participation_for_candidate_visits
+```
+
+## 3. 原因の要約
+
+技術詳細は詳細設計第 4 巻を参照。進捗巻では次のみ要約する。
+
+- 現行 participation mapping は **意思決定窓内 Visit だけ**を保持する
+- candidate 集合は権利保有 Visit の baseline passage timestep P に基づく **P−1 母集団**であり、意思決定窓より **広くなり得る**
+- T=13 で、`veh_a2` は意思決定窓外だが **candidate 集合内**となった
+- `veh_a2` の参加情報が mapping になく、concrete buyer 候補形成で停止した
+- **trial script の設定ミスではない**
+- **本番 driver の mapping 母集団不足**である
+
+## 4. 正本
+
+**観察事実の正本:**
+
+- `TVT_MP_EXPERIMENT_DESIGN_NOTES.md`
+- 節見出し: **「初期小規模trialでparticipation mapping母集団不足を検出（2026-10-07）」**
+
+**原因、正式契約、修正仕様、テスト契約の正本:**
+
+- `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_4.md`
+- 節見出し: **「TVT-MP participation mapping母集団の実装前修正設計（2026-10-07）」**
+
+## 5. 確定した修正方針
+
+- **修正案 A を採用**
+- driver の単一 participation mapping を、alignment 済みの `resolved_undetermined_visits` **全件**へ広げる
+- `_build_participation_mapping` の意思決定窓フィルタを **削除**
+- participation は既存の `_read_participation` を通じて取得する
+- 欠落を `True` または `False` として **推測しない**
+- candidate 集合を意思決定窓へ **縮小しない**
+- concrete buyer 側で live Vehicle を **再読取りしない**
+
+## 6. 変更しない契約
+
+- 意思決定窓: `T < baseline_arrival_timestep <= T + 6`
+- T 到着 Visit を窓へ含めない
+- leading nonparticipating の走査範囲
+- right-of-entry の正式条件
+- candidate の P−1 条件、正式 baseline 順位、最大 N 件
+- 同着 tiebreaker
+- nonparticipating を buyer または seller にしない
+- VOT 0 を不参加扱いしない
+- public API
+- frozen result 型
+- record
+- registry
+- CSV 列
+- evaluation end
+- research output
+- trial script
+- trial 条件
+
+## 7. 実装・テスト予定
+
+**本番修正対象:**
+
+- `uxsim/order_control_tvt_mp_driver.py`
+- private helper `_build_participation_mapping`
+
+**テスト修正対象:**
+
+- `tests_order_control_tvt_mp_driver.py`
+
+**予定する確認:**
+
+- resolved undetermined Visit 全件が mapping へ入る
+- 意思決定窓外かつ candidate 内 Visit も mapping へ入る
+- VOT ではなく `participates_in_order_exchange` を使う
+- 広い mapping でも leading nonparticipating は窓外 Visit を処理しない
+- candidate 集合を縮小しない
+- concrete buyer 候補形成が mapping 欠落で停止しない
+- 真の mapping 欠落は引き続き拒否する
+- T=13 相当の 2 流入合流統合回帰
+- 修正後に **未変更** trial script を再実行する
+
+## 8. BLOCKER
+
+- 現在の trial 継続に対する BLOCKER は **participation mapping 母集団不足**
+- 修正方針は **確定済み**
+- 本番修正と driver 回帰が完了するまで **trial を再実行しない**
+- 新 counter、CSV 列、record、registry、研究出力変更は **不要**
+
+## 9. Git・作業状態
+
+**最新コミット:**
+
+- `472bb2f`
+- `document initial TVT-MP experiment design assumptions and workflow`
+
+**文書作業開始前:**
+
+- ローカル HEAD と origin は **一致**
+- tracked ファイルは **clean**
+
+**現在の未コミット tracked 変更:**
+
+- `TVT_MP_EXPERIMENT_DESIGN_NOTES.md`
+- `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_4.md`
+- 今回追記する `ORDER_EXCHANGE_PROGRESS_3.md`
+
+**未追跡:**
+
+- `research_scripts/`
+- `diagnostics/order_control.zip`
+
+**空 directory:**
+
+- `research_outputs/`
+- `research_outputs/trial/`
+
+空 directory は通常 Git status へ表示されない。
+
+- **Cursor は Git 操作を行わない**
+- **`diagnostics/order_control.zip` には触れない**
+
+## 10. 最新再開地点
+
+**本節が、初期小規模 trial から participation mapping 修正設計へ移行した現在地である。**
+
+- 初期小規模 trial で **T=13** の本番経路不整合を発見
+- 読み取り専用原因調査を **完了**
+- Terminal 原典独立確認を **完了**
+- 実験設計メモへ観察事実を **記録済み**
+- 詳細設計第 4 巻へ実装前修正設計を **記録済み**
+- **今回、進捗第 3 巻へ現在地を記録した**（本節）
+- 次の直接作業は、**3 文書の Terminal 独立確認**
+- 確認後、3 文書を **1 回の `document` コミット**にまとめて push（利用者 Terminal）
+- その後、本番 helper 修正と driver 回帰テスト
+- 本番修正と回帰後に、**未変更** trial script を再実行
+- trial 出力 directory は **まだ未作成**
+- **Cursor は Git 操作を行わない**

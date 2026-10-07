@@ -13860,3 +13860,378 @@ baseline snapshot の 3 件失敗は事実として記録するが、今回の�
 - 実験からバグ、新指標、API 変更、record 変更、CSV 列変更等が生じた場合は、**実装設計へ戻って**記録・設計する。実験メモと実装メモを相互参照する。
 - 実験設計の詳細本文を第4巻へ重複記載しない。
 - 次の再開地点は実験設計メモの **Terminal 確認**（`TVT_MP_EXPERIMENT_DESIGN_NOTES.md` §13）。
+
+---
+
+# TVT-MP participation mapping母集団の実装前修正設計（2026-10-07）
+
+## 独立確認済みの原典事実
+
+Terminal による独立確認で、次を確認済みである。
+
+### 現行 driver の mapping
+
+`uxsim/order_control_tvt_mp_driver.py` の `_build_participation_mapping` は、alignment 済みの `resolved_undetermined_visits` を走査したうえで、次の Visit だけを mapping へ登録している。
+
+```text
+T < baseline_arrival_timestep <= T + 6
+```
+
+現行実装は次を除外する。
+
+- `baseline_arrival_timestep <= T`
+- `baseline_arrival_timestep > T + 6`
+
+docstring も、意思決定窓外 Visit を省略すると記載している。
+
+### 現行 candidate 集合
+
+`uxsim/order_control_tvt_candidate_visit_set.py` の `build_tvt_candidate_visit_set` は、権利保有 Visit の baseline passage timestep を P として、P−1 母集団を正式 baseline 順位で構築し、最大 N 件を candidate 集合とする。
+
+candidate 集合は意思決定窓では切らない。
+
+### concrete buyer 側の要求
+
+`uxsim/order_control_tvt_mp_concrete_buyer_candidate_set.py` の `_validate_participation_for_candidate_visits` は、`candidate_visits` 全件について、`participates_by_visit_key` に VisitKey が存在することを要求する。
+
+欠落時は次の `ValueError` を出す。
+
+```text
+participates_by_visit_key is missing candidate VisitKey ...
+```
+
+この欠落拒否は正しく、**変更しない**。
+
+## 確定した設計判断
+
+次を確定方針として記録する。
+
+- **修正案 A を採用する**
+- driver の単一 participation mapping を、alignment 済みの resolved undetermined Visit **全体**へ広げる
+- `_build_participation_mapping` の意思決定窓による除外を **廃止する**
+- mapping の構築時点は、現行どおり driver **第 2 段階後、第 3 段階前**とする
+- 各 Visit の値は live Vehicle の `participates_in_order_exchange` から取得する
+- 欠落を `True` または `False` として推測しない
+- 意思決定窓を変更しない
+- candidate 集合を変更しない
+- candidate 集合を意思決定窓へ縮小しない
+- leading nonparticipating の走査範囲を変更しない
+- right-of-entry の走査範囲を変更しない
+- concrete buyer 側で live Vehicle を再読取りしない
+- public API、frozen result 型、record、registry、CSV 列、evaluation end、研究出力 API を変更しない
+- trial script を変更しない
+
+## 1. 発見経緯
+
+- 初期小規模 trial は **T=13** で停止した。
+- 初回の progress 表示だけでは T=0 停止に見えたが、読み取り専用再現確認で **T=13** と確定した。
+- 例外は次である。
+
+```text
+ValueError: participates_by_visit_key is missing candidate VisitKey ('veh_a2', 1).
+```
+
+- 実験上の観察事実の正本は `TVT_MP_EXPERIMENT_DESIGN_NOTES.md` の次の節である。
+
+```text
+初期小規模trialでparticipation mapping母集団不足を検出（2026-10-07）
+```
+
+- **本節**は原因、正式契約、修正仕様、テスト契約の **技術的正本**とする。
+
+## 2. T=13 の具体例
+
+### 権利保有 Visit
+
+- VisitKey: `('veh_b1', 1)`
+- departure timestep: 6
+- baseline arrival timestep: 19
+- baseline passage timestep P: 21
+- inlink: `in_b`
+- T=13 の意思決定窓は `(13, 19]`
+- arrival 差は 6
+- 意思決定窓内
+- participation mapping に存在
+- candidate 集合に存在
+- `participates_in_order_exchange=True`
+
+### mapping から欠落した candidate Visit
+
+- VisitKey: `('veh_a2', 1)`
+- departure timestep: 7
+- baseline arrival timestep: 20
+- baseline passage timestep: 23
+- inlink: `in_a`
+- T=13 の意思決定窓は `(13, 19]`
+- arrival 差は 7
+- 意思決定窓外
+- 現行 participation mapping には **存在しない**
+- 権利保有 Visit の P=21 に対して次を満たす。
+
+```text
+20 <= P - 1
+```
+
+- candidate 集合へ入ること自体は **正常**
+- `participates_in_order_exchange=True`
+- concrete buyer 候補形成で参加情報が必要となり、**mapping 欠落として停止**した。
+
+## 3. 直接原因
+
+現行 participation mapping の母集団:
+
+```text
+T < baseline_arrival_timestep <= T + 6
+```
+
+candidate 集合へ入り得る母集団:
+
+```text
+baseline_arrival_timestep <= P - 1
+```
+
+したがって、次を満たす Visit は、candidate 集合には入るが現行 mapping には入らない。
+
+```text
+T + 6 < baseline_arrival_timestep <= P - 1
+```
+
+この不一致は、baseline horizon が 6 以上で、権利保有 Visit の baseline passage timestep P が意思決定窓終端より後になり、最大 candidate Visit 数 N に余裕がある通常ケースで発生し得る。
+
+今回の `veh_a2` はこの正式条件を満たした。
+
+## 4. 欠陥の分類
+
+- trial script の設定ミスではない。
+- VOT、horizon、意思決定窓、車両投入条件の誤りではない。
+- 正常な None 契約ではない。
+- candidate 集合の母集団が広すぎる欠陥ではない。
+- concrete buyer 側の欠落拒否が誤りではない。
+- **driver の participation mapping 母集団が、後段の正式 candidate 契約より狭い**コード・設計不一致である。
+- 第 2 巻の candidate 定義と candidate 全件の mapping 要求を **維持する**。
+- 第 4 巻の旧記述で、後段第 7・第 8 段階も意思決定窓内 mapping だけで足りるとしていた前提を **本節で改訂する**（旧文は削除しない）。
+
+## 5. 改訂後の participation mapping 正式契約
+
+改訂後の `participates_by_visit_key` は、alignment 結果の **`resolved_undetermined_visits` 全件**について構築する。
+
+各 VisitKey について、次を正式契約とする。
+
+- 対応する live Vehicle を既存の正式経路で取得する（`_read_participation`）
+- `Vehicle.participates_in_order_exchange` を読む
+- 値は Python `bool` でなければならない
+- `True` は participating を表す
+- `False` は nonparticipating を表す
+- 欠落を `True` または `False` として推測しない
+- declared VOT から参加・不参加を推測しない
+- VOT 0 を不参加扱いしない
+- 同一 Vehicle の参加属性を走行中に変更しない既存契約を維持する
+
+`resolved_undetermined_visits` 全件を mapping へ載せる理由は次のとおりである。
+
+- 第 3 段階の leading nonparticipating 処理が必要とする意思決定窓内 Visit を包含する
+- 第 4 段階の right-of-entry 処理が必要とする Visit を包含する
+- 後段の candidate 集合に入り得る意思決定窓外 Visit も包含する
+- mapping の母集団を広げても、各段階の処理対象は **各段階の正式 result により限定される**
+- extra mapping key は、走査対象に含まれなければ使用されない
+- **mapping のキー範囲**と、**各段階が処理する Visit 範囲**を混同しない
+
+## 6. 変更しない意思決定窓と走査範囲
+
+次を変更しない契約として明記する。
+
+- 意思決定窓は引き続き次である。
+
+```text
+T < baseline_arrival_timestep <= T + 6
+```
+
+- T 到着 Visit は意思決定窓へ入れない
+- leading nonparticipating 確認は、意思決定窓先頭の連続 nonparticipating だけを扱う
+- mapping が広がっても、窓外 Visit を leading nonparticipating として先行確定しない
+- right-of-entry の正式条件を変更しない
+- candidate 集合は P−1 条件、正式 baseline 順位、最大 N 件の契約を維持する
+- candidate 集合を意思決定窓へ縮小しない
+- 参加・非参加を理由に同着順位の優劣を付けない
+- 既存 tiebreaker と Vehicle ID による順位決定を変更しない
+
+## 7. nonparticipating 契約
+
+次を維持する。
+
+- `participates_in_order_exchange=False` が唯一の不参加表現である
+- nonparticipating を buyer または seller にしない
+- leading nonparticipating は正式条件を満たすときだけ先行確定する
+- trade_scope 内 nonparticipating は候補選択上の金銭契約へ含めない
+- nonparticipating の外部効果は true VOT で別評価する
+- transaction identity を持たない Visit を架空 transaction へ入れない
+- **mapping 欠落**と、正式な nonparticipating 値 `False` を混同しない
+
+## 8. 採用しない修正
+
+### candidate 集合を意思決定窓へ縮小
+
+不採用理由:
+
+- P−1 条件を壊す
+- 本来有効な candidate を除外する
+- 最大 N 件と正式 baseline 順位による既存契約を変更する
+- 今回の `veh_a2` を不当に除外する
+
+### mapping 欠落を False 扱い
+
+不採用理由:
+
+- 契約不存在と nonparticipating を混同する
+- participating Visit を nonparticipating として扱い得る
+- buyer 候補 prefix を失わせる
+
+### mapping 欠落を True 扱い
+
+不採用理由:
+
+- nonparticipating Visit を participating として扱い得る
+
+### concrete buyer 側で live Vehicle を再読取り
+
+不採用理由:
+
+- 上流で検証した入力を使用する既存構造に反する
+- 後段から World または Vehicle へ戻ることになる
+- 原因である driver の母集団不足を隠す
+
+### 窓用 mapping と candidate 用 mapping の分離
+
+技術的には正確だが、今回の最小修正では **不採用**とする。
+
+理由:
+
+- 同じ参加属性を重複して保持する
+- API と呼出しが増える
+- 単一の広い mapping で各段階の正式走査範囲を維持できる
+- 今回の修正には不要である
+
+## 9. 本番修正仕様
+
+**修正対象:**
+
+- `uxsim/order_control_tvt_mp_driver.py`
+- private helper `_build_participation_mapping`
+
+**修正内容:**
+
+- 現行の意思決定窓フィルタ（`baseline_timestep_T` と `window_end` による `continue`）を **削除する**
+- `resolved_undetermined_visits` **全件**を明示的に走査する
+- 各 VisitKey について、既存の `_read_participation` を通じて live Vehicle の `participates_in_order_exchange` を取得する
+- Vehicle 存在検査、Vehicle 型検査、属性存在検査、Python `bool` 検査を **維持する**
+- declared VOT を読まない
+- docstring を新しい母集団へ更新する
+- 高度で短い内包表記ではなく、初学者が追いやすい **明示的な loop** を維持する
+
+**重複 VisitKey:** 現行 alignment 結果に同じ VisitKey が複数存在し得るかを **実装時に限定確認**する。
+
+- 既存契約上重複しないことが保証済みなら、新しい過剰検査を追加しない
+- 重複が重大不整合として未検出なら、暗黙上書きを避ける最小検査の必要性を判断する
+- この限定確認を理由に探索範囲を広げない
+
+## 10. 変更不要の対象
+
+次は **変更不要**とする。
+
+- public `run_tvt_mp_driver` API
+- leading nonparticipating API（`order_control_tvt_leading_nonparticipating_confirmation.py`）
+- right-of-entry API（`order_control_tvt_right_of_entry_selection.py`）
+- candidate visit set API（`order_control_tvt_candidate_visit_set.py`）
+- concrete buyer candidate set API（`order_control_tvt_mp_concrete_buyer_candidate_set.py`）
+- frozen result 型
+- record
+- registry
+- CSV 列
+- evaluation end 処理
+- research output API
+- trial script
+- trial 条件
+- candidate 集合
+- VOT 契約
+- nonparticipating の金銭・外部効果契約
+
+## 11. テスト契約
+
+**修正対象:**
+
+- `tests_order_control_tvt_mp_driver.py`
+
+新しいテストファイルは **必須としない**。
+
+最低限、次を検証する。
+
+1. `_build_participation_mapping` が、alignment 済み `resolved_undetermined_visits` **全件**を mapping へ入れる
+2. 意思決定窓内 Visit が従来どおり mapping へ入る
+3. 意思決定窓外 Visit も resolved undetermined であれば mapping へ入る
+4. 参加情報は declared VOT ではなく `participates_in_order_exchange` から取得する
+5. declared VOT が 0 でも `participates_in_order_exchange=True` なら participating である
+6. `participates_in_order_exchange=False` は nonparticipating として保存される
+7. 意思決定窓外で candidate 集合へ入る participating Visit が mapping に存在する
+8. 広い mapping を渡しても、leading nonparticipating は窓外 Visit を処理しない
+9. candidate 集合を意思決定窓へ縮小しない
+10. candidate 全件の mapping が揃い、concrete buyer 形成が mapping 欠落例外にならない
+11. nonparticipating を buyer または seller にしない
+12. 同着 tiebreaker を変更しない
+13. mapping に真の欠落がある場合、concrete buyer 側は引き続き `ValueError` を出す
+14. 2 流入合流の実 World で、T=13 相当の窓外かつ candidate 内 Visit を含む統合回帰を行う
+15. 修正後、未変更 trial script が evaluation end まで進めるかを **別途確認**する
+
+既存テストのうち、T+7 の Visit を mapping から除外する期待は、新しい正式母集団に合わせて **修正する**。
+
+ただし、窓外 Visit を leading nonparticipating 対象へ含めない契約は **維持**し、必要なら driver テスト内で明示確認する。
+
+## 12. 影響範囲
+
+- 本番修正は driver 内の private helper に **限定**される
+- public API 変更なし
+- result 型変更なし
+- record 変更なし
+- registry 変更なし
+- CSV 変更なし
+- evaluation end 変更なし
+- research output 変更なし
+- trial script 変更なし
+- candidate 集合変更なし
+- nonparticipating 契約変更なし
+- パフォーマンス影響は、alignment 済み未確定 Visit の参加 `bool` を mapping へ追加する程度で **限定的**である
+
+## 13. 旧記述の扱い
+
+第 4 巻の旧 §9 または該当する歴史的記述（例: 母集団は意思決定窓内 Visit だけである、3 段目以降が読む VisitKey はこの窓から作られる候補であり同じ表に含まれる、など）を **削除しない**。
+
+本節で次を明記する。
+
+- 旧記述は、driver mapping を意思決定窓内だけへ限定していた **当時の設計記録**である
+- 初期小規模 trial により、candidate 集合が意思決定窓より広くなり得る正式ケースが確認された
+- **最新契約は本節**（`# TVT-MP participation mapping母集団の実装前修正設計（2026-10-07）`）である
+- 旧記述を **現在の正本として読まない**
+- 第 2 巻の candidate 集合契約は **変更しない**
+- 第 2 巻への追記は **今回行わない**
+
+## 14. BLOCKER
+
+- 現在の trial 継続に対する BLOCKER は **participation mapping 母集団不足**である
+- **修正案 A を採用済み**である
+- 本番修正と driver 回帰が完了するまで **trial を再実行しない**
+- 新 counter、CSV 列、record、registry、研究出力変更は BLOCKER 解消に **不要**である
+
+## 15. 最新再開地点
+
+- 初期小規模 trial で T=13 の本番経路不整合を発見した
+- Grok 4.6 による読み取り専用調査を完了した
+- Terminal による原典独立確認を完了した
+- 実験設計メモへの観察事実の記録は完了した
+- **案 A を採用した**
+- participation mapping 母集団の実装前修正設計を **本節へ記録した**
+- 次の直接作業は、**`ORDER_EXCHANGE_PROGRESS_3.md` だけ**へ現在地を要約することである
+- その後、3 文書を Terminal で独立確認する
+- 独立確認後、実装前文書を **1 回の document コミット**にまとめて push する（利用者 Terminal）
+- その後、本番 helper 修正と driver 回帰テストへ進む
+- trial 再実行は本番修正と回帰の **後**である
+- **Cursor は Git 操作を行わない**
+- **`diagnostics/order_control.zip` には触れない**

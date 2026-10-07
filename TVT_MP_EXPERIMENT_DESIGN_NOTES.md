@@ -516,3 +516,144 @@ UXsim 本来の公式デモ（`demos_and_examples` 等）と、東京大学側�
 | `TVT_MP_EXPERIMENT_DESIGN_NOTES.md` | 実験条件・ネットワーク・保存方針の正本（本文書） |
 | `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_4.md` | TVT-MP 内部実装・API・評価契約の正本 |
 | `ORDER_EXCHANGE_PROGRESS_3.md` | 工程・再開地点・正本の案内 |
+
+---
+
+# 初期小規模trialでparticipation mapping母集団不足を検出（2026-10-07）
+
+## 1. trialの目的
+
+今回の run は **正式実験ではなく**、次を確認するための **初期小規模 trial** である。
+
+- TVT-MP が小規模条件で完走するか
+- 全 World baseline 仮想計算と candidate local 仮想計算を含む実行性
+- バグの有無
+- evaluation end 処理
+- 研究出力 5 表
+- 実行時間
+- 候補形成と取引成立の有無
+
+## 2. 実行対象
+
+| 項目 | 値 |
+| --- | --- |
+| script | `research_scripts/run_tvt_mp_small_scale_initial.py` |
+| scenario | `tvt_mp_small_scale_initial_run` |
+| ネットワーク | 2 流入、1 流出の単車線合流 |
+| 車両数 | 10 台（participating 8、nonparticipating 2） |
+| baseline horizon | 30 |
+| candidate Visit 数上限 | 10 |
+| 評価期間 | T=0 から T=299 |
+| internal TSIZE | 330 |
+| 交通 seed | 0 |
+| VOT seed | 1 |
+
+## 3. 実行結果
+
+- script の `py_compile` は **成功**した。
+- World、ネットワーク、Vehicle、VOT 生成、finalize までは **成功**した。
+- `exec_simulation()` 実行中に **停止**した。
+- **evaluation end には到達していない**。
+- research output build は **実行されていない**。
+- 5 つの研究用 CSV は **生成されていない**。
+- `vehicle_vot.csv` は **生成されていない**。
+- `manifest.json` は **生成されていない**。
+- `run_summary.txt` は **生成されていない**。
+- seed 用 trial 出力 directory は **作成されていない**。
+- `research_outputs/` および `research_outputs/trial/` の **空 directory だけ**が存在する。
+- **trial script 自体は変更していない**。
+
+## 4. 停止 timestep の訂正
+
+- 初回報告では、progress 表示の `0 s` 直後に例外が表示されたため、**T=0 で停止したように見えた**。
+- その後の **読み取り専用再現確認**により、実際の停止 timestep は **T=13** と確定した。
+- UXsim では driver が各 timestep の progress 表示や Link 更新より **前**に呼ばれる。
+- **progress 表示だけから停止 timestep を判断してはならない**。
+- 正式な観察結果は **T=13 停止**である。
+- **T=0 停止とは記録しない**。
+
+## 5. 例外
+
+例外メッセージ:
+
+```text
+ValueError: participates_by_visit_key is missing candidate VisitKey ('veh_a2', 1).
+```
+
+呼出経路:
+
+```text
+run_tvt_mp_driver
+→ build_tvt_mp_concrete_buyer_candidate_sets
+→ _validate_participation_for_candidate_visits
+```
+
+## 6. T=13 における具体的な観察
+
+T=13 停止時点で、権利保有 Visit と例外対象 Visit は次のとおりである。
+
+| 項目 | 権利保有 Visit | 例外対象 Visit |
+| --- | --- | --- |
+| VisitKey | `('veh_b1', 1)` | `('veh_a2', 1)` |
+| departure timestep | 6 | 7 |
+| baseline arrival timestep | 19 | 20 |
+| baseline passage timestep P | 21 | 23 |
+| inlink | `in_b` | `in_a` |
+| T=13 の意思決定窓 | `(13, 19]` | `(13, 19]` |
+| arrival 差 | 6 | 7 |
+| 意思決定窓（当該 Visit） | **窓内** | **窓外** |
+| participation mapping | **存在** | **存在しなかった** |
+| candidate 集合 | **存在** | **存在**（入ること自体は正常） |
+| `participates_in_order_exchange` | `True` | `True` |
+
+例外対象 Visit `('veh_a2', 1)` は、権利保有 Visit の P=21 に対して次を満たす。
+
+```text
+20 <= P - 1
+```
+
+concrete buyer 候補形成で参加情報が必要となり、**mapping 欠落として停止**した。
+
+## 7. 実験上の意味
+
+- 今回の停止は **trial script の設定ミスではない**。
+- VOT、horizon、意思決定窓、車両投入条件は **実験設計どおり**である。
+- 初期小規模 trial により、**本番経路の結合不整合**を検出できた。
+- trial は完走しなかったが、**コード実行性確認**と **バグ発見**という目的の一部を果たした。
+- 本 trial の出力は **未生成**であり、**正式な実験結果として扱わない**。
+- trial 条件を変更して **回避しない**。
+- **本番修正後**に、同じ trial script・同じ条件で **再実行**する。
+- transaction 件数、buyer 件数、seller 件数、nonparticipating 件数、trade ex-post status は **未観測**である。
+- **未観測値を 0 件として記録しない**。
+
+## 8. 実装設計へ戻ること
+
+実験と実装設計の往復運用（§11）に従い、次を記録する。
+
+- **本文書**には trial で観察された **事実**を記録する。
+- participation mapping 母集団の **原因**、**正式契約**、**修正仕様**、**テスト契約**は、`ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_4.md`（詳細設計第 4 巻）へ **別途記録**する（本メモだけで内部実装の正式修正仕様を確定しない）。
+- **現在は実験段階から実装設計段階へ戻った**。
+- 本番修正と回帰が完了するまで **trial を再実行しない**。
+- 新しい counter、CSV 列、研究出力変更は、現時点の BLOCKER 解消には **不要**。
+- **trial script は変更不要**という調査結果である。
+- 詳細設計第 4 巻への実装前修正設計追記は、**次の別作業**で行う。
+
+## 9. BLOCKER
+
+- 現在の trial 継続に対する BLOCKER は、**participation mapping の母集団不足**である。
+- 修正方針の調査と Terminal 原典確認は **完了している**。
+- 実装前修正設計の詳細は、**次に詳細設計第 4 巻へ記録**する。
+- 本番修正と回帰が完了するまで **trial を再実行しない**。
+
+## 10. 最新再開地点（trial 観察記録後）
+
+- 初期小規模 trial は **T=13 で停止**した。
+- 観察事実を **本実験設計メモへ記録した**（本節）。
+- 次の直接作業は、詳細設計第 4 巻へ **participation mapping 母集団の実装前修正設計**を記録することである。
+- その後、進捗第 3 巻へ **現在地を要約**する。
+- 3 文書の記録完了後に **Terminal で独立確認**する。
+- 独立確認後、実装前文書を **document コミットして push** する（利用者 Terminal）。
+- その後、本番 helper 修正と driver 回帰テストへ進む。
+- **trial 再実行は本番修正と回帰の後**である。
+- **Cursor は Git 操作を行わない**。
+- **`diagnostics/order_control.zip` には触れない**。
