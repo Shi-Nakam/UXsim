@@ -2919,3 +2919,39 @@ baseline 名を含む 10 ファイルでも追加確認: **382 成功、3 失敗
 - 次は工程9: 両文書を 1 回の `document` コミットにまとめる
 - 工程10: push、origin 一致、tracked clean 確認
 - Git は利用者 Terminal。Cursor では Git 操作を行わない
+
+---
+
+# TVT-MP 実験設計メモを新設（2026-10-07）
+
+## 概要
+
+- **`TVT_MP_EXPERIMENT_DESIGN_NOTES.md`** を新設した。
+- **実装設計**（`ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_4.md`）と **実験設計**を分離した。
+- 実験と実装設計は必要に応じて **往復**する（観察は実験メモ、仕様・修正は実装メモ；進捗巻に再開地点を残す）。
+
+## 実験設計メモに記録した主要内容（要約）
+
+- 意思決定窓: **0 より大きく 6 以下**（`T < baseline_arrival_timestep <= T + 6`；T 到着 Visit は含めない）。
+- 自由流速度: **60 km/h**（60000/3600 m/s）；**DELTAT 1 秒**。
+- 研究ネットワーク: **全 Link 100 m 以上**（意思決定窓 6 秒との整合；初期試行は 200 m 基本案）。
+- 基本 VOT: 対数正規、元尺度 **平均 1 円/秒・標準偏差 3 円/秒**；participating は true = declared。
+- **小規模 run 基本案**: 2 流入 1 流出、10 台（参加 8 / 非参加 2）、baseline horizon 30、candidate 上限 10、評価 300 / TSIZE 330、seed 0/1、投入 5–14、Link 容量は既定。
+- **1500 台/時**の Link 境界容量案は **正式実験前の未確定**（有力案として実験設計メモ §5）。
+- **Signal** のサイクル・青・全赤は **未確定**。
+- **`research_scripts` / `research_outputs` はまだ作成していない**（方針のみ記録）。
+
+## BLOCKERと利用者判断
+
+- **BLOCKER なし**（実験設計文書化段階）。
+- 利用者判断事項（容量正式採用、Signal 具体値、正式ネットワーク、manifest schema、バックアップ、`.gitignore`、実験 ID 命名等）は **正式実験前の未確定事項**として実験設計メモ §12 に列挙。
+
+## 最新再開地点
+
+**本節が、実験設計メモ新設後における最新再開地点である。**
+
+- TVT-MP 集計・研究出力の実装・検証・push は完了済み。
+- 現在は **初期小規模 run の実験設計段階**。
+- 次: 利用者と Copilot で **`TVT_MP_EXPERIMENT_DESIGN_NOTES.md` を Terminal 独立確認** → 確認後 **document コミットと push**（利用者 Terminal）→ 小規模実行 script 実装前条件の最終確認。
+- **コード、テスト、実験 script、出力 directory、`.gitignore`、Git は本節作成時点では変更していない**（3 文書の作成・追記のみ）。
+- **`diagnostics/order_control.zip` には触れていない。**
