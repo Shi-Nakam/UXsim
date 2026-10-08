@@ -13398,6 +13398,9 @@ route 差を金額・順位差へ加算しない。
 
 ## 8. Vehicle summary table
 
+> **最新契約への注記（2026-10-08）:**
+> 本節の旧列一覧は、当時の研究出力設計を示す歴史的記録である。原典・実装・テストの再確認により、Vehicle表の`trade_scope_visit_count`と`transaction_count`が異なる正式ケースは確認されず、前者の名称も成立取引限定の実際の集計範囲と一致しないことが判明した。最新契約では、Vehicle表の`transaction_count`を維持し、Vehicle表の`trade_scope_visit_count`を削除する。Transaction表の同名列は維持する。詳細と変更理由は、第4巻末尾の「Vehicle summary tableの重複列整理と第5巻への移行（2026-10-08）」を正本として参照する。本節の旧列一覧を現在のVehicle表列契約として読まない。
+
 1 `vehicle_name` につき 1 行。Visit 表に現れる車両に加え、当該 World の TVT 台帳確定 Visit にだけ現れる車両も含める（partition 4 等）。総合満足 status は作らない。
 
 列を2母集団に分ける。
@@ -14235,3 +14238,225 @@ T < baseline_arrival_timestep <= T + 6
 - trial 再実行は本番修正と回帰の **後**である
 - **Cursor は Git 操作を行わない**
 - **`diagnostics/order_control.zip` には触れない**
+
+# Vehicle summary tableの重複列整理と第5巻への移行（2026-10-08）
+
+## 1. 発見経緯
+
+初期小規模trialの研究出力確認中、Vehicle summary tableに次の2列が存在することを確認した。
+
+- `trade_scope_visit_count`
+- `transaction_count`
+
+両列の違い、研究上の必要性、異なる値になる正式ケース、名称と集計対象の整合性を、設計メモ、実装、テストから再確認した。
+
+## 2. 現行Vehicle表における2列の意味
+
+現行のVehicle summary tableは、成立取引から作られたVisit表をVehicle別に集計している。
+
+### `trade_scope_visit_count`
+
+現行実装では、成立取引に関するVisit表で、その`vehicle_name`を持つ行の数である。
+
+これは、不採用候補、経済的不成立候補、未解決候補を含む、候補評価時のtrade scope全体への参加回数ではない。
+
+### `transaction_count`
+
+そのVehicleのVisit行が属する成立取引について、次のtransaction identityのdistinct件数である。
+
+- `tvt_decision_timestep`
+- `node_name`
+- `buyers_sorted`
+
+非技術的には、そのVehicleが関与した成立取引の件数を表す。
+
+## 3. 両列が異なるための条件
+
+現行集計で両列が異なるには、同じVehicleが、同じ1件の成立取引へ複数のVisit行として含まれる必要がある。
+
+しかし、TVT-MPの正式契約では、同じVehicleの複数Visitが同じ成立取引へ入る正式ケースは確認されなかった。
+
+同じVehicleが時間を置いて同じ対象Nodeを再訪し、それぞれ別の成立取引へ入る場合は、Visit数と取引数が同じだけ増える。
+
+同じVehicleがネットワーク上の複数Nodeで別々の成立取引へ関与する場合も、Visit数と取引数が同じだけ増える。
+
+したがって、再訪および複数Node条件を考慮しても、両列が異なる正式ケースは確認されなかった。
+
+## 4. 既存テストの確認結果
+
+既存テストには、同じVehicleが2件の成立取引へ関与するケースがある。
+
+その期待値は次のとおりである。
+
+- `trade_scope_visit_count = 2`
+- `transaction_count = 2`
+
+両列が異なる値になるケースを固定するテストは存在しない。
+
+両列を別々の研究指標として必要とする理由や、利用者がこの区別を明示的に了承した記録も確認されなかった。
+
+## 5. 名称上の問題
+
+trade scopeは、取引候補の形成および候補評価に使用する概念である。
+
+そのため、`trade_scope_visit_count`という名称であれば、本来は、取引の成立・不成立にかかわらず、そのVehicleのVisitがtrade scopeへ入った回数を意味するのが自然である。
+
+しかし、現行Vehicle表の同列は成立取引だけを入力としている。
+
+したがって、Vehicle表の`trade_scope_visit_count`は、名称から自然に読み取れる意味と実際の集計対象が一致せず、研究結果の利用者に誤解を与える。
+
+## 6. 最新のVehicle表契約
+
+Vehicle summary tableについて、次を最新契約として確定する。
+
+- `transaction_count`を維持する
+- Vehicle表の`trade_scope_visit_count`を削除する
+- `transaction_count`は、そのVehicleが関与した成立取引件数を表す
+- 同一Node再訪および複数Nodeでの成立取引関与も、ネットワーク全体を横断して`transaction_count`で数える
+- 成立取引だけを対象とする別名のVisit件数列は追加しない
+- `executed_transaction_visit_count`等への改名または追加は行わない
+- 現行契約ではVisit件数と成立取引件数が同じ値になるため、重複列を維持しない
+
+## 7. Transaction表との区別
+
+削除対象はVehicle表の次の列だけである。
+
+- `OrderControlTvtMpResearchOutputVehicleRow.trade_scope_visit_count`
+
+Transaction表の次の列は維持する。
+
+- `OrderControlTvtMpResearchOutputTransactionRow.trade_scope_visit_count`
+
+Transaction表では、1件の成立取引について、buyer、seller、nonparticipatingを合わせた対象Visit総数を表すためである。
+
+次の関係を維持する。
+
+    buyer_visit_count
+    + seller_visit_count
+    + nonparticipating_visit_count
+    = trade_scope_visit_count
+
+Transaction表の同名列には、1取引の対象範囲全体の大きさを示す明確な意味がある。
+
+## 8. 本来のtrade scope回数
+
+将来、成立・不成立にかかわらず、そのVehicleのVisitが候補評価時のtrade scopeへ入った回数を研究指標として必要とする可能性はある。
+
+ただし、現行研究出力は、不採用候補、経済的不成立候補、未解決候補のtrade scope履歴を保存していないため、現行記録からこの値を算出できない。
+
+この指標が必要になった場合は、候補評価履歴を保存する新しいrecordまたはregistryを別途設計する。
+
+今回は、新record、新registry、新counter、新CSV列を追加しない。
+
+## 9. 実装前変更契約
+
+本番変更対象:
+
+- `uxsim/order_control_tvt_mp_research_output.py`
+
+削除対象:
+
+- `OrderControlTvtMpResearchOutputVehicleRow`の`trade_scope_visit_count`
+- `_build_vehicle_rows`内の`trade_scope_visit_count=len(vehicle_visit_rows)`
+
+維持対象:
+
+- Vehicle表の`transaction_count`
+- `_distinct_transaction_count_for_vehicle`
+- Transaction表の`trade_scope_visit_count`
+- Visit表
+- Node表
+- Scenario表
+- trade scope形成
+- 候補評価
+- transaction identity
+- buyer、seller、nonparticipatingの分類
+- 金銭精算
+- actual passage
+- trade ex-post evaluation
+- individual satisfaction
+
+## 10. テスト変更契約
+
+変更対象:
+
+- `tests_order_control_tvt_mp_research_output.py`
+
+必要な変更:
+
+- VehicleRowのfield order契約から`trade_scope_visit_count`を削除する
+- Vehicle summaryの期待値から同列を削除する
+- assigned-only Vehicleの`trade_scope_visit_count == 0`という期待を削除する
+- Vehicle表の`transaction_count`期待を維持する
+- Transaction表の`trade_scope_visit_count`期待を維持する
+- Transaction表で役割別件数の合計と`trade_scope_visit_count`が一致する契約を維持する
+- `tvt_mp_vehicles.csv`のheaderから`trade_scope_visit_count`が削除されることを確認する
+- Transaction表、Node表、Scenario表のCSV列は変更しない
+
+## 11. CSV列契約
+
+最新schemaでは、`tvt_mp_vehicles.csv`から次の列を削除する。
+
+- `trade_scope_visit_count`
+
+次の列は維持する。
+
+- `transaction_count`
+
+既に生成済みのtrial CSVは、旧schemaの歴史的出力として扱う。
+
+既存のtrial出力directoryを上書きしない。
+
+実装とテスト完了後に、最新schemaで新しいtrial出力を生成する。
+
+## 12. 影響範囲
+
+今回の変更は、研究出力のVehicle summary tableと`tvt_mp_vehicles.csv`の列契約に限定する。
+
+TVT-MPの交通制御、候補形成、取引採否、金銭精算、事後評価、順位台帳、実通過履歴には影響しない。
+
+この列整理はシミュレーション完走のBLOCKERではないが、正式な研究結果を保存する前に修正する。
+
+## 13. 旧設計の扱い
+
+第4巻の旧Vehicle summary table設計は、当時の研究出力実装記録として削除せず残す。
+
+ただし、旧設計にあるVehicle表の`trade_scope_visit_count`を最新契約として読まない。
+
+Vehicle summary tableの最新列契約は本節である。
+
+Transaction表の`trade_scope_visit_count`は引き続き有効である。
+
+## 14. 第5巻への移行
+
+第4巻は本節をもって新規の主要設計追記を終了する。
+
+以後のTVT-MP内部実装設計、trialで発見された追加不具合、研究出力schema変更、正式実験へ向けた追加設計は、次の新文書へ記録する。
+
+- `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_5.md`
+
+第5巻の冒頭には、次を明記する。
+
+- 第1巻から第4巻は歴史的設計記録として維持する
+- 第4巻までに確定した既存契約を覆さない
+- 第4巻の最新節から第5巻へ継続する
+- 第5巻は、初期小規模trial以後の追加実装設計の正本とする
+- 過去の設計を変更する場合は、過去記述を削除せず、変更理由と最新参照先を記録する
+
+第5巻は今回の作業では作成しない。
+
+## 15. 最新再開地点
+
+- Vehicle表2列の原典、実装、テスト調査を完了した
+- 両列が異なる正式ケースは確認されなかった
+- Vehicle表の`transaction_count`を維持する方針を確定した
+- Vehicle表の`trade_scope_visit_count`を削除する方針を確定した
+- Transaction表の`trade_scope_visit_count`は維持する
+- 将来の本来のtrade scope回数は別課題とする
+- 第4巻は本節で主要設計追記を終了する
+- 次の直接作業は、今回の2か所の変更をTerminalで独立確認することである
+- 独立確認後、`ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_5.md`を新設する
+- その後、`ORDER_EXCHANGE_PROGRESS_3.md`へ第5巻移行と現在地を記録する
+- 文書記録完了後に研究出力本番コードと研究出力テストを修正する
+- CursorはGit操作を行わない
+- `diagnostics/order_control.zip`には触れない

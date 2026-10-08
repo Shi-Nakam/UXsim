@@ -1062,7 +1062,6 @@ def _snapshot_outlink(
                 "arrival_time": vehicle.arrival_time,
                 "travel_time": vehicle.travel_time,
                 "link_arrival_time": vehicle.link_arrival_time,
-                "route_next_link": vehicle.route_next_link,
                 "flag_waiting_for_trip_end": vehicle.flag_waiting_for_trip_end,
                 "order_control_current_visit": vehicle.order_control_current_visit,
                 "order_control_visit_id": vehicle.order_control_visit_id,
@@ -1157,7 +1156,6 @@ def _restore_outlink_snapshot(snapshot: dict) -> None:
         vehicle.arrival_time = saved["arrival_time"]
         vehicle.travel_time = saved["travel_time"]
         vehicle.link_arrival_time = saved["link_arrival_time"]
-        vehicle.route_next_link = saved["route_next_link"]
         vehicle.flag_waiting_for_trip_end = saved["flag_waiting_for_trip_end"]
         vehicle.order_control_current_visit = saved["order_control_current_visit"]
         vehicle.order_control_visit_id = saved["order_control_visit_id"]

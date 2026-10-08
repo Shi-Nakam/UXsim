@@ -787,6 +787,32 @@ def test_route_next_link_mismatch_raises_before_any_traffic_change():
     assert before_snapshot == after_snapshot
 
 
+def test_missing_route_next_link_attribute_uses_formal_binding_route():
+    _world_object, local_state, _clock, transfer_state = _two_vehicle_case()
+    first_vehicle = _local_vehicle(local_state, "first_veh")
+    local_world = local_state.local_world
+    in_a = local_world.get_link("in_a")
+    outlink = local_world.get_link("out")
+    side = local_world.get_link("side")
+    assert hasattr(first_vehicle, "route_next_link")
+    before_link_name = first_vehicle.link.name
+    before_in_a_vehicle_names = [vehicle.name for vehicle in in_a.vehicles]
+    delattr(first_vehicle, "route_next_link")
+    assert not hasattr(first_vehicle, "route_next_link")
+    result = scan_and_transfer_tvt_mp_binding_visits_at_current_timestep(
+        transfer_state
+    )
+    assert result.transferred_binding_visit_keys == (("first_veh", 1),)
+    assert ("first_veh", 1) in transfer_state.transferred_binding_visit_keys
+    assert first_vehicle.link is outlink
+    assert first_vehicle.link.name == "out"
+    assert before_link_name == "in_a"
+    assert first_vehicle not in in_a.vehicles
+    assert first_vehicle in outlink.vehicles
+    assert first_vehicle not in side.vehicles
+    assert "first_veh" in before_in_a_vehicle_names
+
+
 def test_transferred_binding_visit_keys_are_protected_via_public_api():
     _world_object, local_state, _clock, transfer_state = _two_vehicle_case(
         first_arrived=False
@@ -836,6 +862,7 @@ TESTS = (
     test_node_flow_capacity_shortage_skips_all_binding_visits_in_order,
     test_invalid_formal_route_name_raises_before_any_traffic_change,
     test_route_next_link_mismatch_raises_before_any_traffic_change,
+    test_missing_route_next_link_attribute_uses_formal_binding_route,
     test_transferred_binding_visit_keys_are_protected_via_public_api,
     test_outlink_entry_space_shortage_skips_only_that_visit,
     test_clearance_stops_the_scan_before_later_visits,

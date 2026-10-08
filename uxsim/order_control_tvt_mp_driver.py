@@ -321,22 +321,17 @@ def _ensure_target_rank_states(rank_states, target_node_names):
 
 def _build_participation_mapping(real_W, arrived_confirmation_result):
     """
-    Map decision-window VisitKeys to Vehicle.participates_in_order_exchange.
+    Map every aligned resolved undetermined VisitKey to
+    Vehicle.participates_in_order_exchange.
 
-    declared VOT is not read. Visits outside the decision window are omitted.
+    declared VOT is not read. Downstream stages limit their own scan to the
+    formal results they receive.
     """
     alignment_fork_result = arrived_confirmation_result.alignment_fork_result
-    baseline_timestep_T = alignment_fork_result.fork_result.baseline_timestep_T
-    window_end = baseline_timestep_T + _DECISION_WINDOW_STEPS
     participation_mapping = {}
 
     for alignment_result in alignment_fork_result.alignment_results:
         for resolved_visit in alignment_result.resolved_undetermined_visits:
-            arrival_timestep = resolved_visit.baseline_arrival_timestep
-            if arrival_timestep <= baseline_timestep_T:
-                continue
-            if arrival_timestep > window_end:
-                continue
             visit_key = resolved_visit.visit_key
             vehicle_name = visit_key[0]
             participates = _read_participation(real_W, vehicle_name)

@@ -455,8 +455,10 @@ def test_participation_mapping_uses_vehicle_flag_not_declared_vot():
     assert "stop after participation" in str(error)
     assert captured["args"][0] is arrived
     assert captured["mapping"] == {
+        ("participant", 1): True,
         ("participant", 2): True,
         ("outsider", 1): False,
+        ("outsider", 2): False,
     }
     assert participant.vot_declared == 0
     assert outsider.participates_in_order_exchange is False

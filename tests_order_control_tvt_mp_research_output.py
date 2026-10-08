@@ -537,7 +537,6 @@ def test_vehicle_summary_aggregates_multiple_transactions_for_same_vehicle():
     buyer_vehicle = next(
         row for row in output.vehicles if row.vehicle_name == "buyer_a"
     )
-    assert buyer_vehicle.trade_scope_visit_count == 2
     assert buyer_vehicle.transaction_count == 2
     assert buyer_vehicle.buyer_count == 2
     assert not hasattr(buyer_vehicle, "overall_satisfaction_status")
@@ -554,7 +553,6 @@ def test_vehicle_summary_includes_assigned_only_vehicle():
     assigned_row = next(
         row for row in output.vehicles if row.vehicle_name == "assigned_only"
     )
-    assert assigned_row.trade_scope_visit_count == 0
     assert assigned_row.assigned_visit_count == 1
 
 

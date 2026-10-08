@@ -657,3 +657,388 @@ concrete buyer 候補形成で参加情報が必要となり、**mapping 欠落�
 - **trial 再実行は本番修正と回帰の後**である。
 - **Cursor は Git 操作を行わない**。
 - **`diagnostics/order_control.zip` には触れない**。
+
+# 初期小規模trial完走・最新研究出力確認（2026-10-08）
+
+## 1. 旧停止記録との関係
+
+- 2026-10-07の初回trialでは、T=13でparticipation mapping母集団不足により停止した
+- その停止記録は、trialが本番経路の不整合を発見した当時の観察事実として維持する
+- その後、実験と実装設計の往復運用に従って本番修正と回帰を実施した
+- participation mapping母集団不足を修正した後、trialはcandidate local仮想計算へ進んだ
+- さらに、binding transferおよびoutlink boundaryの`route_next_link`属性未作成に関する不具合を発見し、修正した
+- 最終的に、同じネットワーク、Vehicle、VOT、seed、評価期間、horizon条件でtrialを完走した
+- trial条件を変更して不具合を回避したのではない
+
+内部実装上の原因、修正仕様、テスト契約の最新正本は、次とする。
+
+- `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_5.md`
+- 「初期小規模trial修正・Vehicle表schema変更の実装結果（2026-10-08）」
+
+## 2. 完走したtrial条件
+
+- script:
+  `research_scripts/run_tvt_mp_small_scale_initial.py`
+- scenario:
+  `tvt_mp_small_scale_initial_run`
+- ネットワーク:
+  2流入1流出の単車線合流
+- 対象Node:
+  `merge`
+- Vehicle:
+  10台
+- participating:
+  8台
+- nonparticipating:
+  2台
+- 交通seed:
+  0
+- VOT seed:
+  1
+- 評価対象:
+  T=0からT=299
+- evaluation end timestep:
+  299
+- internal TSIZE:
+  330
+- baseline horizon:
+  30
+- candidate Visit数上限:
+  10
+- clearance:
+  1 timestep
+- Link長:
+  200 m
+- 自由流速度:
+  60 km/h
+- Link境界容量とNode容量:
+  UXsim既定値
+- trial条件は初回設計から変更していない
+
+## 3. 最新trialの完走結果
+
+最新出力directory:
+
+```text
+research_outputs/trial/tvt_mp_small_scale_initial_seed_1_vehicle_schema_v2
+```
+
+- simulationは正常終了した
+- 全10台がtrip完了した
+- `World.T = 300`
+- evaluation end検査はすべて成功した
+- TVT-MP driver呼出回数は設定上300回
+- 研究出力buildは成功した
+- 研究用CSV 5表を生成した
+- trial補助ファイル3件を生成した
+- console summaryまで正常終了した
+- 現在、初期小規模trialの完走に対するBLOCKERはない
+
+生成済みファイル:
+
+- `tvt_mp_transactions.csv`
+- `tvt_mp_visits.csv`
+- `tvt_mp_vehicles.csv`
+- `tvt_mp_nodes.csv`
+- `tvt_mp_scenario.csv`
+- `vehicle_vot.csv`
+- `manifest.json`
+- `run_summary.txt`
+
+## 4. 成立取引
+
+- 成立取引は2件
+- 取引時点はT=14およびT=18
+- trade ex-post評価は2件とも`EX_POST_FEASIBLE`
+- `EX_POST_INFEASIBLE`は0件
+- `EVALUATION_UNAVAILABLE`は0件
+
+`EX_POST_FEASIBLE`の意味:
+
+- すべてのbuyerの実績時間短縮価値が正である
+- buyer実績時間短縮価値の合計が、seller実績必要補償額の合計以上である
+- 1台でもbuyer実績時間短縮価値が0以下なら`EX_POST_INFEASIBLE`
+- 必要な実通過結果が観測できない場合は`EVALUATION_UNAVAILABLE`
+
+このtrade ex-post statusは、取引採用前のfeasibility判定ではなく、成立取引に対する実績観測後の事後評価である。
+
+## 5. buyer個人の事後評価
+
+今回のbuyerは2件である。
+
+### T=14、`veh_b2`
+
+- 実時間短縮:
+  1秒
+- true VOT:
+  `0.043772974018290514`円/秒
+- 実現時間価値:
+  `0.043772974018290514`円
+- official payment:
+  0円
+- realized gain:
+  `0.043772974018290514`円
+- satisfaction status:
+  `satisfied`
+- satisfaction reason:
+  `satisfied_appropriate_payment_rate`
+
+### T=18、`veh_b4`
+
+- 実時間短縮:
+  3秒
+- true VOT:
+  `0.7637703150148659`円/秒
+- 実現時間価値:
+  `2.291310945044598`円
+- official payment:
+  `1.2492195637669379`円
+- realized gain:
+  `1.04209138127766`円
+- satisfaction status:
+  `satisfied`
+- satisfaction reason:
+  `satisfied_appropriate_payment_rate`
+
+buyer個人の正式な事後満足度理由は次の3分類である。
+
+- `trivially_unsatisfied_nonpositive_realized_time_value`
+- `unsatisfied_by_high_payment_rate`
+- `satisfied_appropriate_payment_rate`
+
+buyerについては「自明に満足」ではなく、実現時間価値が0以下の場合の「自明に不満足」がある。
+
+今回のbuyer 2件はいずれも、実現時間価値が正で、支払後の実現利得も正だった。
+
+## 6. T=14の0円取引
+
+- T=14のbuyerは`veh_b2`
+- sellerは`veh_a2`
+- `veh_b2`のofficial paymentは0円
+- `veh_a2`のofficial compensationは0円
+
+`veh_a2`の通過時刻:
+
+- baseline passage timestep:
+  25
+- candidate passage timestep:
+  24
+- actual passage timestep:
+  24
+
+したがって、sellerである`veh_a2`は遅延せず、baselineより1秒早く通過した。
+
+既存契約に従い、
+
+- sellerが早期通過してもbuyerへ役割変更しない
+- sellerの早期通過価値をbuyer側価値へ加えない
+- sellerの実遅延がないため必要補償額は0円
+- seller必要補償総額が0円なのでbuyer支払総額も0円
+- 金額0円でも個別取引記録を残す
+
+この0円取引は不具合ではなく、既存の金銭精算契約と整合する。
+
+## 7. nonparticipating Vehicle
+
+scenarioには次のnonparticipating Vehicleが存在する。
+
+- `veh_a1`
+- `veh_b3`
+
+両車について、次を確認した。
+
+- 対象Nodeで順位を割り当てられた
+- 実際に対象Nodeを通過した
+- 割当順位と実通過順位が一致した
+- 成立した2件の取引のtrade scopeには入らなかった
+- そのため、成立取引を基礎とする研究出力の`nonparticipating_visit_count`は0だった
+
+`nonparticipating_visit_count = 0`は、scenario内のnonparticipating Vehicle数が0という意味ではない。
+
+今回の条件では、
+
+- scenario内nonparticipating Vehicle数:
+  2台
+- 成立取引のtrade scope内nonparticipating Visit数:
+  0件
+
+である。
+
+## 8. Vehicle summary tableの最新schema
+
+Vehicle summary tableについて、次の最新schemaを確認した。
+
+- Vehicle表の`transaction_count`を維持した
+- Vehicle表の`trade_scope_visit_count`を削除した
+- Transaction表の`trade_scope_visit_count`は維持した
+
+最新の`tvt_mp_vehicles.csv`のheaderには、
+
+- `transaction_count`が存在する
+- `trade_scope_visit_count`は存在しない
+
+最新の`tvt_mp_transactions.csv`のheaderには、
+
+- `trade_scope_visit_count`が存在する
+
+Vehicle表の`trade_scope_visit_count`を削除した理由:
+
+- 現行実装では成立取引のVisit表だけを基礎にしていた
+- 不成立候補のtrade scope回数ではなかった
+- 名称と実際の集計範囲が一致しなかった
+- Vehicle表の`transaction_count`と異なる正式ケースが確認されなかった
+- 重複指標を維持する研究上の価値が確認されなかった
+
+技術的な変更設計の正本:
+
+- `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_4.md`
+- 「Vehicle summary tableの重複列整理と第5巻への移行（2026-10-08）」
+
+実装結果の正本:
+
+- `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_5.md`
+- 「初期小規模trial修正・Vehicle表schema変更の実装結果（2026-10-08）」
+
+## 9. 過去のtrial出力の扱い
+
+次の出力directoryは、途中段階の歴史的trial出力である。
+
+- `research_outputs/trial/tvt_mp_small_scale_initial_seed_1_before_console_fix`
+- `research_outputs/trial/tvt_mp_small_scale_initial_seed_1`
+- `research_outputs/trial/tvt_mp_small_scale_initial_seed_1_vehicle_schema_v2_before_timing_fix`
+
+これら3組は、修正過程の比較確認中には一時的に保持していたが、最新確認済み出力の確定後、出力の増加を抑えるため削除した。各段階で観察した事実と位置づけは、歴史的記録として以下に残す。
+
+Mac上に現在保持しているtrial出力は、最新確認済みの`research_outputs/trial/tvt_mp_small_scale_initial_seed_1_vehicle_schema_v2`だけである。
+
+位置づけ:
+
+### `..._before_console_fix`
+
+- シミュレーション、evaluation end、CSV、補助ファイル生成までは成功
+- 最後のconsole summaryで`world_t`欠落により停止した
+- Vehicle表は旧schema
+- 保存済み計時値も修正前
+
+### `tvt_mp_small_scale_initial_seed_1`
+
+- console summary修正後に完走したtrial
+- Vehicle表は旧schema
+- 保存済み計時値は修正前
+
+### `..._vehicle_schema_v2_before_timing_fix`
+
+- Vehicle表は最新schema
+- trialは完走
+- 保存済み計時値は修正前
+
+最新の確認済みtrial出力は、次である。
+
+```text
+research_outputs/trial/tvt_mp_small_scale_initial_seed_1_vehicle_schema_v2
+```
+
+このdirectoryは、
+
+- Vehicle表が最新schema
+- console summary正常
+- 保存済み計時値修正済み
+- trial完走
+- 研究用CSV 5表と補助3ファイル生成済み
+
+の最新確認済み出力である。
+
+過去出力は正式実験結果として扱わない。
+
+最新出力も初期小規模trialであり、正式実験結果ではない。
+
+## 10. 計時結果
+
+最新trialの画面表示:
+
+- world build:
+  約0.000秒
+- finalize:
+  約18.434秒
+- exec_simulation:
+  約4.236秒
+- research build:
+  約0.000秒
+- CSV write:
+  約0.002秒
+- trial auxiliary write:
+  約0.001秒
+- script total:
+  約22.674秒
+
+保存済み`run_summary.txt`では、次を確認した。
+
+- `trial_auxiliary_write = 0.0006`秒
+- `script_total = 22.6735`秒
+
+以前の0記録は、補助ファイル保存後に計時値を確定していた順序が原因だった。
+
+計時順を修正し、確定値で`manifest.json`と`run_summary.txt`だけを再保存するようにした。
+
+## 11. 回帰確認
+
+次の一括回帰を実行した。
+
+```text
+python -m pytest tests_order_control_tvt_mp*.py -q --tb=short
+```
+
+結果:
+
+```text
+1312 passed in 42.61s
+```
+
+- 失敗0件
+- 過去の個別テスト実行と重複合算しない
+- 1,312件を現時点の最終一括回帰結果とする
+
+## 12. 実験上の結論
+
+初期小規模trialにより、次を確認した。
+
+- TVT-MPは小規模合流条件で評価終了まで完走できる
+- 全World baseline仮想計算を含むdriverを300回実行できる
+- candidate local仮想計算を実行できる
+- 取引を形成・採用できる
+- monetary settlementを記録できる
+- actual passageを観測できる
+- trade ex-post evaluationを実行できる
+- individual satisfactionを評価できる
+- evaluation end処理を完了できる
+- 研究出力5表を生成できる
+- Vehicle VOTとmanifestとrun summaryを保存できる
+- 同じseedと条件で、複数回、同じ取引時点と取引件数を再現できた
+
+ただし、このtrialはコード動作確認を目的とする小規模条件であり、交通工学上の有効性や正式な比較結果を示すものではない。
+
+## 13. 現在のBLOCKER
+
+- 初期小規模trialの完走に対するBLOCKERはない
+- 今回発見した本番不具合は修正・回帰済み
+- Vehicle表schema変更は実装・確認済み
+- trial計時記録も修正・確認済み
+
+正式実験前の未確定事項は、本文書の既存§12に記録した実験設計上の判断事項である。
+
+## 14. 最新再開地点
+
+- 最新schemaによるtrial完走確認済み
+- 研究用CSV 5表と補助3ファイル確認済み
+- 最終一括回帰1,312件成功
+- 実験設計メモへの最新観察結果記録済み
+
+次の直接作業は、`ORDER_EXCHANGE_PROGRESS_3.md`へ最新の実装完了、回帰、trial確認、文書反映状況を記録することである。
+
+その後、Terminalで変更対象とコミット対象を確認する。
+
+正式実験条件の検討には、現在の実装・文書・trial結果を安全な節目として保存した後に進む。
+
+CursorはGit操作を行わない。
+
+`diagnostics/order_control.zip`には触れない。

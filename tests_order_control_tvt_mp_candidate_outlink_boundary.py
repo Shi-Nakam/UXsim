@@ -540,6 +540,40 @@ def test_observed_outflow_exits_without_end_trip_or_visit_key():
     )
 
 
+def test_missing_route_next_link_attribute_does_not_block_outlink_boundary_processing():
+    _world, local_state, _transfer, advance_result, boundary_state, _node_result = (
+        _started({"out": (1, 1), "side": (1, 0)})
+    )
+    _park_at_outlink_end(local_state, ["first_veh"], "out")
+    first = _local_vehicle(local_state, "first_veh")
+    local_world = local_state.local_world
+    outlink = local_world.get_link("out")
+    assert hasattr(first, "route_next_link")
+    delattr(first, "route_next_link")
+    assert not hasattr(first, "route_next_link")
+    outlink.capacity_out_remain = 5
+    cum_before = outlink.cum_departure[-1]
+    result = process_tvt_mp_candidate_outlink_boundaries_at_current_timestep(
+        boundary_state,
+        advance_result,
+    )
+    out_result = result.outlink_results[0]
+    assert out_result.observed_outflow_boundary_exit_vehicle_names == ("first_veh",)
+    assert out_result.flow_allowance_added == 1
+    assert first.state == "end"
+    assert first.link is None
+    assert first.name not in local_world.VEHICLES_RUNNING
+    assert list(outlink.vehicles) == []
+    assert outlink.cum_departure[-1] == cum_before + local_world.DELTAN
+    assert len(boundary_state.vehicle_removal_records) == 1
+    assert boundary_state.vehicle_removal_records[0].vehicle_name == "first_veh"
+    assert (
+        boundary_state.vehicle_removal_records[0].removal_kind
+        is OrderControlTvtMpOutlinkBoundaryRemovalKind.OBSERVED_OUTFLOW_BOUNDARY_EXIT
+    )
+    assert not hasattr(first, "route_next_link")
+
+
 def test_allowance_waits_and_carries_fraction_then_next_timestep():
     _world, local_state, transfer_state, advance_result, boundary_state, _node_result = (
         _started({"out": (5, 2), "side": (1, 0)})
@@ -1199,6 +1233,7 @@ def _run_all() -> None:
         test_missing_boundary_result_is_not_active_zero,
         test_initialization_rejects_reordered_outlinks_without_repair,
         test_observed_outflow_exits_without_end_trip_or_visit_key,
+        test_missing_route_next_link_attribute_does_not_block_outlink_boundary_processing,
         test_allowance_waits_and_carries_fraction_then_next_timestep,
         test_integer_allowance_is_not_reset_when_capacity_blocks_exit,
         test_finite_terminal_capacity_is_consumed_and_shortage_waits,

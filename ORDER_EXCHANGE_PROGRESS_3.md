@@ -3123,3 +3123,471 @@ run_tvt_mp_driver
 - 本番修正と回帰後に、**未変更** trial script を再実行
 - trial 出力 directory は **まだ未作成**
 - **Cursor は Git 操作を行わない**
+
+# 初期小規模trial完走・詳細設計第5巻へ移行（2026-10-08）
+
+## 1. 初期小規模trialの完走
+
+- trial script:
+  `research_scripts/run_tvt_mp_small_scale_initial.py`
+- scenario:
+  `tvt_mp_small_scale_initial_run`
+- 2流入1流出の単車線合流
+- 車両10台
+- participating 8台
+- nonparticipating 2台
+- 評価期間T=0からT=299
+- internal TSIZE 330
+- baseline horizon 30
+- candidate Visit数上限10
+- 全10台がtrip完了
+- `World.T = 300`
+- evaluation end検査はすべて成功
+- TVT-MP driver呼出回数は設定上300回
+- 成立取引は2件
+- 取引時点はT=14およびT=18
+- 2件とも`EX_POST_FEASIBLE`
+- buyer 2件はいずれも個人事後評価で`SATISFIED`
+- 研究出力5表とtrial補助3ファイルを生成した
+- trialは正式実験結果ではなく、初期動作確認・バグ発見・研究出力確認のための結果である
+
+## 2. trialで発見した本番不具合と修正
+
+### participation mapping母集団不足
+
+- 現行mappingが意思決定窓内Visitだけを保持していた
+- candidate集合は意思決定窓外Visitを含み得た
+- T=13でcandidate Visit `('veh_a2', 1)`のparticipation情報がmappingに存在せず停止した
+- mappingをalignment済み`resolved_undetermined_visits`全件へ広げた
+- 意思決定窓、candidate集合、leading nonparticipating契約は変更していない
+
+### binding transferの`route_next_link`属性未作成
+
+- binding Visitにはbaseline由来の正式進路が保存済みだった
+- local Vehicleの`route_next_link`属性が未作成で、直接参照により停止した
+- 属性未作成を`None`相当として扱うため、`getattr(..., None)`へ変更した
+- 実際の通過先は引き続きbinding Visitの正式進路である
+- `route_next_link_choice()`は呼ばない
+- local Vehicleが別outlinkを明示している場合の不整合拒否は維持した
+
+### outlink boundaryの不要な`route_next_link`保存
+
+- outlink boundary処理は`route_next_link`を進路判断に使用しない
+- `Vehicle.end_trip()`も`route_next_link`を変更しない
+- snapshotとrestoreから、不要な`route_next_link`保存・復元の2行を削除した
+- 属性未作成Vehicleでも境界処理できる回帰テストを追加した
+
+### trial scriptの画面表示
+
+- シミュレーション、evaluation end、CSVおよび補助ファイル生成は成功していた
+- 最後の画面表示用返却値に`world_t`が含まれず、`KeyError`になった
+- `verify_evaluation_end()`の返却辞書へ`"world_t": world.T`を追加した
+- 修正後のtrialは画面表示まで完了した
+
+## 3. 実行済みテスト
+
+- participation mapping更新テスト:
+  1件成功
+- driver専用テスト:
+  31件成功
+- candidate Visit set、leading nonparticipating、concrete buyer関連:
+  117件成功
+- binding transferテスト:
+  16件成功
+- driverとbinding transferの組合せ:
+  47件成功
+- candidate local virtual calculationおよびlocal virtual calculation set:
+  119件成功
+- outlink boundaryテスト:
+  22件成功
+- candidate local virtual calculation、local virtual calculation set、outlink boundary:
+  141件成功
+
+同じテスト集合を重複実行した結果を単純合算して、全体テスト件数として扱わない。
+
+各実行単位で失敗は0件だった。
+
+## 4. trial結果から確認した事項
+
+- T=14の取引ではbuyer `veh_b2`の支払額は0円だった
+- seller `veh_a2`は遅延せず、baselineより1秒早く通過した
+- seller必要補償額が0円だったため、buyer支払総額も0円となった
+- sellerが早期通過してもbuyerへ役割変更しない
+- 0円でも取引記録を残す既存契約と整合する
+
+取引全体の事後評価:
+
+- `EX_POST_FEASIBLE`は、すべてのbuyerの実績時間短縮価値が正であることを要求する
+- さらにbuyer実績価値合計がseller実績必要補償額以上であることを要求する
+- 1台でもbuyer実績価値が0以下なら`EX_POST_INFEASIBLE`
+- 必要な実通過結果が観測できなければ`EVALUATION_UNAVAILABLE`
+
+buyer個人の事後満足度:
+
+- `TRIVIALLY_UNSATISFIED_NONPOSITIVE_REALIZED_TIME_VALUE`
+- `UNSATISFIED_BY_HIGH_PAYMENT_RATE`
+- `SATISFIED_APPROPRIATE_PAYMENT_RATE`
+
+今回のbuyer 2件はいずれも、
+
+- `satisfaction_status = satisfied`
+- `satisfaction_reason = satisfied_appropriate_payment_rate`
+
+だった。
+
+## 5. nonparticipating Vehicleの確認
+
+- scenarioにはnonparticipating Vehicleが2台存在する
+- `veh_a1`
+- `veh_b3`
+- 両車とも順位を割り当てられ、実際に対象Nodeを通過した
+- 両車とも割当順位と実通過順位が一致した
+- 成立した2件の取引のtrade scopeには、nonparticipating Visitが含まれなかった
+- そのため、研究出力の`nonparticipating_visit_count`は0だった
+- これはscenario内のnonparticipating Vehicle数が0という意味ではない
+
+## 6. Vehicle summary tableの重複列整理
+
+- Vehicle表には`trade_scope_visit_count`と`transaction_count`が存在していた
+- 現行実装では、両列とも成立取引から作られたVisit表を基礎にする
+- 不成立候補のtrade scope履歴は保存されていない
+- 同一Node再訪および複数Nodeでの取引関与を考慮しても、両列が異なる正式ケースは確認されなかった
+- `trade_scope_visit_count`という名称は、成立・不成立を問わないtrade scope参加回数を自然に想起させる
+- 実際には成立取引限定であり、名称と集計範囲が一致しない
+
+確定した最新契約:
+
+- Vehicle表の`transaction_count`を維持する
+- Vehicle表の`trade_scope_visit_count`を削除する
+- Transaction表の`trade_scope_visit_count`は維持する
+- 本来の、成立・不成立を問わないtrade scope回数は将来の別課題とする
+- 今回は新record、新registry、新counter、新CSV列を追加しない
+
+技術的正本:
+
+- `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_4.md`
+- 「Vehicle summary tableの重複列整理と第5巻への移行（2026-10-08）」
+
+## 7. 詳細設計第5巻への移行
+
+- 第4巻は、Vehicle summary tableの重複列整理節で主要設計追記を終了した
+- `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_5.md`を新設した
+- 第1巻から第4巻は歴史的設計記録として維持する
+- 第4巻までの確定契約は、明示的な新しい設計判断がない限り覆さない
+- 第5巻は、初期小規模trial以後の内部実装設計の正本とする
+- trialで発見された追加不具合、研究出力schema変更、正式実験前の追加実装設計は第5巻へ記録する
+- 実験条件と観察事実の正本は引き続き`TVT_MP_EXPERIMENT_DESIGN_NOTES.md`
+- 工程、BLOCKER、Git状態、再開地点の正本は引き続き`ORDER_EXCHANGE_PROGRESS_3.md`
+
+## 8. 現在の変更状態
+
+最新コミット:
+
+- `e1198b8`
+- `document pre-implementation TVT-MP participation mapping fix design based on initial trial error`
+
+ローカルHEADとoriginは一致済みである。
+
+現在の未コミットtracked変更:
+
+- `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_4.md`
+- `tests_order_control_tvt_mp_candidate_binding_transfer.py`
+- `tests_order_control_tvt_mp_candidate_outlink_boundary.py`
+- `tests_order_control_tvt_mp_driver.py`
+- `uxsim/order_control_tvt_mp_candidate_binding_transfer.py`
+- `uxsim/order_control_tvt_mp_candidate_outlink_boundary.py`
+- `uxsim/order_control_tvt_mp_driver.py`
+- 今回追記する`ORDER_EXCHANGE_PROGRESS_3.md`
+
+現在の未追跡:
+
+- `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_5.md`
+- `research_scripts/`
+- `research_outputs/`
+- `diagnostics/order_control.zip`
+
+`research_scripts/`には初期小規模trial scriptがある。
+
+`research_outputs/`にはtrial出力がある。
+
+`diagnostics/order_control.zip`には触れない。
+
+CursorはGit操作を行わない。
+
+## 9. 現在のBLOCKER
+
+- シミュレーション完走に対するBLOCKERは現在ない
+- participation mapping、binding transfer、outlink boundaryの発見済み不具合は修正・回帰済み
+- Vehicle表schema変更は、正式な研究結果保存前に解消すべき研究出力契約上の作業である
+- trial scriptの計時値について、`run_summary.txt`内の`script_total`および`trial_auxiliary_write`が0となる記録順の問題が残っている
+- この計時記録問題は交通計算結果へ影響しないが、trial記録の整合のため後で修正が必要である
+
+## 10. 最新再開地点
+
+次の直接作業は、文書のTerminal独立確認後、Vehicle summary tableのschema変更を実装することである。
+
+実装対象:
+
+- `uxsim/order_control_tvt_mp_research_output.py`
+
+テスト対象:
+
+- `tests_order_control_tvt_mp_research_output.py`
+
+実装内容:
+
+- VehicleRowから`trade_scope_visit_count`を削除
+- `_build_vehicle_rows`の同列代入を削除
+- Vehicle表の`transaction_count`を維持
+- Transaction表の`trade_scope_visit_count`を維持
+- `tvt_mp_vehicles.csv`のheaderから同列を削除
+
+その後:
+
+- 研究出力テストを実行
+- 関連回帰を実行
+- 新schemaでtrial出力を別directoryへ生成
+- 生成結果を確認
+- trial scriptの計時記録順問題を別途修正
+- 第5巻、実験設計メモ、進捗メモへ実装結果を記録
+- コミットとpushは利用者Terminalで実行する
+
+# 初期小規模trial修正・研究出力schema更新完了（2026-10-08）
+
+## 1. 本節の位置づけ
+
+- 本節は、直前の「初期小規模trial完走・詳細設計第5巻へ移行（2026-10-08）」以後の実装、回帰、trial再実行、文書反映を記録する
+- 直前節は実装途中の進捗記録として維持する
+- 初期小規模trialに関する最新の進捗と再開地点は本節である
+
+## 2. 完了した本番修正
+
+### participation mapping
+
+- `uxsim/order_control_tvt_mp_driver.py`
+- `_build_participation_mapping`の意思決定窓フィルタを削除した
+- alignment済み`resolved_undetermined_visits`全件をmappingへ登録する
+- `_read_participation`による参加情報取得を維持した
+- 意思決定窓、candidate集合、leading nonparticipating、right-of-entryは変更していない
+
+### binding transfer
+
+- `uxsim/order_control_tvt_mp_candidate_binding_transfer.py`
+- local Vehicleの`route_next_link`属性未作成を`None`相当として扱うため、直接参照を`getattr(..., None)`へ変更した
+- 実際の通過先は引き続きbinding Visitの正式進路である
+- `route_next_link_choice()`は呼ばない
+- 別outlinkが明示されている場合の不整合拒否を維持した
+
+### outlink boundary
+
+- `uxsim/order_control_tvt_mp_candidate_outlink_boundary.py`
+- outlink boundary処理と`Vehicle.end_trip()`が`route_next_link`を変更しないことを確認した
+- snapshotから不要な`route_next_link`保存を削除した
+- restoreから不要な`route_next_link`代入を削除した
+- 処理前に存在しなかった属性を復元時に新設しない
+
+## 3. 完了した回帰テスト追加・更新
+
+変更対象:
+
+- `tests_order_control_tvt_mp_driver.py`
+- `tests_order_control_tvt_mp_candidate_binding_transfer.py`
+- `tests_order_control_tvt_mp_candidate_outlink_boundary.py`
+
+- driver mappingテストを、resolved undetermined Visit全件の契約へ更新した
+- `test_missing_route_next_link_attribute_uses_formal_binding_route`を追加した
+- `test_missing_route_next_link_attribute_does_not_block_outlink_boundary_processing`を追加した
+- 属性未作成Vehicleを明示的に再現する回帰を固定した
+- 正式進路、不一致拒否、outlink境界処理の既存契約を維持した
+
+## 4. Vehicle表schema変更
+
+本番変更:
+
+- `uxsim/order_control_tvt_mp_research_output.py`
+
+テスト変更:
+
+- `tests_order_control_tvt_mp_research_output.py`
+
+完了内容:
+
+- VehicleRowから`trade_scope_visit_count`を削除した
+- `_build_vehicle_rows`から同列の代入を削除した
+- Vehicle表の`transaction_count`を維持した
+- Transaction表の`trade_scope_visit_count`を維持した
+- 代替列は追加していない
+- Vehicle表に関する旧assertionを2件削除した
+- `transaction_count == 2`の期待を維持した
+- assigned-only Vehicleの`assigned_visit_count == 1`の期待を維持した
+
+最新CSV契約:
+
+- `tvt_mp_vehicles.csv`には`transaction_count`が存在する
+- `tvt_mp_vehicles.csv`には`trade_scope_visit_count`が存在しない
+- `tvt_mp_transactions.csv`には`trade_scope_visit_count`が存在する
+
+設計正本:
+
+- `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_4.md`
+- 「Vehicle summary tableの重複列整理と第5巻への移行（2026-10-08）」
+
+実装結果正本:
+
+- `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_5.md`
+- 「初期小規模trial修正・Vehicle表schema変更の実装結果（2026-10-08）」
+
+## 5. trial script修正
+
+変更対象:
+
+- `research_scripts/run_tvt_mp_small_scale_initial.py`
+
+完了内容:
+
+### World.T表示
+
+- `verify_evaluation_end()`の返却辞書へ`"world_t": world.T`を追加した
+- evaluation end検査内容は変更していない
+- console summaryへ`World.T = 300`を表示できるようになった
+
+### 計時記録
+
+- 初回の補助ファイル保存後に`trial_auxiliary_write_s`と`script_total_s`を確定する
+- 確定値を反映するため、`manifest.json`と`run_summary.txt`だけを再保存する
+- `vehicle_vot.csv`と研究用CSVは再保存しない
+- 新しい計時fieldは追加していない
+- 保存済み`run_summary.txt`で次を確認した
+  - `trial_auxiliary_write = 0.0006`秒
+  - `script_total = 22.6735`秒
+
+## 6. 最新schemaによるtrial完走
+
+最新確認済み出力directory:
+
+```text
+research_outputs/trial/tvt_mp_small_scale_initial_seed_1_vehicle_schema_v2
+```
+
+結果:
+
+- 全10台がtrip完了
+- `World.T = 300`
+- evaluation end検査はすべて成功
+- TVT-MP driver呼出回数は設定上300回
+- 成立取引2件
+- 取引時点はT=14およびT=18
+- 2件とも`EX_POST_FEASIBLE`
+- buyer 2件はいずれも個人事後評価で`SATISFIED`
+- 研究出力5表を生成した
+- trial補助3ファイルを生成した
+- console summaryまで正常終了した
+- 最新Vehicle CSVとTransaction CSVのheaderを確認した
+- 保存済み計時値を確認した
+
+## 7. 最終一括回帰
+
+次を実行した。
+
+```text
+python -m pytest tests_order_control_tvt_mp*.py -q --tb=short
+```
+
+結果:
+
+```text
+1312 passed in 42.61s
+```
+
+- 失敗0件
+- 過去の個別テスト実行結果と重複合算しない
+- 1,312件を現時点の最終一括回帰結果とする
+
+## 8. 文書反映
+
+- 第4巻の旧Vehicle summary table節へ最新契約の注記を追加した
+- 第4巻末尾へ重複列整理と第5巻移行を記録した
+- 第4巻は主要設計追記を終了した
+- `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_5.md`を新設した
+- 第5巻へ本番修正、schema変更、回帰、trial再実行結果を記録した
+- `TVT_MP_EXPERIMENT_DESIGN_NOTES.md`へ完走条件、取引結果、buyer個人評価、0円取引、nonparticipating Vehicle、最新schema、計時、回帰、限界を記録した
+- 本節で進捗第3巻の最新状態を更新する
+
+## 9. 現在のBLOCKER
+
+- 初期小規模trialの完走に対するBLOCKERはない
+- participation mapping、binding transfer、outlink boundaryの不具合は修正・回帰済み
+- Vehicle表schema変更は実装・テスト・最新出力確認済み
+- trial計時記録問題は修正・最新出力確認済み
+- TVT-MP関連一括回帰は成功済み
+- 正式実験条件の未確定事項は、実装BLOCKERではなく実験設計上の今後の判断事項である
+
+## 10. 現在の変更状態
+
+最新コミット:
+
+- `e1198b8`
+- `document pre-implementation TVT-MP participation mapping fix design based on initial trial error`
+
+ローカルHEADとoriginは一致済みである。
+
+現在の未コミットtracked変更:
+
+- `ORDER_EXCHANGE_PROGRESS_3.md`
+- `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_4.md`
+- `TVT_MP_EXPERIMENT_DESIGN_NOTES.md`
+- `tests_order_control_tvt_mp_candidate_binding_transfer.py`
+- `tests_order_control_tvt_mp_candidate_outlink_boundary.py`
+- `tests_order_control_tvt_mp_driver.py`
+- `tests_order_control_tvt_mp_research_output.py`
+- `uxsim/order_control_tvt_mp_candidate_binding_transfer.py`
+- `uxsim/order_control_tvt_mp_candidate_outlink_boundary.py`
+- `uxsim/order_control_tvt_mp_driver.py`
+- `uxsim/order_control_tvt_mp_research_output.py`
+
+現在の未追跡:
+
+- `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_5.md`
+- `research_scripts/`
+- `research_outputs/`
+- `diagnostics/order_control.zip`
+
+`research_scripts/`には初期小規模trial scriptがある。
+
+`research_outputs/`には途中段階および最新のtrial出力がある。
+
+`diagnostics/order_control.zip`には触れない。
+
+CursorはGit操作を行わない。
+
+## 11. 最新再開地点
+
+現在の安全な節目:
+
+- 本番修正完了
+- 回帰テスト追加・更新完了
+- Vehicle表schema変更完了
+- trial script修正完了
+- 最新schemaでtrial完走
+- 研究出力8ファイル生成確認済み
+- 保存済み計時値確認済み
+- TVT-MP関連一括回帰1,312件成功
+- 第4巻、第5巻、実験設計メモ、進捗第3巻への記録完了
+
+次の直接作業は、Terminalで次を確認することである。
+
+- 累積差分
+- 変更ファイル一覧
+- 未追跡ファイル一覧
+- trial出力directory一覧
+- コミット対象と非コミット対象
+
+その後、本番コード、テスト、trial script、文書を適切なコミット単位へ整理する。
+
+`research_outputs/`をGit管理対象へ含めるかは、既存方針と正式実験の保存方針を確認してから判断する。
+
+`diagnostics/order_control.zip`はコミット対象にしない。
+
+コミットとpushは利用者がTerminalで行う。
+
+正式実験条件の検討は、この安全な節目をコミット・pushした後に進む。

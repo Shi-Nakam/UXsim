@@ -134,7 +134,6 @@ class OrderControlTvtMpResearchOutputVisitRow:
 class OrderControlTvtMpResearchOutputVehicleRow:
     scenario_name: str
     vehicle_name: str
-    trade_scope_visit_count: int
     transaction_count: int
     buyer_count: int
     seller_count: int
@@ -1573,7 +1572,6 @@ def _build_vehicle_rows(
             OrderControlTvtMpResearchOutputVehicleRow(
                 scenario_name=context.scenario_name,
                 vehicle_name=vehicle_name,
-                trade_scope_visit_count=len(vehicle_visit_rows),
                 transaction_count=_distinct_transaction_count_for_vehicle(
                     vehicle_visit_rows
                 ),

@@ -426,7 +426,7 @@ def scan_and_transfer_tvt_mp_binding_visits_at_current_timestep(
             local_world,
             binding_visit.route_next_link_name,
         )
-        route_next_link = local_vehicle.route_next_link
+        route_next_link = getattr(local_vehicle, "route_next_link", None)
         if route_next_link is not None and route_next_link.name != outlink.name:
             raise RuntimeError(
                 f"Node {target_node.name!r}: Vehicle {local_vehicle.name!r} "
