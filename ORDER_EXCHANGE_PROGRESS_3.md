@@ -3876,3 +3876,53 @@ Node全体の順位とcandidate local rankを混同しない修正がまだ必�
 - 次の直接作業は、既存FCFSコードとTVT順位適用baseline forkへの適用可能性を読み取り専用で調査することである。
 - Git操作は利用者がTerminalで行う。
 - `diagnostics/order_control.zip`には触れない。
+
+# TVT順位適用baseline forkの順位未確定Visit走査 実装方式を確定（2026-10-10）
+
+制度上の最新正本は、詳細設計第4巻「TVT順位適用baseline forkの順位未確定Visit通過契約の変更（2026-10-09）」である。実装方式の詳細は、同巻「TVT順位適用baseline forkの順位未確定Visit走査 実装方式の確定（2026-10-10）」を参照する。
+
+## 1. 調査結果
+
+既存FCFSとTVT順位適用baseline forkを読み取り専用で比較した。通過試行の考え方は同じである。既存FCFS関数は直接再利用できない。順位材料、対象集合、例外、終了処理、物理移動の接続が異なる。FCFSとの共通化は行わず、baseline専用private helperをTVT物理通過module内へ追加する方針とした。
+
+## 2. 採用した実装構成
+
+変更対象は原則として次の2ファイルである。
+
+- `uxsim/order_control_tvt_mp_physical_transfer.py`
+- `tests_order_control_tvt_mp_physical_transfer.py`
+
+新しい独立moduleは作らない。`uxsim/uxsim.py` は変更しない。baseline collectorへ新しいAPIは追加しない。`get_baseline_visit_snapshot()` を使う。FCFS本体とFCFS専用テストは変更しない。generic baseline forkの通常合流は維持する。real Worldとcandidate local virtual calculationは変更しない。
+
+## 3. 群処理の重要契約
+
+timestep開始時にincoming snapshotを一度だけ取得する。confirmed群と未確定群への所属を時刻内で固定する。confirmed群を先に通過試行する。confirmed群がすべて先に通過するという意味ではない。confirmed群の通常スキップ後、clearance停止がなければ未確定群へ進み得る。confirmed群でclearance停止した場合は未確定群へ進まない。一時スキップされたconfirmed Visitを未確定群へ混ぜない。通過可否はconfirmed群処理後のlive状態で判断する。両群は容量とclearance履歴を共有する。
+
+## 4. 未確定群の実装契約
+
+sort keyは `baseline_arrival_timestep`、`arrival_tiebreaker`、`vehicle_id` である。rank ledgerへ書き込まない。collectorの公開APIを使う。`merge_priority` を使わない。通過選択用RNGを使わない。hard deterministic modeで順位を変えない。通常の通過不能は一時スキップする。Node流量不足も初回実装では一時スキップとして後順位を確認する。clearance未充足では、その時刻の残りを確認しない。通過成功には既存の1台物理移動helperを使う。成功後だけclearance履歴を更新する。TVT側の既存終了処理を1回だけ使う。
+
+## 5. 可読性と独立確認
+
+高度なPythonテクニックを避ける。多重内包表記や過度な抽象化を避ける。明示的な変数、loop、`if` 分岐を優先する。少し長くても初学者が処理順を追える実装にする。Cursor報告だけで完了判断しない。ただし細部を毎回重複確認しない。sort key、群混入防止、clearance停止、RNG不使用、generic fork非影響、T=14型テストなど、クリティカルな箇所だけTerminalで独立確認する。
+
+## 6. テスト方針
+
+旧merge priorityテストを新契約テストへ置換する。T=14型の最小clearanceテストを追加する。到着順位の3段階sortを確認する。通常スキップとclearance停止を区別する。到着情報欠落の `RuntimeError` を確認する。confirmed群と未確定群の接続を確認する。merge priority、hard deterministic mode、通過選択用RNGが未確定群の順序へ影響しないことを確認する。generic baseline fork、real World、candidate local virtual calculationへの非影響を確認する。
+
+## 7. 診断scriptとtrial
+
+未追跡の診断scriptは変更停止中である。新baseline契約の本番実装とテスト完了後に修正する。生成済み診断出力は暫定結果である。trialの再実行は本番実装とテスト完了後の別作業とする。T=13、T=14、T=18、T=21の成立・不成立は再検証対象のままである。
+
+## 8. 最新再開地点
+
+- FCFS適用可能性の読み取り専用調査は完了した。
+- baseline専用private helper方針を採用した。
+- 実装対象は原則2ファイルである。
+- Python実装は未着手である。
+- 次の直接作業は、対象2ファイルだけを変更する実装指示を作成し、実装することである。
+- 実装は可読性を優先する。
+- 実装後はクリティカルな点だけTerminalで独立確認する。
+- trial再実行にはまだ進まない。
+- Git操作は利用者がTerminalで行う。
+- `diagnostics/order_control.zip` には触れない。
