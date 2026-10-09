@@ -3594,6 +3594,10 @@ CursorはGit操作を行わない。
 
 # TVT-MP意思決定過程の診断方式確定（2026-10-09）
 
+**2026-10-09更新注記:** 本節は、診断方式を確定した時点の歴史的記録として維持する。診断scriptは実際に作成・実行され、4ファイルが生成された。診断により、TVT順位適用baseline forkの順位未確定Visitがbaseline到着順位ではなく通常合流で選択される問題を発見した。wrapper方式、非干渉契約、出力4ファイル、候補段階の区別、選択理由の監査は、引き続き有用な診断設計である。
+
+次の旧記載を、現在の再開指示として読まない。「本番コード変更は不要」「本番コード非変更方針確定」「次の直接作業は新規診断scriptの実装」「本番コードを実装対象外とする」記載。本番コード修正が必要である。修正の中心は、TVT順位適用baseline forkの順位未確定Visitの通過試行である。順位未確定Visitは最新契約では、(1) `baseline_arrival_timestep`、(2) `arrival_tiebreaker`、(3) `vehicle_id` の順で通過を試す。最新正本は詳細設計第4巻末尾の「TVT順位適用baseline forkの順位未確定Visit通過契約の変更（2026-10-09）」。最新の進捗は、本巻末尾の「TVT順位適用baseline forkの順位未確定Visit契約変更を採用（2026-10-09）」。T=13、T=14、T=18、T=21の取引妥当性は再検証対象である。診断scriptと生成済み診断出力は暫定であり、正式評価結果として扱わない。現在の次の直接作業は、既存FCFSコードとTVT順位適用baseline forkへの適用可能性を読み取り専用で調査することである。調査結果と利用者判断まではPython実装へ進まない。generic baseline fork、real World、candidate local virtual calculationは今回の問題ではない。既存FCFSコードの直接再利用は未確定である。
+
 ## 1. 今回の目的
 
 - 初期小規模trialは完走したが、完走だけでは候補形成、候補別評価、最終候補選択の正しさを確認したことにはならない
@@ -3782,3 +3786,93 @@ CursorはGit操作を行わない。
 Git操作は利用者がTerminalで行う。
 
 `diagnostics/order_control.zip`には触れない。
+
+# TVT順位適用baseline forkの順位未確定Visit契約変更を採用（2026-10-09）
+
+正式な契約は、詳細設計第4巻「TVT順位適用baseline forkの順位未確定Visit通過契約の変更（2026-10-09）」を参照する。2026-09-29の通常合流による未確定Visit選択は、その節によって撤回済みの歴史的記録である。現在の再開指示として読まない。
+
+## 1. 発見した問題
+
+初期小規模trialの意思決定T=14を交通流として監査した。
+
+- baseline local順位は`veh_a2`、`veh_b2`、`veh_b3`
+- candidate local順位は`veh_b2`、`veh_a2`、`veh_b3`
+- baselineでは`veh_b2`がT=23、`veh_a2`がT=25
+- candidateでは`veh_b2`がT=22、`veh_a2`がT=24
+
+buyerだけでなくsellerも1 timestep早くなる理由を調査した。現行のTVT順位適用baseline forkで、順位未確定Visitがbaseline到着順位ではなく通常合流で選択されることを確認した。`merge_priority`とRNGによる選択差が、candidateとの時間差へ混入し得る。
+
+## 2. 調査結論
+
+現行実装は第4巻の旧契約どおりであり、単純な実装漏れではない。旧契約自体が、研究上必要な反実仮想baselineと一致しなかった。
+
+generic baseline fork、real World、candidate local virtual calculationの順位走査は今回の問題ではない。
+
+問題は、TVT順位適用baseline forkの順位未確定Visitを`ordinary_baseline_vehicles`として`Node._transfer_normal_merge()`へ渡す処理である。
+
+T=13、T=14、T=18、T=21の評価は再検証対象とした。
+
+## 3. 採用した新契約
+
+- 順位確定済みVisitは保存済み確定順位で試す。
+- 順位未確定Visitはbaseline到着順位で試す。
+- sort keyは`baseline_arrival_timestep`、`arrival_tiebreaker`、`vehicle_id`である。
+- 未到着Visitはそのtimestepの走査対象外とし、次timestepで再評価する。
+- incomingに存在する到着済みVisitの順位材料欠落は`RuntimeError`とする。
+- 通常の物理条件または容量条件では一時スキップして後順位を試せる。
+- clearance未充足ではそのtimestepのNode通過処理を終了する。
+- clearance待ちVisitを飛ばして後順位へ進まない。
+- 次timestepでは未通過Visitを先頭から再評価する。
+- `merge_priority`と通過車両選択用RNGを未確定群の順序決定に使わない。
+- 未確定Visitをrank ledgerへ正式確定登録しない。
+- 通過試行契約はFCFSと同じ考え方を採用する。
+- 既存FCFSコードをそのまま再利用することは、まだ確定していない。
+
+## 4. 変更範囲
+
+変更予定:
+
+- `uxsim/order_control_tvt_mp_physical_transfer.py`
+- 対応する専用テスト
+- 必要最小限の補助処理
+- 調査結果によってはbaseline専用helperまたは独立module
+
+変更対象外:
+
+- generic baseline fork
+- real Worldの確定順位走査
+- candidate local virtual calculation
+- 通常NodeのUXsim合流処理
+- research output schema
+
+## 5. 現在のBLOCKER
+
+- 本番コード修正前に、既存FCFSコードを直接再利用できるかの原典調査が必要である。
+- 契約はFCFSと同じだが、Python実装を共通化できるとは確定していない。
+- baseline専用helperまたはmoduleが必要か未確定である。
+- collectorと各timestepのincoming snapshotの接続方法が未確定である。
+- 専用診断結果が必要か未確定である。
+- 既存ordinary群テストの置換方法が未確定である。
+- fixed seed trialの数値変化は未確認である。
+- T=13、T=14、T=18、T=21の取引妥当性は未確認である。
+
+## 6. 未追跡の診断script
+
+`research_scripts/diagnose_tvt_mp_small_scale_initial_decision_trace.py`は未追跡である。baseline詳細を追加する途中変更が存在する。
+
+Node全体の順位とcandidate local rankを混同しない修正がまだ必要である。新しいbaseline契約が実装されるまで、診断scriptの追加修正と再実行を停止している。
+
+生成済み診断出力も暫定結果であり、正式評価結果として扱わない。
+
+## 7. 最新再開地点
+
+- 読み取り専用の契約不整合調査は完了した。
+- 新しいbaseline通過試行契約を採用した。
+- FCFSと同じ通過試行契約を採用した。
+- 既存FCFSコードの直接再利用は未確定である。
+- 詳細設計第4巻へ契約変更を記録した。
+- 進捗第3巻へ現在地を記録した。
+- Python実装は未着手である。
+- 次の直接作業は、既存FCFSコードとTVT順位適用baseline forkへの適用可能性を読み取り専用で調査することである。
+- Git操作は利用者がTerminalで行う。
+- `diagnostics/order_control.zip`には触れない。

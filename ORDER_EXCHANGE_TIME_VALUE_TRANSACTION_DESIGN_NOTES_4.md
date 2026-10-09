@@ -2138,6 +2138,10 @@ Cursor 報告だけでは完了判断していない。次を Terminal で直接
 
 # TVT-MP確定順位の物理通過接続 設計判断
 
+**2026-10-09更新注記:** 本節は 2026-09-29 時点の設計判断として歴史的記録のため維持する。本節のうち、TVT順位適用baseline forkの順位未確定Visitを通常合流で選ぶ契約は撤回済みである。次を現在の契約として読まない。`ordinary_baseline_vehicles` を `Node._transfer_normal_merge()` へ渡すこと、`merge_priority`、通過車両選択用RNG、`hard_deterministic_mode` による最大 merge priority 選択の維持。
+
+順位未確定Visitは、最新契約では次の baseline 到着順位で通過を試す。(1) `baseline_arrival_timestep`、(2) `arrival_tiebreaker`、(3) `vehicle_id`。最新正本は、第4巻末尾の「TVT順位適用baseline forkの順位未確定Visit通過契約の変更（2026-10-09）」である。confirmed Visit の `assigned_rank` 順、一時スキップ、clearance 停止、次 timestep 再評価の契約は維持する。generic baseline fork および通常Nodeの `Node._transfer_normal_merge()` は、本更新注記の撤回対象ではない。
+
 記録日: 2026-09-29
 
 ## 1. 記録の目的と位置づけ
@@ -2708,6 +2712,10 @@ fork 種別の識別不足は、TVT-MP 物理通過の実装後に、既存 base
 上記の再開地点は履歴として残す。実装、独立確認、回帰結果は、同じ第4巻の「TVT-MP確定順位の物理通過接続 実装・独立確認・検証結果」を参照する。
 
 # TVT-MP確定順位の物理通過接続 完全実装前仕様
+
+**2026-10-09更新注記:** 本節は 2026-09-29 時点の完全実装前仕様として歴史的記録のため維持する。本節に記載された、TVT順位適用baseline forkの順位未確定Visitに関する通常合流仕様は撤回済みである。`ordinary_baseline_vehicles` を `Node._transfer_normal_merge()` へ渡し、`merge_priority`、RNG、hard deterministic 選択を維持する記述を、現在の実装指示として使用しない。
+
+最新契約では、順位未確定Visitを baseline 到着順位で走査する。通常の物理条件または容量条件では一時スキップでき、clearance 未充足ではその timestep の Node 通過処理を終了する。通過試行契約は既存FCFSと同じ考え方を採用するが、既存FCFSコードの直接再利用は未確定である。最新正本は、第4巻末尾の「TVT順位適用baseline forkの順位未確定Visit通過契約の変更（2026-10-09）」である。confirmed 群の既存仕様、generic baseline fork、real World、candidate local virtual calculation は、本更新注記によって変更されない。
 
 記録日: 2026-09-29
 
@@ -14460,3 +14468,328 @@ Transaction表の`trade_scope_visit_count`は引き続き有効である。
 - 文書記録完了後に研究出力本番コードと研究出力テストを修正する
 - CursorはGit操作を行わない
 - `diagnostics/order_control.zip`には触れない
+
+# TVT順位適用baseline forkの順位未確定Visit通過契約の変更（2026-10-09）
+
+本節が、TVT順位適用baseline forkにおける順位未確定Visitの通過試行の最新契約である。
+
+2026-09-29の「TVT-MP確定順位の物理通過接続 設計判断」と「完全実装前仕様」は削除しない。そのうち、順位未確定Visitを通常合流で選ぶ部分だけを、本節が撤回する。confirmed群の既存契約、generic baseline fork、通常Nodeの通常合流は維持する。詳細は§9である。
+
+第4巻末尾付近の「第4巻は本節をもって新規の主要設計追記を終了する」は、当時の移行記録として残す。順位未確定Visitの通過試行については、その記録ではなく本節を読む。
+
+## 1. 変更の目的
+
+TVT-MPの候補評価では、到着順位を維持したbaselineと、取引によって順位を変更したcandidateを比較する必要がある。
+
+現行のTVT順位適用baseline forkでは、過去に順位確定済みのVisitは確定順位で処理する。一方、順位未確定VisitはUXsimの通常合流処理へ渡している。
+
+通常合流処理では、baseline到着順位ではなく、`merge_priority`と、`hard_deterministic_mode=False`の場合のRNGによって通過試行車両が選ばれ得る。
+
+このため、baselineとcandidateの差へ、TVT順位交換の効果だけでなく、異なる車両選択方式の差が混入し得る。
+
+研究上有効な反実仮想baselineを作るため、TVT順位適用baseline forkの順位未確定Visitについて通過試行契約を変更する。
+
+## 2. 調査で判明した現行契約
+
+現行契約は、詳細設計第4巻の2026-09-29の設計判断および完全実装前仕様で明示的に採用されていた。
+
+現行実装は、旧契約から逸脱した実装バグではない。旧契約自体が、今回明確化した研究上のbaseline要件と一致しなかった。
+
+commit `d9e05c1`で、TVT順位適用baseline forkの物理通過処理が実装、テスト、文書化された。
+
+現行実装では、fork作成時に凍結した順位台帳でconfirmedのVisitを`confirmed_candidates`とする。confirmedでない到着車両を`ordinary_baseline_vehicles`とする。
+
+`confirmed_candidates`は`assigned_rank`順に処理する。confirmed群でclearance未充足なら、そのtimestepのNode通過処理を終了し、ordinary群へ進まない。
+
+confirmed群でclearance停止がなければ、`ordinary_baseline_vehicles`を`Node._transfer_normal_merge()`へ渡す。ordinary群ではbaseline到着順位を使用せず、`merge_priority`およびRNGまたはhard deterministicの選択を使用する。
+
+baseline collectorは到着時刻、`arrival_tiebreaker`、Vehicle IDを保持している。現行のordinary群の選択には使用していない。
+
+## 3. T=14の診断で判明した問題
+
+意思決定T=14では、candidate Visit集合内のbaseline local順位は次である。
+
+1. `veh_a2`
+2. `veh_b2`
+3. `veh_b3`
+
+形成されたcandidate local順位は次である。
+
+1. `veh_b2`
+2. `veh_a2`
+3. `veh_b3`
+
+baseline予測通過時刻:
+
+- `veh_b2`: T=23
+- `veh_a2`: T=25
+
+candidate予測通過時刻:
+
+- `veh_b2`: T=22
+- `veh_a2`: T=24
+
+後着の`veh_b2`を前へ移したcandidateで、buyerだけでなくsellerの`veh_a2`もbaselineより1 timestep早くなった。
+
+共通outlinkであり、少数車両の単車線trialであるため、単純なoutlink渋滞またはinlink容量だけでは説明しにくい。
+
+調査により、baseline側の順位未確定Visitは到着順位で拘束されず、通常合流で選択されることが判明した。baselineとcandidateで車両選択方式が異なるため、1 timestepの差を順位交換効果だけとして解釈できない。
+
+個別のRNG出目を再現しなくても、この構造だけで研究上の比較可能性に問題がある。
+
+T=14の取引成立妥当性は保留する。同じbaseline処理を使ったT=13、T=18、T=21も再検証対象とする。
+
+## 4. 新しい正式契約
+
+TVT順位適用baseline forkでは、各対象Nodeについて次の順序で通過を試す。
+
+### 4.1 順位確定済みVisit
+
+- fork作成時に凍結された順位台帳でconfirmedのVisitを対象とする。
+- 保存済み`assigned_rank`の昇順で通過を試す。
+- 同じ`assigned_rank`の重複は重大不整合として`RuntimeError`とする。
+- `merge_priority`を使用しない。
+- 通過車両選択用のRNGを使用しない。
+- 未到着、inlinkの物理先頭でないこと、通常の容量不足、入口空間不足では、そのVisitを削除せず一時スキップし、後順位Visitを試す。
+- clearance未充足の場合のみ、そのtimestepの対象Node通過処理を終了する。
+- clearance停止時は順位未確定Visitの走査へ進まない。
+- 次のtimestepでは、残る未通過の順位確定済みVisitを`assigned_rank`の先頭から再評価する。
+
+### 4.2 順位未確定Visit
+
+- fork作成時に凍結された順位台帳でconfirmedではないVisitを対象とする。
+- 正式順位としてrank ledgerへ書き込まない。
+- baseline fork内だけの一時的な通過試行順位を作る。
+- 到着済み・未通過の順位未確定Visitを対象とする。
+- 通過試行順位は次の昇順とする。
+
+    1. `baseline_arrival_timestep`
+    2. `arrival_tiebreaker`
+    3. `vehicle_id`
+
+- `baseline_passage_timestep`を順位決定へ使用しない。
+- `merge_priority`を順位決定へ使用しない。
+- 通過車両選択用のRNGを使用しない。
+- `hard_deterministic_mode`による最大`merge_priority`選択を使用しない。
+- 未到着Visitは、そのtimestepの到着済み走査対象に含めず、次のtimestepで再評価する。
+- inlinkの物理先頭でないこと、通常の容量不足、入口空間不足では、そのVisitを削除せず一時スキップし、後順位Visitを試す。
+- clearance未充足の場合のみ、そのtimestepの対象Node通過処理を終了する。
+- clearance未充足となったVisitを飛ばして、後順位Visitへ通過機会を与えない。
+- 次のtimestepでは、残る到着済み・未通過Visitをbaseline到着順位の先頭から再評価する。
+- 前のtimestepで一時スキップしたVisitも、次のtimestepで再評価する。
+
+### 4.3 到着情報の整合性
+
+FCFSと同じ通過試行契約として、次を採用する。
+
+- まだ対象Nodeへ到着していないVisitに到着情報がないことは正常である。
+- 未到着Visitはそのtimestepの走査対象に含めない。
+- 次のtimestepで到着した場合は、その時点の到着済み・未通過集合へ加える。
+- 対象Nodeの`incoming_vehicles`にすでに存在するVisitについて、`baseline_arrival_timestep`、`arrival_tiebreaker`、`vehicle_id`の順位材料が得られない場合は重大不整合として`RuntimeError`とする。
+- 到着済みVisitについて順位材料の一部だけが存在する部分状態も重大不整合として`RuntimeError`とする。
+- baseline horizon内に到着しなかったVisitについて、到着順位または通過時刻を推測しない。
+- horizon終了時に未観測であること自体は、別途正式なbaseline情報不足または未観測として処理する。
+- 到着情報がないことを理由に、`merge_priority`またはRNGによる代替順位を作らない。
+
+### 4.4 通常の通過不能とclearanceの区別
+
+FCFSと同じ通過試行契約として、次を採用する。
+
+一時スキップして後順位Visitを確認できるもの:
+
+- 未到着
+- inlinkの物理先頭でない
+- Nodeの通常の流量または通過容量条件を満たさない
+- inlink流出容量不足
+- outlink流入容量不足
+- outlink入口空間不足
+- その他、通常の物理条件または容量条件を満たさない状態
+
+ただし、Node流量または容量条件について、既存UXsimの状態更新上、後順位Visitも必ず同じ理由で通過不能になることが原典から保証される場合に、最適化として走査を終了できるかは実装設計時に調査する。
+
+この調査は意味上の契約を変更しない。
+
+意味上の正式契約は、通常の通過不能とclearance未充足を区別することである。
+
+clearance未充足の場合:
+
+- そのVisitを一時スキップして後順位へ進まない。
+- そのtimestepの対象Node通過処理を終了する。
+- confirmed群で発生した場合は順位未確定群へ進まない。
+- 順位未確定群で発生した場合は残る順位未確定Visitを確認しない。
+- 次のtimestepで正式な走査順の先頭から再評価する。
+
+### 4.5 FCFSとの関係
+
+上記の通過試行契約は、既存FCFSと同じ考え方を採用する。
+
+同じ考え方とは、未到着、物理先頭未充足、通常の物理条件、容量条件では一時スキップでき、clearance未充足ではそのtimestepのNode通過処理を終了することである。同じ考え方とは、次のtimestepで残るVisitを正式順位の先頭から再評価することでもある。
+
+同じ契約を採用することは、既存FCFSのPythonコードをそのまま再利用することを意味しない。
+
+FCFSとTVT順位適用baseline forkでは、入力、順位情報の取得元、状態の保持場所、collectorとの接続、通過記録、呼出位置、結果型が異なる可能性がある。
+
+既存FCFS API、helperまたはmoduleを直接再利用できるかは、実装前の原典調査後に判断する。調査前に直接再利用を確定しない。
+
+共通化によって異なる責務や状態を混同する場合は、同じ契約を明示的に実装するbaseline専用helperまたはmoduleを使用する。コード重複を減らすことより、契約の正確性、非干渉、可読性を優先する。
+
+## 5. 順位確定済み群と順位未確定群の接続
+
+次を正式契約とする。
+
+1. 各timestepで順位確定済みVisitを先に走査する。
+2. confirmed群でclearance停止が起きた場合は、そのtimestepの処理を終了する。
+3. confirmed群でclearance停止がなく、対象Nodeの通過処理を続行できる場合だけ、順位未確定Visitのbaseline到着順位走査へ進む。
+4. confirmed群と未確定群は、同じNode流量残高、inlink流出容量、outlink流入容量、outlink入口空間、clearance履歴を共有する。
+5. confirmed群から未確定群へ移る際に容量を再補充しない。
+6. 同じtimestepの走査途中でも容量を再補充しない。
+7. clearance履歴は実際に通過したときだけ更新する。
+8. 一時スキップではclearance履歴を更新しない。
+9. 同じVisitをconfirmed群と未確定群の双方で処理しない。
+10. 当該timestep終了後、次のtimestepでは最新の到着済み・未通過集合から未確定群の一時走査列を作り直す。
+
+## 6. rank ledgerへ書き込まない理由
+
+baseline到着順位は、baseline fork内の反実仮想計算で使用する一時的な試行順である。これは実Worldで正式に確定したTVT順位ではない。
+
+順位未確定Visitをconfirmedとしてrank ledgerへ保存してはならない。fork作成時点の過去確定順位と、今回まだ未確定のVisitとの境界を維持する。
+
+baseline到着順位走査は、一時的な局所列または一時sort結果として構築する。次のtimestepでは、残る未通過Visitについて再構築する。実Worldのrank ledgerや正式順位を変更しない。
+
+## 7. 変更対象
+
+変更対象の中心:
+
+- `uxsim/order_control_tvt_mp_physical_transfer.py`
+- TVT順位適用baseline forkで、`ordinary_baseline_vehicles`を`Node._transfer_normal_merge()`へ渡している分岐
+- 順位未確定Visitをbaseline到着順位で走査する新しい明示的処理
+- 対応する専用テスト
+
+必要に応じて、baseline専用の補助helperまたは独立moduleを追加できる。ただし、module構成とhelper責務は実装前調査後に確定する。
+
+`Node._transfer_normal_merge()`自体は削除しない。
+
+## 8. 変更対象外
+
+今回の変更対象外:
+
+- real WorldのTVT確定順位走査
+- candidate local virtual calculation
+- generic baseline fork
+- 通常NodeのUXsim合流処理
+- rank ledgerの正式確定API
+- candidate形成
+- general trade rank
+- FIFO検査
+- candidate economic evaluation
+- payment and compensation
+- final rank
+- actual passage観測
+- research output schema
+
+### generic baseline fork
+
+generic baseline forkは、TVTの過去確定順位を適用せず、UXsim本来の通常合流処理を将来へ進めるbaselineである。
+
+今回変更するのは、過去確定順位を引き継ぎながら今回未確定のVisitを処理するTVT順位適用baseline forkである。
+
+generic baseline forkは`Node._transfer_normal_merge()`による通常合流を維持する。
+
+### real World
+
+real Worldは、最新の正式確定順位に従って通過を試す。
+
+未確定の研究対象Visitがincomingに存在する場合は`RuntimeError`であり、ordinary群へ落とさない。
+
+実Worldの既存順位走査は、与えられた`assigned_rank`に従っている。今回の問題はreal Worldの順位走査には存在しない。
+
+### candidate local virtual calculation
+
+candidate local virtual calculationは、候補ごとに完成した拘束順位列を使用する。
+
+拘束順位内Visitは与えられた順位で試し、拘束順位外Vehicleは別の一時的FCFS契約で処理する。`Node._transfer_normal_merge()`を使用しない。
+
+候補局所計算の既存順位走査は、与えられた候補順位に従っている。今回の問題はcandidate local virtual calculationの順位走査には存在しない。
+
+## 9. 旧契約の扱い
+
+詳細設計第4巻の2026-09-29の「TVT-MP確定順位の物理通過接続 設計判断」と「完全実装前仕様」は、歴史的記録として削除しない。
+
+そのうち、TVT順位適用baseline forkの順位未確定Visitを通常合流で選ぶ契約は、本節によって撤回する。`ordinary_baseline_vehicles`へ`merge_priority`、RNG、hard deterministic選択を適用する旧契約を、現在の再開指示として読まない。最新契約は本節§4と§5である。
+
+confirmed Visitの`assigned_rank`順、一時スキップ、clearance停止、次timestep再評価の契約は維持する。
+
+generic baseline forkと通常Nodeにおける`Node._transfer_normal_merge()`の契約は維持する。
+
+## 10. 実装前に残る調査事項
+
+次は未確定の制度ではない。実装方法を決めるための調査事項である。調査結果を確定仕様として扱わない。
+
+- 既存FCFSのPythonコード、API、helperまたはmoduleを直接再利用できるか。
+- 直接再利用すると、TVT順位適用baseline fork固有のcollector、凍結台帳、confirmed群との接続、通過記録、終了処理を損なわないか。
+- 同一契約のbaseline専用helperまたは独立moduleが必要か。
+- baseline collectorを走査時に直接参照するか、各timestepのincoming snapshotとcollector記録から一時記録を作るか。
+- 順位未確定Visitの一時走査結果または診断結果型が必要か。
+- Node流量不足時に、後順位を形式上確認して一時スキップ記録を残すか、全候補が同じ残容量を共有することを理由に早期終了できるか。この早期終了の可否は§4.4の調査であり、意味上の契約は変えない。
+- 既存テスト`test_ordinary_group_keeps_merge_priority_and_hard_deterministic_choice`を削除、置換または分割する方法。
+- fixed seed trialで変化するbaseline通過時刻、candidate評価、成立取引、支払・補償。
+- 診断scriptの途中変更を新契約へどう整合させるか。
+
+次は確定事項である。
+
+- 未到着Visitはそのtimestepの走査対象外とし、次timestepで再評価する。
+- incomingに存在する到着済みVisitの順位材料欠落は`RuntimeError`である。
+- 通常の物理条件または容量条件は、clearanceとは区別する。
+- clearance未充足では、そのtimestepの対象Node通過処理を終了する。
+- これらはFCFSと同じ通過試行契約である。
+- 既存FCFSコードをそのまま使用するかは未確定である。
+
+## 11. 必要な回帰テスト
+
+最低限、次を実装前テスト契約候補として記録する。候補であり、この文書作業ではテストを追加しない。
+
+- 未確定Visit2台で、後着車のinlinkが直前通過inlinkと同じでも、先着車が別inlinkでclearance未充足なら後着車を通さない。
+- 先着Visitが通常の容量不足だけなら、後順位Visitを試せる。
+- 先着Visitがinlink物理先頭でない場合、後順位Visitを試せる。
+- 未到着Visitを一時スキップして後順位Visitを試せる。
+- 次timestepで未通過Visitを到着順位の先頭から再評価する。
+- `baseline_arrival_timestep`が同じ場合、`arrival_tiebreaker`で順位を決める。
+- `arrival_tiebreaker`も同じ場合、`vehicle_id`で順位を決める。
+- incomingに存在する到着済みVisitの`baseline_arrival_timestep`欠落を`RuntimeError`とする。
+- incomingに存在する到着済みVisitの`arrival_tiebreaker`欠落を`RuntimeError`とする。
+- 順位材料の部分状態を`RuntimeError`とする。
+- 順位確定済みVisitを順位未確定Visitより先に処理する。
+- confirmed群でclearance停止した場合、未確定群へ進まない。
+- confirmed群の通常の通過不能では、条件を満たせば未確定群へ進み得る。
+- confirmed群と未確定群が容量残高とclearance履歴を共有する。
+- 通過成功時だけclearance履歴を更新する。
+- 一時スキップではclearance履歴を更新しない。
+- `merge_priority`と通過選択用RNGを未確定群の順位へ使用しない。
+- `hard_deterministic_mode`の値によって未確定群の順位が変わらない。
+- generic baseline forkは通常合流のままである。
+- real Worldの確定順位通過は変わらない。
+- candidate local virtual calculationは変わらない。
+- FCFSコードを直接再利用しない実装になった場合でも、FCFSと同じ通過試行契約を満たす。
+
+## 12. 現時点の評価
+
+T=13、T=14、T=18、T=21の候補形成結果、経済評価、成立・不成立判断は再検証対象である。
+
+現行baselineとcandidateの差には、順位交換だけでなく通過車両選択方式の差が混入し得る。現時点で、これら4候補の成立・不成立が交通上妥当であると結論づけない。
+
+診断scriptによる内部数値の整合確認は有用だった。取引妥当性の確認完了を意味しない。
+
+本番コード修正後にtrialを再実行し、baseline通過時刻、candidate通過時刻、G、R、surplus、成立取引、支払・補償、実通過結果を再評価する。
+
+## 13. 次の直接作業
+
+次の直接作業は、読み取り専用で次を調査することである。
+
+- 既存FCFSの通過試行コード、API、helper、状態、結果型
+- TVT順位適用baseline forkの未確定群処理へ再利用できる部分
+- 直接再利用すると意味または状態を混同する部分
+- baseline専用helperまたは独立moduleが必要か
+- 必要最小限の本番コード変更範囲
+- 専用テストの置換・追加範囲
+
+この調査結果を報告し、利用者判断を得るまでPython実装へ進まない。
