@@ -3926,3 +3926,132 @@ sort keyは `baseline_arrival_timestep`、`arrival_tiebreaker`、`vehicle_id` �
 - trial再実行にはまだ進まない。
 - Git操作は利用者がTerminalで行う。
 - `diagnostics/order_control.zip` には触れない。
+
+# TVT順位適用baseline forkの順位未確定Visit走査 実装・独立確認・関連回帰完了（2026-10-10）
+
+制度上の最新正本は、詳細設計第4巻「TVT順位適用baseline forkの順位未確定Visit通過契約の変更（2026-10-09）」である。実装方式の最新正本は、同巻「TVT順位適用baseline forkの順位未確定Visit走査 実装方式の確定（2026-10-10）」である。実装結果の詳細は、同巻「TVT順位適用baseline forkの順位未確定Visit走査 実装・独立確認・関連回帰結果（2026-10-10）」を参照する。
+
+## 1. 実装完了
+
+- 変更対象は本番コードと専用テストの2ファイルである
+- baseline専用private helperを追加した
+- 旧通常合流呼出しをbaseline到着順位走査へ置換した
+- `ordinary_baseline_vehicles` を `unconfirmed_baseline_vehicles` へ変更した
+- confirmed群の既存処理を維持した
+- generic baseline forkの通常合流を維持した
+- real World、candidate local virtual calculation、FCFSを変更していない
+
+## 2. 新しい未確定群処理
+
+- 開始時snapshotで群を固定する
+- collector公開APIから順位材料を取得する
+- sort keyは `baseline_arrival_timestep`、`arrival_tiebreaker`、`vehicle_id`
+- 順位材料と進路情報の欠落・不一致は `RuntimeError`
+- 通常の物理条件または容量条件では一時スキップ
+- clearance未充足では後順位へ進まない
+- Node流量不足も初回実装では後順位を確認する
+- 通過成功時だけ既存物理移動helperを呼ぶ
+- 成功後だけclearance履歴を更新する
+- `merge_priority` と通過選択用RNGを使わない
+- hard deterministic modeで順位を変えない
+
+## 3. 専用テスト
+
+- 旧merge priorityテストを新契約テストへ置換した
+- baseline arrival timestep順
+- tiebreaker順
+- Vehicle ID順
+- hard deterministic mode非影響
+- RNG非消費
+- collector記録欠落
+- 通常スキップ
+- clearance停止
+- confirmed群と未確定群の接続
+- T=14型最小テスト
+
+Cursor実行結果:
+
+- 構文確認成功
+- 専用テスト68件成功
+
+## 4. Terminal独立確認
+
+- tracked変更は指定2ファイルだけであることを確認した
+- クリティカルな実装分岐を原典確認した
+- 構文確認を独立実行し成功した
+- 専用テストを独立実行し68件成功した
+- Cursor報告と一致した
+
+## 5. 関連回帰
+
+実行した関連回帰:
+
+- baseline alignment
+- baseline driver registration
+- baseline fork alignment
+- candidate local state
+- candidate local vehicle advance
+- candidate local virtual calculation
+- FCFS versus UXsim standard grid network
+
+結果:
+
+- 195件成功
+- 失敗なし
+
+合計:
+
+- 専用テスト68件
+- 関連回帰195件
+- 合計263件成功
+
+全suite、trial、診断runは未実行である。
+
+## 6. 変更対象外
+
+次を変更していない。
+
+- generic baseline forkの通常合流
+- real Worldの確定順位走査
+- candidate local virtual calculation
+- FCFS本体
+- FCFS専用テスト
+- baseline collector
+- baseline driver
+- rank ledger
+- trial script
+- research output
+- 未追跡診断script
+
+## 7. 現在の評価
+
+- 旧契約に起因した本番コード問題の修正と、対象テスト・関連回帰は完了した
+- trialはまだ再実行していない
+- T=13、T=14、T=18、T=21は再検証対象のまま
+- 旧研究出力と診断出力は暫定結果である
+- 取引成立・不成立の交通上の妥当性はまだ確定しない
+
+## 8. 未追跡ファイル
+
+- `research_scripts/diagnose_tvt_mp_small_scale_initial_decision_trace.py` は未追跡であり、途中変更を含む
+- `research_outputs/` は未追跡である
+- 生成済み診断出力は暫定である
+- `diagnostics/order_control.zip` は未追跡であり、対象外である
+- 今回はこれらに触れていない
+
+## 9. 最新再開地点
+
+- 本番コード実装完了
+- 専用テスト実装完了
+- 構文確認成功
+- 専用テスト68件成功
+- 関連回帰195件成功
+- 合計263件成功
+- 実装結果文書化完了
+- trial再実行は未着手
+- 診断script修正は未着手
+- 次の直接作業は、文書差分をTerminalで独立確認し、本番コード、専用テスト、実装結果文書をコミットすることである
+- commit結果確認後、別指示でpushする
+- push後に新しい出力directoryで初期小規模trialを再実行する
+- Git操作は利用者がTerminalで行う
+- `diagnostics/order_control.zip` には触れない

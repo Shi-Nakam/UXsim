@@ -15079,3 +15079,488 @@ Cursorの報告だけで完了判断しない。ただし、毎回すべての�
 - trial再実行にはまだ進まない。
 - Git操作は利用者がTerminalで行う。
 - `diagnostics/order_control.zip` には触れない。
+
+# TVT順位適用baseline forkの順位未確定Visit走査 実装・独立確認・関連回帰結果（2026-10-10）
+
+制度上の最新正本は、同巻「TVT順位適用baseline forkの順位未確定Visit通過契約の変更（2026-10-09）」である。実装方式の最新正本は、同巻「TVT順位適用baseline forkの順位未確定Visit走査 実装方式の確定（2026-10-10）」である。本節は、これらを変更または再検討するものではない。確定済み契約に従って実装した事実、専用テスト、Terminalによる独立確認結果、関連回帰結果、次の再開地点を記録する。
+
+## 1. 実装の目的
+
+旧実装では、TVT順位適用baseline forkの順位未確定Visitを `Node._transfer_normal_merge()` へ渡していた。そのため、baseline到着順位ではなく、`merge_priority`、通過選択用RNG、`hard_deterministic_mode` の影響を受け得た。
+
+新実装では、順位未確定Visitをbaseline到着順位で通過試行する。baselineとcandidateの比較へ、異なる選択方式の差が混入する問題を除去する。
+
+generic baseline fork、real World、candidate local virtual calculation、FCFSは変更しない。
+
+## 2. 変更したファイル
+
+次の2ファイルだけを変更した。
+
+- `uxsim/order_control_tvt_mp_physical_transfer.py`
+- `tests_order_control_tvt_mp_physical_transfer.py`
+
+次は変更していない。
+
+- `uxsim/uxsim.py`
+- baseline collector
+- baseline driver
+- rank ledger
+- FCFS本体
+- FCFS専用テスト
+- candidate local virtual calculation
+- trial script
+- research output
+- 診断script
+- 文書以外の指定外ファイル
+
+## 3. 実装したprivate型とhelper
+
+### `_UnconfirmedBaselinePassageCandidate`
+
+順位未確定baseline Visitの一時的な通過候補を表すprivate classとして追加した。
+
+保持する情報:
+
+- Vehicle
+- 開始時inlink
+- 開始時outlink
+- VisitKey
+- `baseline_arrival_timestep`
+- `arrival_tiebreaker`
+- `vehicle_id`
+
+このclassは正式順位を表さない。rank ledgerへ保存しない。baseline fork内の当該timestepだけで使う一時的な通過候補である。
+
+### `_try_unconfirmed_baseline_vehicles`
+
+TVT順位適用baseline forkの順位未確定Visitを、baseline到着順位で1回走査するprivate helperとして追加した。
+
+責務:
+
+- 開始時に分類済みの順位未確定Vehicle集合を受け取る
+- collector公開APIから順位材料を取得する
+- 順位材料と進路情報を検証する
+- baseline到着順位で並べる
+- 順位順に通過を試す
+- 通常の通過不能では一時スキップする
+- clearance未充足では残りを試さず終了する
+- 通過成功時に既存の1台物理移動helperを呼ぶ
+- 通過成功後にclearance履歴を更新する
+
+行わない処理:
+
+- incoming snapshotの再取得
+- confirmed群との再分類
+- rank ledger更新
+- formal rank確定
+- actual passage記録
+- timestep進行
+- 容量再補充
+- `incoming_vehicles` の最終消去
+- Node全体のtrip-end最終整理
+- 恒久的な診断記録作成
+
+## 4. timestep開始時分類
+
+既存の `_unique_incoming_snapshot(node)` で、当該timestep開始時の到着車両集合を一度だけ取得する。
+
+既存の `_classify_snapshot()` で次の2群へ分類する。
+
+- confirmed candidates
+- `unconfirmed_baseline_vehicles`
+
+旧変数名 `ordinary_baseline_vehicles` は、新契約上の意味を明確にするため、`unconfirmed_baseline_vehicles` へ変更した。
+
+群への所属は、そのtimestep内では変更しない。
+
+次を維持した。
+
+- 一時スキップされたconfirmed Visitを未確定群へ移さない
+- confirmed群処理後に未確定群を作り直さない
+- 同じVisitを両群で処理しない
+- confirmed群でclearance停止した場合は未確定群へ進まない
+
+## 5. confirmed群の維持
+
+confirmed群の既存契約は変更していない。
+
+維持したもの:
+
+- `assigned_rank` 昇順
+- duplicate rankの `RuntimeError`
+- 通常の物理条件または容量条件での一時スキップ
+- clearance未充足でのtimestep内処理終了
+- clearance停止時に未確定群へ進まないこと
+- real Worldでのactual passage historyおよびobservation
+- 既存の1台物理移動helper
+- 通過成功後のclearance履歴更新
+
+「confirmed群を先に処理する」とは、全confirmed Visitを必ず先に通過させる意味ではない。confirmed Visitが通常理由で一時スキップされ、clearance停止がなければ、confirmed Visitが未通過で残っていても未確定群へ進み得る。
+
+## 6. 共通の通常通過不能判定
+
+旧 `_confirmed_candidate_should_skip()` を、confirmed群と未確定群の双方で意味が明確になる名称へ整理した。
+
+新しい名称:
+
+- `_physical_passage_limits_should_skip`
+
+このhelperは、通常の物理条件または容量条件による一時スキップを表す。
+
+確認する条件:
+
+- inlinkが空
+- Vehicleがinlink物理先頭でない
+- Node流量不足
+- inlink流出容量不足
+- outlink流入容量不足
+- outlink入口空間不足
+
+これはclearance停止ではない。Node流量不足も初回実装では一時スキップとして扱い、後順位Vehicleを明示的に確認する。
+
+この整理は大規模な共通化ではなく、同一の物理通過条件をconfirmed群と未確定群で読み違えないための小さなprivate helperである。
+
+## 7. baseline到着順位
+
+未確定群のsort keyは次の昇順である。
+
+1. `baseline_arrival_timestep`
+2. `arrival_tiebreaker`
+3. `vehicle_id`
+
+実装では、次を使用する。
+
+- `_baseline_arrival_sort_key`
+
+次は順位へ使用しない。
+
+- `baseline_passage_timestep`
+- current Visitの `arrival_time`
+- `merge_priority`
+- 通過Vehicle選択用RNG
+- `hard_deterministic_mode`
+
+未確定群の順位決定では、次を呼ばない。
+
+- `rng.choice`
+- `rng.shuffle`
+
+## 8. collectorとの接続
+
+既存の公開APIを使用する。
+
+- `get_baseline_visit_snapshot(vehicle_name, visit_id)`
+
+使用しないもの:
+
+- collectorのprivate属性
+- `export_node_baseline_visits()` の返却順
+- 新規collector API
+
+順位材料の取得と検証は、次のprivate処理へ分けた。
+
+- `_require_tvt_rank_applying_baseline_collector`
+- `_copy_validated_baseline_rank_fields`
+- `_build_unconfirmed_baseline_candidates`
+- `_raise_baseline_rank_field_error`
+
+次を検証する。
+
+- TVT順位適用baseline forkであること
+- collector snapshotが存在すること
+- node name
+- vehicle name
+- visit id
+- inlink name
+- `baseline_arrival_timestep`
+- `arrival_tiebreaker`
+- `vehicle_id`
+- live Vehicle IDとの一致
+- `route_next_link_name`
+- live outlink名との一致
+
+欠落または不一致は `RuntimeError` とする。例外メッセージには、Node、Vehicle、Visit ID、対象fieldを含める。欠落時に `merge_priority` またはRNGで代替順位を作らない。
+
+## 9. live状態による通過判定
+
+対象集合、開始時inlink、開始時outlinkはtimestep開始時分類に基づいて固定する。通過可否は各Vehicleの試行時点のlive状態で判断する。
+
+確認するlive状態:
+
+- Vehicleがまだ `incoming_vehicles` に存在するか
+- Vehicleの現在link
+- Vehicleの現在 `route_next_link`
+- inlink物理先頭
+- Node流量残高
+- inlink流出容量
+- outlink流入容量
+- outlink入口空間
+- clearance履歴
+
+開始時inlinkまたはoutlinkから変化していれば `RuntimeError` とする。confirmed Visitが通過した結果、同じinlinkの未確定後続が新たな物理先頭になった場合は、最新状態で通過を試せる。
+
+## 10. 通常スキップとclearance停止
+
+通常の物理条件または容量条件を満たさない場合:
+
+- そのVehicleだけを一時スキップする
+- 後順位Vehicleを同じtimestepで確認する
+- clearance履歴を更新しない
+
+clearanceは、通常の物理条件を満たした後で評価する。
+
+使用する既存処理:
+
+- `node._order_control_clearance_blocks_passage(vehicle, inlink)`
+
+clearance未充足の場合:
+
+- 後順位Vehicleを試さない
+- 未確定群走査を終了する
+- clearance履歴を更新しない
+- 次のtimestepで正式順の先頭から再評価する
+
+## 11. 通過成功
+
+通過成功時は、既存の次を呼ぶ。
+
+- `node._transfer_one_vehicle_between_links(vehicle, inlink, outlink)`
+
+正常return後に未確定群走査側で次を更新する。
+
+- `node.last_order_control_inlink`
+- `node.last_order_control_entry_timestep`
+
+通過成功時だけ更新する。baseline collectorのpassage記録は、既存の1台物理移動helperが行う。actual passage historyまたはactual passage observationは作らない。
+
+## 12. 終了処理
+
+新helper内では次を行わない。
+
+- `_finish_node_transfer()`
+- `incoming_vehicles` 全消去
+- Node全体のtrip-end最終整理
+
+`Node.transfer()` のtime_value分岐が、既存どおりTVT物理通過後に `_finish_node_transfer()` を1回だけ呼ぶ。終了処理を重複させていない。
+
+## 13. generic baseline fork、real World、candidate local virtual calculation、FCFS
+
+### generic baseline fork
+
+`apply_copied_tvt_confirmed_ranks is False` の場合は、引き続き次を使用する。
+
+- `node._transfer_normal_merge()`
+
+通常合流契約は変更していない。
+
+### real World
+
+collectorが `None` のreal Worldでは、未確定研究対象Visitは従来どおり `RuntimeError` である。未確定baseline helperへ進まない。
+
+### candidate local virtual calculation
+
+変更していない。
+
+### FCFS
+
+次を変更していない。
+
+- `transfer_fcfs_clearance()`
+- `transfer_fcfs_no_clearance()`
+- FCFSのrank key
+- FCFS本体
+- FCFS専用テスト
+
+## 14. 既存テストの置換
+
+旧契約を固定していた次のテストを置換した。
+
+旧テスト:
+
+- `test_ordinary_group_keeps_merge_priority_and_hard_deterministic_choice`
+
+新テスト:
+
+- `test_unconfirmed_baseline_group_uses_arrival_order_not_merge_priority`
+
+新テストでは、後着Vehicleのmerge priorityを高くしても、baseline到着順位が早いVehicleが先に通過することを確認する。
+
+## 15. 追加した主要テスト
+
+次を確認する専用テストを追加した。
+
+- `baseline_arrival_timestep` 順
+- 同着時の `arrival_tiebreaker` 順
+- tiebreakerも同じ場合の `vehicle_id` 順
+- hard deterministic modeの非影響
+- 通過選択用RNGの非消費
+- collector snapshot欠落
+- baseline arrival timestep欠落
+- arrival tiebreaker欠落
+- Vehicle ID不一致
+- route next link名不一致
+- 物理先頭未充足時の一時スキップ
+- inlink流出容量不足
+- outlink流入容量または入口空間不足
+- Node流量不足時に後順位も確認すること
+- confirmed群と未確定群の接続
+- clearance停止
+- 次timestepでの再評価
+
+本番コードへテスト専用hookは追加していない。
+
+## 16. T=14型最小テスト
+
+追加したテスト:
+
+- `test_unconfirmed_clearance_of_earlier_arrival_blocks_later_same_outlink`
+
+表現する状況:
+
+- 2本の単車線inlink
+- 共通outlink
+- clearance timesteps 1
+- 直前通過は `in_b`
+- 先着未確定Visitは `in_a`
+- 後着未確定Visitは `in_b`
+- 両者は同じoutlinkへ進む
+- 先着Visitではclearance未充足
+- 後着Visitは単独なら同一inlinkのためclearance上通れそうな状態
+
+確認結果:
+
+- 先着Visitのclearance停止後、後着Visitを試さない
+- 当該timestepでは両車とも通過しない
+- clearance履歴を変更しない
+- 次のtimestepで先着Visitから再評価する
+- 先着Visit通過後、別inlinkの後着Visitを同じtimestepに通さない
+
+このテストは成功した。
+
+## 17. Cursor実行結果
+
+Cursorは次を報告した。
+
+構文確認:
+
+- 成功
+
+専用テスト:
+
+- `68 passed`
+
+Cursor報告だけでは完了判断していない。
+
+## 18. Terminalによる独立確認
+
+Terminalでクリティカルな実装箇所を確認した。
+
+確認内容:
+
+- 変更trackedファイルは指定した2ファイルだけ
+- generic baseline forkの `_transfer_normal_merge()` が維持されている
+- timestep開始時snapshotと分類が維持されている
+- confirmed群でclearance停止した場合に未確定群へ進まない
+- 旧通常合流呼出しがTVT順位適用baseline forkの未確定群経路から除去されている
+- 未確定群sort keyが `baseline_arrival_timestep`、`arrival_tiebreaker`、`vehicle_id` である
+- collector公開APIを使用している
+- 未確定群で `merge_priority` を使用していない
+- 未確定群で通過選択用RNGを使用していない
+- 通常スキップとclearance停止が別分岐である
+- 既存物理移動helperを使用している
+- 通過成功後だけclearance履歴を更新している
+- 終了処理を重複実行していない
+
+独立構文確認:
+
+- 成功
+
+独立専用テスト:
+
+- `68 passed in 15.66s`
+
+## 19. 関連回帰
+
+Terminalで次の関連回帰を実行した。
+
+- baseline alignment
+- baseline driver registration
+- baseline fork alignment
+- candidate local state
+- candidate local vehicle advance
+- candidate local virtual calculation
+- FCFS versus UXsim standard grid network
+
+結果:
+
+- `195 passed in 22.79s`
+
+構文確認、専用テスト、関連回帰の合計:
+
+- 専用テスト 68件成功
+- 関連回帰 195件成功
+- 合計263件成功
+
+失敗はなかった。
+
+## 20. 独立確認の範囲
+
+全suiteは実行していない。
+
+次も実行していない。
+
+- trial
+- 診断run
+- 固定seed正式サンプル
+- 研究出力生成
+- BATCH全回帰
+- FCFS全回帰
+- 全テストsuite
+
+今回の独立確認は、変更対象と直接関係する専用テスト、およびbaseline、FCFS、candidate local virtual calculationの関連回帰に限定した。
+
+## 21. 可読性確認
+
+実装は次の方針に従っている。
+
+- 明示的なprivate class
+- 明示的な順位材料
+- 明示的な検証処理
+- 明示的なloopと `if` 分岐
+- confirmed群と未確定群の区別
+- 通常スキップとclearance停止の区別
+- 過度なPython技巧なし
+- 大規模な抽象化なし
+- 独立module追加なし
+- 初学者が処理順を追いやすい構造
+
+## 22. 現時点の評価
+
+順位未確定Visitが通常合流で選ばれる旧問題について、本番コード修正と専用テスト、関連回帰は完了した。
+
+ただし、まだtrialを再実行していない。したがって、次はまだ確定していない。
+
+- T=13の候補評価
+- T=14の候補評価
+- T=18の候補評価
+- T=21の候補評価
+- baseline通過時刻
+- candidate通過時刻
+- `G`
+- `R`
+- surplus
+- 取引成立・不成立
+- 支払と補償
+- 実通過結果
+
+旧診断出力は暫定結果のままである。
+
+## 23. 次の作業
+
+次の直接作業は、文書変更をTerminalで独立確認し、今回の本番コード、専用テスト、実装結果文書を適切なコミット単位で保存することである。
+
+その後に、初期小規模trialを新しい出力directoryで再実行する。trial再実行後に、T=13、T=14、T=18、T=21を再評価する。
+
+未追跡の診断scriptは、本番trial再実行後に新契約へ整合させる。
+
+今回の文書作業中は、trial、診断script、診断run、研究出力変更へ進まない。

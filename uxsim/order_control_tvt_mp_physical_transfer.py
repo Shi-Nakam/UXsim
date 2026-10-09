@@ -1,5 +1,5 @@
 """
-Physical passage attempts for confirmed TVT-MP ranks.
+Physical passage attempts for TVT-MP ranks.
 
 Reads the current incoming vehicles and the node's rank ledger. Does not
 import uxsim.uxsim. Does not change the ledger, payments, or formal routes.
@@ -7,6 +7,11 @@ On the real world, a confirmed passage records node passage history, then
 an actual passage observation when a wait entry exists. It does not build
 an actual outcome, run ex-post evaluation, or evaluate roles. It does not
 call the downstream observer. A baseline fork records neither.
+
+A TVT rank-applying baseline fork tries confirmed visits in assigned_rank
+order, then unconfirmed visits in baseline arrival order. That arrival
+order is a temporary scan inside the fork. It is not written to the rank
+ledger. A generic baseline fork still uses ordinary merge.
 """
 
 from uxsim.order_control_tvt_mp_actual_passage import (
@@ -27,6 +32,32 @@ class _ConfirmedPassageCandidate:
         self.outlink = outlink
         self.visit_key = visit_key
         self.assigned_rank = assigned_rank
+
+
+class _UnconfirmedBaselinePassageCandidate:
+    """
+    One unconfirmed baseline vehicle, ordered by baseline arrival.
+
+    The order is temporary. It is not a confirmed TVT rank.
+    """
+
+    def __init__(
+        self,
+        vehicle,
+        inlink,
+        outlink,
+        visit_key,
+        baseline_arrival_timestep,
+        arrival_tiebreaker,
+        vehicle_id,
+    ):
+        self.vehicle = vehicle
+        self.inlink = inlink
+        self.outlink = outlink
+        self.visit_key = visit_key
+        self.baseline_arrival_timestep = baseline_arrival_timestep
+        self.arrival_tiebreaker = arrival_tiebreaker
+        self.vehicle_id = vehicle_id
 
 
 def transfer_tvt_mp_passage_attempts(node):
@@ -69,11 +100,14 @@ def transfer_tvt_mp_passage_attempts(node):
         return None
 
     rank_state = _require_rank_state(node)
-    confirmed_candidates, ordinary_baseline_vehicles = _classify_snapshot(
+    confirmed_candidates, unconfirmed_baseline_vehicles = _classify_snapshot(
         node,
         rank_state,
         snapshot_vehicles,
     )
+    # Confirmed visits are tried first. A normal physical skip does not move
+    # that visit into the unconfirmed group. Clearance stop ends this timestep
+    # before any unconfirmed visit is tried.
     clearance_stopped = _try_confirmed_candidates(node, confirmed_candidates)
     if clearance_stopped:
         return None
@@ -81,12 +115,9 @@ def transfer_tvt_mp_passage_attempts(node):
     baseline_collector = node.W._order_control_baseline_collector
     if baseline_collector is None:
         return None
-    if len(ordinary_baseline_vehicles) == 0:
+    if len(unconfirmed_baseline_vehicles) == 0:
         return None
-    node._transfer_normal_merge(
-        allowed_vehicles=ordinary_baseline_vehicles,
-        enforce_order_control_clearance=True,
-    )
+    _try_unconfirmed_baseline_vehicles(node, unconfirmed_baseline_vehicles)
     return None
 
 
@@ -128,7 +159,7 @@ def _unique_incoming_snapshot(node):
 
 def _classify_snapshot(node, rank_state, snapshot_vehicles):
     confirmed_candidates = []
-    ordinary_vehicles = []
+    unconfirmed_baseline_vehicles = []
     baseline_collector = node.W._order_control_baseline_collector
     for vehicle in snapshot_vehicles:
         if vehicle.flag_waiting_for_trip_end:
@@ -160,11 +191,14 @@ def _classify_snapshot(node, rank_state, snapshot_vehicles):
                 )
             )
         else:
-            ordinary_vehicles.append(vehicle)
+            # Membership is fixed at the start of this timestep. A later
+            # rebuild from incoming_vehicles would mix in a skipped confirmed
+            # visit.
+            unconfirmed_baseline_vehicles.append(vehicle)
 
     _reject_duplicate_assigned_ranks(node, confirmed_candidates)
     confirmed_candidates.sort(key=_assigned_rank_of_candidate)
-    return confirmed_candidates, tuple(ordinary_vehicles)
+    return confirmed_candidates, tuple(unconfirmed_baseline_vehicles)
 
 
 def _assigned_rank_of_candidate(candidate):
@@ -243,7 +277,7 @@ def _try_confirmed_candidates(node, confirmed_candidates):
                 f"Node {node.name}: vehicle {vehicle.name} link changed "
                 "after classification."
             )
-        if _confirmed_candidate_should_skip(node, vehicle, inlink, outlink):
+        if _physical_passage_limits_should_skip(node, vehicle, inlink, outlink):
             continue
         if node._order_control_clearance_blocks_passage(vehicle, inlink):
             return True
@@ -278,7 +312,15 @@ def _try_confirmed_candidates(node, confirmed_candidates):
     return False
 
 
-def _confirmed_candidate_should_skip(node, vehicle, inlink, outlink):
+def _physical_passage_limits_should_skip(node, vehicle, inlink, outlink):
+    """
+    Return True when ordinary physical limits block this vehicle.
+
+    Used by both the confirmed rank scan and the unconfirmed baseline scan.
+    This is a temporary skip. It is not an order-control clearance stop.
+    Node flow shortage is also a temporary skip: later visits are still
+    checked, even when they share the same remaining node flow.
+    """
     if len(inlink.vehicles) == 0:
         return True
     if vehicle is not inlink.vehicles[0]:
@@ -296,3 +338,231 @@ def _confirmed_candidate_should_skip(node, vehicle, inlink, outlink):
         if entrance_vehicle.x <= entry_gap:
             return True
     return False
+
+
+def _baseline_arrival_sort_key(candidate):
+    """
+    Temporary baseline trial order for one unconfirmed visit.
+
+    Earlier baseline arrival is tried first. The same arrival timestep uses
+    the fixed arrival tiebreaker, then vehicle id. Passage time, merge
+    priority, and a passage-selection random draw are not part of this key.
+    """
+    return (
+        candidate.baseline_arrival_timestep,
+        candidate.arrival_tiebreaker,
+        candidate.vehicle_id,
+    )
+
+
+def _require_tvt_rank_applying_baseline_collector(node):
+    """This scan is only for a TVT rank-applying baseline fork."""
+    baseline_collector = getattr(node.W, "_order_control_baseline_collector", None)
+    if baseline_collector is None:
+        raise RuntimeError(
+            f"Node {node.name}: unconfirmed baseline scan requires a "
+            "baseline collector."
+        )
+    apply_copied_ranks = getattr(
+        baseline_collector,
+        "apply_copied_tvt_confirmed_ranks",
+        None,
+    )
+    if apply_copied_ranks is not True:
+        raise RuntimeError(
+            f"Node {node.name}: unconfirmed baseline scan requires "
+            "apply_copied_tvt_confirmed_ranks True, got "
+            f"{apply_copied_ranks!r}."
+        )
+    return baseline_collector
+
+
+def _raise_baseline_rank_field_error(node, vehicle, visit_id, field_name, value):
+    raise RuntimeError(
+        f"Node {node.name}: vehicle {vehicle.name} visit_id {visit_id} "
+        f"baseline field {field_name} is missing or inconsistent; "
+        f"got {value!r}."
+    )
+
+
+def _copy_validated_baseline_rank_fields(node, vehicle, visit_id, inlink, outlink, snapshot):
+    """
+    Read one public collector snapshot and check the arrival-order facts.
+
+    A missing snapshot, a partial arrival record, or a route that does not
+    match the live outlink is a broken baseline record. Do not invent an
+    order from merge priority or a random draw.
+    """
+    if not isinstance(snapshot, dict):
+        _raise_baseline_rank_field_error(
+            node, vehicle, visit_id, "baseline_visit_snapshot", snapshot
+        )
+    if snapshot.get("node_name") != node.name:
+        _raise_baseline_rank_field_error(
+            node, vehicle, visit_id, "node_name", snapshot.get("node_name")
+        )
+    if snapshot.get("vehicle_name") != vehicle.name:
+        _raise_baseline_rank_field_error(
+            node, vehicle, visit_id, "vehicle_name", snapshot.get("vehicle_name")
+        )
+    if snapshot.get("visit_id") != visit_id:
+        _raise_baseline_rank_field_error(
+            node, vehicle, visit_id, "visit_id", snapshot.get("visit_id")
+        )
+    if snapshot.get("inlink_name") != inlink.name:
+        _raise_baseline_rank_field_error(
+            node, vehicle, visit_id, "inlink_name", snapshot.get("inlink_name")
+        )
+
+    baseline_arrival_timestep = snapshot.get("baseline_arrival_timestep")
+    arrival_tiebreaker = snapshot.get("arrival_tiebreaker")
+    vehicle_id = snapshot.get("vehicle_id")
+    route_next_link_name = snapshot.get("route_next_link_name")
+
+    if baseline_arrival_timestep is None:
+        _raise_baseline_rank_field_error(
+            node,
+            vehicle,
+            visit_id,
+            "baseline_arrival_timestep",
+            baseline_arrival_timestep,
+        )
+    if isinstance(baseline_arrival_timestep, bool) or not isinstance(
+        baseline_arrival_timestep, int
+    ) or baseline_arrival_timestep < 0:
+        _raise_baseline_rank_field_error(
+            node,
+            vehicle,
+            visit_id,
+            "baseline_arrival_timestep",
+            baseline_arrival_timestep,
+        )
+
+    if arrival_tiebreaker is None:
+        _raise_baseline_rank_field_error(
+            node, vehicle, visit_id, "arrival_tiebreaker", arrival_tiebreaker
+        )
+    if isinstance(arrival_tiebreaker, bool) or not isinstance(
+        arrival_tiebreaker, (int, float)
+    ):
+        _raise_baseline_rank_field_error(
+            node, vehicle, visit_id, "arrival_tiebreaker", arrival_tiebreaker
+        )
+
+    if vehicle_id is None:
+        _raise_baseline_rank_field_error(
+            node, vehicle, visit_id, "vehicle_id", vehicle_id
+        )
+    if isinstance(vehicle_id, bool) or not isinstance(vehicle_id, int) or vehicle_id < 0:
+        _raise_baseline_rank_field_error(
+            node, vehicle, visit_id, "vehicle_id", vehicle_id
+        )
+    if vehicle_id != vehicle.id:
+        _raise_baseline_rank_field_error(
+            node, vehicle, visit_id, "vehicle_id", vehicle_id
+        )
+
+    if route_next_link_name is None or route_next_link_name == "":
+        _raise_baseline_rank_field_error(
+            node, vehicle, visit_id, "route_next_link_name", route_next_link_name
+        )
+    if route_next_link_name != outlink.name:
+        _raise_baseline_rank_field_error(
+            node, vehicle, visit_id, "route_next_link_name", route_next_link_name
+        )
+
+    return baseline_arrival_timestep, arrival_tiebreaker, vehicle_id
+
+
+def _build_unconfirmed_baseline_candidates(node, unconfirmed_baseline_vehicles):
+    """
+    Order the fixed unconfirmed set by baseline arrival.
+
+    Vehicles that have not arrived are not in this set. Do not pull extra
+    visits from the collector. The collector return order is not the rank.
+    """
+    baseline_collector = _require_tvt_rank_applying_baseline_collector(node)
+    candidates = []
+    for vehicle in unconfirmed_baseline_vehicles:
+        current_visit = _require_research_candidate(node, vehicle)
+        inlink = vehicle.link
+        outlink = vehicle.route_next_link
+        visit_id = current_visit["visit_id"]
+        visit_key = (vehicle.name, visit_id)
+        snapshot = baseline_collector.get_baseline_visit_snapshot(
+            vehicle.name,
+            visit_id,
+        )
+        if snapshot is None:
+            _raise_baseline_rank_field_error(
+                node,
+                vehicle,
+                visit_id,
+                "baseline_visit_snapshot",
+                None,
+            )
+        (
+            baseline_arrival_timestep,
+            arrival_tiebreaker,
+            vehicle_id,
+        ) = _copy_validated_baseline_rank_fields(
+            node,
+            vehicle,
+            visit_id,
+            inlink,
+            outlink,
+            snapshot,
+        )
+        candidates.append(
+            _UnconfirmedBaselinePassageCandidate(
+                vehicle,
+                inlink,
+                outlink,
+                visit_key,
+                baseline_arrival_timestep,
+                arrival_tiebreaker,
+                vehicle_id,
+            )
+        )
+    candidates.sort(key=_baseline_arrival_sort_key)
+    return candidates
+
+
+def _try_unconfirmed_baseline_vehicles(node, unconfirmed_baseline_vehicles):
+    """
+    Try one timestep of unconfirmed baseline visits in arrival order.
+
+    The set was classified at the start of this timestep. Whether a vehicle
+    can pass is read from the live links after the confirmed scan. A normal
+    physical block skips only that vehicle. Unmet clearance stops the rest
+    of this scan. This helper does not clear incoming_vehicles and does not
+    record an actual passage.
+    """
+    candidates = _build_unconfirmed_baseline_candidates(
+        node,
+        unconfirmed_baseline_vehicles,
+    )
+    for candidate in candidates:
+        vehicle = candidate.vehicle
+        inlink = candidate.inlink
+        outlink = candidate.outlink
+        if vehicle not in node.incoming_vehicles:
+            continue
+        if vehicle.link is not inlink:
+            raise RuntimeError(
+                f"Node {node.name}: vehicle {vehicle.name} link changed "
+                "after classification."
+            )
+        if vehicle.route_next_link is not outlink:
+            raise RuntimeError(
+                f"Node {node.name}: vehicle {vehicle.name} route_next_link "
+                "changed after classification."
+            )
+        if _physical_passage_limits_should_skip(node, vehicle, inlink, outlink):
+            continue
+        if node._order_control_clearance_blocks_passage(vehicle, inlink):
+            return None
+        node._transfer_one_vehicle_between_links(vehicle, inlink, outlink)
+        node.last_order_control_inlink = inlink
+        node.last_order_control_entry_timestep = node.W.T
+    return None

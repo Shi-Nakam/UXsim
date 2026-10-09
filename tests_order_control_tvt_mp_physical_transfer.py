@@ -228,6 +228,37 @@ def _as_fork(world, *, apply_copied_tvt_confirmed_ranks=True):
     return world._order_control_baseline_collector
 
 
+def _register_unconfirmed_baseline_snapshot(
+    collector,
+    vehicle,
+    *,
+    baseline_arrival_timestep=10,
+    arrival_tiebreaker=0.1,
+    route_next_link_name=None,
+    inlink_name=None,
+    vehicle_id=None,
+):
+    """Record one arrived unconfirmed visit so the baseline scan can order it."""
+    if inlink_name is None:
+        inlink_name = vehicle.link.name
+    if route_next_link_name is None:
+        route_next_link_name = vehicle.route_next_link.name
+    if vehicle_id is None:
+        vehicle_id = vehicle.id
+    collector.register_snapshot_visit(
+        vehicle_name=vehicle.name,
+        vehicle_id=vehicle_id,
+        node_name="junction",
+        inlink_name=inlink_name,
+        visit_id=vehicle.order_control_current_visit["visit_id"],
+        was_arrived_at_snapshot=True,
+        baseline_arrival_timestep=baseline_arrival_timestep,
+        arrival_tiebreaker=arrival_tiebreaker,
+        route_next_link_name=route_next_link_name,
+        baseline_passage_timestep=None,
+    )
+
+
 def _expect_runtime_error(function):
     try:
         function()
@@ -552,6 +583,13 @@ def test_fork_ledger_stays_at_pre_decision_confirms():
     assert fork_state.is_confirmed(("new_car", 2)) is False
     assert real_state.is_confirmed(("new_car", 2)) is True
     _as_fork(fork)
+    for vehicle in fork.VEHICLES.values():
+        if vehicle.name == "new_car":
+            _register_unconfirmed_baseline_snapshot(
+                fork._order_control_baseline_collector,
+                vehicle,
+                baseline_arrival_timestep=12,
+            )
     fork.get_node("junction").flow_capacity = 1
     fork.get_node("junction").flow_capacity_remain = 1
     fork.get_node("junction").transfer()
@@ -574,7 +612,12 @@ def test_fork_tries_past_confirmed_before_ordinary_group():
     junction.incoming_vehicles = [ordinary, confirmed]
     _confirm(world, [confirmed])
     _register_only(world, [ordinary])
-    _as_fork(world)
+    collector = _as_fork(world)
+    _register_unconfirmed_baseline_snapshot(
+        collector,
+        ordinary,
+        baseline_arrival_timestep=12,
+    )
     junction.transfer()
     assert confirmed.link.name == "out"
     assert ordinary.link.name == "in_a"
@@ -586,15 +629,24 @@ def test_skipped_past_confirmed_vehicle_is_excluded_from_ordinary_merge():
     ordinary = _place(world, "ordinary_passes", "in_b", visit_id=2)
     _confirm(world, [skipped])
     _register_only(world, [ordinary])
-    _as_fork(world)
+    collector = _as_fork(world)
+    _register_unconfirmed_baseline_snapshot(
+        collector,
+        ordinary,
+        baseline_arrival_timestep=12,
+    )
     seen = []
-    original = Node._transfer_normal_merge
+    original = physical_transfer._try_unconfirmed_baseline_vehicles
 
-    def spy(node, allowed_vehicles=None, enforce_order_control_clearance=False):
-        seen.append(allowed_vehicles)
-        return original(node, allowed_vehicles, enforce_order_control_clearance)
+    def spy(node, unconfirmed_baseline_vehicles):
+        seen.append(unconfirmed_baseline_vehicles)
+        return original(node, unconfirmed_baseline_vehicles)
 
-    with patch.object(Node, "_transfer_normal_merge", spy):
+    with patch.object(
+        physical_transfer,
+        "_try_unconfirmed_baseline_vehicles",
+        spy,
+    ):
         _junction(world).transfer()
     assert len(seen) == 1
     assert skipped not in seen[0]
@@ -609,36 +661,61 @@ def test_clearance_stop_skips_ordinary_group():
     ordinary = _place(world, "ordinary_wait", "in_b", visit_id=2)
     _confirm(world, [confirmed])
     _register_only(world, [ordinary])
-    _as_fork(world)
+    collector = _as_fork(world)
+    _register_unconfirmed_baseline_snapshot(
+        collector,
+        ordinary,
+        baseline_arrival_timestep=12,
+    )
     junction = _junction(world)
     junction.order_control_clearance_timesteps = 0
     junction.last_order_control_inlink = world.get_link("side")
     junction.last_order_control_entry_timestep = world.T
     seen = []
-    original = Node._transfer_normal_merge
+    original = physical_transfer._try_unconfirmed_baseline_vehicles
 
-    def spy(node, allowed_vehicles=None, enforce_order_control_clearance=False):
-        seen.append(allowed_vehicles)
-        return original(node, allowed_vehicles, enforce_order_control_clearance)
+    def spy(node, unconfirmed_baseline_vehicles):
+        seen.append(unconfirmed_baseline_vehicles)
+        return original(node, unconfirmed_baseline_vehicles)
 
-    with patch.object(Node, "_transfer_normal_merge", spy):
+    with patch.object(
+        physical_transfer,
+        "_try_unconfirmed_baseline_vehicles",
+        spy,
+    ):
         junction.transfer()
     assert seen == []
     assert confirmed.link.name == "in_a"
     assert ordinary.link.name == "in_b"
 
 
-def test_ordinary_group_keeps_merge_priority_and_hard_deterministic_choice():
-    world = _world("fork_priority", hard_deterministic_mode=True, flow_capacity=1)
-    low = _place(world, "low_priority", "in_a", visit_id=1)
-    high = _place(world, "high_priority", "in_b", visit_id=2)
+def test_unconfirmed_baseline_group_uses_arrival_order_not_merge_priority():
+    world = _world(
+        "fork_arrival_not_priority",
+        hard_deterministic_mode=True,
+        flow_capacity=1,
+    )
+    early = _place(world, "early_arrival", "in_a", visit_id=1)
+    late = _place(world, "late_high_priority", "in_b", visit_id=2)
     world.get_link("in_a").merge_priority = 1
     world.get_link("in_b").merge_priority = 5
-    _register_only(world, [low, high])
-    _as_fork(world)
+    _register_only(world, [early, late])
+    collector = _as_fork(world)
+    _register_unconfirmed_baseline_snapshot(
+        collector,
+        early,
+        baseline_arrival_timestep=8,
+        arrival_tiebreaker=0.9,
+    )
+    _register_unconfirmed_baseline_snapshot(
+        collector,
+        late,
+        baseline_arrival_timestep=12,
+        arrival_tiebreaker=0.1,
+    )
     _junction(world).transfer()
-    assert high.link.name == "out"
-    assert low.link.name == "in_a"
+    assert early.link.name == "out"
+    assert late.link.name == "in_b"
 
 
 def test_ordinary_group_sees_capacity_after_past_confirmed_passage():
@@ -654,7 +731,12 @@ def test_ordinary_group_sees_capacity_after_past_confirmed_passage():
     ordinary = _place(world, "ordinary_follower", "in_a", visit_id=2)
     _confirm(world, [confirmed])
     _register_only(world, [ordinary])
-    _as_fork(world)
+    collector = _as_fork(world)
+    _register_unconfirmed_baseline_snapshot(
+        collector,
+        ordinary,
+        baseline_arrival_timestep=12,
+    )
     _junction(world).transfer()
     assert confirmed.link.name == "out"
     assert ordinary.link.name == "out"
@@ -667,7 +749,17 @@ def test_ordinary_group_stops_on_unmet_order_control_clearance():
     world.get_link("in_a").merge_priority = 1
     world.get_link("in_b").merge_priority = 1
     _register_only(world, [first, second])
-    _as_fork(world)
+    collector = _as_fork(world)
+    _register_unconfirmed_baseline_snapshot(
+        collector,
+        first,
+        baseline_arrival_timestep=8,
+    )
+    _register_unconfirmed_baseline_snapshot(
+        collector,
+        second,
+        baseline_arrival_timestep=12,
+    )
     junction = _junction(world)
     junction.order_control_clearance_timesteps = 0
     junction.last_order_control_inlink = world.get_link("side")
@@ -682,7 +774,8 @@ def test_ordinary_passage_updates_order_control_clearance_history():
     world = _world("ordinary_history")
     vehicle = _place(world, "ordinary_moves", "in_a", visit_id=1)
     _register_only(world, [vehicle])
-    _as_fork(world)
+    collector = _as_fork(world)
+    _register_unconfirmed_baseline_snapshot(collector, vehicle)
     junction = _junction(world)
     junction.transfer()
     assert vehicle.link.name == "out"
@@ -694,7 +787,8 @@ def test_same_inlink_ordinary_group_needs_no_extra_clearance_wait():
     world = _world("same_inlink_ordinary")
     vehicle = _place(world, "same_inlink_car", "in_a", visit_id=1)
     _register_only(world, [vehicle])
-    _as_fork(world)
+    collector = _as_fork(world)
+    _register_unconfirmed_baseline_snapshot(collector, vehicle)
     junction = _junction(world)
     junction.order_control_clearance_timesteps = 5
     junction.last_order_control_inlink = world.get_link("in_a")
@@ -709,7 +803,12 @@ def test_different_inlink_after_passage_does_not_pass_in_the_same_timestep():
     ordinary = _place(confirmed_world, "other_inlink_car", "in_b", visit_id=2)
     _confirm(confirmed_world, [confirmed])
     _register_only(confirmed_world, [ordinary])
-    _as_fork(confirmed_world)
+    confirmed_collector = _as_fork(confirmed_world)
+    _register_unconfirmed_baseline_snapshot(
+        confirmed_collector,
+        ordinary,
+        baseline_arrival_timestep=12,
+    )
     confirmed_world.order_control_clearance_timesteps = 0
     _junction(confirmed_world).order_control_clearance_timesteps = 0
     _junction(confirmed_world).transfer()
@@ -725,7 +824,20 @@ def test_different_inlink_after_passage_does_not_pass_in_the_same_timestep():
     ordinary_world.get_link("in_b").merge_priority = 5
     ordinary_world.get_link("in_a").merge_priority = 1
     _register_only(ordinary_world, [winner, loser])
-    _as_fork(ordinary_world)
+    ordinary_collector = _as_fork(ordinary_world)
+    # Arrival order, not merge priority, decides who is tried first.
+    _register_unconfirmed_baseline_snapshot(
+        ordinary_collector,
+        winner,
+        baseline_arrival_timestep=8,
+        arrival_tiebreaker=0.2,
+    )
+    _register_unconfirmed_baseline_snapshot(
+        ordinary_collector,
+        loser,
+        baseline_arrival_timestep=12,
+        arrival_tiebreaker=0.1,
+    )
     ordinary_world.order_control_clearance_timesteps = 0
     _junction(ordinary_world).order_control_clearance_timesteps = 0
     _junction(ordinary_world).transfer()
@@ -979,6 +1091,13 @@ def test_tvt_rank_applying_baseline_fork_applies_copied_confirmed_ranks():
     fork_junction.flow_capacity_remain = 1
     fork_collector = _as_fork(fork, apply_copied_tvt_confirmed_ranks=True)
     assert fork_collector.apply_copied_tvt_confirmed_ranks is True
+    for vehicle in fork.VEHICLES.values():
+        if vehicle.name == "ordinary_later":
+            _register_unconfirmed_baseline_snapshot(
+                fork_collector,
+                vehicle,
+                baseline_arrival_timestep=12,
+            )
     fork_junction.transfer()
     fork_confirmed = None
     fork_ordinary = None
@@ -2303,6 +2422,325 @@ def test_history_commit_is_after_clearance_and_before_observation_commit():
         "commit_observation",
     ]
     assert entry.actual_passage_observation_record is not None
+
+
+def test_unconfirmed_baseline_arrival_timestep_beats_merge_priority():
+    world = _world("arrival_timestep_order", flow_capacity=1)
+    early = _place(world, "timestep_early", "in_a", visit_id=1)
+    late = _place(world, "timestep_late", "in_b", visit_id=2)
+    world.get_link("in_a").merge_priority = 1
+    world.get_link("in_b").merge_priority = 9
+    _register_only(world, [early, late])
+    collector = _as_fork(world)
+    _register_unconfirmed_baseline_snapshot(
+        collector, early, baseline_arrival_timestep=8, arrival_tiebreaker=0.9
+    )
+    _register_unconfirmed_baseline_snapshot(
+        collector, late, baseline_arrival_timestep=12, arrival_tiebreaker=0.1
+    )
+    _junction(world).transfer()
+    assert early.link.name == "out"
+    assert late.link.name == "in_b"
+
+
+def test_unconfirmed_baseline_tiebreaker_breaks_same_arrival_timestep():
+    world = _world("arrival_tiebreaker_order", flow_capacity=1)
+    # Created first, so this vehicle has the smaller id. A larger tiebreaker
+    # must still wait behind the later-created vehicle.
+    larger_tie = _place(world, "larger_tie", "in_a", visit_id=1)
+    smaller_tie = _place(world, "smaller_tie", "in_b", visit_id=2)
+    world.get_link("in_a").merge_priority = 9
+    world.get_link("in_b").merge_priority = 1
+    _register_only(world, [larger_tie, smaller_tie])
+    collector = _as_fork(world)
+    _register_unconfirmed_baseline_snapshot(
+        collector,
+        larger_tie,
+        baseline_arrival_timestep=10,
+        arrival_tiebreaker=0.8,
+    )
+    _register_unconfirmed_baseline_snapshot(
+        collector,
+        smaller_tie,
+        baseline_arrival_timestep=10,
+        arrival_tiebreaker=0.1,
+    )
+    _junction(world).transfer()
+    assert smaller_tie.link.name == "out"
+    assert larger_tie.link.name == "in_a"
+
+
+def test_unconfirmed_baseline_vehicle_id_breaks_equal_tiebreaker():
+    world = _world("arrival_vehicle_id_order", flow_capacity=1)
+    smaller_id = _place(world, "smaller_id", "in_a", visit_id=1)
+    larger_id = _place(world, "larger_id", "in_b", visit_id=2)
+    world.get_link("in_a").merge_priority = 1
+    world.get_link("in_b").merge_priority = 9
+    assert smaller_id.id < larger_id.id
+    _register_only(world, [smaller_id, larger_id])
+    collector = _as_fork(world)
+    _register_unconfirmed_baseline_snapshot(
+        collector,
+        smaller_id,
+        baseline_arrival_timestep=10,
+        arrival_tiebreaker=0.4,
+    )
+    _register_unconfirmed_baseline_snapshot(
+        collector,
+        larger_id,
+        baseline_arrival_timestep=10,
+        arrival_tiebreaker=0.4,
+    )
+    _junction(world).transfer()
+    assert smaller_id.link.name == "out"
+    assert larger_id.link.name == "in_b"
+
+
+def test_unconfirmed_baseline_order_ignores_hard_deterministic_mode():
+    for mode in (False, True):
+        world = _world(
+            "arrival_mode_" + str(mode),
+            hard_deterministic_mode=mode,
+            flow_capacity=1,
+        )
+        early = _place(world, "mode_early", "in_a", visit_id=1)
+        late = _place(world, "mode_late", "in_b", visit_id=2)
+        world.get_link("in_a").merge_priority = 1
+        world.get_link("in_b").merge_priority = 9
+        _register_only(world, [early, late])
+        collector = _as_fork(world)
+        _register_unconfirmed_baseline_snapshot(
+            collector, early, baseline_arrival_timestep=8
+        )
+        _register_unconfirmed_baseline_snapshot(
+            collector, late, baseline_arrival_timestep=12
+        )
+        _junction(world).transfer()
+        assert early.link.name == "out"
+        assert late.link.name == "in_b"
+
+
+def test_unconfirmed_baseline_scan_does_not_use_passage_rng():
+    world = _world("arrival_no_rng", flow_capacity=1)
+    early = _place(world, "rng_early", "in_a", visit_id=1)
+    late = _place(world, "rng_late", "in_b", visit_id=2)
+    world.get_link("in_b").merge_priority = 9
+    _register_only(world, [early, late])
+    collector = _as_fork(world)
+    _register_unconfirmed_baseline_snapshot(
+        collector, early, baseline_arrival_timestep=8
+    )
+    _register_unconfirmed_baseline_snapshot(
+        collector, late, baseline_arrival_timestep=12
+    )
+    # numpy Generator.choice and Generator.shuffle cannot be replaced.
+    # Any passage-selection draw would change this saved generator state.
+    rng_state_before = world.rng.bit_generator.state
+    order_rng_state_before = world.order_control_rng.bit_generator.state
+    _junction(world).transfer()
+    assert world.rng.bit_generator.state == rng_state_before
+    assert world.order_control_rng.bit_generator.state == order_rng_state_before
+    assert early.link.name == "out"
+    assert late.link.name == "in_b"
+
+
+def test_unconfirmed_baseline_missing_rank_facts_are_runtime_error():
+    missing = _world("missing_snapshot")
+    missing_vehicle = _place(missing, "missing_record", "in_a", visit_id=1)
+    _register_only(missing, [missing_vehicle])
+    _as_fork(missing)
+    error = _expect_runtime_error(_junction(missing).transfer)
+    assert "missing_record" in str(error)
+    assert "visit_id 1" in str(error)
+    assert "baseline_visit_snapshot" in str(error)
+    assert missing_vehicle.link.name == "in_a"
+
+    no_timestep = _world("missing_timestep")
+    timestep_vehicle = _place(no_timestep, "no_timestep", "in_a", visit_id=1)
+    _register_only(no_timestep, [timestep_vehicle])
+    timestep_collector = _as_fork(no_timestep)
+    _register_unconfirmed_baseline_snapshot(timestep_collector, timestep_vehicle)
+    stored = timestep_collector._visit_records_by_primary_key[
+        (timestep_vehicle.name, 1)
+    ]
+    stored.baseline_arrival_timestep = None
+    error = _expect_runtime_error(_junction(no_timestep).transfer)
+    assert "baseline_arrival_timestep" in str(error)
+    assert timestep_vehicle.link.name == "in_a"
+
+    no_tie = _world("missing_tiebreaker")
+    tie_vehicle = _place(no_tie, "no_tie", "in_a", visit_id=1)
+    _register_only(no_tie, [tie_vehicle])
+    tie_collector = _as_fork(no_tie)
+    _register_unconfirmed_baseline_snapshot(tie_collector, tie_vehicle)
+    stored = tie_collector._visit_records_by_primary_key[(tie_vehicle.name, 1)]
+    stored.arrival_tiebreaker = None
+    error = _expect_runtime_error(_junction(no_tie).transfer)
+    assert "arrival_tiebreaker" in str(error)
+
+    wrong_id = _world("wrong_vehicle_id")
+    id_vehicle = _place(wrong_id, "wrong_id", "in_a", visit_id=1)
+    _register_only(wrong_id, [id_vehicle])
+    id_collector = _as_fork(wrong_id)
+    _register_unconfirmed_baseline_snapshot(
+        id_collector,
+        id_vehicle,
+        vehicle_id=id_vehicle.id + 50,
+    )
+    error = _expect_runtime_error(_junction(wrong_id).transfer)
+    assert "vehicle_id" in str(error)
+
+    wrong_route = _world("wrong_route_name")
+    route_vehicle = _place(wrong_route, "wrong_route", "in_a", visit_id=1)
+    _register_only(wrong_route, [route_vehicle])
+    route_collector = _as_fork(wrong_route)
+    _register_unconfirmed_baseline_snapshot(
+        route_collector,
+        route_vehicle,
+        route_next_link_name="side",
+    )
+    error = _expect_runtime_error(_junction(wrong_route).transfer)
+    assert "route_next_link_name" in str(error)
+    assert route_vehicle.link.name == "in_a"
+
+
+def _add_junction_outlink(world, link_name):
+    link = world.addLink(
+        link_name,
+        "junction",
+        "dest",
+        length=100,
+        free_flow_speed=20,
+        number_of_lanes=1,
+    )
+    link.cum_arrival.append(0)
+    link.cum_departure.append(0)
+    link.traveltime_actual = np.zeros(world.T + 5)
+    return link
+
+
+def test_unconfirmed_physical_skip_tries_the_later_arrival():
+    head = _world("skip_not_head", flow_capacity=2)
+    early_blocked = _place(head, "not_head_early", "in_a", visit_id=1, behind=True)
+    later = _place(head, "not_head_later", "in_b", visit_id=2)
+    _register_only(head, [early_blocked, later])
+    head_collector = _as_fork(head)
+    _register_unconfirmed_baseline_snapshot(
+        head_collector, early_blocked, baseline_arrival_timestep=8
+    )
+    _register_unconfirmed_baseline_snapshot(
+        head_collector, later, baseline_arrival_timestep=12
+    )
+    _junction(head).transfer()
+    assert early_blocked.link.name == "in_a"
+    assert later.link.name == "out"
+
+    outflow = _world("skip_outflow", flow_capacity=2)
+    early_out = _place(outflow, "outflow_early", "in_a", visit_id=1)
+    later_out = _place(outflow, "outflow_later", "in_b", visit_id=2)
+    outflow.get_link("in_a").capacity_out_remain = 0
+    _register_only(outflow, [early_out, later_out])
+    outflow_collector = _as_fork(outflow)
+    _register_unconfirmed_baseline_snapshot(
+        outflow_collector, early_out, baseline_arrival_timestep=8
+    )
+    _register_unconfirmed_baseline_snapshot(
+        outflow_collector, later_out, baseline_arrival_timestep=12
+    )
+    _junction(outflow).transfer()
+    assert early_out.link.name == "in_a"
+    assert later_out.link.name == "out"
+
+    inflow = _world("skip_inflow", flow_capacity=2)
+    out_b = _add_junction_outlink(inflow, "out_b")
+    early_in = _place(inflow, "inflow_early", "in_a", visit_id=1, outlink_name="out")
+    later_in = _place(inflow, "inflow_later", "in_b", visit_id=2, outlink_name="out_b")
+    inflow.get_link("out").capacity_in_remain = 0
+    out_b.capacity_in_remain = 10
+    _register_only(inflow, [early_in, later_in])
+    inflow_collector = _as_fork(inflow)
+    _register_unconfirmed_baseline_snapshot(
+        inflow_collector, early_in, baseline_arrival_timestep=8
+    )
+    _register_unconfirmed_baseline_snapshot(
+        inflow_collector,
+        later_in,
+        baseline_arrival_timestep=12,
+        route_next_link_name="out_b",
+    )
+    _junction(inflow).transfer()
+    assert early_in.link.name == "in_a"
+    assert later_in.link.name == "out_b"
+
+
+def test_unconfirmed_node_flow_shortage_still_checks_the_later_visit():
+    world = _world("node_flow_checks_later", flow_capacity=1)
+    junction = _junction(world)
+    junction.flow_capacity_remain = 0
+    early = _place(world, "flow_early", "in_a", visit_id=1)
+    late = _place(world, "flow_late", "in_b", visit_id=2)
+    _register_only(world, [early, late])
+    collector = _as_fork(world)
+    _register_unconfirmed_baseline_snapshot(
+        collector, early, baseline_arrival_timestep=8
+    )
+    _register_unconfirmed_baseline_snapshot(
+        collector, late, baseline_arrival_timestep=12
+    )
+    checked = []
+    original = physical_transfer._physical_passage_limits_should_skip
+
+    def spy(node, vehicle, inlink, outlink):
+        checked.append(vehicle.name)
+        return original(node, vehicle, inlink, outlink)
+
+    with patch.object(
+        physical_transfer,
+        "_physical_passage_limits_should_skip",
+        spy,
+    ):
+        junction.transfer()
+    assert checked == ["flow_early", "flow_late"]
+    assert early.link.name == "in_a"
+    assert late.link.name == "in_b"
+    assert junction.last_order_control_inlink is None
+
+
+def test_unconfirmed_clearance_of_earlier_arrival_blocks_later_same_outlink():
+    world = _world("earlier_clearance_blocks_later", flow_capacity=2)
+    early = _place(world, "clearance_early", "in_a", visit_id=1)
+    late = _place(world, "clearance_late", "in_b", visit_id=2)
+    world.get_link("in_a").merge_priority = 1
+    world.get_link("in_b").merge_priority = 9
+    _register_only(world, [early, late])
+    collector = _as_fork(world)
+    _register_unconfirmed_baseline_snapshot(
+        collector, early, baseline_arrival_timestep=8, arrival_tiebreaker=0.2
+    )
+    _register_unconfirmed_baseline_snapshot(
+        collector, late, baseline_arrival_timestep=12, arrival_tiebreaker=0.1
+    )
+    junction = _junction(world)
+    junction.order_control_clearance_timesteps = 1
+    previous_inlink = world.get_link("in_b")
+    junction.last_order_control_inlink = previous_inlink
+    junction.last_order_control_entry_timestep = world.T
+    junction.transfer()
+    assert early.link.name == "in_a"
+    assert late.link.name == "in_b"
+    assert junction.last_order_control_inlink is previous_inlink
+    assert junction.last_order_control_entry_timestep == 10
+
+    # The next timestep's Vehicle.update puts link-end vehicles back into
+    # incoming_vehicles. This direct transfer test does that re-entry itself.
+    world.T = 12
+    junction.incoming_vehicles.append(early)
+    junction.incoming_vehicles.append(late)
+    junction.transfer()
+    assert early.link.name == "out"
+    assert late.link.name == "in_b"
+    assert junction.last_order_control_inlink is world.get_link("in_a")
+    assert junction.last_order_control_entry_timestep == 12
 
 
 def test_registry_matches_defined_functions():
