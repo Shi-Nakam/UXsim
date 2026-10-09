@@ -3591,3 +3591,194 @@ CursorはGit操作を行わない。
 コミットとpushは利用者がTerminalで行う。
 
 正式実験条件の検討は、この安全な節目をコミット・pushした後に進む。
+
+# TVT-MP意思決定過程の診断方式確定（2026-10-09）
+
+## 1. 今回の目的
+
+- 初期小規模trialは完走したが、完走だけでは候補形成、候補別評価、最終候補選択の正しさを確認したことにはならない
+- 正式実験条件の検討へ進む前に、簡素なネットワークでTVT-MPの意思決定過程を人間が監査する方針とした
+- 最初は既存の2流入1流出・10台のtrial条件を再利用する
+- T=14とT=18だけを事前指定せず、全意思決定timestepを監視して候補形成時刻を自動識別する
+
+## 2. 読み取り専用調査の結論
+
+- 本番コードを変更せずに診断できる
+- 既存trial scriptも変更せずに再利用できる
+- `World.exec_simulation()`は各timestepで`run_tvt_mp_driver(W)`を呼ぶが、戻り値を保存していない
+- driver戻り値から、候補形成、FIFO検査、局所仮想計算、経済評価、候補選択、支払・補償、最終順位まで辿れる
+- 情報が計算されていないのではなく、通常simulation経路では戻り値を利用していない
+- baseline fork resultとbaseline collectorはfork Worldへの参照を保持しないことを原典確認した
+- driver resultを長期保持せず、その場で文字列、数値、bool、None、list、tuple、dict等の単純値へ変換する方針とした
+
+## 3. 確定した診断方式
+
+- 新規診断scriptだけを追加する
+- `uxsim.order_control_tvt_mp_driver.run_tvt_mp_driver`を診断scriptから一時的にwrapperへ差し替える
+- wrapperは元driverを1回だけ呼ぶ
+- wrapperは元driverと同じresultをそのまま返す
+- wrapperはresultを変更しない
+- wrapperはWorld、Vehicle、Link、Node、順位台帳、registry、RNGへ代入しない
+- `try/finally`でsimulation終了後または例外時に元driverへ必ず復元する
+- 本番コードへ恒久的な診断hook、registry、CSV出力を追加しない
+- 正式実験の通常経路には性能影響を与えない
+
+## 4. 診断scriptと出力
+
+新規作成予定:
+
+- `research_scripts/diagnose_tvt_mp_small_scale_initial_decision_trace.py`
+
+診断出力directory:
+
+- `research_outputs/trial/tvt_mp_small_scale_initial_seed_1_decision_trace`
+
+生成予定の4ファイル:
+
+- `decision_summary.csv`
+- `candidate_summary.csv`
+- `selected_result_summary.csv`
+- `decision_trace.json`
+
+- `decision_summary.csv`はT=0からT=299まで全300 timestepを記録する
+- 候補なしtimestepも記録する
+- 候補詳細はcandidate Visit集合またはconcrete buyer候補が存在するtimestepだけ記録する
+- 診断runでは既存研究用CSV 5表を重複生成しない
+- 既存の最新trial出力directoryを変更または上書きしない
+- 診断出力directoryが存在する場合は停止し、自動削除・自動renameを行わない
+
+## 5. 候補段階を区別する方針
+
+次を別々に記録する。
+
+- candidate Visit集合
+- concrete buyer候補
+- general trade rank候補
+- FIFO True候補
+- FIFO False候補
+- resolved候補
+- unresolved候補
+- 経済評価対象候補
+- economically feasible候補
+- 最終選択候補
+
+次を混同しない。
+
+- candidate Visitなし
+- right-of-entryなし
+- baseline情報不足
+- concrete buyer候補なし
+- FIFO違反
+- local仮想計算未解決
+- buyer非正価値
+- buyer価値合計が必要補償未満
+- 経済的成立候補なし
+- 成立候補間の比較で非選択
+- 最終同率抽選で非選択
+
+## 6. 選択理由
+
+診断script側で次の4分類を導出する。
+
+- `no_economically_feasible_candidate`
+- `unique_maximum_surplus`
+- `maximum_surplus_then_unique_maximum_buyer_count`
+- `final_tie_resolved_by_local_rng`
+
+- 全経済評価結果、selected candidate、`rng_was_used`から導出する
+- local RNGは再実行しない
+- 浮動小数点比較は本番処理と同じ完全比較とする
+- 診断側で独自Toleranceを導入しない
+
+## 7. 第5巻への記録
+
+- `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_5.md`へ、次の大見出しを追記済みである
+- 「TVT-MP意思決定過程の診断方式と監査用ネットワーク構想（2026-10-09）」
+- §1から§22へ、調査結果、診断方式、出力契約、非干渉契約、監査項目、将来ネットワーク構想を記録した
+- 技術的な最新正本は同節である
+
+## 8. 将来の監査用ネットワーク構想
+
+- 内部に十字路交差点4 Nodeを正方形状に配置する構想
+- 外周にOD Nodeを8つ配置する構想
+- 隣接Node間は双方向とする
+- 各方向は別々の単車線Linkとする
+- 各内部交差点は原則として3 inlink・3 outlinkを持つ
+- 直進、右折、左折を含められる
+- 最初はTVT-MP対象を1 Nodeに限定し、その後2 Node、4 Nodeへ拡張する
+- Vehicleの走らせ方は探索的に変更し、監査項目は固定する
+
+この構想は次の位置づけとする。
+
+- 将来の監査用ネットワーク案
+- 正式実験条件ではない
+- 2流入1流出trialで診断方法を確立した後に使用する
+- 具体的なVehicle投入条件やネットワークパラメータは未確定
+
+## 9. 現在の変更状態
+
+最新コミット:
+
+- `d860ea2`
+- `implement and document TVT-MP initial trial fixes and research output schema update`
+
+ローカルHEADとoriginは一致済みである。
+
+現在のtracked変更:
+
+- `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_5.md`
+- 今回追記する`ORDER_EXCHANGE_PROGRESS_3.md`
+
+現在の未追跡:
+
+- `research_outputs/`
+- `diagnostics/order_control.zip`
+
+`research_outputs/`には、最新確認済みの初期小規模trial出力だけを保持している。
+
+`diagnostics/order_control.zip`には触れない。
+
+CursorはGit操作を行わない。
+
+## 10. 現在のBLOCKER
+
+- 診断方式の設計に対するBLOCKERはない
+- 本番コード変更は不要と確認済み
+- 既存trial script変更も不要と確認済み
+- driver wrapper方式で必要情報を取得できる見込みが確定した
+- 診断scriptはまだ未実装である
+- TVT-MPの候補形成と選択が正しかったという実証確認は、診断script実行後に行う
+- 現時点では、診断方法を確定した段階であり、処理の正しさを確認済みとは表現しない
+
+## 11. 最新再開地点
+
+現在の安全な節目:
+
+- 読み取り専用調査完了
+- 本番コード非変更方針確定
+- 既存trial script非変更方針確定
+- wrapper差替え方式確定
+- result参照連鎖確認済み
+- live World非保持確認済み
+- 診断出力4ファイル確定
+- 将来の4交差点・8 OD Node監査構想を第5巻へ記録済み
+- 進捗第3巻への現在地記録済み
+
+次の直接作業は、新規診断scriptの実装である。
+
+実装対象:
+
+- `research_scripts/diagnose_tvt_mp_small_scale_initial_decision_trace.py`
+
+実装対象外:
+
+- 本番コード
+- 既存trial script
+- 既存テスト
+- 既存研究出力
+
+診断script実装後に、構文確認、診断run、4ファイル生成確認、全300 timestep確認、T=14とT=18の全候補確認、選択理由確認、支払・補償・最終順位確認を行う。
+
+Git操作は利用者がTerminalで行う。
+
+`diagnostics/order_control.zip`には触れない。
