@@ -2545,16 +2545,10 @@ def test_unconfirmed_baseline_scan_does_not_use_passage_rng():
 
 
 def test_unconfirmed_baseline_missing_rank_facts_are_runtime_error():
-    missing = _world("missing_snapshot")
-    missing_vehicle = _place(missing, "missing_record", "in_a", visit_id=1)
-    _register_only(missing, [missing_vehicle])
-    _as_fork(missing)
-    error = _expect_runtime_error(_junction(missing).transfer)
-    assert "missing_record" in str(error)
-    assert "visit_id 1" in str(error)
-    assert "baseline_visit_snapshot" in str(error)
-    assert missing_vehicle.link.name == "in_a"
-
+    # A missing collector snapshot is not itself an error. That visit is
+    # outside the snapshot-fixed set and is ordered from the current visit.
+    # A collector record that does exist is not repaired from the current
+    # visit when one of its rank fields is broken.
     no_timestep = _world("missing_timestep")
     timestep_vehicle = _place(no_timestep, "no_timestep", "in_a", visit_id=1)
     _register_only(no_timestep, [timestep_vehicle])
@@ -2602,6 +2596,126 @@ def test_unconfirmed_baseline_missing_rank_facts_are_runtime_error():
     error = _expect_runtime_error(_junction(wrong_route).transfer)
     assert "route_next_link_name" in str(error)
     assert route_vehicle.link.name == "in_a"
+
+
+def test_unconfirmed_baseline_arrival_outside_snapshot_set_uses_current_visit_order():
+    world = _world("outside_snapshot_arrival_order", flow_capacity=1)
+    # Created first, so this vehicle has the smaller id and the higher merge
+    # priority. A later arrival must still wait.
+    late = _place(world, "outside_late", "in_b", visit_id=1)
+    early = _place(world, "outside_early", "in_a", visit_id=2)
+    world.get_link("in_a").merge_priority = 1
+    world.get_link("in_b").merge_priority = 9
+    assert late.id < early.id
+    early.order_control_current_visit["arrival_time"] = 8.0
+    early.order_control_current_visit["arrival_tiebreaker"] = 0.9
+    late.order_control_current_visit["arrival_time"] = 12.0
+    late.order_control_current_visit["arrival_tiebreaker"] = 0.1
+    expected_early_timestep = int(
+        round(early.order_control_current_visit["arrival_time"] / world.DELTAT)
+    )
+    expected_late_timestep = int(
+        round(late.order_control_current_visit["arrival_time"] / world.DELTAT)
+    )
+    assert expected_early_timestep < expected_late_timestep
+    _register_only(world, [late, early])
+    collector = _as_fork(world)
+    assert collector.get_baseline_visit_snapshot(early.name, 2) is None
+    assert collector.get_baseline_visit_snapshot(late.name, 1) is None
+    rng_state_before = world.rng.bit_generator.state
+    order_rng_state_before = world.order_control_rng.bit_generator.state
+    _junction(world).transfer()
+    assert world.rng.bit_generator.state == rng_state_before
+    assert world.order_control_rng.bit_generator.state == order_rng_state_before
+    assert early.link.name == "out"
+    assert late.link.name == "in_b"
+    # No collector passage record is normal for a visit outside the fixed set.
+    assert collector.get_baseline_visit_snapshot(early.name, 2) is None
+    assert collector.get_baseline_visit_snapshot(late.name, 1) is None
+
+
+def test_unconfirmed_baseline_collector_record_is_not_replaced_by_current_visit():
+    world = _world("collector_record_wins", flow_capacity=1)
+    collector_early = _place(world, "collector_early", "in_a", visit_id=1)
+    collector_late = _place(world, "collector_late", "in_b", visit_id=2)
+    # Current visit times are the reverse of the collector record.
+    collector_early.order_control_current_visit["arrival_time"] = 30.0
+    collector_early.order_control_current_visit["arrival_tiebreaker"] = 0.9
+    collector_late.order_control_current_visit["arrival_time"] = 1.0
+    collector_late.order_control_current_visit["arrival_tiebreaker"] = 0.1
+    world.get_link("in_a").merge_priority = 1
+    world.get_link("in_b").merge_priority = 9
+    _register_only(world, [collector_early, collector_late])
+    collector = _as_fork(world)
+    _register_unconfirmed_baseline_snapshot(
+        collector,
+        collector_early,
+        baseline_arrival_timestep=8,
+        arrival_tiebreaker=0.2,
+    )
+    _register_unconfirmed_baseline_snapshot(
+        collector,
+        collector_late,
+        baseline_arrival_timestep=12,
+        arrival_tiebreaker=0.1,
+    )
+    _junction(world).transfer()
+    assert collector_early.link.name == "out"
+    assert collector_late.link.name == "in_b"
+
+
+def test_unconfirmed_baseline_current_visit_arrival_gaps_are_runtime_error():
+    both_missing = _world("outside_both_arrival_missing")
+    both_vehicle = _place(both_missing, "both_missing", "in_a", visit_id=1)
+    both_vehicle.order_control_current_visit["arrival_time"] = None
+    both_vehicle.order_control_current_visit["arrival_tiebreaker"] = None
+    _register_only(both_missing, [both_vehicle])
+    _as_fork(both_missing)
+    error = _expect_runtime_error(_junction(both_missing).transfer)
+    assert "both_missing" in str(error)
+    assert "visit_id 1" in str(error)
+    assert "arrival_time" in str(error)
+    assert both_vehicle.link.name == "in_a"
+
+    time_only_missing = _world("outside_arrival_time_missing")
+    time_vehicle = _place(time_only_missing, "time_missing", "in_a", visit_id=1)
+    time_vehicle.order_control_current_visit["arrival_time"] = None
+    time_vehicle.order_control_current_visit["arrival_tiebreaker"] = 0.2
+    _register_only(time_only_missing, [time_vehicle])
+    _as_fork(time_only_missing)
+    error = _expect_runtime_error(_junction(time_only_missing).transfer)
+    assert "arrival_time" in str(error)
+    assert time_vehicle.link.name == "in_a"
+
+    tie_only_missing = _world("outside_tiebreaker_missing")
+    tie_vehicle = _place(tie_only_missing, "tie_missing", "in_a", visit_id=1)
+    tie_vehicle.order_control_current_visit["arrival_time"] = 8.0
+    tie_vehicle.order_control_current_visit["arrival_tiebreaker"] = None
+    _register_only(tie_only_missing, [tie_vehicle])
+    _as_fork(tie_only_missing)
+    error = _expect_runtime_error(_junction(tie_only_missing).transfer)
+    assert "arrival_tiebreaker" in str(error)
+    assert tie_vehicle.link.name == "in_a"
+
+    bad_time = _world("outside_arrival_time_invalid")
+    bad_time_vehicle = _place(bad_time, "bad_time", "in_a", visit_id=1)
+    bad_time_vehicle.order_control_current_visit["arrival_time"] = float("inf")
+    bad_time_vehicle.order_control_current_visit["arrival_tiebreaker"] = 0.2
+    _register_only(bad_time, [bad_time_vehicle])
+    _as_fork(bad_time)
+    error = _expect_runtime_error(_junction(bad_time).transfer)
+    assert "arrival_time" in str(error)
+    assert bad_time_vehicle.link.name == "in_a"
+
+    bad_tie = _world("outside_tiebreaker_invalid")
+    bad_tie_vehicle = _place(bad_tie, "bad_tie", "in_a", visit_id=1)
+    bad_tie_vehicle.order_control_current_visit["arrival_time"] = 8.0
+    bad_tie_vehicle.order_control_current_visit["arrival_tiebreaker"] = True
+    _register_only(bad_tie, [bad_tie_vehicle])
+    _as_fork(bad_tie)
+    error = _expect_runtime_error(_junction(bad_tie).transfer)
+    assert "arrival_tiebreaker" in str(error)
+    assert bad_tie_vehicle.link.name == "in_a"
 
 
 def _add_junction_outlink(world, link_name):

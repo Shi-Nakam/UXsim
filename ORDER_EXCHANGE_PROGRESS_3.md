@@ -4055,3 +4055,114 @@ Cursor実行結果:
 - push後に新しい出力directoryで初期小規模trialを再実行する
 - Git操作は利用者がTerminalで行う
 - `diagnostics/order_control.zip` には触れない
+
+# TVT順位適用baseline forkのsnapshot固定集合外Visit対応・trial再検証完了（2026-10-10）
+
+技術的な完全正本は、詳細設計第4巻「TVT順位適用baseline forkのsnapshot固定集合外Visit対応・trial再検証結果（2026-10-10）」である。trial監査上の接続は、詳細設計第5巻「TVT順位適用baseline再設計後の初期小規模trial監査更新（2026-10-10）」を参照する。
+
+## 1. trialで発見した追加問題
+
+- baseline到着順位走査の初回実装後、trialを新directoryへ再実行した
+- snapshot固定集合外の `veh_b1` でcollector snapshotが `None` となり、trialが停止した
+- collector snapshotが `None` であること自体は正常だった
+- baseline開始時に未出発で、その後baseline中に到着したVehicleはsnapshot固定集合外となる
+- 初回実装の前提が誤っていた
+
+## 2. 追加修正
+
+- collector snapshotがあるVisitはcollector記録を使う
+- collector snapshotがないVisitはcurrent Visitのarrival情報を使う
+- `baseline_arrival_timestep` は `int(round(arrival_time / node.W.DELTAT))`
+- 最終sort keyは両経路で共通
+- current Visitの到着情報欠落または部分状態は `RuntimeError`
+- collector記録がある場合はcurrent Visitで不整合を隠さない
+- confirmed群、clearance、通常スキップ、generic fork、real World、candidate local calculation、FCFSは変更しない
+
+## 3. 専用テスト
+
+- snapshot固定集合外の正常系テストを追加した
+- collector記録をcurrent Visitで置換しないテストを追加した
+- current Visit arrival欠落の `RuntimeError` を確認した
+- T=14型clearanceテストを維持した
+- 構文確認成功
+- 専用テスト71件成功
+
+## 4. trial再実行
+
+- 新出力directoryでtrialが正常完走した
+- `World.T = 300`
+- 完了trip 10 / 10
+- transaction count 2
+- trade ex-post feasible 2
+- 8ファイルを生成した
+- 既存出力を上書きしていない
+
+新出力directory:
+
+- `research_outputs/trial/tvt_mp_small_scale_initial_seed_1_baseline_arrival_order`
+
+## 5. 新trialの取引
+
+T=15:
+
+- buyer `veh_a3`
+- 3 timestep短縮
+- seller `veh_b2`
+- 1 timestep遅延
+- candidate予測とactualが一致
+- buyerとsellerはともにsatisfied
+
+T=22:
+
+- buyer `veh_b4`
+- 3 timestep短縮
+- seller `veh_a5`
+- 1 timestep遅延
+- candidate予測とactualが一致
+- buyerとsellerはともにsatisfied
+
+旧T=14で見られたsellerまで早くなる現象は、新trialの成立取引では発生していない。
+
+旧trialのT=13、T=14、T=18、T=21を最新の正式評価として使用しない。
+
+## 6. 関連回帰
+
+- baseline、candidate local、FCFS関連回帰195件を再実行した
+- `195 passed in 23.01s`
+- 失敗なし
+- 専用テスト71件と合わせて266件成功
+- 全suiteは未実行
+
+## 7. 現在の評価
+
+- snapshot固定集合内外の未確定Visitをbaseline到着順位で処理できるようになった
+- 初期小規模trialは最新実装で完走した
+- 成立取引ではbuyer短縮、seller遅延となった
+- candidate予測とactual passageは一致した
+- 旧trialと旧診断出力は正式評価結果として使用しない
+- 診断scriptによる候補形成から選択までの詳細監査は未完了
+
+## 8. 未追跡ファイル
+
+- 未追跡診断scriptは途中変更を含む
+- 旧診断出力は暫定
+- 旧trial出力と新trial出力は未追跡
+- `diagnostics/order_control.zip` は対象外
+- 今回の文書作業では変更、削除しない
+
+## 9. 最新再開地点
+
+- snapshot固定集合外対応の本番修正完了
+- 専用テスト71件成功
+- 関連回帰195件成功
+- 合計266件成功
+- 新trial正常完走
+- 新trialの取引T=15とT=22を確認
+- 第4巻、第5巻、進捗第3巻への文書化完了
+- 次の直接作業は3文書の差分をTerminalで独立確認すること
+- その後、本番コード、専用テスト、第4巻、第5巻、進捗第3巻をコミットする
+- commit結果確認後、別指示でpushする
+- push後に診断scriptを新契約と新trialへ整合させる
+- 新trial出力をGit管理対象へ含めるかは別途判断する
+- Git操作は利用者がTerminalで行う
+- `diagnostics/order_control.zip` には触れない

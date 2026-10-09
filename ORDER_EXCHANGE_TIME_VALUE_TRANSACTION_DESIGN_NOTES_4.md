@@ -15564,3 +15564,379 @@ Terminalで次の関連回帰を実行した。
 未追跡の診断scriptは、本番trial再実行後に新契約へ整合させる。
 
 今回の文書作業中は、trial、診断script、診断run、研究出力変更へ進まない。
+
+# TVT順位適用baseline forkのsnapshot固定集合外Visit対応・trial再検証結果（2026-10-10）
+
+## 1. 追加問題の発見
+
+baseline到着順位走査の初回実装後、専用テスト68件と関連回帰195件は成功した。
+
+その後、初期小規模trialを新しい出力directoryで再実行した。trialは、`veh_b1` の `baseline_visit_snapshot` が `None` であることを理由に `RuntimeError` で停止した。
+
+`veh_b1` はbaseline開始時点では未出発であり、snapshot固定集合外だった。baseline中に対象Nodeへ到着したため、`incoming_vehicles` には存在した。
+
+baseline collectorの正式契約では、snapshot固定集合外Visitのarrival記録およびpassage記録は正常に無視される。`get_baseline_visit_snapshot()` が `None` を返すこと自体は正常である。
+
+初回実装の「incomingにいる未確定Visitには必ずcollector snapshotがある」という前提が誤っていた。
+
+## 2. snapshot固定集合内外の区別
+
+順位未確定Visitを次の2種類へ区別する。
+
+### 2.1 snapshot固定集合内Visit
+
+- collector snapshotが存在する
+- collector記録を順位材料の正本として使用する
+- current Visitの値でcollector記録の欠落または不整合を補わない
+- collector記録の欠落、部分状態、不一致は `RuntimeError` とする
+
+使用する順位材料:
+
+1. `baseline_arrival_timestep`
+2. `arrival_tiebreaker`
+3. `vehicle_id`
+
+### 2.2 snapshot固定集合外Visit
+
+- baseline開始時点で未出発だったVehicleなどが該当し得る
+- baseline中に対象Nodeへ到着すると、未確定Visitの通過試行対象になる
+- collector snapshotが `None` であることは正常
+- current Visitの到着情報を順位材料の正本として使用する
+
+使用する値:
+
+- `current_visit["arrival_time"]`
+- `current_visit["arrival_tiebreaker"]`
+- `vehicle.id`
+
+`baseline_arrival_timestep` は次で算出する。
+
+    int(round(arrival_time / node.W.DELTAT))
+
+この式は、`Vehicle.record_order_control_node_arrival()` がcollectorへ到着時刻を記録するときの式と一致する。
+
+両経路の最終sort keyは同じである。
+
+1. `baseline_arrival_timestep`
+2. `arrival_tiebreaker`
+3. `vehicle_id`
+
+## 3. snapshot固定集合外Visitの検証
+
+collector snapshotが `None` の場合、current Visitについて次を検証する。
+
+- current Visitがdictとして存在する
+- current VisitのNodeが対象Nodeと一致する
+- current Visitのinlinkが開始時inlinkと一致する
+- `arrival_time` が存在する
+- `arrival_tiebreaker` が存在する
+- arrival情報が部分状態でない
+- `arrival_time` がboolではない有限数値である
+- `node.W.DELTAT` がboolではない有限の正数である
+- 算出したarrival timestepが非負のPython intである
+- `arrival_tiebreaker` がboolではない有限数値である
+- `vehicle.id` がboolではない非負のPython intである
+- outlinkが存在する
+- outlinkが対象Nodeの登録outlinkである
+
+incoming snapshotに存在するVehicleは到着済みである。したがって、collector snapshotがなく、current Visitのarrival情報も欠ける場合は、正常な未到着状態ではなく `RuntimeError` とする。
+
+欠落情報を `merge_priority` またはRNGで補わない。
+
+## 4. 実装変更
+
+変更したファイル:
+
+- `uxsim/order_control_tvt_mp_physical_transfer.py`
+- `tests_order_control_tvt_mp_physical_transfer.py`
+
+追加したprivate helper:
+
+- `_copy_validated_current_visit_rank_fields`
+
+既存処理の変更:
+
+- `_build_unconfirmed_baseline_candidates` で、collector snapshotの有無を明示的に分岐する
+- snapshotが存在すればcollector経路を使用する
+- snapshotが `None` ならcurrent Visit経路を使用する
+- どちらの経路も同じ3要素のsort keyへ接続する
+
+維持したもの:
+
+- timestep開始時の群固定
+- confirmed群の既存走査
+- confirmed群でのclearance停止
+- 通常通過不能の一時スキップ
+- 未確定群でのclearance停止
+- 既存の1台物理移動helper
+- 通過成功後のclearance履歴更新
+- generic baseline forkの通常合流
+- real Worldの未確定Visitに対する `RuntimeError`
+- candidate local virtual calculation
+- FCFS
+
+## 5. trial失敗時の出力
+
+最初の再実行は、simulation途中の `RuntimeError` で停止した。
+
+出力CSVを書き始める前の失敗であり、指定した新規trial directoryは作成されていなかった。
+
+既存出力directoryは変更、削除していない。
+
+## 6. 専用テスト修正
+
+初回実装時の次の前提を修正した。
+
+旧前提:
+
+- collector snapshot欠落は常に `RuntimeError`
+
+新契約:
+
+- collector snapshotが `None` でも、snapshot固定集合外Visitなら正常
+- current Visitのarrival情報が完全なら、その情報から順位材料を構築する
+- collector snapshotが存在する場合は、collector記録をcurrent Visitで補修しない
+
+次のテストを追加または修正した。
+
+- `test_unconfirmed_baseline_arrival_outside_snapshot_set_uses_current_visit_order`
+- `test_unconfirmed_baseline_collector_record_is_not_replaced_by_current_visit`
+- `test_unconfirmed_baseline_current_visit_arrival_gaps_are_runtime_error`
+- `test_unconfirmed_baseline_missing_rank_facts_are_runtime_error` の契約修正
+
+T=14型の次のテストも維持し、成功した。
+
+- `test_unconfirmed_clearance_of_earlier_arrival_blocks_later_same_outlink`
+
+## 7. 構文確認と専用テスト
+
+Cursor実行結果:
+
+- 構文確認成功
+- 専用テスト71件成功
+
+Terminalによる独立確認:
+
+- `snapshot is None` の分岐を確認
+- current Visit経路の変換式を確認
+- collector snapshotがある場合はcollector記録が優先されることを確認
+- clearance停止契約が維持されていることを確認
+- tracked変更が指定2ファイルだけであることを確認
+- 構文確認成功
+- 専用テスト `71 passed in 15.85s`
+
+Cursor報告とTerminal独立確認は一致した。
+
+## 8. trial再実行
+
+出力directory:
+
+- `research_outputs/trial/tvt_mp_small_scale_initial_seed_1_baseline_arrival_order`
+
+scenario name:
+
+- `tvt_mp_small_scale_initial_baseline_arrival_order_run`
+
+実行結果:
+
+- 正常完走
+- exit code 0
+- `World.T = 300`
+- driver call 300
+- 完了trip 10 / 10
+- transaction count 2
+- trade ex-post feasible 2
+- infeasible 0
+- unavailable 0
+
+生成ファイル:
+
+- `tvt_mp_transactions.csv`
+- `tvt_mp_visits.csv`
+- `tvt_mp_vehicles.csv`
+- `tvt_mp_nodes.csv`
+- `tvt_mp_scenario.csv`
+- `vehicle_vot.csv`
+- `manifest.json`
+- `run_summary.txt`
+
+既存出力directoryを上書きしていない。
+
+## 9. 新trialの取引
+
+### T=15
+
+buyer:
+
+- `veh_a3`
+- baseline passage T=27
+- candidate passage T=24
+- actual passage T=24
+- 3 timestep短縮
+- declared value total 3.7476586913008134
+
+seller:
+
+- `veh_b2`
+- baseline passage T=25
+- candidate passage T=26
+- actual passage T=26
+- 1 timestep遅延
+- required compensation 0.043772974018290514
+
+transaction:
+
+- official buyer payment 0.043772974018290514
+- official seller compensation 0.043772974018290514
+- buyer realized gain 3.703885717282523
+- buyer satisfied
+- seller satisfied
+- candidate予測とactual passageは一致
+
+### T=22
+
+buyer:
+
+- `veh_b4`
+- baseline passage T=34
+- candidate passage T=31
+- actual passage T=31
+- 3 timestep短縮
+- declared value total 2.291310945044598
+
+seller:
+
+- `veh_a5`
+- baseline passage T=32
+- candidate passage T=33
+- actual passage T=33
+- 1 timestep遅延
+- required compensation 0.5498660906751628
+
+transaction:
+
+- official buyer payment 0.5498660906751628
+- official seller compensation 0.5498660906751628
+- buyer realized gain 1.7414448543694352
+- buyer satisfied
+- seller satisfied
+- candidate予測とactual passageは一致
+
+## 10. 旧trialとの比較
+
+旧trial:
+
+- T=14
+  - buyer `veh_b2`: baseline 23、candidate 22、actual 22
+  - seller `veh_a2`: baseline 25、candidate 24、actual 24
+  - sellerまで1 timestep早くなる問題があった
+- T=18
+  - buyer `veh_b4`: baseline 30、candidate 27、actual 27
+  - seller `veh_a3`: baseline 28、candidate 29、actual 29
+
+新trial:
+
+- T=15
+  - buyer `veh_a3`: baseline 27、candidate 24、actual 24
+  - seller `veh_b2`: baseline 25、candidate 26、actual 26
+- T=22
+  - buyer `veh_b4`: baseline 34、candidate 31、actual 31
+  - seller `veh_a5`: baseline 32、candidate 33、actual 33
+
+次を結論として記録する。
+
+- 取引時刻と対象Vehicleは変化した
+- 新trialではbuyerが短縮しsellerが遅延する本来の時間交換になった
+- 全4 trade-scope Visitでcandidate予測とactual passageが一致した
+- 旧T=14で見られた「順位交換後にsellerまで早くなる」現象は、新trialでは成立取引に現れていない
+- 旧T=13、T=14、T=18、T=21の評価結果は、最新実装の正式結果として使用しない
+
+## 11. 関連回帰
+
+snapshot固定集合外対応後、Terminalで関連回帰195件を再実行した。
+
+対象:
+
+- baseline alignment
+- baseline driver registration
+- baseline fork alignment
+- candidate local state
+- candidate local vehicle advance
+- candidate local virtual calculation
+- FCFS versus UXsim standard grid network
+
+結果:
+
+- `195 passed in 23.01s`
+- 失敗なし
+
+今回の最終確認件数:
+
+- 専用テスト 71件
+- 関連回帰 195件
+- 合計266件成功
+
+全suiteは実行していない。
+
+## 12. 現時点の評価
+
+本番コードについて、次は完了した。
+
+- baseline到着順位走査
+- snapshot固定集合内Visit対応
+- snapshot固定集合外Visit対応
+- 専用テスト
+- 関連回帰
+- 初期小規模trial完走
+- 新trialの成立取引確認
+- 予測と実績の一致確認
+
+ただし、未追跡の診断scriptは新契約へまだ整合していない。
+
+生成済み旧診断出力も旧実装による暫定結果である。
+
+新trialの取引について候補形成から選択までの詳細監査は、診断script修正後に行う。
+
+## 13. 未追跡ファイル
+
+- `research_scripts/diagnose_tvt_mp_small_scale_initial_decision_trace.py` は未追跡であり、途中変更を含む
+- 旧診断出力directoryは未追跡であり、旧実装の暫定結果である
+- `tvt_mp_small_scale_initial_seed_1_vehicle_schema_v2` は旧trial出力である
+- `tvt_mp_small_scale_initial_seed_1_baseline_arrival_order` は今回の新trial出力である
+- `diagnostics/order_control.zip` は未追跡であり、対象外である
+
+今回の文書作業では、これらを変更、削除しない。
+
+## 14. 既存実装結果節の扱い
+
+第4巻の次の既存節は、snapshot固定集合外問題の発見前の記録として残す。
+
+- 「TVT順位適用baseline forkの順位未確定Visit走査 実装・独立確認・関連回帰結果（2026-10-10）」
+
+その節にある次の記述を、現在の最終状態として読まない。
+
+- snapshot固定集合外Visitのcollector snapshot欠落を考慮していない実装完了判断
+- 専用テスト68件
+- 合計263件
+- trial未実行
+- T=13、T=14、T=18、T=21が今後の再検証対象という再開情報
+
+最新状態は本節である。
+
+## 15. 次の作業
+
+次の直接作業は、3文書の差分をTerminalで独立確認することである。
+
+その後、次を同じコミット単位で保存する。
+
+- snapshot固定集合外対応の本番コード
+- 専用テスト
+- 第4巻の最新実装結果
+- 第5巻のtrial監査更新
+- 進捗第3巻の最新状態
+
+新trial出力directoryをGit管理対象へ含めるかは、既存のresearch output保存方針を確認してから別途判断する。
+
+コミットとpushは利用者がTerminalで行う。
+
+push後に、未追跡の診断scriptを新契約および新trialへ整合させる。

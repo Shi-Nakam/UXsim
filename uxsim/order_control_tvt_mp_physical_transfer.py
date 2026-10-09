@@ -11,8 +11,13 @@ call the downstream observer. A baseline fork records neither.
 A TVT rank-applying baseline fork tries confirmed visits in assigned_rank
 order, then unconfirmed visits in baseline arrival order. That arrival
 order is a temporary scan inside the fork. It is not written to the rank
-ledger. A generic baseline fork still uses ordinary merge.
+ledger. A visit with no collector snapshot is outside the snapshot-fixed
+set. Its arrival facts come from the current visit, using the same
+timestep conversion as baseline arrival recording. A generic baseline
+fork still uses ordinary merge.
 """
+
+import math
 
 from uxsim.order_control_tvt_mp_actual_passage import (
     commit_tvt_mp_actual_node_passage_history,
@@ -387,11 +392,14 @@ def _raise_baseline_rank_field_error(node, vehicle, visit_id, field_name, value)
 
 def _copy_validated_baseline_rank_fields(node, vehicle, visit_id, inlink, outlink, snapshot):
     """
-    Read one public collector snapshot and check the arrival-order facts.
+    Read one existing public collector snapshot and check its arrival facts.
 
-    A missing snapshot, a partial arrival record, or a route that does not
-    match the live outlink is a broken baseline record. Do not invent an
-    order from merge priority or a random draw.
+    Call this only when get_baseline_visit_snapshot returned a dict.
+    None is not a broken record. The caller uses the current visit for a
+    visit outside the snapshot-fixed set. A partial collector record, or a
+    route that does not match the live outlink, is not repaired from the
+    current visit. Do not invent an order from merge priority or a random
+    draw.
     """
     if not isinstance(snapshot, dict):
         _raise_baseline_rank_field_error(
@@ -474,12 +482,130 @@ def _copy_validated_baseline_rank_fields(node, vehicle, visit_id, inlink, outlin
     return baseline_arrival_timestep, arrival_tiebreaker, vehicle_id
 
 
+def _copy_validated_current_visit_rank_fields(
+    node, vehicle, visit_id, inlink, outlink, current_visit
+):
+    """
+    Rank facts for one visit outside the snapshot-fixed set.
+
+    get_baseline_visit_snapshot returns None for that visit. That is normal
+    when the vehicle had not departed at baseline start and arrived later.
+    The order uses the current visit arrival, converted with the same
+    expression as Vehicle.record_order_control_node_arrival:
+
+        int(round(arrival_time / node.W.DELTAT))
+
+    This scan only includes vehicles from the timestep's incoming snapshot,
+    so a missing or partial arrival is a broken record. It is not treated
+    as a not-yet-arrived visit.
+    """
+    if not isinstance(current_visit, dict):
+        _raise_baseline_rank_field_error(
+            node,
+            vehicle,
+            visit_id,
+            "order_control_current_visit",
+            current_visit,
+        )
+    if current_visit.get("node") is not node:
+        _raise_baseline_rank_field_error(
+            node, vehicle, visit_id, "node", current_visit.get("node")
+        )
+    if current_visit.get("inlink") is not inlink:
+        _raise_baseline_rank_field_error(
+            node, vehicle, visit_id, "inlink", current_visit.get("inlink")
+        )
+
+    arrival_time = current_visit.get("arrival_time")
+    arrival_tiebreaker = current_visit.get("arrival_tiebreaker")
+    # Both missing, or only one of the pair, stops the scan. Do not fill
+    # the gap from merge priority or a random draw.
+    if arrival_time is None:
+        _raise_baseline_rank_field_error(
+            node, vehicle, visit_id, "arrival_time", arrival_time
+        )
+    if arrival_tiebreaker is None:
+        _raise_baseline_rank_field_error(
+            node, vehicle, visit_id, "arrival_tiebreaker", arrival_tiebreaker
+        )
+
+    arrival_time_is_finite = (
+        not isinstance(arrival_time, bool)
+        and isinstance(arrival_time, (int, float))
+        and math.isfinite(arrival_time)
+    )
+    if not arrival_time_is_finite:
+        _raise_baseline_rank_field_error(
+            node, vehicle, visit_id, "arrival_time", arrival_time
+        )
+
+    deltat = node.W.DELTAT
+    deltat_is_finite_positive = (
+        not isinstance(deltat, bool)
+        and isinstance(deltat, (int, float))
+        and math.isfinite(deltat)
+        and deltat > 0
+    )
+    if not deltat_is_finite_positive:
+        _raise_baseline_rank_field_error(
+            node, vehicle, visit_id, "W.DELTAT", deltat
+        )
+
+    baseline_arrival_timestep = int(round(arrival_time / deltat))
+    if (
+        isinstance(baseline_arrival_timestep, bool)
+        or not isinstance(baseline_arrival_timestep, int)
+        or baseline_arrival_timestep < 0
+    ):
+        _raise_baseline_rank_field_error(
+            node,
+            vehicle,
+            visit_id,
+            "baseline_arrival_timestep",
+            baseline_arrival_timestep,
+        )
+
+    arrival_tiebreaker_is_finite = (
+        not isinstance(arrival_tiebreaker, bool)
+        and isinstance(arrival_tiebreaker, (int, float))
+        and math.isfinite(arrival_tiebreaker)
+    )
+    if not arrival_tiebreaker_is_finite:
+        _raise_baseline_rank_field_error(
+            node, vehicle, visit_id, "arrival_tiebreaker", arrival_tiebreaker
+        )
+
+    vehicle_id = vehicle.id
+    if isinstance(vehicle_id, bool) or not isinstance(vehicle_id, int) or vehicle_id < 0:
+        _raise_baseline_rank_field_error(
+            node, vehicle, visit_id, "vehicle_id", vehicle_id
+        )
+
+    if outlink is None:
+        _raise_baseline_rank_field_error(
+            node, vehicle, visit_id, "route_next_link", outlink
+        )
+    outlink_is_registered = False
+    for registered_outlink in node.outlinks.values():
+        if registered_outlink is outlink:
+            outlink_is_registered = True
+            break
+    if not outlink_is_registered:
+        _raise_baseline_rank_field_error(
+            node, vehicle, visit_id, "route_next_link", outlink
+        )
+
+    return baseline_arrival_timestep, arrival_tiebreaker, vehicle_id
+
+
 def _build_unconfirmed_baseline_candidates(node, unconfirmed_baseline_vehicles):
     """
     Order the fixed unconfirmed set by baseline arrival.
 
-    Vehicles that have not arrived are not in this set. Do not pull extra
-    visits from the collector. The collector return order is not the rank.
+    A collector snapshot is the record for a snapshot-fixed visit. None
+    means the visit is outside that set, so the current visit arrival is
+    used. Do not pull extra visits from the collector. The collector return
+    order is not the rank.
     """
     baseline_collector = _require_tvt_rank_applying_baseline_collector(node)
     candidates = []
@@ -494,25 +620,31 @@ def _build_unconfirmed_baseline_candidates(node, unconfirmed_baseline_vehicles):
             visit_id,
         )
         if snapshot is None:
-            _raise_baseline_rank_field_error(
+            (
+                baseline_arrival_timestep,
+                arrival_tiebreaker,
+                vehicle_id,
+            ) = _copy_validated_current_visit_rank_fields(
                 node,
                 vehicle,
                 visit_id,
-                "baseline_visit_snapshot",
-                None,
+                inlink,
+                outlink,
+                current_visit,
             )
-        (
-            baseline_arrival_timestep,
-            arrival_tiebreaker,
-            vehicle_id,
-        ) = _copy_validated_baseline_rank_fields(
-            node,
-            vehicle,
-            visit_id,
-            inlink,
-            outlink,
-            snapshot,
-        )
+        else:
+            (
+                baseline_arrival_timestep,
+                arrival_tiebreaker,
+                vehicle_id,
+            ) = _copy_validated_baseline_rank_fields(
+                node,
+                vehicle,
+                visit_id,
+                inlink,
+                outlink,
+                snapshot,
+            )
         candidates.append(
             _UnconfirmedBaselinePassageCandidate(
                 vehicle,

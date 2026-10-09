@@ -1148,3 +1148,171 @@ FIFO False候補、unresolved候補、経済的不成立候補、成立したが
 - 次の直接作業は、新規診断scriptの実装前設計および実装である
 - CursorはGit操作を行わない
 - `diagnostics/order_control.zip`には触れない
+
+# TVT順位適用baseline再設計後の初期小規模trial監査更新（2026-10-10）
+
+## 1. 本節の位置づけ
+
+第5巻は、初期小規模trial以後に発見された追加不具合、診断、監査、追加設計を記録する。
+
+今回、baseline到着順位走査の実装後にtrialを再実行し、snapshot固定集合外Visitの追加問題を発見した。問題修正後に新trialを完走した。
+
+本節はtrial監査上の意味と、旧診断記録から最新状態への接続を記録する。
+
+技術的な完全正本は、第4巻末尾の次の節である。
+
+- 「TVT順位適用baseline forkのsnapshot固定集合外Visit対応・trial再検証結果（2026-10-10）」
+
+実装方式の前提は、第4巻の次の節を参照する。
+
+- 「TVT順位適用baseline forkの順位未確定Visit走査 実装方式の確定（2026-10-10）」
+
+進捗の最新状態は、進捗第3巻末尾の次の節を参照する。
+
+- 「TVT順位適用baseline forkのsnapshot固定集合外Visit対応・trial再検証完了（2026-10-10）」
+
+## 2. trial監査で発見した追加問題
+
+- baseline開始時に未出発だったVehicleはsnapshot固定集合に含まれない
+- そのVehicleがbaseline中に対象Nodeへ到着した場合も、baseline到着順位に加える必要がある
+- collectorはsnapshot固定集合外Visitを正常に記録対象外とする
+- collector snapshotが `None` であることは正常に起こる
+- 初回実装はこの正常な `None` を `RuntimeError` にしていた
+- 専用テストだけではこの経路を検出できず、実trial再実行によって判明した
+- trial再実行を、単なる結果生成ではなく、実経路の統合確認として行う必要性が確認された
+
+## 3. 追加修正の意味
+
+- snapshot固定集合内Visitはcollector記録を正本とする
+- snapshot固定集合外Visitはcurrent Visitのarrival情報を使う
+- どちらも同じbaseline到着順位へ接続する
+- collector記録がある場合はcurrent Visitで不整合を隠さない
+- collector記録がない場合でも、incomingにいるVehicleのarrival情報欠落は `RuntimeError` とする
+- `merge_priority`、通過選択用RNG、`hard_deterministic_mode` を順位に使わない契約は維持した
+- clearance、通常スキップ、confirmed群、generic baseline fork、real World、candidate local virtual calculation、FCFSの契約は変更していない
+
+## 4. 新trialの完走結果
+
+新trial出力directory:
+
+- `research_outputs/trial/tvt_mp_small_scale_initial_seed_1_baseline_arrival_order`
+
+scenario name:
+
+- `tvt_mp_small_scale_initial_baseline_arrival_order_run`
+
+結果:
+
+- 正常完走
+- `World.T = 300`
+- driver call 300
+- 完了trip 10 / 10
+- transaction count 2
+- trade ex-post feasible 2
+- infeasible 0
+- unavailable 0
+- 8ファイル生成
+- 既存出力を上書きしていない
+
+## 5. 成立取引の変化
+
+新trialの成立取引は次の2件である。
+
+### T=15
+
+- buyerは `veh_a3`
+- baseline T=27
+- candidate T=24
+- actual T=24
+- 3 timestep短縮
+- sellerは `veh_b2`
+- baseline T=25
+- candidate T=26
+- actual T=26
+- 1 timestep遅延
+- buyerとsellerはともにsatisfied
+- candidate予測とactual passageは一致
+
+### T=22
+
+- buyerは `veh_b4`
+- baseline T=34
+- candidate T=31
+- actual T=31
+- 3 timestep短縮
+- sellerは `veh_a5`
+- baseline T=32
+- candidate T=33
+- actual T=33
+- 1 timestep遅延
+- buyerとsellerはともにsatisfied
+- candidate予測とactual passageは一致
+
+旧trialで成立していたT=14とT=18は、最新実装の成立取引ではない。
+
+## 6. 旧trialおよび旧診断結果の扱い
+
+- 旧trialで成立していたT=14とT=18は、最新実装の成立取引ではない
+- 旧T=14ではsellerまでbaselineより早くなる現象があった
+- 新trialではbuyerが短縮しsellerが遅延する時間交換になった
+- 旧T=13、T=14、T=18、T=21の評価を、最新実装の正式評価として使用しない
+- 旧trial出力directoryは歴史的な暫定出力として残す
+- 旧診断出力は旧実装を対象とした暫定結果である
+- 旧診断出力を新trialの候補形成または選択の根拠として使用しない
+
+## 7. 診断方式の維持と修正
+
+第5巻に記録済みの次の診断設計は維持する。
+
+- driver wrapper方式
+- live World非保持
+- 出力4ファイル
+- 候補段階の分離
+- 選択理由の監査
+- 将来の4交差点監査用ネットワーク構想
+
+ただし、未追跡診断scriptには次の対応が必要である。
+
+- 新trialを対象にする
+- T=15とT=22を詳細監査する
+- baseline順位とcandidate local rankの母集団を混同しない
+- snapshot固定集合内外の順位材料を正しく解釈する
+- 旧T=14およびT=18を最新結果として固定しない
+- 旧診断出力directoryを上書きしない
+- 新しい出力directoryを使用する
+
+診断script修正と再実行は、本番修正のコミットとpush後に行う。
+
+## 8. テストと回帰
+
+- 専用テスト71件成功
+- 関連回帰195件成功
+- 合計266件成功
+- 全suiteは未実行
+- trialは正常完走
+- candidate予測とactual passageは、成立2取引の全4 trade-scope Visitで一致
+
+## 9. 現在の監査評価
+
+- 旧T=14のseller早期通過問題は、新trialの成立取引では解消した
+- 新trialの成立取引は、buyer短縮、seller遅延という時間交換の基本構造と整合する
+- 予測とactual passageも一致する
+- ただし、候補形成、全候補比較、FIFO、局所仮想計算、経済評価、最終選択理由の詳細監査はまだ完了していない
+- 新trialの処理全体が正しいという最終判断は、診断scriptを新契約へ整合させて再実行した後に行う
+- 完走と2件の取引結果だけで、候補選択過程全体を確認済みとは表現しない
+
+## 10. 最新再開地点
+
+- snapshot固定集合外Visit問題の修正完了
+- 専用テスト71件成功
+- 関連回帰195件成功
+- 新trial正常完走
+- T=15とT=22の成立取引を確認
+- 旧trialと旧診断出力を暫定扱いとした
+- 技術詳細は第4巻最新節へ記録した
+- 次の直接作業は3文書の差分をTerminalで独立確認することである
+- その後、本番コード、専用テスト、第4巻、第5巻、進捗第3巻をコミットする
+- push後に未追跡診断scriptを新契約と新trialへ整合させる
+- 新trial出力をGit管理対象へ含めるかは別途判断する
+- Git操作は利用者がTerminalで行う
+- `diagnostics/order_control.zip` には触れない
