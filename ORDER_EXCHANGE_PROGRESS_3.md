@@ -4285,3 +4285,59 @@ merge Nodeのactual順位1から10を確認した。
 - 新診断出力のGit管理は別途判断
 - Git操作は利用者がTerminalで行う
 - diagnostics/order_control.zipには触れない
+
+# 初期小規模trial・診断出力をGit管理対象外として保持（2026-10-10）
+
+## 1. Terminal確認
+
+次を記録する。
+
+- `git check-ignore -v`では代表出力（`manifest.json`、`decision_trace.json`）に該当規則なし
+- `git ls-files 'research_outputs/**'`は出力なし
+- `git log --oneline --all -- 'research_outputs/'`は出力なし
+- `research_outputs/`にはtracked実績と過去コミット実績がない
+
+## 2. 採用方針
+
+次を記録する。
+
+- 旧trial出力（`tvt_mp_small_scale_initial_seed_1_vehicle_schema_v2`）を追加しない
+- 旧診断出力（`tvt_mp_small_scale_initial_seed_1_decision_trace`）を追加しない
+- 新trial出力（`tvt_mp_small_scale_initial_seed_1_baseline_arrival_order`）を追加しない
+- 新診断出力（`tvt_mp_small_scale_initial_seed_1_baseline_arrival_order_decision_trace`）を追加しない
+- 未追跡のローカル実行結果として保持する
+- 削除しない
+- `.gitignore`を変更しない
+- 正式実験結果の保存方針は別途決定する
+- 出力をGit管理しないことは、出力を不要と判断したことや削除してよいことを意味しない
+
+## 3. 再現性
+
+次を記録する。
+
+- trial script（`research_scripts/run_tvt_mp_small_scale_initial.py`）と診断script（`research_scripts/diagnose_tvt_mp_small_scale_initial_decision_trace.py`）はGit管理済み
+- seed、scenario、directory、主要結果は第4巻、第5巻、進捗第3巻へ記録済み
+- 必要時は既存directoryを上書きせず、新directoryへ再生成する
+- 再現性はscript、設定、設計文書、進捗文書で確保する
+
+## 4. 未追跡状態
+
+次を記録する。
+
+- 新旧trial出力は未追跡のまま
+- 新旧診断出力は未追跡のまま
+- `diagnostics/order_control.zip`も未追跡のまま
+- この状態は今回の採用方針と整合する
+
+## 5. 最新再開地点
+
+次を記録する。
+
+- 出力のGit管理方針を確定した
+- 第5巻と進捗第3巻への文書化完了
+- 次の直接作業は文書差分のTerminal独立確認
+- その後、文書2ファイルだけをコミット
+- commit確認後、別指示でpush
+- 出力ファイルはaddしない
+- `diagnostics/order_control.zip`もaddしない
+- Git操作は利用者がTerminalで行う

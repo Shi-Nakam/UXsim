@@ -1579,3 +1579,121 @@ candidate detail付きdecisionで6行捕捉した。
 その後、診断script、第4巻、第5巻、進捗第3巻をコミットする。
 
 新診断出力をGit管理対象へ含めるかは別途判断する。
+
+# 初期小規模trial・診断生成出力のGit管理方針（2026-10-10）
+
+## 1. 確認内容
+
+Terminalで次を確認した。
+
+- 代表ファイル（`research_outputs/trial/tvt_mp_small_scale_initial_seed_1_baseline_arrival_order/manifest.json`、`research_outputs/trial/tvt_mp_small_scale_initial_seed_1_baseline_arrival_order_decision_trace/decision_trace.json`）について`git check-ignore -v`を実行した結果、出力なしであり、`.gitignore`規則による除外対象ではなかった
+- `git ls-files 'research_outputs/**'`の結果、trackedファイルはなかった
+- `git log --oneline --all -- 'research_outputs/'`の結果、過去コミットはなかった
+
+## 2. 採用方針
+
+次を採用する。
+
+- 旧trial、旧診断、新trial、新診断の生成出力をGit管理対象へ追加しない
+- 未追跡のローカル実行結果として保持する
+- 削除しない
+- 上書きしない
+- `.gitignore`は変更しない
+- 今回の初期小規模trial・診断結果を正式実験結果の保存方針へ一般化しない
+- 出力が未追跡として`git status`へ表示される状態を許容する
+- 将来、正式実験結果の保存方針を別途決定した場合は、その方針に従って改めて判断する
+
+理由:
+
+- `research_outputs/`には既存のtracked実績がない
+- 過去のGit履歴にも同directoryの保存実績がない
+- 今回の出力は初期小規模trialと診断runの実行結果である
+- 旧出力には旧実装による暫定結果が含まれる
+- 新出力も初期小規模trialの監査用結果であり、正式実験結果ではない
+- 実行結果をコード・設計文書と同じコミットへ混在させない
+- repositoryの履歴を多数の生成CSV・JSONで増大させない
+- 必要な結果、数値、出力directory、再現条件、監査結論は第4巻、第5巻、進捗第3巻へ既に記録している
+- trial scriptと診断scriptはGit管理済みであり、同じ条件で再生成できる
+- 出力をGit管理しないことは、出力を不要と判断したことや削除してよいことを意味しない
+
+## 3. 各出力の位置づけ
+
+### 旧trial出力
+
+- directory: `research_outputs/trial/tvt_mp_small_scale_initial_seed_1_vehicle_schema_v2`
+- 旧baseline実装による初期trial出力
+- 歴史的な暫定出力
+- 最新の正式評価には使用しない
+- Gitへ追加せず、削除せずローカルに保持する
+
+### 旧診断出力
+
+- directory: `research_outputs/trial/tvt_mp_small_scale_initial_seed_1_decision_trace`
+- 旧baseline実装を対象とした診断出力
+- 歴史的な暫定出力
+- 最新の正式評価には使用しない
+- Gitへ追加せず、削除せずローカルに保持する
+
+### 新trial出力
+
+- directory: `research_outputs/trial/tvt_mp_small_scale_initial_seed_1_baseline_arrival_order`
+- snapshot固定集合外Visit対応後の最新初期小規模trial出力
+- 正常完走
+- T=15とT=22の成立取引を含む
+- 初期小規模trialの最新結果
+- 正式実験結果ではない
+- Gitへ追加せずローカルに保持する
+
+### 新診断出力
+
+- directory: `research_outputs/trial/tvt_mp_small_scale_initial_seed_1_baseline_arrival_order_decision_trace`
+- 最新baseline契約へ整合した診断出力
+- 候補形成から実通過までの詳細監査に使用した
+- 最新trial CSVとの照合済み
+- 初期小規模trialの監査結果
+- 正式実験結果ではない
+- Gitへ追加せずローカルに保持する
+
+### diagnostics/order_control.zip
+
+- 未追跡
+- 今回の判断対象外
+- Gitへ追加しない
+- 変更・削除しない
+
+## 4. 再現性
+
+- 最新trialは`research_scripts/run_tvt_mp_small_scale_initial.py`を基礎として再生成可能
+- 最新診断は`research_scripts/diagnose_tvt_mp_small_scale_initial_decision_trace.py`で再生成可能
+- 最新trialの出力directory名とscenario nameは文書へ記録済み
+- 新診断の出力directory名、4ファイル構成、監査結果も文書へ記録済み
+- seed、評価期間、baseline horizon、成立時刻、主要取引結果も設計文書と進捗文書へ記録済み
+- 再現性はscript、設定、設計文書、進捗文書で確保する
+- ローカル出力自体をGit管理しない
+- 必要時は既存directoryを上書きせず、新しい出力directoryへ再生成する
+- 出力をGit管理しないことと、出力を削除してよいことは別である
+
+## 5. 将来の正式実験
+
+- 正式実験結果をGitで保存するかは未確定
+- 正式実験では、Git、外部ストレージ、アーカイブ、集計結果のみ保存などを別途検討する
+- 今回の初期trial出力方針を自動適用しない
+
+`.gitignore`の扱い:
+
+- 今回は`.gitignore`を変更しない
+- `research_outputs/`全体をignoreすると、将来正式実験結果を選択的にGit管理する判断を妨げる可能性がある
+- 現時点で正式実験結果の保存方式は未確定
+- 今回必要なのは、未追跡出力をコミット対象から外す運用判断である
+- 将来、生成出力を一律除外する方針を採用する場合は、別の設計判断として検討する
+
+## 6. 最新再開地点
+
+- 新旧trial・診断出力をGit管理しない方針を採用した
+- `.gitignore`は変更しない
+- 出力directoryは削除しない
+- 次の直接作業は第5巻と進捗第3巻の文書差分をTerminalで独立確認すること
+- その後、文書2ファイルだけをコミットする
+- commit結果確認後、別指示でpushする
+- Git操作は利用者がTerminalで行う
+- `diagnostics/order_control.zip`には触れない
