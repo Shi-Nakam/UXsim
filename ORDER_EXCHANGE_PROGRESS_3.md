@@ -4341,3 +4341,204 @@ merge Nodeのactual順位1から10を確認した。
 - 出力ファイルはaddしない
 - `diagnostics/order_control.zip`もaddしない
 - Git操作は利用者がTerminalで行う
+
+# 全テストsuite中断・失敗候補の限定再確認（2026-10-10）
+
+## 1. 全suiteを開始した目的
+
+次を記録する。
+
+- 正式実験へ進む前に、今回直接変更していないBATCH、FCFS、信号制御、各種ネットワーク、補助機能を含め、予想外の回帰がないか確認する目的で`pytest -q`を開始した
+- ただし、開始前に実行時間、対象範囲、停止基準を利用者へ十分説明していなかった
+- 実行は非常に長時間となり、進行途中で少なくとも1件の`F`が表示された
+- 全suiteの完走を待たず、実行を停止する判断とした
+- 今後、長時間の全suiteを実行する場合は、目的、想定時間、ログ保存方法、失敗時停止方法を先に明示する
+
+## 2. 停止時の状況
+
+次を記録する。
+
+- 元のTerminalでは`Control + C`および`Control + Z`が機能しなかった
+- Cursorの`Terminal → New Terminal`で別Terminalを開いた
+- 次を実行してpytestを終了した
+
+  `pkill -TERM -f "pytest -q"`
+
+- `pkill`は出力なしでプロンプトへ戻った
+- 次を実行した
+
+  `pgrep -af pytest`
+
+- 出力はなく、pytest processが残っていないことを確認した
+- 古いTerminalが消えたため、途中までの完全なpytest出力は回収できなかった
+- したがって、今回の全suiteについて、実行件数、成功件数、失敗件数、失敗一覧は確定できない
+- 全suite成功とは記録しない
+
+## 3. pytest cacheの確認
+
+次を記録する。
+
+- `.pytest_cache/v/cache/lastfailed`を読み取った
+- 次の4件が保存されていた
+
+  - `tests_order_control_tvt_right_of_entry_selection.py::test_no_right_of_entry_when_remaining_empty`
+  - `tests_order_control_tvt_mp_driver.py::test_exec_simulation_and_node_transfer_do_not_call_the_driver`
+  - `tests/test_other_functions.py::test_osm_import`
+  - `tests_order_control_tvt_mp_atomic_apply.py::test_zero_sellers_writes_only_the_buyer_row`
+
+- `lastfailed`は過去のpytest実行から残った項目を含み得る
+- 今回の全suiteで表示された1件の`F`と、この4件全部が同一であるとは判断しなかった
+
+## 4. 古いテスト名の確認
+
+最初にcache記載の4つのnode IDをそのまま指定して実行しようとしたが、3件は現在のテスト名と一致せず、pytest collection段階で`not found`となった。
+
+この最初の限定コマンドでは、4件とも正常なテスト実行結果を得ていない。
+
+原典をgrepで確認し、次を特定した。
+
+### right-of-entry関連
+
+旧cache名:
+
+- `test_no_right_of_entry_when_remaining_empty`
+
+現在存在する関連テスト:
+
+- `test_no_right_of_entry_when_remaining_empty_via_manual_result`
+- `test_no_right_of_entry_zero_decision_window_and_all_nonparticipating`
+
+### driver接続関連
+
+旧cache名:
+
+- `test_exec_simulation_and_node_transfer_do_not_call_the_driver`
+
+現在存在するテスト:
+
+- `test_exec_simulation_connects_driver_but_node_transfer_does_not`
+
+### atomic apply関連
+
+旧cache名:
+
+- `test_zero_sellers_writes_only_the_buyer_row`
+
+現在のファイル内には、この検索語に一致するテストはなかった。
+
+### OSM関連
+
+次は現在も存在した。
+
+- `tests/test_other_functions.py::test_osm_import`
+
+## 5. 現在存在する関連テストの限定再実行
+
+次の4件だけを、`--tb=short`付きで実行した。
+
+- `test_no_right_of_entry_when_remaining_empty_via_manual_result`
+- `test_no_right_of_entry_zero_decision_window_and_all_nonparticipating`
+- `test_exec_simulation_connects_driver_but_node_transfer_does_not`
+- `test_osm_import`
+
+結果:
+
+- 3件成功
+- 1件失敗
+- 実行時間1.20秒
+- warning 7件
+
+成功した3件:
+
+- right-of-entry関連2件
+- TVT-MP driver接続関連1件
+
+失敗した1件:
+
+- `tests/test_other_functions.py::test_osm_import`
+
+## 6. test_osm_importの失敗原因
+
+失敗原因は次である。
+
+- `osmnx`が現在のPython環境へインストールされていない
+- `OSMImporter.import_osm_data()`が`import osmnx as ox`で`ModuleNotFoundError`となった
+- その後、OSM importerが説明用の`ImportError`を送出した
+- error messageは、optional moduleである`osmnx`を利用するには`pip install osmnx`が必要という内容だった
+
+次を明記する。
+
+- `osmnx`はOSM import機能用の任意依存である
+- 今回変更したTVT-MP baseline通過処理、snapshot固定集合外対応、候補形成、診断scriptとは直接関係しない
+- TVT-MP関連の限定再実行3件は成功した
+- この失敗を今回のTVT-MP変更による回帰とは扱わない
+- 今回は`osmnx`をインストールしない
+- `test_osm_import`を修正またはskipへ変更しない
+- 全suiteを再実行しない
+
+## 7. warningの扱い
+
+限定再実行では、次のwarningも表示された。
+
+- `PytestUnknownMarkWarning`として未登録の`pytest.mark.flaky`
+- NumPy由来の`PytestCollectionWarning`
+- `OSMImporter`のdeprecation warning
+
+次を明記する。
+
+- これらは今回の`test_osm_import`失敗の直接原因ではない
+- 今回のTVT-MP作業範囲では修正しない
+- warning解消を今回の正式実験準備の前提条件にはしない
+
+## 8. TVT-MPで確認済みの範囲
+
+全suiteは完走していないが、TVT-MPに直接関係する次は既に成功している。
+
+- 専用テスト71件
+- baseline、candidate local、FCFS関連回帰195件
+- 合計266件
+- 初期小規模trial正常完走
+- 完了trip 10 / 10
+- T=15とT=22の成立取引
+- candidate予測とactual passageの一致
+- 診断runのdriver call 300
+- decision row 300
+- 最新trial CSVとの完全比較
+- candidate baseline local順位
+- candidate trade local順位
+- trade scope内rank change
+- baseline Node passage順
+- actual Node passage順
+- snapshot固定集合外baseline交通と取引候補の非混入
+
+## 9. 現時点の判断
+
+次を記録する。
+
+- 全suite成功は未確認である
+- 全suite実行は中断した
+- 中断前に表示された`F`の完全な原出力は回収できていない
+- pytest cacheから確認した現在存在する関連テストでは、TVT-MP関連3件は成功した
+- 確認できた失敗は、任意依存`osmnx`未導入による`test_osm_import`だけである
+- 現時点で、今回のTVT-MP変更に起因する新たな失敗は確認されていない
+- 正式実験準備を、`osmnx`未導入だけを理由に停止しない
+- 全suite再実行は、必要性、依存環境、実行時間、ログ保存方式を別途整理した場合にのみ検討する
+
+## 10. 最新再開地点
+
+次を記録する。
+
+- 全suiteを中断した
+- pytest processが残っていないことを確認した
+- 現在存在する関連テスト4件を限定再実行した
+- TVT-MP関連3件は成功した
+- `test_osm_import`は`osmnx`未導入により失敗した
+- 今回は`osmnx`をインストールしない
+- 全suiteを再実行しない
+- 次の直接作業は、本節の文書差分をTerminalで独立確認することである
+- その後、進捗第3巻だけをコミットする
+- commit結果確認後、別指示でpushする
+- push後、複数Node・複数ネットワークを用いる正式実験の準備条件整理へ進む
+- Git操作は利用者がTerminalで行う
+- 未追跡のresearch_outputsをaddしない
+- `diagnostics/order_control.zip`にも触れない
