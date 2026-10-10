@@ -1316,3 +1316,266 @@ scenario name:
 - 新trial出力をGit管理対象へ含めるかは別途判断する
 - Git操作は利用者がTerminalで行う
 - `diagnostics/order_control.zip` には触れない
+
+# TVT-MP意思決定診断scriptの最新baseline契約整合・詳細監査結果（2026-10-10）
+
+## 1. 今回の目的
+
+次を記録する。
+
+- 未追跡診断scriptに、Node全体のcollector到着順とcandidate内trade local順位を比較する途中実装があった
+- 両者は母集団が異なるため不適切だった
+- candidate内local順位とNode全体通過順位を分離した
+- snapshot固定集合外Visitを含むbaseline Node通過順を診断側で捕捉した
+- actual Node passage historyと最新trial CSVを照合した
+
+## 2. 変更したファイル
+
+- `research_scripts/diagnose_tvt_mp_small_scale_initial_decision_trace.py`のみ
+
+本番コード、trial script、本番テスト、研究出力schemaは変更していない。
+
+## 3. 維持した診断処理
+
+次を記録する。
+
+- trial moduleによるWorld構築
+- trial mainの非呼出し
+- 研究用CSV非生成
+- driver wrapper
+- 元driverを1回だけ呼ぶ
+- 元resultを返す
+- 段階連鎖
+- 経済評価
+- 選択理由
+- 支払・補償
+- final rank
+- 全300 timestep
+- 4ファイル構成
+- directory非上書き
+
+## 4. 廃止した誤った順位概念
+
+次を廃止した。
+
+- `baseline_official_order`
+- `baseline_official_rank`
+- `trade_scope_baseline_official_order`
+- `official_rank_by_visit_key`
+- collector到着順とcandidate trade local順位の比較
+- collector由来passage列を完全なNode passage orderとする扱い
+
+## 5. candidate local順位
+
+baseline local order:
+
+- `candidate_visits`の保存順
+- 1始まりの`candidate_baseline_local_rank`
+- 再ソートしない
+
+trade local order:
+
+- `trade_order`
+- `trade_rank_items()`
+- `assigned_rank()`
+
+両者を同じcandidate Visit集合内で比較する。
+
+## 6. trade scope内rank change
+
+次はtrade scope内Visitだけを含む。
+
+- `trade_scope_baseline_local_order`
+- `trade_scope_candidate_order`
+- `rank_changes`
+
+trade scope外Visitを入れない。
+
+候補集合全体の`trade_order`は別項目として維持する。
+
+## 7. baseline Node passage捕捉
+
+診断script内で`Node._transfer_one_vehicle_between_links()`を一時wrapperへ差し替えた。
+
+次を記録する。
+
+- TVT順位適用baseline forkの対象Nodeだけを観測
+- generic fork、real World、candidate local Worldを除外
+- 元methodを1回だけ呼ぶ
+- 正常return後だけ記録
+- 成功記録順をNode passage rankとする
+- 同一timestepでも再ソートしない
+- driver呼出し単位の一時bufferを使用
+- live objectを保持しない
+
+## 8. 集合内外のarrival source
+
+集合内:
+
+- `collector_snapshot`
+- collectorのarrival timestep、tiebreaker、vehicle ID
+- `snapshot_fixed = True`
+
+集合外:
+
+- `current_visit_outside_snapshot_set`
+- current Visitのarrival time、tiebreaker、live vehicle ID
+- `snapshot_fixed = False`
+- timestep変換は`int(round(arrival_time / node.W.DELTAT))`
+
+## 9. actual Node passage
+
+simulation終了後に正式registryを保存順で読んだ。
+
+- `actual_node_passage_orders`
+- rank連続
+- VisitKey重複なし
+- timestep非減少
+- 再ソートなし
+
+## 10. wrapper復元
+
+設定順:
+
+1. Node passage observer
+2. driver wrapper
+
+復元順:
+
+1. driver wrapper
+2. Node passage observer
+
+両者を`try/finally`で復元し、終了後に元objectまたはmethodへ戻ったことを確認した。
+
+## 11. 出力
+
+新directory:
+
+- `research_outputs/trial/tvt_mp_small_scale_initial_seed_1_baseline_arrival_order_decision_trace`
+
+4ファイル:
+
+- `decision_summary.csv`
+- `candidate_summary.csv`
+- `selected_result_summary.csv`
+- `decision_trace.json`
+
+CSV schemaは変更していない。
+
+## 12. 最新trial CSV照合
+
+最新trial directoryのtransactionsとvisitsだけを読み取った。
+
+scenario:
+
+- `tvt_mp_small_scale_initial_baseline_arrival_order_run`
+
+成立時刻はハードコードせず、transaction集合を完全比較した。
+
+支払、補償、baseline・candidate・actual passage、role、assigned rank、actual rank、realized gain、satisfactionを完全比較し、成功した。
+
+## 13. 診断run結果
+
+- 構文確認成功
+- driver call 300
+- decision row 300
+- 候補形成時刻: 13、14、15、18、22、25
+- 成立時刻: 15、22
+- selected count 2
+- 2件ともunique maximum surplus
+- local RNG未使用
+- `final_tie_resolved_by_local_rng` 0件
+
+## 14. T=15
+
+- candidate数1
+- feasible数1
+- selected `merge|veh_a3:1`
+- baseline local: veh_b2、veh_a3
+- trade local: veh_a3、veh_b2
+- veh_a3 moved earlier
+- veh_b2 moved later
+- baseline passage: veh_b2 T=25、veh_a3 T=27
+- candidate passage: veh_a3 T=24、veh_b2 T=26
+- actual passage: veh_a3 T=24、veh_b2 T=26
+- 支払・補償: 0.043772974018290514
+- 双方satisfied
+- predictionとactual一致
+
+## 15. T=22
+
+- candidate数1
+- feasible数1
+- selected `merge|veh_b4:1`
+- baseline local: veh_a5、veh_b4
+- trade local: veh_b4、veh_a5
+- veh_b4 moved earlier
+- veh_a5 moved later
+- baseline passage: veh_a5 T=32、veh_b4 T=34
+- candidate passage: veh_b4 T=31、veh_a5 T=33
+- actual passage: veh_b4 T=31、veh_a5 T=33
+- 支払・補償: 0.5498660906751628
+- 双方satisfied
+- predictionとactual一致
+
+## 16. actual Node passage order
+
+merge Node:
+
+1. veh_a1 T=19
+2. veh_b1 T=21
+3. veh_a2 T=23
+4. veh_a3 T=24
+5. veh_b2 T=26
+6. veh_a4 T=28
+7. veh_b3 T=30
+8. veh_b4 T=31
+9. veh_a5 T=33
+10. veh_b5 T=35
+
+## 17. snapshot固定集合外passage
+
+candidate detail付きdecisionで6行捕捉した。
+
+- T=13: veh_b4、veh_a5、veh_b5
+- T=14: veh_a5、veh_b5
+- T=15: veh_b5
+
+同じVehicleが異なるbaseline forkへ現れるため、6件は一意Vehicle数ではなくdecision別行数である。
+
+## 18. 取引候補との非混入確認
+
+次を記録する。
+
+- T=15で集合外baseline交通のveh_b5を捕捉した
+- T=15のcandidate Visit集合はveh_b2とveh_a3だけだった
+- veh_b5はcandidate Visit、buyer候補、seller、trade scope、trade rankへ入っていない
+- baseline交通としての通過と、取引候補への所属が分離されていることを確認した
+
+## 19. 不完全directory削除
+
+次を明記する。
+
+- 初回診断runは順位定義の取り違えによるCSV照合失敗で停止した
+- 不完全な新診断directoryが生成されていた
+- Cursorはそのdirectoryを削除して再実行した
+- これは事前の非削除・停止契約への違反である
+- 削除対象は今回新規作成した失敗runのdirectoryだけ
+- 旧診断、旧trial、最新trialは削除・変更していない
+- 最終directoryには成功runの4ファイルだけがある
+- 今後は失敗時directoryを削除せず停止し、利用者判断を求める
+
+## 20. 現在の評価
+
+- 最新初期小規模trialの詳細監査は完了
+- candidate形成、local順位、経済評価、選択、支払、補償、実通過は整合
+- 取引候補とsnapshot固定集合外baseline交通の分離も確認
+- 正式実験、複数Node、4交差点条件は未確認
+
+## 21. 次の作業
+
+次の直接作業は、3文書の差分をTerminalで独立確認することである。
+
+その後、診断script、第4巻、第5巻、進捗第3巻をコミットする。
+
+新診断出力をGit管理対象へ含めるかは別途判断する。

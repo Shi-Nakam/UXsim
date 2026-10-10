@@ -14796,6 +14796,59 @@ T=13、T=14、T=18、T=21の候補形成結果、経済評価、成立・不成�
 
 # TVT順位適用baseline forkの順位未確定Visit走査 実装方式の確定（2026-10-10）
 
+### 2026-10-10更新注記
+
+本節は、snapshot固定集合外Visit問題が判明する前に確定した実装前設計の歴史的記録として維持する。本節全体を撤回したものではない。
+
+実trialにより、baseline開始時点では未出発だったVehicleなど、snapshot固定集合外のVehicleがbaseline中に対象Nodeへ到着する場合があることを確認した。baseline collectorは、そのようなsnapshot固定集合外Visitを意図的に記録対象外とする。したがって、`get_baseline_visit_snapshot()`が`None`を返すこと自体は、snapshot固定集合外Visitでは正常である。旧節だけを検索して読んだ場合に、現在もcollector記録欠落を一律に`RuntimeError`とする契約だと誤認されないよう、以下に現行契約との差分を明記する。
+
+**本節に記録された次の設計は、現在も有効である。**
+
+- 既存FCFS関数を直接呼ばない
+- TVT物理通過module内にbaseline専用private helperを置く
+- confirmed群と未確定群をtimestep開始時snapshotで固定する
+- confirmed群の通常スキップ後、clearance停止がなければ未確定群へ進み得る
+- clearance停止時には後順位へ進まない
+- sort keyは最終的に`baseline_arrival_timestep`、`arrival_tiebreaker`、`vehicle_id`
+- `merge_priority`、通過選択用RNG、`hard_deterministic_mode`を順位に使わない
+- 通常の物理条件または容量条件では一時スキップする
+- 既存の物理移動helperを使用する
+- 可読性を優先する
+
+**次の旧記載は、現在の完全な契約として読まない。**
+
+- すべての未確定Visitについてcollector snapshotが存在するという前提
+- `incoming_vehicles`に存在する到着済みVisitでcollector記録がなければ一律に`RuntimeError`とする記載
+- current Visitの`arrival_time`を順位材料へ使用しないという一律の記載
+
+**最新契約では、順位未確定Visitを次の2種類へ区別する。**
+
+#### snapshot固定集合内Visit
+
+- collector snapshotが存在する
+- collector記録を正本として使用する
+- collector記録の欠落または不整合をcurrent Visitで補修しない
+- collector記録の欠落、部分状態、不一致は`RuntimeError`
+
+#### snapshot固定集合外Visit
+
+- baseline開始時点で未出発だったVehicleなどが該当し得る
+- baseline中に対象Nodeへ到着した場合、collector snapshotが`None`であることは正常
+- current Visitの`arrival_time`と`arrival_tiebreaker`、および`vehicle.id`を使用する
+- `baseline_arrival_timestep`は次で算出する: `int(round(arrival_time / node.W.DELTAT))`
+- incomingに存在する到着済みVehicleで、current Visitのarrival情報が欠ける、部分状態である、または無効値なら`RuntimeError`
+- snapshot固定集合外Vehicleを時刻Tの取引候補へ追加しない
+- snapshot固定集合外Vehicleは、取引候補外のbaseline交通として対象Node到着後に物理通過させる
+
+取引候補への所属とbaseline交通としての物理通過は別契約である。collector記録はsnapshot固定集合内Visitの順位正本であり、snapshot固定集合外Visitではcollector snapshotが意図的に存在しない。current Visitを順位材料に用いるのは、collector snapshotが正常に存在しないsnapshot固定集合外Visitに限定する。collector記録に不整合がある場合にcurrent Visitへfallbackする契約ではない。
+
+**現在の技術的正本は、第4巻末尾の次の節である。**
+
+- 「TVT順位適用baseline forkのsnapshot固定集合外Visit対応・trial再検証結果（2026-10-10）」
+- 「TVT取引候補固定とsnapshot固定集合外baseline交通の分離確認（2026-10-10）」
+
+---
+
 本節は、制度上の最新正本である「TVT順位適用baseline forkの順位未確定Visit通過契約の変更（2026-10-09）」を変更しない。本節は、既存FCFS実装との比較調査結果と、採用する実装構成を記録する。
 
 ## 1. 今回の目的
@@ -15940,3 +15993,126 @@ snapshot固定集合外対応後、Terminalで関連回帰195件を再実行し�
 コミットとpushは利用者がTerminalで行う。
 
 push後に、未追跡の診断scriptを新契約および新trialへ整合させる。
+
+# TVT取引候補固定とsnapshot固定集合外baseline交通の分離確認（2026-10-10）
+
+## 1. 確認の目的
+
+次を記録する。
+
+- snapshot固定集合外Vehicleをbaseline中に物理通過させる追加修正について、取引候補集合まで拡張される危険がないか確認した
+- 特に次の2ケースを確認対象とした
+  - baseline開始時にはまだOから出発しておらず、その後最初のinlinkへ進入するVehicle
+  - baseline開始時には上流側におり、その後ネットワーク内部の対象Nodeのinlinkへ進入するVehicle
+- 確認対象は、取引候補への所属とbaseline交通上の物理通過の分離である
+
+## 2. 時刻Tの取引候補
+
+次を正式契約として明記する。
+
+- 時刻Tの取引候補は、T時点に対象Nodeのincomingまたは対象inlink上に存在し、snapshot固定集合へ登録されたVisitから形成する
+- 候補形成はbaseline collectorのsnapshot固定Visit記録を使用する
+- `candidate_visits`はcollectorの`export_node_baseline_visits(node_name)`から形成する
+- collectorへ登録されていないVisitを、baseline進行中にcandidate Visit集合へ追加しない
+- candidate Visit集合をbaseline進行中に作り直さない
+- 時刻Tより後に対象inlinkへ進入したVehicleは、Tのbuyer候補、seller、nonparticipating、trade scope、general trade rankへ追加しない
+- そのVehicleは、将来の別の意思決定時刻T'で対象inlink上に存在すれば、T'の候補にはなり得る
+
+## 3. Oから最初のinlinkへ進入するVehicle
+
+次を明記する。
+
+- T時点ですでに最初のinlink上にいるVehicleは、snapshot固定集合に含まれ得る
+- T時点ではまだ出発していないVehicleは、snapshot固定集合に含まれない
+- 後者がbaseline中に出発して最初のinlinkへ進入しても、Tの取引候補にはならない
+- ただし、そのVehicleはbaseline交通へ存在し、対象Nodeへ到着した後は物理通過させる
+- 取引候補外だから交通流から削除する、または通過させない、という契約ではない
+
+## 4. ネットワーク内部で後から対象inlinkへ進入するVehicle
+
+次を明記する。
+
+- T時点で対象inlink上におらず、上流Linkまたは上流Node側にいるVehicleは、対象NodeのTのsnapshot固定集合には含まれない
+- baseline中に上流Nodeを通過して対象inlinkへ進入しても、Tの取引候補へ追加しない
+- 対象Nodeへ到着した後は、snapshot固定集合外の未確定baseline交通として物理通過させる
+- そのVehicleの存在は、Node容量、inlink・outlink容量、入口空間、clearance、他Vehicleの通過時刻へ影響し得る
+- したがって、取引候補外であることを理由にbaseline交通から除外してはならない
+
+## 5. 取引候補とbaseline交通の分離
+
+次の一文を、誤解防止の正式な要約として明記する。
+
+> snapshot固定集合外Vehicleは、時刻Tの時間価値取引候補には追加しない。一方、baseline交通を正しく再現するため、baseline中に対象Nodeへ到着すれば、取引候補外の交通として物理通過させる。
+
+次も明記する。
+
+- candidate形成と物理通過は別責務である
+- snapshot固定集合は取引候補の母集団を固定する
+- `incoming_vehicles`は各timestepの物理通過対象を表す
+- baseline中に新しく到着したVehicleが`incoming_vehicles`へ入ることは、candidate Visit集合への追加を意味しない
+- baseline physical transferがそのVehicleを処理することは、formal rankやtrade rankを付けることを意味しない
+
+## 6. コード上の独立確認
+
+原典確認結果として次を記録する。
+
+- 候補形成はcollector exportから行われる
+- `was_arrived_at_snapshot is True`のVisitは、将来到着するB-type candidate列から除外される
+- B-type candidateはsnapshot時点で対象inlink上に存在したnot-yet-arrived Visitである
+- snapshot固定集合外Visitはcollector exportに現れない
+- したがって、そのVisitはcandidate Visit集合へ入らない
+- baseline physical transferは、その後のtimestepに`incoming_vehicles`へ入ったVehicleも処理する
+- snapshot固定集合外の場合はcurrent Visitのarrival情報で一時通過試行順を作る
+- この一時順位をrank ledgerへ書き込まない
+- candidate形成APIへ戻して候補を追加しない
+
+## 7. 最新診断による具体例
+
+T=15のbaseline forkで次を確認した。
+
+取引候補:
+
+- `veh_b2:1`
+- `veh_a3:1`
+
+snapshot固定集合外baseline交通:
+
+- `veh_b5:1`
+
+`veh_b5:1`は次として記録された。
+
+- `arrival_source = "current_visit_outside_snapshot_set"`
+- `snapshot_fixed = False`
+- baseline arrival T=33
+- baseline passage T=37
+- baseline Node passage rank 10
+
+一方、`veh_b5:1`はT=15の次へ入っていない。
+
+- candidate Visit集合
+- concrete buyer候補
+- seller集合
+- trade scope
+- general trade rank
+
+この結果は、取引候補とbaseline交通が分離されている具体例である。
+
+## 8. 設計記録の整理
+
+次を記録する。
+
+- snapshot固定集合外Visitをbaseline交通として物理通過させる契約は、既存の第4巻末尾節に技術的には記録済みだった
+- ただし、取引候補へ追加しないこととの関係が一文で明確になっていなかった
+- 本節により、両契約の関係を明示した
+- 古い実装前節にある「collector記録がなければRuntimeError」という記述は、snapshot固定集合外対応前の歴史的記録である
+- 最新のsnapshot固定集合外対応節および本節を現在の正本として読む
+
+## 9. 現在の結論
+
+次を明記する。
+
+- Oから後発するVehicleを、過去の意思決定時刻Tの取引候補へ追加しない
+- ネットワーク内部で後から対象inlinkへ進入するVehicleも、Tの取引候補へ追加しない
+- 両者はbaseline交通として到着後に物理通過する
+- 将来の別意思決定時刻では、その時点の対象inlink上の状態に基づき、新しい候補になり得る
+- 現行コードと最新診断結果は、この契約と整合する

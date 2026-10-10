@@ -4166,3 +4166,122 @@ T=22:
 - 新trial出力をGit管理対象へ含めるかは別途判断する
 - Git操作は利用者がTerminalで行う
 - `diagnostics/order_control.zip` には触れない
+
+# TVT-MP診断script整合・取引候補とbaseline交通の分離確認完了（2026-10-10）
+
+## 1. 診断script修正
+
+- 未追跡診断script1ファイルを修正
+- 本番コード、trial script、テストは非変更
+- candidate local順位とNode全体通過順位を分離
+- baseline passage observerを診断側に追加
+- actual Node passage registryを読取り
+- 4ファイル構成維持
+
+## 2. 取引候補とbaseline交通
+
+- 時刻Tの候補はsnapshot固定集合から形成
+- Tより後にinlinkへ進入したVehicleをTの候補へ追加しない
+- 集合外Vehicleもbaseline交通として到着後に物理通過
+- Oから後発するVehicleとネットワーク内部から後着するVehicleの双方へ適用
+- T=15のveh_b5で非混入を確認
+
+## 3. 順位比較
+
+- baseline official概念を廃止
+- candidate baseline local順はcandidate_visits保存順
+- trade local順はtrade rank
+- 同じ母集団で比較
+- rank changeはtrade scope内だけ
+- trade scope外を除外
+
+## 4. 診断run
+
+- 構文成功
+- driver 300
+- decision 300
+- 候補形成時刻 13、14、15、18、22、25
+- 成立時刻 15、22
+- selected 2
+- unique maximum surplus 2
+- local RNG 0
+- 最新trial CSV照合成功
+- 4ファイルだけ生成
+
+## 5. T=15
+
+- baseline local: veh_b2、veh_a3
+- trade local: veh_a3、veh_b2
+- baseline passage: 25、27
+- candidate/actual: 24、26
+- 支払・補償0.043772974018290514
+- 双方satisfied
+
+## 6. T=22
+
+- baseline local: veh_a5、veh_b4
+- trade local: veh_b4、veh_a5
+- baseline passage: 32、34
+- candidate/actual: 31、33
+- 支払・補償0.5498660906751628
+- 双方satisfied
+
+## 7. 集合外passage
+
+- 合計6行
+- T=13: veh_b4、veh_a5、veh_b5
+- T=14: veh_a5、veh_b5
+- T=15: veh_b5
+- decision別行数であり一意Vehicle数ではない
+
+## 8. actual passage
+
+merge Nodeのactual順位1から10を確認した。
+
+- veh_a1 19
+- veh_b1 21
+- veh_a2 23
+- veh_a3 24
+- veh_b2 26
+- veh_a4 28
+- veh_b3 30
+- veh_b4 31
+- veh_a5 33
+- veh_b5 35
+
+## 9. 不完全directory削除
+
+- 初回runのCSV照合失敗後に不完全directoryを削除して再実行した
+- 事前指示違反として記録
+- 旧出力と最新trialは非変更
+- 今後は削除せず停止して利用者判断を求める
+
+## 10. 現在の評価
+
+- 最新初期小規模trialの詳細監査完了
+- 取引候補とbaseline交通の分離確認完了
+- 正式実験、複数Node、4交差点は未確認
+
+## 11. 未追跡ファイル
+
+- 診断script
+- 新診断出力
+- 新trial出力
+- 旧trial・旧診断出力
+- diagnostics/order_control.zip
+
+今回の文書作業では変更・削除しない。
+
+## 12. 最新再開地点
+
+- 診断script修正完了
+- 診断run成功
+- CSV照合成功
+- Terminal独立確認完了
+- 第4巻、第5巻、進捗第3巻への記録完了
+- 次は文書差分をTerminalで独立確認
+- その後、診断scriptと3文書をコミット
+- commit確認後、別指示でpush
+- 新診断出力のGit管理は別途判断
+- Git操作は利用者がTerminalで行う
+- diagnostics/order_control.zipには触れない
