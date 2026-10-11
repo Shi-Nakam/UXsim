@@ -14,6 +14,7 @@ from uxsim.order_control_tvt_mp_candidate_virtual_time import (
     OrderControlTvtMpCandidateVirtualTimeState,
     advance_tvt_mp_candidate_virtual_time_one_step,
     initialize_tvt_mp_candidate_virtual_time_state,
+    refill_tvt_mp_candidate_local_capacity_at_current_timestep,
 )
 from uxsim.order_control_tvt_mp_concrete_buyer_candidate_set import (
     OrderControlTvtMpConcreteBuyerCandidateSet,
@@ -209,7 +210,7 @@ def test_initialize_starts_at_offset_zero_without_refill():
     assert len(local_state.inlinks[0].cum_departure) == 11
 
 
-def test_one_step_refills_local_capacity_once():
+def test_refill_at_offset_zero_does_not_move_the_clock():
     _world_object, local_state = _local_state()
     clock = initialize_tvt_mp_candidate_virtual_time_state(local_state)
     deltat = local_state.local_world.DELTAT
@@ -218,22 +219,22 @@ def test_one_step_refills_local_capacity_once():
     side = local_state.outlinks[1]
     far = local_state.local_world.get_link("far")
     before_far_arrival = list(far.cum_arrival)
+    before_arrival_length = len(inlink.cum_arrival)
     before_traveltime = inlink.traveltime_actual.copy()
     before_enter_log = dict(inlink.vehicles_enter_log)
     before_traffic = _unchanged_traffic(local_state)
-    advance_tvt_mp_candidate_virtual_time_one_step(clock)
-    assert clock.current_offset == 1
-    assert clock.current_virtual_timestep == 11
-    assert clock.simulated_timestep_count == 1
-    assert local_state.local_world.T == 11
+    refill_tvt_mp_candidate_local_capacity_at_current_timestep(clock)
+    assert clock.current_offset == 0
+    assert clock.current_virtual_timestep == 10
+    assert clock.simulated_timestep_count == 0
+    assert local_state.local_world.T == 10
     assert inlink.capacity_out_remain == 0.0 + inlink.capacity_out * deltat
     assert inlink.capacity_in_remain == 0.1 + inlink.capacity_in * deltat
     assert outlink.capacity_in_remain == 0.0 + outlink.capacity_in * deltat
     assert local_state.target_node.flow_capacity_remain == (
         0.0 + local_state.target_node.flow_capacity * deltat
     )
-    assert len(inlink.cum_arrival) == 12
-    assert inlink.cum_arrival[10] == inlink.cum_arrival[9]
+    assert len(inlink.cum_arrival) == before_arrival_length
     assert list(inlink.traveltime_actual) == list(before_traveltime)
     assert inlink.vehicles_enter_log == before_enter_log
     assert far.cum_arrival == before_far_arrival
@@ -242,20 +243,47 @@ def test_one_step_refills_local_capacity_once():
     assert _unchanged_traffic(local_state) == before_traffic
 
 
-def test_repeated_steps_are_one_timestep_each():
+def test_clock_advance_does_not_refill_and_next_timestep_refills_once():
     _world_object, local_state = _local_state()
     clock = initialize_tvt_mp_candidate_virtual_time_state(local_state)
     inlink = local_state.inlinks[0]
-    expected_out_remain = inlink.capacity_out_remain
-    added_each_step = inlink.capacity_out * local_state.local_world.DELTAT
+    inlink.capacity_out = 0.25
+    inlink.capacity_out_remain = 0.0
+    deltat = local_state.local_world.DELTAT
+    added_each_step = inlink.capacity_out * deltat
+    refill_tvt_mp_candidate_local_capacity_at_current_timestep(clock)
+    assert inlink.capacity_out_remain == added_each_step
+    assert clock.current_virtual_timestep == 10
+    try:
+        refill_tvt_mp_candidate_local_capacity_at_current_timestep(clock)
+        raise AssertionError("expected a second refill at timestep 10 to fail")
+    except RuntimeError as exc:
+        assert "10" in str(exc)
+    assert inlink.capacity_out_remain == added_each_step
+    advance_tvt_mp_candidate_virtual_time_one_step(clock)
+    assert clock.current_offset == 1
+    assert clock.current_virtual_timestep == 11
+    assert clock.simulated_timestep_count == 1
+    assert local_state.local_world.T == 11
+    assert inlink.capacity_out_remain == added_each_step
+    assert len(inlink.cum_arrival) == 12
+    refill_tvt_mp_candidate_local_capacity_at_current_timestep(clock)
+    assert inlink.capacity_out_remain == added_each_step * 2
+    assert clock.current_virtual_timestep == 11
+
+
+def test_repeated_steps_move_the_clock_without_stacking_capacity():
+    _world_object, local_state = _local_state()
+    clock = initialize_tvt_mp_candidate_virtual_time_state(local_state)
+    inlink = local_state.inlinks[0]
+    remain_before_advances = inlink.capacity_out_remain
     for step_number in range(1, 4):
         advance_tvt_mp_candidate_virtual_time_one_step(clock)
-        expected_out_remain += added_each_step
         assert clock.current_offset == step_number
         assert clock.current_virtual_timestep == 10 + step_number
         assert clock.simulated_timestep_count == step_number
         assert local_state.local_world.T == 10 + step_number
-        assert inlink.capacity_out_remain == expected_out_remain
+        assert inlink.capacity_out_remain == remain_before_advances
         assert len(inlink.cum_arrival) == 10 + step_number + 1
 
 
@@ -265,8 +293,9 @@ def test_remainder_at_or_above_threshold_is_not_refilled():
     threshold = local_state.local_world.DELTAN * inlink.number_of_lanes
     inlink.capacity_out_remain = threshold
     clock = initialize_tvt_mp_candidate_virtual_time_state(local_state)
-    advance_tvt_mp_candidate_virtual_time_one_step(clock)
+    refill_tvt_mp_candidate_local_capacity_at_current_timestep(clock)
     assert inlink.capacity_out_remain == threshold
+    assert clock.current_virtual_timestep == 10
 
 
 def test_unset_capacity_uses_uxsim_unlimited_sentinel():
@@ -280,7 +309,8 @@ def test_unset_capacity_uses_uxsim_unlimited_sentinel():
     clock = initialize_tvt_mp_candidate_virtual_time_state(local_state)
     assert side.capacity_out_remain == 3.0
     assert local_state.target_node.flow_capacity_remain == 1.0
-    advance_tvt_mp_candidate_virtual_time_one_step(clock)
+    refill_tvt_mp_candidate_local_capacity_at_current_timestep(clock)
+    assert clock.current_virtual_timestep == 10
     assert side.capacity_out_remain == 10e10
     assert side.capacity_in_remain == 10e10
     assert local_state.target_node.flow_capacity_remain == 10e10
@@ -380,6 +410,7 @@ def test_update_and_transfer_methods_are_not_called():
         vehicle.end_trip = lambda *args, **kwargs: called.append("end")
         vehicle.route_next_link_choice = lambda *args, **kwargs: called.append("route")
     clock = initialize_tvt_mp_candidate_virtual_time_state(local_state)
+    refill_tvt_mp_candidate_local_capacity_at_current_timestep(clock)
     advance_tvt_mp_candidate_virtual_time_one_step(clock)
     assert called == []
 
@@ -394,8 +425,9 @@ def test_candidate_local_state_type_error_is_value_error():
 
 TESTS = (
     test_initialize_starts_at_offset_zero_without_refill,
-    test_one_step_refills_local_capacity_once,
-    test_repeated_steps_are_one_timestep_each,
+    test_refill_at_offset_zero_does_not_move_the_clock,
+    test_clock_advance_does_not_refill_and_next_timestep_refills_once,
+    test_repeated_steps_move_the_clock_without_stacking_capacity,
     test_remainder_at_or_above_threshold_is_not_refilled,
     test_unset_capacity_uses_uxsim_unlimited_sentinel,
     test_clock_mismatch_does_not_refill,

@@ -503,7 +503,7 @@ def test_no_right_of_entry_zero_decision_window_and_all_nonparticipating():
     assert leading_all_n.node_confirmation_results[0].decision_window_visit_keys != ()
 
 
-def test_unresolved_cases_and_priority_over_remaining():
+def test_remaining_nonempty_selects_head_despite_unresolved_arrivals():
     rank_state = _new_rank_state("merge")
     _register_undetermined(rank_state, ("veh_p1", 1))
     arrived_nonempty = _arrived_confirmation_result(
@@ -534,10 +534,21 @@ def test_unresolved_cases_and_priority_over_remaining():
         participation,
     )
     assert result_nonempty.node_selection_results[0].selection_status == (
-        OrderControlTvtRightOfEntrySelectionStatus.UNRESOLVED_BASELINE_ARRIVALS
+        OrderControlTvtRightOfEntrySelectionStatus.SELECTED
     )
-    assert result_nonempty.node_selection_results[0].right_of_entry_visit_key is None
+    assert result_nonempty.node_selection_results[0].right_of_entry_visit_key == (
+        ("veh_p1", 1)
+    )
+    alignment_results = (
+        result_nonempty.leading_confirmation_result
+        .arrived_confirmation_result.alignment_fork_result.alignment_results
+    )
+    assert alignment_results[0].unresolved_undetermined_visits == (
+        ("veh_unresolved", 9),
+    )
 
+
+def test_no_right_of_entry_when_remaining_empty_despite_unresolved_arrivals():
     rank_state_empty = _new_rank_state("merge")
     arrived_empty = _arrived_confirmation_result(
         target_node_names=("merge",),
@@ -561,11 +572,12 @@ def test_unresolved_cases_and_priority_over_remaining():
     )
     result_empty = _select(leading_empty, {"merge": rank_state_empty}, {})
     assert result_empty.node_selection_results[0].selection_status == (
-        OrderControlTvtRightOfEntrySelectionStatus.UNRESOLVED_BASELINE_ARRIVALS
+        OrderControlTvtRightOfEntrySelectionStatus.NO_RIGHT_OF_ENTRY
     )
+    assert result_empty.node_selection_results[0].right_of_entry_visit_key is None
 
 
-def test_multi_node_unresolved_on_one_node_other_selected():
+def test_multi_node_selects_head_even_when_one_node_has_unresolved_arrivals():
     rank_state_a = _new_rank_state("node_a")
     rank_state_b = _new_rank_state("node_b")
     _register_undetermined(rank_state_a, ("veh_p_a", 1))
@@ -610,17 +622,22 @@ def test_multi_node_unresolved_on_one_node_other_selected():
         arrived_result,
         (leading_a, leading_b),
     )
+    participation = dict(participation_b)
+    participation[("veh_p_a", 1)] = True
     result = _select(
         leading_result,
         {"node_a": rank_state_a, "node_b": rank_state_b},
-        participation_b,
+        participation,
     )
     assert [item.node_name for item in result.node_selection_results] == [
         "node_a",
         "node_b",
     ]
     assert result.node_selection_results[0].selection_status == (
-        OrderControlTvtRightOfEntrySelectionStatus.UNRESOLVED_BASELINE_ARRIVALS
+        OrderControlTvtRightOfEntrySelectionStatus.SELECTED
+    )
+    assert result.node_selection_results[0].right_of_entry_visit_key == (
+        ("veh_p_a", 1)
     )
     assert result.node_selection_results[1].selection_status == (
         OrderControlTvtRightOfEntrySelectionStatus.SELECTED

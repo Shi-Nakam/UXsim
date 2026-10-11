@@ -632,6 +632,77 @@ def test_candidate_filtering_sorting_and_nonparticipant_inclusion():
     assert node_result.candidate_visits[1].inlink_name == "in3"
 
 
+def test_unobserved_arrival_is_outside_p_minus_one_but_observed_partner_stays():
+    collector = OrderControlBaselineCollector()
+    rank_state = _new_rank_state("merge")
+    _register_undetermined(
+        rank_state,
+        ("veh_roe", 1),
+        ("veh_partner", 2),
+        ("veh_after_p", 3),
+        ("veh_unobserved", 4),
+    )
+    p = 20
+    _register_b_visit(
+        collector,
+        vehicle_name="veh_roe",
+        visit_id=1,
+        vehicle_id=1,
+        arrival=12,
+        tiebreaker=0.1,
+        passage=p,
+    )
+    _register_b_visit(
+        collector,
+        vehicle_name="veh_partner",
+        visit_id=2,
+        vehicle_id=2,
+        arrival=p - 1,
+        tiebreaker=0.2,
+        passage=p + 1,
+    )
+    _register_b_visit(
+        collector,
+        vehicle_name="veh_after_p",
+        visit_id=3,
+        vehicle_id=3,
+        arrival=p,
+        tiebreaker=0.3,
+        passage=p + 2,
+    )
+    collector.register_snapshot_visit(
+        vehicle_name="veh_unobserved",
+        vehicle_id=4,
+        node_name="merge",
+        inlink_name="in_unobserved",
+        visit_id=4,
+        was_arrived_at_snapshot=False,
+        baseline_arrival_timestep=None,
+        arrival_tiebreaker=None,
+        route_next_link_name=None,
+        baseline_passage_timestep=None,
+    )
+    selection_result = _selection_result(
+        collector=collector,
+        target_node_names=("merge",),
+        node_selection_results=(_selected_node("merge", ("veh_roe", 1)),),
+    )
+    result = _build(selection_result, {"merge": rank_state})
+    node_result = result.node_candidate_set_results[0]
+    assert node_result.build_status == (
+        OrderControlTvtCandidateVisitSetStatus.BASELINE_INFORMATION_COMPLETE
+    )
+    assert node_result.right_of_entry_baseline_passage_timestep == p
+    assert [item.visit_key for item in node_result.candidate_visits] == [
+        ("veh_roe", 1),
+        ("veh_partner", 2),
+    ]
+    assert node_result.p_minus_one_eligible_visit_count_before_limit == 2
+    assert node_result.build_status != (
+        OrderControlTvtCandidateVisitSetStatus.NOT_BUILT_UNRESOLVED_ARRIVALS
+    )
+
+
 def test_unresolved_candidate_passages_keeps_full_candidate_set():
     collector = OrderControlBaselineCollector()
     rank_state = _new_rank_state("merge")
@@ -906,10 +977,15 @@ def test_candidate_record_validation_and_missing_right_of_entry():
         target_node_names=("merge",),
         node_selection_results=(_selected_node("merge", ("veh_roe", 1)),),
     )
-    _expect_runtime_error(
-        lambda: _build(selection_bad, {"merge": rank_state3}),
-        "baseline_arrival_timestep=None",
+    result_unobserved_arrival = _build(selection_bad, {"merge": rank_state3})
+    unobserved_node = result_unobserved_arrival.node_candidate_set_results[0]
+    assert unobserved_node.build_status == (
+        OrderControlTvtCandidateVisitSetStatus.BASELINE_INFORMATION_COMPLETE
     )
+    assert [item.visit_key for item in unobserved_node.candidate_visits] == [
+        ("veh_roe", 1),
+    ]
+    assert unobserved_node.p_minus_one_eligible_visit_count_before_limit == 1
 
     collector4 = OrderControlBaselineCollector()
     rank_state4 = _new_rank_state("merge")

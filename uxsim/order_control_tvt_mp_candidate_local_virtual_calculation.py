@@ -51,6 +51,7 @@ from uxsim.order_control_tvt_mp_candidate_virtual_time import (
     OrderControlTvtMpCandidateVirtualTimeState,
     advance_tvt_mp_candidate_virtual_time_one_step,
     initialize_tvt_mp_candidate_virtual_time_state,
+    refill_tvt_mp_candidate_local_capacity_at_current_timestep,
 )
 from uxsim.order_control_tvt_mp_concrete_buyer_candidate_set import (
     OrderControlTvtMpConcreteBuyerCandidateSet,
@@ -580,7 +581,14 @@ def initialize_tvt_mp_candidate_local_virtual_calculation_state(
 def run_tvt_mp_candidate_local_virtual_calculation_one_timestep(
     calculation_state,
 ) -> OrderControlTvtMpCandidateVirtualTimestepResult:
-    """Run the seven traffic steps of one allowed virtual timestep."""
+    """
+    Refill capacity once, then run one allowed virtual timestep.
+
+    The real World refills link and node capacity before node transfer.
+    This loop does the same at every virtual timestep, including offset 0.
+    Offset 0 stays at baseline timestep T. After that timestep is complete,
+    the clock moves, and the next call refills the new timestep once.
+    """
     state = _require_calculation_state(calculation_state)
     _raise_if_finished(state)
     _raise_if_final_result_without_finished(state)
@@ -613,6 +621,11 @@ def run_tvt_mp_candidate_local_virtual_calculation_one_timestep(
             f"virtual timestep {virtual_timestep} is already completed in "
             "the orchestrating loop."
         )
+
+    # One refill for this virtual timestep. Offset 0 does not advance the
+    # clock. The previous timestep was refilled before its own transfer, so
+    # this call does not refill that timestep again.
+    refill_tvt_mp_candidate_local_capacity_at_current_timestep(virtual_time_state)
 
     binding_transfer_result = (
         scan_and_transfer_tvt_mp_binding_visits_at_current_timestep(

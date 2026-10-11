@@ -1119,6 +1119,45 @@ def test_branch2_infeasible_and_unresolved_candidates_still_fall_back():
     assert len(result.node_final_rank_results[0].final_rank_visits) == 2
 
 
+def test_unobserved_passage_inside_p_minus_one_fallbacks_one_remaining_visit():
+    remaining = (_visit("only"),)
+    spec = _fallback_spec(
+        "merge",
+        remaining=remaining,
+        build_status=UNRESOLVED_PASSAGES,
+    )
+    payment_set = _build([spec])
+    result = build_tvt_mp_final_ranks(payment_set)
+    node_result = result.node_final_rank_results[0]
+    candidate_node = (
+        payment_set.candidate_selection_set_result
+        .economic_evaluation_set_result
+        .local_virtual_calculation_set_result
+        .fifo_inspection_set_result
+        .general_trade_rank_set_result
+        .concrete_buyer_candidate_set_result
+        .inlink_candidate_physical_order_result
+        .candidate_visit_set_result
+        .node_candidate_set_results[0]
+    )
+    assert candidate_node.build_status is UNRESOLVED_PASSAGES
+    assert node_result.final_rank_status is (
+        OrderControlTvtMpFinalRankStatus.BASELINE_FALLBACK_RANKS
+    )
+    assert node_result.selected_candidate_economic_result is None
+    assert len(node_result.final_rank_visits) == 1
+    assert node_result.final_rank_visits[0].visit_key == remaining[0]
+    assert node_result.final_rank_visits[0].finalization_source is (
+        OrderControlTvtMpFinalizationSource.BASELINE
+    )
+    assert (
+        result.payment_and_compensation_set_result
+        .node_payment_and_compensation_results[0]
+        .buyer_payment_records
+        == ()
+    )
+
+
 def test_branch3_information_shortage_is_fallback_not_economic_failure():
     remaining = (_visit("stay"), _visit("next"))
     for build_status in (UNRESOLVED_ARRIVALS, UNRESOLVED_RIGHT, UNRESOLVED_PASSAGES):

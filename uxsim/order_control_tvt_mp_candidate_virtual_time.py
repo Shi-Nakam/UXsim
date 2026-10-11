@@ -1,12 +1,18 @@
 """
 Virtual clock and capacity refill for one candidate's copied World.
 
-Offset 0 is baseline timestep T. It keeps the snapshot's remaining capacity.
-Each later step moves the copied clock by one timestep and refills only the
-target Node and the target inlinks and outlinks, using the same refill as
-``Link.in_out_flow_constraint`` and ``Node.flow_capacity_update``.
+Offset 0 is baseline timestep T. Creating the clock does not refill capacity
+and does not move vehicles. Each virtual timestep, including offset 0, is
+refilled once before that timestep's node passage. The refill matches
+``Link.in_out_flow_constraint`` and ``Node.flow_capacity_update`` for the
+target Node and the target inlinks and outlinks.
 
-This stage does not move vehicles or pass them through the Node.
+Moving the clock to the next timestep does not refill. The next timestep
+receives its own single refill when that timestep is processed. The same
+timestep is never refilled twice.
+
+This stage does not move vehicles or pass them through the Node. It does not
+call ``Link.update`` or ``Node.update``.
 """
 
 from __future__ import annotations
@@ -44,6 +50,9 @@ class OrderControlTvtMpCandidateVirtualTimeState:
         self._current_offset = 0
         # Clock advances past T. Offset 0 has not advanced the clock.
         self._simulated_timestep_count = 0
+        # Virtual timesteps whose local capacity has already been refilled.
+        # Each timestep is refilled once, before its binding transfer.
+        self._capacity_refilled_virtual_timesteps: set[int] = set()
 
     @property
     def candidate_local_state(self) -> OrderControlTvtMpCandidateLocalState:
@@ -375,14 +384,23 @@ def initialize_tvt_mp_candidate_virtual_time_state(
     )
 
 
-def advance_tvt_mp_candidate_virtual_time_one_step(
+def refill_tvt_mp_candidate_local_capacity_at_current_timestep(
     virtual_time_state: OrderControlTvtMpCandidateVirtualTimeState,
 ) -> OrderControlTvtMpCandidateVirtualTimeState:
     """
-    Move the copied clock one timestep and refill local capacity once.
+    Refill local link and target-node capacity once at the current virtual timestep.
 
-    The next remainders and cumulative lists are calculated before any clock
-    or capacity field is written. Vehicles are not moved.
+    The added amount matches ``Link.in_out_flow_constraint`` and
+    ``Node.flow_capacity_update``. A remainder already at or above
+    ``DELTAN * number_of_lanes`` is left unchanged. Offset 0 uses baseline
+    timestep T and does not move the clock.
+
+    Calling this twice for the same virtual timestep is an error. The clock
+    advance does not refill, so the next timestep is refilled only when this
+    function runs again at that new timestep.
+
+    Vehicles, incoming lists, clearance history, and cumulative arrays stay
+    as they are. ``Link.update`` and ``Node.update`` are not called.
     """
     if not isinstance(
         virtual_time_state,
@@ -394,14 +412,20 @@ def advance_tvt_mp_candidate_virtual_time_one_step(
             f"type {type(virtual_time_state).__name__}."
         )
     _require_clock_is_consistent(virtual_time_state)
+    virtual_timestep = virtual_time_state.current_virtual_timestep
+    if virtual_timestep in virtual_time_state._capacity_refilled_virtual_timesteps:
+        raise RuntimeError(
+            "virtual timestep "
+            f"{virtual_timestep} already refilled local capacity. "
+            "Each virtual timestep is refilled once, before its binding "
+            "transfer, and the same timestep is not refilled again when "
+            "the clock later advances."
+        )
     candidate_local_state = virtual_time_state.candidate_local_state
     local_world = _require_local_world(candidate_local_state)
     deltat, deltan = _require_world_step_sizes(local_world)
     local_links = _unique_local_links(candidate_local_state)
     target_node = candidate_local_state.target_node
-    next_offset = virtual_time_state.current_offset + 1
-    next_virtual_timestep = virtual_time_state.baseline_timestep_T + next_offset
-
     next_link_remains = []
     for link in local_links:
         next_capacity_out_remain, next_capacity_in_remain = (
@@ -419,6 +443,43 @@ def advance_tvt_mp_candidate_virtual_time_one_step(
         deltat=deltat,
         deltan=deltan,
     )
+    for link, next_capacity_out_remain, next_capacity_in_remain in next_link_remains:
+        link.capacity_out_remain = next_capacity_out_remain
+        link.capacity_in_remain = next_capacity_in_remain
+    target_node.flow_capacity_remain = next_flow_capacity_remain
+    virtual_time_state._capacity_refilled_virtual_timesteps.add(virtual_timestep)
+    return virtual_time_state
+
+
+def advance_tvt_mp_candidate_virtual_time_one_step(
+    virtual_time_state: OrderControlTvtMpCandidateVirtualTimeState,
+) -> OrderControlTvtMpCandidateVirtualTimeState:
+    """
+    Move the copied clock one timestep and extend cumulative arrays.
+
+    Capacity is not refilled here. The timestep being left keeps the refill
+    it already received, and the new timestep is refilled later by
+    ``refill_tvt_mp_candidate_local_capacity_at_current_timestep``.
+    Vehicles are not moved.
+    """
+    if not isinstance(
+        virtual_time_state,
+        OrderControlTvtMpCandidateVirtualTimeState,
+    ):
+        raise ValueError(
+            "virtual_time_state must be "
+            "OrderControlTvtMpCandidateVirtualTimeState; got "
+            f"type {type(virtual_time_state).__name__}."
+        )
+    _require_clock_is_consistent(virtual_time_state)
+    candidate_local_state = virtual_time_state.candidate_local_state
+    local_world = _require_local_world(candidate_local_state)
+    # Reject a bad step size before the clock moves. The refill helper is
+    # what applies DELTAT and DELTAN to capacity.
+    _require_world_step_sizes(local_world)
+    local_links = _unique_local_links(candidate_local_state)
+    next_offset = virtual_time_state.current_offset + 1
+    next_virtual_timestep = virtual_time_state.baseline_timestep_T + next_offset
     next_cumulative_arrays = []
     for link in local_links:
         next_cumulative_arrays.append(
@@ -440,10 +501,6 @@ def advance_tvt_mp_candidate_virtual_time_one_step(
         )
 
     local_world.T = next_virtual_timestep
-    for link, next_capacity_out_remain, next_capacity_in_remain in next_link_remains:
-        link.capacity_out_remain = next_capacity_out_remain
-        link.capacity_in_remain = next_capacity_in_remain
-    target_node.flow_capacity_remain = next_flow_capacity_remain
     for link, next_cum_arrival, next_cum_departure in next_cumulative_arrays:
         if len(next_cum_arrival) != len(link.cum_arrival):
             link.cum_arrival = next_cum_arrival

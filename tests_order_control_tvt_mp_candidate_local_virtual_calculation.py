@@ -983,15 +983,28 @@ def test_horizon_2_and_3_process_t_through_t_plus_h_minus_1():
     assert counts[3].timestep_results[2].virtual_timestep == BASELINE_T + 2
 
 
-def test_process_order_offset_0_has_no_one_step_and_unbound_always_runs():
+def test_process_order_refills_before_binding_and_offset_0_does_not_advance_clock():
     _world, local_state, _collector, state, _visits = _buyer_ready_case(horizon=2)
     _block_clearance_from_other_inlink(local_state)
     order = []
+    original_refill = (
+        orch_mod.refill_tvt_mp_candidate_local_capacity_at_current_timestep
+    )
     original_one_step = orch_mod.advance_tvt_mp_candidate_virtual_time_one_step
     original_binding = orch_mod.scan_and_transfer_tvt_mp_binding_visits_at_current_timestep
     original_unbound = orch_mod.scan_and_transfer_tvt_mp_unbound_fcfs_vehicles_at_current_timestep
     original_advance = orch_mod.advance_tvt_mp_candidate_local_vehicles_and_register_new_arrivals
     original_boundary = orch_mod.process_tvt_mp_candidate_outlink_boundaries_at_current_timestep
+
+    def refill(virtual_time_state):
+        order.append(
+            (
+                "refill",
+                virtual_time_state.current_offset,
+                virtual_time_state.current_virtual_timestep,
+            )
+        )
+        return original_refill(virtual_time_state)
 
     def one_step(virtual_time_state):
         order.append(("one_step", virtual_time_state.current_offset))
@@ -1013,6 +1026,7 @@ def test_process_order_offset_0_has_no_one_step_and_unbound_always_runs():
         order.append(("boundary", advance_result.virtual_timestep))
         return original_boundary(boundary_state, advance_result)
 
+    orch_mod.refill_tvt_mp_candidate_local_capacity_at_current_timestep = refill
     orch_mod.advance_tvt_mp_candidate_virtual_time_one_step = one_step
     orch_mod.scan_and_transfer_tvt_mp_binding_visits_at_current_timestep = binding
     orch_mod.scan_and_transfer_tvt_mp_unbound_fcfs_vehicles_at_current_timestep = unbound
@@ -1022,19 +1036,31 @@ def test_process_order_offset_0_has_no_one_step_and_unbound_always_runs():
         first = run_tvt_mp_candidate_local_virtual_calculation_one_timestep(state)
         second = run_tvt_mp_candidate_local_virtual_calculation_one_timestep(state)
     finally:
+        orch_mod.refill_tvt_mp_candidate_local_capacity_at_current_timestep = (
+            original_refill
+        )
         orch_mod.advance_tvt_mp_candidate_virtual_time_one_step = original_one_step
         orch_mod.scan_and_transfer_tvt_mp_binding_visits_at_current_timestep = original_binding
         orch_mod.scan_and_transfer_tvt_mp_unbound_fcfs_vehicles_at_current_timestep = original_unbound
         orch_mod.advance_tvt_mp_candidate_local_vehicles_and_register_new_arrivals = original_advance
         orch_mod.process_tvt_mp_candidate_outlink_boundaries_at_current_timestep = original_boundary
     assert first.offset == 0
+    assert first.virtual_timestep == BASELINE_T
     assert second.offset == 1
-    assert order[0] == ("binding", 0)
-    assert order[1][0] == "unbound"
-    assert order[2][0] == "advance"
-    assert order[3][0] == "boundary"
-    assert order[4] == ("one_step", 0)
-    assert order[5] == ("binding", 1)
+    assert second.virtual_timestep == BASELINE_T + 1
+    assert order[0] == ("refill", 0, BASELINE_T)
+    assert order[1] == ("binding", 0)
+    assert order[2][0] == "unbound"
+    assert order[3][0] == "advance"
+    assert order[4][0] == "boundary"
+    assert order[5] == ("one_step", 0)
+    assert order[6] == ("refill", 1, BASELINE_T + 1)
+    assert order[7] == ("binding", 1)
+    refill_steps = [item for item in order if item[0] == "refill"]
+    assert refill_steps == [
+        ("refill", 0, BASELINE_T),
+        ("refill", 1, BASELINE_T + 1),
+    ]
     assert first.unbound_fcfs_result is not None
     assert second.unbound_fcfs_result is not None
     assert state.completed_virtual_timesteps == (BASELINE_T, BASELINE_T + 1)
@@ -3485,6 +3511,235 @@ def test_run_to_completion_from_partial_one_timestep_state():
     assert len(result.timestep_results) == 2
     assert result.final_offset == 1
     assert result.resolved is False
+
+
+def _passage_timestep(result, vehicle_name: str) -> int | None:
+    for record in result.required_passage_records:
+        if record.vehicle_name == vehicle_name:
+            return record.candidate_passage_timestep
+    raise AssertionError(f"no passage record for {vehicle_name}")
+
+
+def _deplete_outlink_inflow(local_state) -> None:
+    outlink = local_state.local_world.get_link("out")
+    outlink.capacity_in_remain = 0.0
+    outlink.capacity_in = 1.0
+
+
+def test_offset_0_outlink_inflow_refill_passes_at_baseline_timestep():
+    _world, local_state, collector, _visits = _prepare_world_with_vehicles(
+        [
+            {
+                "name": "buyer_veh",
+                "origin": "orig_a",
+                "dest": "dest",
+                "inlink": "in_a",
+                "route": "out",
+            }
+        ]
+    )
+    _deplete_outlink_inflow(local_state)
+    outlink = local_state.local_world.get_link("out")
+    state = _init_state(local_state, collector, horizon=1)
+    result = run_tvt_mp_candidate_local_virtual_calculation(state)
+    assert result.timestep_results[0].virtual_timestep == BASELINE_T
+    assert result.timestep_results[0].offset == 0
+    assert state.virtual_time_state.current_virtual_timestep == BASELINE_T
+    assert _passage_timestep(result, "buyer_veh") == BASELINE_T
+    assert result.required_passage_records[0].candidate_passage_timestep == BASELINE_T
+    assert outlink.capacity_in_remain == 0.0
+    transferred = (
+        result.timestep_results[0]
+        .binding_transfer_result.transferred_binding_visit_keys
+    )
+    assert transferred == (("buyer_veh", 1),)
+
+
+def test_offset_0_inlink_outflow_refill_passes_at_baseline_timestep():
+    _world, local_state, collector, _visits = _prepare_world_with_vehicles(
+        [
+            {
+                "name": "buyer_veh",
+                "origin": "orig_a",
+                "dest": "dest",
+                "inlink": "in_a",
+                "route": "out",
+            }
+        ]
+    )
+    inlink = local_state.local_world.get_link("in_a")
+    inlink.capacity_out_remain = 0.0
+    inlink.capacity_out = 1.0
+    state = _init_state(local_state, collector, horizon=1)
+    result = run_tvt_mp_candidate_local_virtual_calculation(state)
+    assert _passage_timestep(result, "buyer_veh") == BASELINE_T
+    assert inlink.capacity_out_remain == 0.0
+    assert state.virtual_time_state.current_offset == 0
+
+
+def test_offset_0_node_flow_refill_passes_at_baseline_timestep():
+    _world, local_state, collector, _visits = _prepare_world_with_vehicles(
+        [
+            {
+                "name": "buyer_veh",
+                "origin": "orig_a",
+                "dest": "dest",
+                "inlink": "in_a",
+                "route": "out",
+            }
+        ]
+    )
+    node = local_state.target_node
+    node.flow_capacity = 1.0
+    node.flow_capacity_remain = 0.0
+    state = _init_state(local_state, collector, horizon=1)
+    result = run_tvt_mp_candidate_local_virtual_calculation(state)
+    assert _passage_timestep(result, "buyer_veh") == BASELINE_T
+    assert node.flow_capacity_remain == 0.0
+    assert result.final_virtual_timestep == BASELINE_T
+
+
+def test_each_virtual_timestep_refills_once_and_does_not_repeat_the_previous():
+    _world, local_state, collector, _visits = _prepare_world_with_vehicles(
+        [
+            {
+                "name": "buyer_veh",
+                "origin": "orig_a",
+                "dest": "dest",
+                "inlink": "in_a",
+                "route": "out",
+            }
+        ]
+    )
+    _block_clearance_from_other_inlink(local_state)
+    outlink = local_state.local_world.get_link("out")
+    outlink.capacity_in = 0.4
+    outlink.capacity_in_remain = 0.0
+    state = _init_state(local_state, collector, horizon=2)
+    first = run_tvt_mp_candidate_local_virtual_calculation_one_timestep(state)
+    assert first.virtual_timestep == BASELINE_T
+    assert first.offset == 0
+    assert state.virtual_time_state.current_virtual_timestep == BASELINE_T
+    assert outlink.capacity_in_remain == 0.4
+    assert first.binding_transfer_result.transferred_binding_visit_keys == ()
+    second = run_tvt_mp_candidate_local_virtual_calculation_one_timestep(state)
+    assert second.virtual_timestep == BASELINE_T + 1
+    assert outlink.capacity_in_remain == 0.8
+    assert state.virtual_time_state.current_virtual_timestep == BASELINE_T + 1
+
+
+def test_offset_0_refill_does_not_pass_a_vehicle_that_has_not_arrived():
+    _world, local_state, collector, _visits = _prepare_world_with_vehicles(
+        [
+            {
+                "name": "buyer_veh",
+                "origin": "orig_a",
+                "dest": "dest",
+                "inlink": "in_a",
+                "route": "out",
+                "incoming": False,
+            }
+        ]
+    )
+    _deplete_outlink_inflow(local_state)
+    buyer = _local_vehicle(local_state, "buyer_veh")
+    buyer.x = 0.0
+    state = _init_state(local_state, collector, horizon=1)
+    result = run_tvt_mp_candidate_local_virtual_calculation(state)
+    binding = result.timestep_results[0].binding_transfer_result
+    assert binding.transferred_binding_visit_keys == ()
+    assert binding.temporarily_skipped_visits[0].skip_reason is (
+        OrderControlTvtMpBindingVisitTemporarySkipReason.NOT_ARRIVED_AT_TARGET_NODE
+    )
+    assert _passage_timestep(result, "buyer_veh") is None
+    assert result.timestep_results[0].virtual_timestep == BASELINE_T
+    assert local_state.local_world.get_link("out").capacity_in_remain == 1.0
+
+
+def test_offset_0_refill_does_not_pass_when_clearance_is_not_satisfied():
+    _world, local_state, collector, _visits = _prepare_world_with_vehicles(
+        [
+            {
+                "name": "buyer_veh",
+                "origin": "orig_a",
+                "dest": "dest",
+                "inlink": "in_a",
+                "route": "out",
+            }
+        ]
+    )
+    _deplete_outlink_inflow(local_state)
+    node = local_state.target_node
+    node.last_order_control_inlink = local_state.local_world.get_link("in_b")
+    node.last_order_control_entry_timestep = BASELINE_T - 1
+    node.order_control_clearance_timesteps = 1
+    state = _init_state(local_state, collector, horizon=2)
+    first = run_tvt_mp_candidate_local_virtual_calculation_one_timestep(state)
+    assert first.virtual_timestep == BASELINE_T
+    assert first.binding_transfer_result.transferred_binding_visit_keys == ()
+    assert (
+        first.binding_transfer_result.stop_reason
+        is OrderControlTvtMpBindingTransferStopReason.CLEARANCE_NOT_SATISFIED
+    )
+    assert first.binding_transfer_result.stopped_binding_visit_key == ("buyer_veh", 1)
+    result = run_tvt_mp_candidate_local_virtual_calculation(state)
+    assert _passage_timestep(result, "buyer_veh") == BASELINE_T + 1
+    assert result.timestep_results[0].virtual_timestep == BASELINE_T
+    assert result.timestep_results[1].virtual_timestep == BASELINE_T + 1
+
+
+def test_ready_head_passes_at_offset_0_and_clearance_follower_is_not_shifted():
+    _world, local_state, collector, _visits = _prepare_world_with_vehicles(
+        [
+            {
+                "name": "lead_veh",
+                "origin": "orig_b",
+                "dest": "dest",
+                "inlink": "in_b",
+                "route": "out",
+                "role": OrderControlTvtMpLocalBindingTradeRole.BUYER,
+            },
+            {
+                "name": "follow_veh",
+                "origin": "orig_a",
+                "dest": "dest",
+                "inlink": "in_a",
+                "route": "out",
+                "role": OrderControlTvtMpLocalBindingTradeRole.SELLER,
+            },
+        ]
+    )
+    in_b = local_state.local_world.get_link("in_b")
+    outlink = local_state.local_world.get_link("out")
+    node = local_state.target_node
+    in_b.capacity_out_remain = 0.0
+    in_b.capacity_out = 1.0
+    outlink.capacity_in_remain = 0.0
+    outlink.capacity_in = 1.0
+    node.flow_capacity_remain = 10.0
+    node.order_control_clearance_timesteps = 1
+    node.last_order_control_inlink = in_b
+    node.last_order_control_entry_timestep = BASELINE_T
+    state = _init_state(local_state, collector, horizon=3)
+    result = run_tvt_mp_candidate_local_virtual_calculation(state)
+    assert _passage_timestep(result, "lead_veh") == BASELINE_T
+    assert _passage_timestep(result, "follow_veh") == BASELINE_T + 2
+    assert (
+        result.timestep_results[0]
+        .binding_transfer_result.transferred_binding_visit_keys
+        == (("lead_veh", 1),)
+    )
+    assert (
+        result.timestep_results[1]
+        .binding_transfer_result.transferred_binding_visit_keys
+        == ()
+    )
+    assert (
+        result.timestep_results[2]
+        .binding_transfer_result.transferred_binding_visit_keys
+        == (("follow_veh", 1),)
+    )
+    assert result.final_virtual_timestep == BASELINE_T + 2
 
 
 def test_tests_registry_matches_defined_functions():

@@ -4644,3 +4644,49 @@ merge Nodeのactual順位1から10を確認した。
 - 引き継ぎメモもコミット・pushした後、新チャットへ移る
 - 新チャットでは50台trial条件整理から開始
 - Pythonコード、trial、診断runにはまだ進まない
+
+> 2026-10-12参照注記: 本節の再開地点は2026-10-11時点の記録である。50台trialの条件整理、実行、契約修正、容量補充修正、`capacity_refill_v3`完走の現在地は、直後の「50台中程度高需要trialの契約修正・容量補充修正とcapacity_refill_v3完走（2026-10-12）」を参照する。
+
+# 50台中程度高需要trialの契約修正・容量補充修正とcapacity_refill_v3完走（2026-10-12）
+
+詳細な時系列とdirectoryの区別は、第5巻「50台中程度高需要trialの契約不整合・arrival未観測の過剰停止・offset 0容量補充漏れとcapacity_refill_v3結果（2026-10-12）」を参照する。core designは第4巻の同日付節を参照する。
+
+## 1. 作成済みscript
+
+- `research_scripts/run_tvt_mp_50_vehicle_medium_demand_trial.py`
+- `research_scripts/diagnose_tvt_mp_50_vehicle_medium_demand_decision_trace.py`
+
+50台、`orig_a` 25、`orig_b` 25、participating 35、nonparticipating 15、出発T=5から38、traffic seed 0、VOT seed 1、evaluation T=0から299、horizon 30、候補上限10、clearance 1。診断はT=0から299を保存し、意思決定窓、remaining、unresolved、P−1上限適用前件数、candidate limit、right-of-entry statusを追加している。
+
+## 2. 修正済みの不整合
+
+契約不整合を1件、実装不整合を2件修正した。
+
+1. remaining 0件より前にarrival未観測を見て`NOT_BUILT_UNRESOLVED_ARRIVALS`を返していた。remaining空を先に`NO_RIGHT_OF_ENTRY`とする。final-rankの`NO_VISITS_TO_CONFIRM`要求は維持した。この修正後の完走が`seed_1_initial`で、成立取引は3件である。最終成果物ではない。
+2. arrival未観測をright-of-entry前の一律停止にしていた。Pはbaseline fork上の実通過時刻であり、arrival未観測VisitはP−1母集団に入らない。right-of-entry選定では`NO_RIGHT_OF_ENTRY`または`SELECTED`を生成する。candidate Visit集合構築では、必要なpassage未観測に応じて`UNRESOLVED_RIGHT_OF_ENTRY_PASSAGE`または`UNRESOLVED_CANDIDATE_PASSAGES`を生成し得る。旧right-of-entry選定statusの`UNRESOLVED_BASELINE_ARRIVALS`と、旧candidate Visit集合構築statusの`NOT_BUILT_UNRESOLVED_ARRIVALS`は、現行の通常処理経路では生成しない。関連テスト415件が成功した。この修正後の途中成果物が`passage_resolution_v2`で、成立取引は13件、`NOT_BUILT_UNRESOLVED_ARRIVALS`は0件である。最終成果物ではない。
+3. candidate局所仮想のoffset 0が補充前容量でbinding transferしていた。各virtual timestepでbinding transfer前に容量を1回補充し、offset 0では時計を進めない。時刻進行と補充は分離した。限定テスト168件が成功した。baseline仮想計算は`World.exec_simulation`であり、同じ修正は不要である。
+
+10台の`vehicle_schema_v2`と`baseline_arrival_order`、50台の`initial`、`passage_resolution_v2`、`capacity_refill_v3`は別成果物である。前の成果物は削除も上書きもしていない。
+
+## 3. 最新結果
+
+最新directoryは`research_outputs/trial/tvt_mp_50_vehicle_medium_demand_seed_1_capacity_refill_v3`と`..._capacity_refill_v3_decision_trace`である。
+
+- driver call 300。completed trips 50 / 50。
+- right-of-entry選定25。`baseline_information_complete` 25。`no_right_of_entry` 275。
+- concrete buyer candidate合計14。general trade rank candidate合計14。1意思決定当たり最大候補1。
+- FIFO true 14、false 0。local resolved 14、unresolved 0。
+- economically feasible 10、infeasible 4。selected 10。全件`unique_maximum_surplus`。
+- buyer数比較0。local RNG 0。candidate limit reached 0。
+- snapshot固定集合外baseline passage 4件。
+- 成立時刻はT=14、20、23、32、43、52、57、60、81、90。
+- trial CSVと診断再simulationの成立時刻は完全一致。
+- buyer・seller 20 Visitのcandidate passageとactual passageは20 / 20で一致。差の最大は0 timestep。buyer satisfied 10 / 10。seller satisfied 10 / 10。
+
+v2の1 timestep差はoffset 0容量補充漏れが原因であり、修正後に解消した。candidateとactualの一致は実装全体の正しさの十分条件ではない。
+
+## 4. 最新再開地点
+
+次の直接作業は、`capacity_refill_v3`の経済的不成立4件をまとめて確認することである。その後、buyer候補なしの理由分類、snapshot固定集合外baseline passage 4件の代表追跡、50台trial監査の終了可否、未発生ケースのための追加trial要否を判断する。10成立取引の詳細反復監査は行わない。
+
+今回発生していないものは、複数buyer、複数seller、複数候補、複数候補間のsurplus比較、buyer数比較、local RNG、FIFO false、local unresolved、候補上限到達、nonparticipatingを含むtrade_scope、actual未観測、unsatisfiedである。

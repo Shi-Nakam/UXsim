@@ -519,11 +519,13 @@ def build_tvt_candidate_visit_set(
                 )
 
             baseline_arrival_timestep_value = record["baseline_arrival_timestep"]
+            # Arrival is still None only when this registered Visit did not
+            # reach the Node during the same fixed-horizon fork that observed
+            # P. That arrival is after every passage this fork can store, so
+            # the Visit is outside the P-1 population. It is not an error and
+            # it does not block candidate construction.
             if baseline_arrival_timestep_value is None:
-                raise RuntimeError(
-                    f"Node {node_name!r}: undetermined B-type VisitKey "
-                    f"{record_visit_key!r} has baseline_arrival_timestep=None."
-                )
+                continue
             baseline_arrival_timestep = _require_non_negative_int(
                 baseline_arrival_timestep_value,
                 "baseline_arrival_timestep",

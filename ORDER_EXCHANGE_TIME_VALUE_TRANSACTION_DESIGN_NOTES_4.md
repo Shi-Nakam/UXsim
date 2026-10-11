@@ -4314,6 +4314,8 @@ diagnostic traffic conditions:
 `capacity_out=0.2` の因果:
 
 - candidate local の virtual time 更新で、各 offset ごとに `capacity_out_remain` が 0.2 ずつ補充される（`remain < DELTAN` のとき `+ capacity_out * DELTAT`）。
+
+> 2026-10-12参照注記: 上の「virtual time更新で各offsetごとに補充」は、2026-09-30のStage 3診断時に観察した当時の実装である。当時の補充は時計進行に付随しており、offset 0のbinding transferは補充前のremainで判定していた。現行の容量補充契約は、第4巻末尾「50台中程度高需要trialで確定したright-of-entry母集団とcandidate局所仮想の容量補充契約（2026-10-12）」を正本とする。上のStage 3の数値は当時の記録として残す。
 - offset 2〜4 では残量が 1 未満なので、到着済み Vehicle は `INLINK_OUTFLOW_CAPACITY_UNAVAILABLE` で一時 skip される。
 - offset 5 では残量が 1 となり、D、A、C、B を同じ binding scan で試せる。
 - このため 4 台を同一 scan へ揃えた。
@@ -13901,6 +13903,8 @@ docstring も、意思決定窓外 Visit を省略すると記載している。
 
 candidate 集合は意思決定窓では切らない。
 
+> 2026-10-12参照注記: 「P−1母集団を正式baseline順位で構築する」という当時の要約は、arrival未観測Visitがあるとその時点でright-of-entry選定前に停止する旧経路と併読され得る。現行では、remainingが1件以上ならright-of-entryを選定し、`baseline_arrival_timestep`が`None`のVisitはP−1母集団から除外する。正本は第4巻末尾「50台中程度高需要trialで確定したright-of-entry母集団とcandidate局所仮想の容量補充契約（2026-10-12）」である。本段のparticipation mapping修正自体は変更しない。第4巻本文には「unresolved arrivalが1件でもあればright-of-entry前で停止する」という文面は無い。その旧契約の本文は詳細設計第1巻§25.25.34.42および同巻の`unresolved_undetermined_visits`非空時の上位接続であり、第4巻の対象外のため本日付では注記を入れていない。
+
 ### concrete buyer 側の要求
 
 `uxsim/order_control_tvt_mp_concrete_buyer_candidate_set.py` の `_validate_participation_for_candidate_visits` は、`candidate_visits` 全件について、`participates_by_visit_key` に VisitKey が存在することを要求する。
@@ -16116,3 +16120,84 @@ snapshot固定集合外baseline交通:
 - 両者はbaseline交通として到着後に物理通過する
 - 将来の別意思決定時刻では、その時点の対象inlink上の状態に基づき、新しい候補になり得る
 - 現行コードと最新診断結果は、この契約と整合する
+
+# 50台中程度高需要trialで確定したright-of-entry母集団とcandidate局所仮想の容量補充契約（2026-10-12）
+
+本節は、2026-10-12時点の正本である。50台trialの時系列、成果物directory、件数は第5巻の同日付節を参照する。進捗上の現在地は進捗第3巻の同日付節を参照する。
+
+本節は次を同一視しない。
+
+- 意思決定窓
+- remaining decision window
+- trade_scopeを選ぶP−1母集団
+- 選定されたtrade_scope
+- binding上の拘束順位
+
+arrival未観測とpassage未観測も区別する。`baseline_arrival_timestep is None` は到着未観測である。`baseline_passage_timestep is None` は通過未観測である。
+
+## 1. arrival未観測をright-of-entry前の一律停止にしない
+
+旧契約は、`unresolved_undetermined_visits`が1件でもあればright-of-entry選定前に停止し、`UNRESOLVED_BASELINE_ARRIVALS`およびcandidate buildの`NOT_BUILT_UNRESOLVED_ARRIVALS`へ進むものだった。その本文は詳細設計第1巻§25.25.34.42と同巻の上位接続にある。第4巻本文にはその文面は無い。第1巻は本日付の更新対象外であり、当時の記録として残す。現行の通常経路は本節を正本とする。
+
+時間関係は次である。
+
+- right-of-entryのbaseline passage timestep Pは、到着時刻からの推定ではない。
+- Pは、同じbaseline forkで対象Vehicleが対象Nodeを実際に通過した`W.T`である。
+- baseline forkはPで早期終了しない。開始Tからhorizon末尾まで実行する。
+- collector登録済みVisitの`baseline_arrival_timestep`が`None`なら、そのVisitはfork処理期間中に対象Nodeへ到着していない。
+- Pはfork処理期間内でのみ観測される。
+- したがって、arrival未観測VisitがP−1以前に到着することはない。
+- そのVisitは今回のtrade_scopeを選ぶP−1母集団には入らない。
+- arrival未観測だけを理由にright-of-entry選定前で停止する処理は過剰である。
+
+現行の処理順は次である。
+
+1. `remaining_decision_window_visit_keys`が0件なら、今回TVT検討するVisitも確定するVisitもない。right-of-entry statusは`NO_RIGHT_OF_ENTRY`。別Visitのarrival未観測はこれを変えない。candidate build statusは`NOT_BUILT_NO_RIGHT_OF_ENTRY`。final-rank statusは`NO_VISITS_TO_CONFIRM`。arrival未観測Visitは後の意思決定へ残る。
+2. remainingが1件以上なら、その先頭をright-of-entryとして選定する。statusは`SELECTED`。
+3. right-of-entry自身のbaseline passage timestep Pが未観測なら`UNRESOLVED_RIGHT_OF_ENTRY_PASSAGE`。これはpassage未観測であり、arrival未観測とは別である。
+4. Pが観測済みなら、`baseline_arrival_timestep is None`のVisitはP−1母集団外として除外する。
+5. `baseline_arrival_timestep <= P−1`のVisitだけを候補母集団へ含める。
+6. P−1母集団に入り、候補上限内に残ったVisitの必要なbaseline passageが未観測なら`UNRESOLVED_CANDIDATE_PASSAGES`。
+7. 情報不足を経済的不成立へ変換しない。
+8. 情報不足時はremaining意思決定窓全体をbaseline順位で確定する。
+9. 意思決定窓内だがP−1母集団外、またはtrade_scope外のVisitも、最終順位処理でbaseline順位により確定する。
+
+現行の通常処理経路で使用する主要statusは、処理段階別に次のとおりである。
+
+right-of-entry選定では、`NO_RIGHT_OF_ENTRY`または`SELECTED`を生成する。
+
+candidate Visit集合構築では、必要なpassage未観測に応じて`UNRESOLVED_RIGHT_OF_ENTRY_PASSAGE`または`UNRESOLVED_CANDIDATE_PASSAGES`を生成し得る。`UNRESOLVED_RIGHT_OF_ENTRY_PASSAGE`は、選定済みright-of-entry自身のbaseline passage timestep Pが未観測の場合である。`UNRESOLVED_CANDIDATE_PASSAGES`は、P−1母集団に入り、候補上限内に残ったVisitの必要なbaseline passage timestepが未観測の場合である。
+
+旧status `UNRESOLVED_BASELINE_ARRIVALS`と`NOT_BUILT_UNRESOLVED_ARRIVALS`は、古い保存結果や手製テスト結果を読み得る下流互換のためenum等に残る場合がある。現行の通常right-of-entry選定経路および通常のcandidate Visit集合構築経路では生成しない。
+
+remaining 0件のとき、right-of-entryが先に`UNRESOLVED_BASELINE_ARRIVALS`を返し、final-rankが`NO_RIGHT_OF_ENTRY` / `NO_VISITS_TO_CONFIRM`を要求するステージ間矛盾は解消済みである。判定順はremaining空を先にする。final-rankの防御契約は維持する。
+
+## 2. candidate局所仮想計算の容量補充
+
+実Worldの各timestepは次の順である。
+
+1. `run_tvt_mp_driver`
+2. `Link.update`によるLink容量補充（`Link.in_out_flow_constraint`）
+3. `Node.flow_capacity_update`によるNode容量補充
+4. Node transfer
+
+candidate局所仮想計算は、driver時点のsnapshotを使い、同じtimestepのNode処理から再現する。snapshot取得位置は変更しない。車両位置、incoming、clearance履歴をoffset 0開始前に別途進めない。
+
+2026-10-12より前の実装は、offset 0では補充前remainのままbinding transferを試し、容量補充を仮想T+1へ進むとき初めて行っていた。これは正常な予測誤差ではない。offset 0だけ補充前容量で通過を判定する実装不整合である。T=56では`veh_b12`が仮想T=56で`outlink_inflow_capacity_unavailable`により一時スキップされ、仮想T=57で通過した。実WorldではT=56のNode通過前に容量が補充されるため、`veh_b12`はT=56に通過した。この1 timestep差が後続clearance列へ伝播した。
+
+現行契約は次である。
+
+- offset 0を含む各virtual timestepで、binding transferより前に、そのtimestep分の容量補充を必ず1回行う。
+- offset 0の容量補充ではvirtual timestepを進めない。offset 0の時刻は`baseline_timestep_T`のままである。
+- 時刻進行と容量補充を分離する。`advance_tvt_mp_candidate_virtual_time_one_step`は時計と累積配列だけを進める。容量は`refill_tvt_mp_candidate_local_capacity_at_current_timestep`が補充する。
+- 各virtual timestepの補充は1回だけである。`_capacity_refilled_virtual_timesteps`に記録済みの時刻を再補充した場合は拒否する。
+- offset 0でTを補充したあと、offset 1への遷移で同じTを再補充しない。T+1は、T+1を処理するときの補充1回で補充する。
+- 補充規則は`Link.in_out_flow_constraint`および`Node.flow_capacity_update`と同じである。
+- 補充対象は、既存helperが扱う対象inlinkと対象outlinkの`capacity_out_remain`、`capacity_in_remain`、および対象Nodeの`flow_capacity_remain`である。inlinkかつoutlinkであるlinkは1回だけ補充する。
+- `Link.update`全体と`Node.update`全体は呼ばない。`user_function`、交通状態集計、その他の副作用を補充で発生させない。
+- 補充後の処理順は、binding transfer、拘束順位外FCFS、required passage記録、vehicle advance、新規Node到着登録、outlink境界処理、timestep完了である。
+- 通過済みVisitの再通過防止、拘束順位、一時スキップ、clearance停止の既存契約は維持する。容量が補充されても、未到着は通過しない。clearance未充足ならそのtimestepの後順位処理を終了する。
+
+baseline仮想計算は通常の`World.exec_simulation`を使う。実Worldと同じく、各timestepで容量補充後にNode通過処理を行う。今回のoffset 0補充漏れはcandidate局所仮想計算固有であり、baseline仮想計算に同じ修正は不要である。
+
+candidate passageとactual passageの一致は、実装全体の正しさの十分条件ではない。単純ネットワークで、candidate計算後に結果を変える外乱が少ない場合に一致が自然であることがある。不一致も、本節の補充漏れのように実装不整合である場合と、外乱による予測差である場合を分けて扱う。

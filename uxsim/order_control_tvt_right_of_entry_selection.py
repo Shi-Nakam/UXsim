@@ -2,8 +2,9 @@
 Select right-of-entry visits after leading non-participating confirmation.
 
 Reads leading confirmation results, rank states, and participation mappings to
-select the top participating visit as right-of-entry when baseline arrivals are
-fully resolved. Does not modify rank ledgers or rerun upstream processing.
+select the first remaining decision-window Visit as right-of-entry. An
+unresolved baseline arrival on another snapshot Visit does not block that
+selection. Does not modify rank ledgers or rerun upstream processing.
 """
 
 from __future__ import annotations
@@ -26,6 +27,9 @@ class OrderControlTvtRightOfEntrySelectionStatus(Enum):
 
     SELECTED = "selected"
     NO_RIGHT_OF_ENTRY = "no_right_of_entry"
+    # Kept so an older result can still be read. Current selection does not
+    # return this status: an unobserved arrival on another Visit is not a
+    # reason to refuse the remaining-window head.
     UNRESOLVED_BASELINE_ARRIVALS = "unresolved_baseline_arrivals"
 
 
@@ -117,10 +121,12 @@ def select_right_of_entry_decision_window_visits(
     """
     Select right-of-entry visits from leading non-participating confirmation results.
 
-    Walks ``fork_result.target_node_names`` in order, reads unresolved visits and
-    remaining decision-window VisitKeys without modifying rank ledgers, and
-    returns per-Node selection status plus ``k_confirmed_before`` snapshots. Does
-    not rerun baseline fork, alignment, arrived confirmation, leading
+    Walks ``fork_result.target_node_names`` in order. An empty remaining
+    decision window is ``NO_RIGHT_OF_ENTRY`` even when another Visit still has
+    an unobserved baseline arrival. A non-empty remaining window selects its
+    first Visit. Those unobserved arrivals stay on the alignment result and are
+    not a reason to skip selection. Does not modify rank ledgers, and does not
+    rerun baseline fork, alignment, arrived confirmation, leading
     non-participating confirmation, or collector export.
     """
     arrived_confirmation_result = leading_confirmation_result.arrived_confirmation_result
@@ -151,19 +157,6 @@ def select_right_of_entry_decision_window_visits(
         node_rank_state = rank_states_by_node_name[node_name]
         k_confirmed_before = node_rank_state.k_confirmed()
 
-        if len(alignment_result.unresolved_undetermined_visits) > 0:
-            node_selection_results.append(
-                OrderControlTvtNodeRightOfEntrySelectionResult(
-                    node_name=node_name,
-                    selection_status=(
-                        OrderControlTvtRightOfEntrySelectionStatus.UNRESOLVED_BASELINE_ARRIVALS
-                    ),
-                    right_of_entry_visit_key=None,
-                    k_confirmed_before=k_confirmed_before,
-                )
-            )
-            continue
-
         remaining_visit_keys = (
             leading_node_result.remaining_decision_window_visit_keys
         )
@@ -180,6 +173,9 @@ def select_right_of_entry_decision_window_visits(
             )
             continue
 
+        # Another Visit may still have no baseline arrival. That Visit did not
+        # arrive during this fork, so it is not a reason to refuse the head of
+        # the remaining decision window. The alignment result keeps the list.
         candidate_visit_key = remaining_visit_keys[0]
         _validate_participation_for_candidate(
             candidate_visit_key,
