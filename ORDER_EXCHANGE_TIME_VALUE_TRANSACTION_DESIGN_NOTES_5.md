@@ -1697,3 +1697,536 @@ Terminalで次を確認した。
 - commit結果確認後、別指示でpushする
 - Git操作は利用者がTerminalで行う
 - `diagnostics/order_control.zip`には触れない
+
+# 10台初期小規模trialの取引選択・仮想計算・実World確認結果（2026-10-11）
+
+## 1. 監査再開の位置づけ
+
+次を記録する。
+
+- 元々、初期小規模trialの候補形成、buyer・seller、順位交換、通過予測、経済評価、選択理由を監査していた
+- 旧trialのT=14で、sellerが遅延せずbaselineより早く通過する現象を発見した
+- 原因調査により、TVT順位適用baseline forkの順位未確定Visitがbaseline到着順位ではなく通常合流で処理されていた問題を発見した
+- baseline到着順位走査を実装した
+- snapshot固定集合外Visitにも対応した
+- 専用テスト、関連回帰、trial再実行、診断script整合を行った
+- そのため、今回の監査は新規開始ではなく、旧問題によって中断していた取引選択監査を、修正後の最新trialで再開したものである
+
+確認対象の最新trial directoryは`research_outputs/trial/tvt_mp_small_scale_initial_seed_1_baseline_arrival_order`、最新診断directoryは`research_outputs/trial/tvt_mp_small_scale_initial_seed_1_baseline_arrival_order_decision_trace`である。対象Vehicleはveh_a1からveh_a5、veh_b1からveh_b5の合計10台で、完了tripは10 / 10である。
+
+## 2. 10台の処理結果
+
+次をVehicle別に記録する。
+
+### veh_a1
+
+- nonparticipating
+- T=13の意思決定窓でbaseline到着順の先頭
+- 先頭から連続するnonparticipating VisitとしてTVT候補検討前に先行確定
+- Node別割当順位1位
+- 実通過T=19、Node別実通過順位1位
+
+### veh_b1
+
+- participating
+- T=13のright-of-entry
+- buyer候補veh_a2との取引案ではseller
+- baseline passage T=21
+- candidate passage T=23
+- 2秒遅延
+- 必要補償R = 2.2003144786876243
+- buyer価値G = 1.0442185618892235
+- surplus = -1.1560959167984008
+- G < Rのため不成立
+- baseline順位で確定
+- Node別割当順位2位
+- 実通過T=21、Node別実通過順位2位
+
+### veh_a2
+
+- participating
+- T=13ではbuyer候補
+- T=13の取引はG < Rで不成立
+- T=14ではright-of-entryかつseller
+- buyer候補veh_b2との取引案では、baseline passage T=23、candidate passage T=24
+- 1秒遅延
+- 必要補償R = 0.5221092809446117
+- buyer価値G = 0.13131892205487156
+- surplus = -0.3907903588897402
+- G < Rのため不成立
+- T=14にbaseline順位で確定
+- Node別割当順位3位
+- 実通過T=23、Node別実通過順位3位
+
+### veh_b2
+
+- participating
+- T=14ではbuyer候補だが取引不成立
+- T=15ではright-of-entryかつseller
+- T=15の採用候補ではveh_a3へ順位を譲る
+- baseline passage T=25
+- candidate passage T=26
+- actual passage T=26
+- 1秒遅延
+- 必要補償R = 0.043772974018290514
+- Node別割当順位5位
+- Node別実通過順位5位
+
+### veh_a3
+
+- participating
+- T=15の唯一の具体的buyer候補
+- T=15の採用候補のbuyer
+- baseline passage T=27
+- candidate passage T=24
+- actual passage T=24
+- 3秒短縮
+- buyer価値G = 3.7476586913008134
+- T=15のsurplus = 3.703885717282523
+- G > Rで成立
+- Node別割当順位4位
+- Node別実通過順位4位
+
+### veh_b3
+
+- nonparticipating
+- T=18でright-of-entry veh_a4と異なるinlink側の、trade_scopeを選ぶ母集団に存在した
+- buyer候補側inlinkで先頭となる対象Visitだったがnonparticipating
+- 同一inlinkでその後ろにいるparticipating Vehicleはveh_b3を追い越してbuyerにはなれない
+- そのためbuyer prefixを形成できず、T=18では具体的buyer候補0件
+- 後の意思決定で先行nonparticipatingとして順位台帳へ接続された
+- Node別割当順位7位
+- 実通過T=30、Node別実通過順位7位
+
+### veh_a4
+
+- participating
+- T=18のright-of-entry
+- T=18では反対側buyer候補inlinkの先頭対象Visitがnonparticipatingのveh_b3だったため、buyer候補なし
+- 経済評価へ進んだ候補は0件
+- T=18にbaseline順位で確定
+- Node別割当順位6位
+- 実通過T=28、Node別実通過順位6位
+
+### veh_b4
+
+- participating
+- T=22の唯一の具体的buyer候補
+- T=22の採用候補のbuyer
+- baseline passage T=34
+- candidate passage T=31
+- actual passage T=31
+- 3秒短縮
+- buyer価値G = 2.291310945044598
+- T=22のsurplus = 1.7414448543694352
+- G > Rで成立
+- Node別割当順位8位
+- Node別実通過順位8位
+
+### veh_a5
+
+- participating
+- T=22のright-of-entryかつseller
+- baseline passage T=32
+- candidate passage T=33
+- actual passage T=33
+- 1秒遅延
+- 必要補償R = 0.5498660906751628
+- Node別割当順位9位
+- Node別実通過順位9位
+
+### veh_b5
+
+- participating
+- T=15のbaseline開始時点ではsnapshot固定集合外
+- T=15の取引候補とtrade_scopeには入らない
+- T=15 baseline中は候補外交通として物理通過し、baseline passage T=37
+- T=25ではright-of-entry
+- T=25では、trade_scopeのbuyerになり得る別の対象Visitが存在しなかった
+- 具体的buyer候補0件、経済評価0件
+- baseline順位で確定
+- Node別割当順位10位
+- 実通過T=35、Node別実通過順位10位
+
+## 3. 候補形成時刻6件の監査結果
+
+次を記録する。
+
+### T=13
+
+- right-of-entryはveh_b1
+- コード内部の`candidate_visits`は、trade_scopeを選ぶために使用する母集団である。本時刻ではtrade_scopeを選ぶ母集団はveh_b1、veh_a2
+- trade_scopeを選ぶ母集団が2台であり、trade_scopeも同じ2台であった
+- 具体的buyer候補はveh_a2の1件
+- FIFO維持
+- 局所仮想計算resolved
+- G = 1.0442185618892235
+- R = 2.2003144786876243
+- surplus = -1.1560959167984008
+- G < Rで不成立
+- 意思決定窓内のveh_b1をbaseline順位で確定
+
+### T=14
+
+- right-of-entryはveh_a2
+- trade_scopeを選ぶ母集団はveh_a2、veh_b2
+- 具体的buyer候補はveh_b2の1件
+- FIFO維持
+- 局所仮想計算resolved
+- G = 0.13131892205487156
+- R = 0.5221092809446117
+- surplus = -0.3907903588897402
+- G < Rで不成立
+- 意思決定窓内のveh_a2をbaseline順位で確定
+- veh_b2はT=14の意思決定窓外だったため、この時点では確定せずT=15へ残った
+
+### T=15
+
+- right-of-entryはveh_b2
+- trade_scopeを選ぶ母集団はveh_b2、veh_a3
+- trade_scopeを選ぶ母集団が2台であり、trade_scopeも同じ2台であった
+- 具体的buyer候補はveh_a3の1件
+- buyerはveh_a3
+- sellerはveh_b2
+- FIFO維持
+- 局所仮想計算resolved
+- G = 3.7476586913008134
+- R = 0.043772974018290514
+- surplus = 3.703885717282523
+- G > R
+- 経済的に成立可能な唯一候補
+- unique_maximum_surplusで選択
+- local RNGは不使用
+
+### T=18
+
+- right-of-entryはveh_a4
+- trade_scopeを選ぶ母集団はveh_a4、veh_b3
+- right-of-entryと反対側inlinkの対象Visitはveh_b3
+- veh_b3はnonparticipating
+- 同一inlinkでveh_b3の後ろにいるparticipating Vehicleをbuyerとして追い越させない
+- buyer prefixなし
+- 具体的buyer候補0件
+- general trade rank候補0件
+- 経済評価0件
+- veh_a4をbaseline順位で確定
+- 経済評価で不成立になったケースではなく、buyer候補を形成できなかったケースである
+
+### T=22
+
+- right-of-entryはveh_a5
+- trade_scopeを選ぶ母集団はveh_a5、veh_b4
+- trade_scopeを選ぶ母集団が2台であり、trade_scopeも同じ2台であった
+- 具体的buyer候補はveh_b4の1件
+- buyerはveh_b4
+- sellerはveh_a5
+- FIFO維持
+- 局所仮想計算resolved
+- G = 2.291310945044598
+- R = 0.5498660906751628
+- surplus = 1.7414448543694352
+- G > R
+- 経済的に成立可能な唯一候補
+- unique_maximum_surplusで選択
+- local RNGは不使用
+
+### T=25
+
+- right-of-entryはveh_b5
+- trade_scopeを選ぶ母集団にはveh_b5のみ
+- buyerになり得る別の対象Visitなし
+- buyer prefixなし
+- 具体的buyer候補0件
+- general trade rank候補0件
+- 経済評価0件
+- veh_b5をbaseline順位で確定
+- 経済評価で不成立になったケースではなく、取引相手が存在しなかったケースである
+
+## 4. T=15 baseline仮想計算の確認
+
+次を記録する。
+
+baseline Node passage sequence:
+
+1. veh_a1 T=19
+2. veh_b1 T=21
+3. veh_a2 T=23
+4. veh_b2 T=25
+5. veh_a3 T=27
+6. veh_b3 T=29
+7. veh_a4 T=31
+8. veh_b4 T=33
+9. veh_a5 T=35
+10. veh_b5 T=37
+
+次を記録する。
+
+- 最初のveh_a1以後、通過間隔はすべて2 timestep
+- 流入inlinkはin_aとin_bで交互
+- order_control_clearance_timestepsは1
+- 異なるinlinkへの切替条件は、現在時刻と直前通過時刻の差がclearance_timestepsを超えること
+- 直前通過がT=19ならT=20では差1のため通過不可、T=21では差2のため通過可能
+- 通過成功後にlast_order_control_inlinkとlast_order_control_entry_timestepを更新する
+- したがって、19、21、23、...、37という通過列はclearance設定、判定式、履歴更新と整合する
+- veh_b5はT=15のsnapshot固定集合外だが、候補外交通としてbaseline上でT=37に物理通過した
+- baseline成功通過列と最終通過時刻は確認した
+- baselineの全virtual timestepについて、一時スキップとclearance停止の完全なevent履歴を保存して監査したわけではない
+
+## 5. T=15 candidate局所仮想計算の確認
+
+次を記録する。
+
+T=15の採用候補では、Node連続順位へ接続する拘束順位の対象部分は次であった。
+
+- veh_a1
+- veh_b1
+- veh_a2
+- veh_a3
+- veh_b2
+
+取引部分では次の順位である。
+
+- buyer veh_a3
+- seller veh_b2
+
+保存された局所仮想計算の時系列:
+
+- T=15からT=17: 対象VisitはNode未到着
+- T=18のNode処理後のvehicle advanceでveh_a1が到着
+- T=19: veh_a1通過、その後veh_b1が到着
+- T=20: veh_b1は異なるinlinkへの切替clearance未充足
+- T=20のadvanceでveh_a2が到着
+- T=21: veh_b1通過、後順位のveh_a2はclearanceで停止
+- T=21のadvanceでveh_b2が到着
+- T=22: veh_a2はclearance未充足
+- T=23: veh_a2通過
+- 同じT=23のNode処理時点でveh_a3は未到着のため一時スキップ
+- veh_b2はclearanceで停止
+- T=23のNode処理後のvehicle advanceでveh_a3が到着
+- T=24: 到着済みのveh_a3が通過
+- veh_b2はclearanceで停止
+- T=24のadvanceでveh_a4が到着
+- T=25: veh_b2はclearance未充足
+- T=26: veh_b2通過
+- T=26の拘束順位外FCFS候補はveh_a4
+- veh_a4は同時刻にveh_b2が通過した直後のclearance未充足により通過しなかった
+- T=26のNode処理後のadvanceでveh_b3が到着
+- 所定のT=26 timestep処理完了後、必要なbuyer・seller通過記録が揃っているためresolved=Trueで終了
+
+次を明記する。
+
+- veh_a3はT=24のvehicle advanceで到着して同じT=24に通過したのではない
+- veh_a3はT=23のNode処理後に到着し、次のT=24に通過した
+- これはUXsimの時刻内処理順と整合する
+- 必要通過記録が揃った瞬間に即時returnしたのではない
+- T=26で拘束順位外FCFS API、vehicle advance、outlink境界処理等の所定処理を完了した後に終了した
+
+## 6. 意思決定窓、trade_scope、拘束順位外FCFS
+
+veh_a4を例として次を記録する。
+
+- T=15の意思決定窓はbaseline arrival T=16からT=21
+- right-of-entry veh_b2のbaseline passageはp=25
+- veh_a4のbaseline arrivalはT=27
+- 27 > 21なので、veh_a4はT=15の意思決定窓外
+- 27 > p-1=24なので、veh_a4はT=15のtrade_scopeを選ぶ母集団にも含まれない
+- したがってtrade_scope外
+- したがって拘束順位外
+- ただしcandidate局所仮想交通から除外されるわけではない
+- candidate局所仮想計算内でNodeへ到着した後は、拘束順位外FCFSとして処理される
+- candidate局所仮想計算内のT=24はveh_a4の到着時刻
+- T=26は拘束順位外FCFS候補として通過を試された時刻
+- T=24とT=26は、veh_a4をtrade_scope外と判定する根拠ではなく、判定後のcandidate局所仮想交通内の出来事である
+
+`candidate_visits`、意思決定窓、trade_scopeは同一視しない。一般にはtrade_scopeはtrade_scopeを選ぶ母集団の全部とは限らない。
+
+## 7. 実Worldの確定順位適用
+
+次を記録する。
+
+原典確認では、実Worldのtime_value Nodeで次の処理を行う。
+
+- 各timestep開始時のincoming Vehicleを一度snapshotする
+- 順位台帳で確定済みかを確認する
+- 確定済みVisitのassigned_rankを取得する
+- assigned_rank昇順へ並べる
+- その順番で通過試行する
+- 未到着、物理先頭未充足、Node流量不足、inlink流出容量不足、outlink流入容量不足、入口空間不足は一時スキップ
+- clearance未充足時のみ、そのtimestepの後順位走査を終了する
+- 通過成功後にclearance履歴を更新する
+- 通過成功後にNode別actual passage historyを記録する
+- trade_scope内で実績時間評価が必要なVisitについては、別途actual passage observationも記録する
+
+「Node別actual passage history」と「trade_scope用actual passage observation」を区別する。
+
+- Node別actual passage history:
+  - 順位台帳に接続された全確定Visitの通過成功順を記録する
+  - buyer、seller、nonparticipating、取引の内外で限定しない
+- trade_scope用actual passage observation:
+  - 成立取引のtrade_scope内Visitについて、baseline予測、candidate予測、actualを比較するための観測
+  - T=15ではveh_a3とveh_b2
+  - T=22ではveh_b4とveh_a5
+
+## 8. 全10台のNode別割当順位と実通過順位
+
+tvt_mp_nodes.csvの集計結果を記録する。
+
+- assigned_visit_count = 10
+- actual_passed_assigned_visit_count = 10
+- actual_unpassed_assigned_visit_count = 0
+- rank_difference_evaluated_count = 10
+- rank_difference_unavailable_count = 0
+- moved_earlier_count = 0
+- rank_exact_count = 10
+- moved_later_count = 0
+- rank_difference_total = 0
+
+したがって、全10台のNode別割当順位とNode別実通過順位は一致した。
+
+実通過順:
+
+1. veh_a1 T=19
+2. veh_b1 T=21
+3. veh_a2 T=23
+4. veh_a3 T=24
+5. veh_b2 T=26
+6. veh_a4 T=28
+7. veh_b3 T=30
+8. veh_b4 T=31
+9. veh_a5 T=33
+10. veh_b5 T=35
+
+次を明記する。
+
+- 成立取引の当事者4台について、tvt_mp_visits.csvでもassigned_rankとactual_node_passage_rankが一致した
+- T=15:
+  - veh_a3 assigned 4、actual 4
+  - veh_b2 assigned 5、actual 5
+- T=22:
+  - veh_b4 assigned 8、actual 8
+  - veh_a5 assigned 9、actual 9
+- 全10台の個別assigned_rankはtvt_mp_visits.csvには保存されない
+- 全10台の一致はtvt_mp_nodes.csvのNode集計で確認した
+- 診断JSONのfinal_rank_resultには、各意思決定の最終順位処理で確定した8台が現れる
+- 先行nonparticipating確定のveh_a1とveh_b3はfinal_rank_resultには現れない
+- したがって、異なる保存物の役割を混同しない
+
+## 9. 確認できたことと確認限界
+
+次を分けて記録する。
+
+### 確認できたこと
+
+- 10台すべてについて、順位確定または取引成立・不成立の説明がついた
+- 候補形成時刻6件の候補数と成立・不成立理由が説明できた
+- T=13とT=14はG < R
+- T=18はbuyer候補なし
+- T=25は取引相手なし
+- T=15とT=22はG > Rの唯一候補
+- T=15のbaseline成功通過列はclearance契約と整合した
+- T=15のcandidate局所仮想計算の時系列は、拘束順位、一時スキップ、clearance、時刻内処理順と整合した
+- 実Worldの原典はassigned_rank昇順で通過試行する
+- 全10台のNode別割当順位と実通過順位が一致した
+
+### 確認限界
+
+- candidate予測とactualの一致は、計算実装の正しさの十分条件ではない
+- candidate局所仮想計算と実Worldが共通の仕様解釈またはhelperを共有する場合、同じ誤りを含んで同じ結果になる可能性がある
+- baselineは反実仮想であるため、取引成立後の実Worldと直接比較して真偽を判定できない
+- T=15 baselineについて、全virtual timestepの一時スキップとclearance停止をevent単位で保存して完全監査したわけではない
+- 実Worldについて、各timestepの全通過試行、一時スキップ、clearance停止の詳細履歴を保存して完全監査したわけではない
+- 今回の交通は単純で、ひどい渋滞が発生していない可能性が高い
+- そのためcandidate予測とactualが一致したこと自体は自然な結果である可能性がある
+- 高需要・強い渋滞では、下流閉塞、後続需要、他の意思決定、horizon外影響などによりcandidate予測とactualがずれることが予想される
+- 予測誤差の発生は必ずしも実装不具合を意味しない
+- 今後は計算実装の正しさ、予測精度、取引結果の実績妥当性を分けて評価する
+
+## 10. T=22詳細時系列監査を終了する判断
+
+次を記録する。
+
+- T=22について、候補形成、buyer・seller、FIFO、予測通過時刻、G、R、surplus、選択理由、actual passage、Node別割当順位と実通過順位の一致は確認済み
+- T=22のcandidate局所仮想計算とbaseline仮想計算をT=15と同じ粒度で1 timestepずつ追加監査することは可能
+- ただし、T=15と同型の2流入単車線合流、buyer1台、seller1台、唯一候補である
+- 利用者判断により、この10台trialについては現在の確認範囲で監査を終了する
+- T=22の詳細時系列監査を未確認事項として大きなBLOCKERにはしない
+- 複雑な候補と予測誤差が得られる可能性のある高需要trialを優先する
+
+## 11. 次の高需要trial方針
+
+次を記録する。
+
+- 元の計画では次に4つの十字路交差点を含むネットワークへ進む想定だった
+- その前に、現在の単純な2流入1流出合流ネットワークを維持し、車両数を増やす再trialを行う
+- 最初は50台trialを推奨・採用する
+- 100台trialは50台trialの交通状態、候補数、unresolved率、計算時間を確認してから判断する
+- 単純なネットワークを維持することで、複雑化の原因を交通量増加へ限定しやすい
+- 複数buyer、複数seller、複数候補の競合、surplus比較、buyer数比較、local RNG、nonparticipatingを含むtrade_scope、予測誤差が現れる可能性を確認する
+- candidate予測とactualが一致しないケースを、不具合と決めつけず研究対象として評価する
+- 最初の50台trialでは、少なくとも次の設定を原則維持する方針案である
+  - ネットワーク形状
+  - 単車線
+  - order-control方式
+  - clearance設定
+  - baseline horizon 30
+  - max_tvt_candidate_visit_count 10
+  - VOT生成方式
+  - seedを明示的に記録する方式
+- 出発時刻配置、流入別台数、参加・非参加配置、評価期間、内部計算期間は次のチャットで正式に整理する
+- 同じ時間内へ50台を投入するという目的を、単に現在の出発間隔を保ったまま実験時間を5倍へ延長することと混同しない
+- 投入時間幅と流入別発生パターンを明示的な実験条件とする
+
+## 12. 候補上限Nと意思決定窓外Visit
+
+次を記録する。
+
+- N+1位以降かつ意思決定窓内のVisitは、今回のTVT候補としては検討しないが、今回の意思決定でbaseline順位により確定する
+- N+1位以降かつ意思決定窓外のVisitは、今回の意思決定では順位を確定しない
+- 意思決定窓外Visitは未確定のまま残り、後の意思決定時刻で意思決定窓へ入った際に処理する
+- 後の意思決定で、その時点までのNode別連続順位の末尾へ接続する
+- 候補上限Nは、今回TVT候補として検討するVisit数の上限であり、Node別連続順位列そのものをN件で打ち切るものではない
+- 最初の50台trialではN=10を維持し、上限到達件数とその影響を観測する
+- Nの変更は、交通量増加とは別の感度分析として扱う
+
+## 13. 生成出力と未追跡ファイル
+
+次を維持する。
+
+- 既存の新旧trial出力は未追跡のローカル成果として保持
+- 既存の新旧診断出力も未追跡のローカル成果として保持
+- 削除しない
+- 上書きしない
+- Gitへ追加しない
+- `.gitignore`を今回は変更しない
+- `diagnostics/order_control.zip`は今回の対象外
+- `diagnostics/order_control.zip`を開かない、変更しない、削除しない、stageしない
+
+多数の`??`について次を記録する。
+
+- `??`は未追跡ファイルを意味する
+- trackedコードまたは文書の未コミット変更を意味しない
+- 今回の未追跡出力は採用済みのGit非保持方針と整合する
+- ただしgit statusが見づらくなる問題は残る
+- `.git/info/exclude`でローカル非表示にする案は未採用
+- 新チャットで高需要trial条件を整理する作業より前に必ず処理する必要はない
+- `git add .`を使用せず、対象ファイルを明示してstageする運用を維持する
+
+## 14. 最新再開地点
+
+次を記録する。
+
+- 10台trialの取引選択監査を再開し、今回の範囲を終了した
+- 10台すべてについて順位確定または取引判断の説明がついた
+- 候補形成時刻6件を確認した
+- T=15 baseline成功通過列とclearance整合を確認した
+- T=15 candidate局所仮想計算の時系列を確認した
+- 実Worldの確定順位走査原典を確認した
+- 全10台でNode別割当順位とNode別実通過順位が一致した
+- T=22の同粒度時系列監査は追加実施せず、次の高需要trialを優先する
+- 次の直接作業は、第5巻と進捗第3巻の文書差分をTerminalで独立確認すること
+- その後、文書2ファイルだけをコミットする
+- commit結果確認後、別指示でpushする
+- push後、新チャット開始専用の引き継ぎメモを作成する
+- 引き継ぎメモも確認、コミット、pushしてから新チャットへ移行する
+- 新チャットでは、同じ合流ネットワークを用いる50台trialの条件整理から再開する
+- Git操作は利用者がTerminalで行う

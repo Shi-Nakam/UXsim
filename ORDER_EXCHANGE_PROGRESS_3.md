@@ -4542,3 +4542,105 @@ merge Nodeのactual順位1から10を確認した。
 - Git操作は利用者がTerminalで行う
 - 未追跡のresearch_outputsをaddしない
 - `diagnostics/order_control.zip`にも触れない
+
+# 10台trial取引選択監査終了・50台高需要trialへの移行判断（2026-10-11）
+
+## 1. 監査再開
+
+- seller早期通過問題で中断していた取引選択監査を、baseline修正後の最新trialで再開した
+- 最新trial directoryは`research_outputs/trial/tvt_mp_small_scale_initial_seed_1_baseline_arrival_order`
+- 最新診断directoryは`research_outputs/trial/tvt_mp_small_scale_initial_seed_1_baseline_arrival_order_decision_trace`
+- veh_a1〜veh_a5、veh_b1〜veh_b5の10台を対象とした
+
+## 2. 候補形成時刻6件
+
+次を簡潔に記録する。
+
+- T=13: 候補1件、G < R、不成立
+- T=14: 候補1件、G < R、不成立
+- T=15: 唯一候補、G > R、成立（trade_scopeを選ぶ母集団2台＝trade_scope2台）
+- T=18: 反対側先頭対象Visitがnonparticipating、buyer候補0件（経済評価不成立とは別）
+- T=22: 唯一候補、G > R、成立（trade_scopeを選ぶ母集団2台＝trade_scope2台）
+- T=25: right-of-entry以外の取引相手なし、buyer候補0件
+
+## 3. 10台の説明
+
+- 全10台について、先行nonparticipating確定、baseline fallback、成立取引、後続確定のいずれかとして説明できた
+- 成立取引はT=15（veh_a3 buyer、veh_b2 seller）とT=22（veh_b4 buyer、veh_a5 seller）
+- veh_b5はT=15のsnapshot固定集合外で候補外交通としてbaseline T=37通過
+- 完了trip 10 / 10
+
+## 4. T=15 baselineとcandidate局所仮想計算
+
+- baseline passageは19、21、23、25、27、29、31、33、35、37
+- clearance設定1と、異なるinlink切替条件のため2 timestep間隔
+- candidateではveh_a3 T=24、veh_b2 T=26
+- veh_a3はT=23のNode処理後に到着し、T=24に通過（同一timestep到着・通過ではない）
+- veh_b2のT=26通過後、所定の同timestep処理を完了してresolved
+- veh_a4はT=15の意思決定窓外かつtrade_scope外であり、到着後は拘束順位外FCFS
+
+## 5. 実World
+
+- confirmed Visitをassigned_rank昇順で通過試行する原典を確認
+- 通常の物理条件では一時スキップ
+- clearance未充足時は後順位へ進まない
+- Node別actual passage historyとtrade_scope用actual passage observationを区別
+- 全10台のNode別割当順位とNode別実通過順位が一致
+- rank_exact_count 10
+- moved_earlier 0
+- moved_later 0
+- rank_difference_total 0
+- 個別10台のassigned_rankはtvt_mp_visits.csvではなくtvt_mp_nodes.csv集計で確認
+
+## 6. 確認限界
+
+- candidate予測とactual一致は正しさの十分条件ではない
+- baselineは反実仮想であり実Worldと直接比較できない
+- 全timestepの内部eventを完全監査したわけではない
+- 高需要・渋滞条件では予測誤差が生じ得る
+- 実装の正しさ、予測精度、取引結果の実績妥当性を分けて評価する
+
+## 7. 10台trial監査の終了判断
+
+- T=22の詳細時系列監査はT=15と同型と推察される
+- 候補形成、経済評価、選択、actual、順位一致は確認済み
+- 利用者判断により、この10台trialの監査は今回の範囲で終了する
+- T=22の同粒度時系列監査は追加実施しない（実施済みとは記録しない）
+- 正式4交差点実験へ直行せず、同じ合流ネットワークの高需要trialを優先する
+
+## 8. 50台trial方針
+
+- 最初は50台
+- 100台は50台結果後に判断
+- ネットワークと主要制御設定を維持
+- horizon 30、候補上限N=10を最初は維持する方針案
+- 複数buyer、複数seller、複数候補、選択競合、予測誤差を観測する
+- 車両数増加と候補上限変更を同時に行わない
+- 出発時刻、流入別台数、参加配置、評価期間、内部期間は新チャットで整理する（今回未確定）
+
+## 9. N+1位以降
+
+- N+1位以降かつ意思決定窓内は、今回baseline順位で確定
+- N+1位以降かつ意思決定窓外は、今回未確定のまま残す
+- 後の意思決定で意思決定窓へ入った際に順位台帳末尾へ接続
+- NはTVT検討上限であり、Node連続順位をN件で打ち切らない
+
+## 10. 未追跡出力
+
+- 新旧trial・診断出力は未追跡のまま保持
+- Gitへ追加しない
+- 削除・上書きしない
+- `.gitignore`を変更しない
+- `.git/info/exclude`案は未採用
+- `diagnostics/order_control.zip`には触れない
+
+## 11. 最新再開地点
+
+- 第5巻と進捗第3巻への記録完了
+- 次はTerminalで2文書の差分を独立確認
+- その後、2文書だけをコミット
+- commit確認後、別指示でpush
+- push後、新チャット専用の引き継ぎメモを作成
+- 引き継ぎメモもコミット・pushした後、新チャットへ移る
+- 新チャットでは50台trial条件整理から開始
+- Pythonコード、trial、診断runにはまだ進まない
