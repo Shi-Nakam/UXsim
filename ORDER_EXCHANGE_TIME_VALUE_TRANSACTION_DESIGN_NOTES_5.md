@@ -2430,3 +2430,209 @@ v2で見られた1 timestep差は、正常な予測誤差ではなくoffset 0容
 3. snapshot固定集合外baseline passageの代表ケースを確認する。
 4. その後、50台trial監査の終了可否を判断する。
 5. 未発生ケースを得るため、需要配置や参加配置を変更した追加trialが必要か判断する。
+
+## 7. capacity_refill_v3の追加監査結果
+
+本小節は、前節で未確認として残していた事項について、その後に実施した追加監査の記録である。前節の未確認一覧は当時の記録として残す。`capacity_refill_v3`の既存集計は上書きしない。
+
+### 7.1 経済的不成立4件
+
+4件とも、FIFO違反、局所仮想計算未解決、情報不足ではない。
+
+共通は次である。
+
+- buyer 1台。seller 1台。trade_scope 2台。
+- FIFO preservedはtrue。local virtual calculation resolvedはtrue。
+- buyerはbaselineより3 timestep短縮。sellerはbaselineより1 timestep遅延。
+- infeasibility reasonは`total_buyer_value_below_required_compensation`。
+- G < Rにより経済的不成立。candidateは選択されない。
+- remaining意思決定窓はbaseline順位で確定。
+
+各件は次である。
+
+- T=50。buyer `veh_a13`。seller `veh_b12`。G = 0.01550377470139688。R = 1.4569398477533346。surplus = -1.4414360730519378。buyer VOTが非常に低く、seller補償を大幅に賄えない例である。
+- T=63。buyer `veh_b17`。seller `veh_a16`。G = 2.5310757582650676。R = 7.86461383460219。surplus = -5.333538076337122。seller VOTが非常に高く、必要補償が大きい例である。
+- T=79。buyer `veh_b21`。seller `veh_a20`。G = 0.3364092245338354。R = 0.4077190272970466。surplus = -0.0713098027632112。
+- T=84。buyer `veh_b22`。seller `veh_a22`。G = 0.22621441259039682。R = 0.2834800352717827。surplus = -0.05726562268138591。
+
+T=79とT=84は成立境界に比較的近いが、完全比較によりG < Rなので不成立である。Toleranceや丸めは使用していない。
+
+### 7.2 concrete buyer候補0件の11時刻
+
+right-of-entryが選定されたが、concrete buyer候補が0件だった意思決定は11時刻である。
+
+分類は次である。
+
+1. 反対側のP−1母集団先頭Visitがnonparticipatingで、単車線物理prefixを遮断したケースは10件。
+2. right-of-entry以外の取引相手が存在しなかったケースは1件。
+
+nonparticipatingによる遮断は次である。
+
+- T=12: `veh_a1`
+- T=16: `veh_b3`
+- T=28: `veh_a7`
+- T=35: `veh_b8`
+- T=39: `veh_b9`
+- T=46: `veh_a12`
+- T=65: `veh_a17`
+- T=69: `veh_a18`
+- T=75: `veh_b20`
+- T=86: `veh_a23`
+
+共通は次である。
+
+- P−1母集団はright-of-entryを含む2台。
+- 相手側Visitはnonparticipating。
+- 単車線上でそのVisitを越えて後続participating Visitをbuyer prefixへ含めない。
+- concrete buyer候補は0件。経済評価前に候補形成が終了する。
+- remaining意思決定窓をbaseline順位で確定する。
+
+取引相手なしはT=99である。right-of-entryは`veh_b25`。P−1母集団はright-of-entry自身の1台だけである。concrete buyer候補は0件。baseline順位で確定する。
+
+解釈は次である。nonparticipating 15台の影響は、今回の成立trade_scopeへ入る形ではなく、主としてbuyer候補形成を物理prefixで遮断する形で現れた。nonparticipatingを含む成立trade_scopeは今回発生していない。
+
+### 7.3 snapshot固定集合外baseline交通
+
+診断集計では、snapshot固定集合外baseline passageは4件である。
+
+全件は次である。
+
+- T=12 baseline fork。
+  - `veh_b5`。arrival_sourceは`current_visit_outside_snapshot_set`。snapshot_fixedはFalse。baseline arrivalはT=31。baseline passageはT=35。baseline passage rankは9。inlinkは`in_b`。
+  - `veh_b6`。arrival_sourceは`current_visit_outside_snapshot_set`。snapshot_fixedはFalse。baseline arrivalはT=35。baseline passageはT=39。baseline passage rankは11。inlinkは`in_b`。
+  - `veh_a6`。arrival_sourceは`current_visit_outside_snapshot_set`。snapshot_fixedはFalse。baseline arrivalはT=37。baseline passageはT=41。baseline passage rankは12。inlinkは`in_a`。
+- T=14 baseline fork。
+  - `veh_b7`。arrival_sourceは`current_visit_outside_snapshot_set`。snapshot_fixedはFalse。baseline arrivalはT=39。baseline passageはT=43。baseline passage rankは13。inlinkは`in_b`。
+
+T=12の代表確認は次である。
+
+- right-of-entryは`veh_b1`。Pは19。P−1は18。
+- P−1母集団は`veh_b1`と`veh_a1`の2台。
+- snapshot固定集合外3台のarrivalはT=31、35、37であり、P−1母集団とは無関係である。
+- T=18からT=31まで交通が空だったわけではない。その間にはsnapshot固定集合内の後続Visitが連続して到着・通過した。snapshot固定集合外Visitはその後続交通へ混入した。
+
+T=12のbaseline passage列は次である。
+
+1. `veh_b1`、T=19、snapshot固定
+2. `veh_a1`、T=21、snapshot固定
+3. `veh_b2`、T=23、snapshot固定
+4. `veh_a2`、T=25、snapshot固定
+5. `veh_b3`、T=27、snapshot固定
+6. `veh_a3`、T=29、snapshot固定
+7. `veh_b4`、T=31、snapshot固定
+8. `veh_a4`、T=33、snapshot固定
+9. `veh_b5`、T=35、snapshot固定集合外
+10. `veh_a5`、T=37、snapshot固定
+11. `veh_b6`、T=39、snapshot固定集合外
+12. `veh_a6`、T=41、snapshot固定集合外
+
+baseline passage rank 10は欠落していない。snapshot固定集合外だけを抽出したため、9、11、12となった。10位の`veh_a5`はsnapshot固定集合内である。
+
+T=12のsnapshot固定集合外3台は、candidate Visit集合、concrete buyer候補、general trade rank候補、FIFO評価、candidate局所仮想評価、economic evaluationのいずれにも含まれなかった。
+
+結論は次である。snapshot固定集合外Visitは時刻Tの候補へ追加しない。baseline交通としては到着後に物理通過する。候補形成とbaseline交通再現の分離は設計どおりである。
+
+### 7.4 先頭nonparticipating Visitの先行順位確定
+
+意思決定窓内の先頭nonparticipating Visitをbaseline順位で先行確定した事例は14件である。
+
+- T=18: `veh_b3`
+- T=26: `veh_a6`
+- T=30: `veh_a7`
+- T=37: `veh_b8`
+- T=41: `veh_b9`
+- T=48: `veh_a12`
+- T=55: `veh_b14`
+- T=67: `veh_a17`
+- T=71: `veh_a18`
+- T=73: `veh_b19`
+- T=77: `veh_b20`
+- T=88: `veh_a23`
+- T=93: `veh_a25`
+- T=95: `veh_b24`
+
+全14件の共通処理は次である。
+
+1. 該当nonparticipating Visitが意思決定窓内先頭である。
+2. baseline順位で先行確定する。
+3. その時刻のremainingは0件である。
+4. right-of-entryはない。
+5. final-rank statusは`NO_VISITS_TO_CONFIRM`である。
+6. preconfirmed Visitをfinal-rankで重複確定しない。
+
+このtrialでは、先頭nonparticipating先行確定後もremaining参加Visitが残るケースは発生していない。全14件とも、先行確定後のremainingは0件だった。
+
+### 7.5 trade_scope外かつ意思決定窓内Visitのbaseline確定
+
+成立10件について確認した。
+
+選択されたtrade_scopeより外側に、未確定の意思決定窓内Visitが残った事例は0件である。したがって、trade_scope内を採用候補順位で確定し、残る意思決定窓内Visitをbaseline順位で確定する混合処理は今回発生していない。
+
+この分岐は未発生ケースとして残る。次の非対称需要trialでは、意思決定窓内に複数Visitが残る状況を増やすことで、観測可能性が高まる。
+
+### 7.6 Tで順位確定したVisitのT+1再登場防止
+
+確認方法は次である。各Tで、先頭nonparticipatingとして先行確定されたVisitと、selected candidateまたはbaseline final-rankで確定されたVisitを、順位確定Visitとして収集した。T+1で、decision window、remaining decision window、candidate Visit集合、trade_scopeへ再登場していないかを比較した。
+
+結果は次である。
+
+- TからT+1への確定Visit確認は50 Visit。
+- 再登場違反は0件。
+
+したがって、Tで意思決定窓内に入り、順位確定されたVisitは、T+1でbaseline到着予測上引き続き6 timestep以内に位置し得ても、順位台帳で確定済みなので未確定Visit集合から除外される。その結果、T+1の意思決定窓、remaining、candidate Visit集合、trade_scopeへ再登場しない。移動する意思決定窓によって同じVisitを重複して順位確定または取引する問題は発生していない。
+
+代表例は、T=12で`veh_b1`と`veh_a1`を確定し、T=13では両Visitとも、意思決定窓、remaining、candidate Visit集合、trade_scopeのいずれにも再登場しないことである。
+
+## 8. 50台中程度高需要trial監査の終了判断と次trial
+
+現在の50台中程度高需要trial監査は、この範囲で終了する。
+
+監査済みは次である。
+
+- trialと診断再simulationの成立時刻一致
+- candidate passageとactual passageの比較
+- economic infeasible候補4件
+- buyer候補0件11時刻
+- snapshot固定集合外baseline交通
+- 先頭nonparticipating先行確定
+- trade_scope外かつ意思決定窓内Visitの有無
+- 確定済みVisitのT+1再登場防止
+- 全50台completed
+- Node別assigned/actual関連集計
+- FIFO、local resolved、候補上限、RNG等の全体集計
+
+終了理由は次である。
+
+- 成立10件はすべてbuyer 1台、seller 1台、唯一候補の同型である。
+- 同じ型の詳細監査を反復しても新しい情報が少ない。
+- 今回発生しなかった分岐を得るには、需要配置を変える方が有効である。
+- candidateとactualの一致は正しさの十分条件ではないという留保は維持する。
+
+今回未発生は次である。
+
+- 複数buyer
+- 複数seller
+- 複数concrete buyer candidate
+- 複数general trade rank candidate
+- 複数候補間のsurplus比較
+- buyer数比較
+- local RNG
+- FIFO false
+- local unresolved
+- candidate limit N=10到達
+- nonparticipatingを含む成立trade_scope
+- trade_scope外かつ意思決定窓内Visitのbaseline確定
+- 先頭nonparticipating先行確定後にremaining参加Visitが残るケース
+- actual未観測
+- buyerまたはseller unsatisfied
+
+次のtrial方針は、利用者の希望に沿う。一方向からの進入を高密度にし、他方からの進入を低密度にする。「一方向はギチギチ、他方向はスキスキ」の非対称需要trialを行う。
+
+目的は次である。
+
+- 高密度側に複数Vehicleの物理列を形成する。
+- 低密度側のright-of-entryに対し、高密度側から複数buyer候補が形成される可能性を高める。
+- 流入方向によるbuyer・sellerの発生非対称を確認する。
+- 複数buyer、複数seller、複数候補、複数候補間のsurplus比較、buyer数比較、local RNG、nonparticipatingのprefix遮断、trade_scope外かつ意思決定窓内Visitのbaseline確定、候補上限への接近の発生可能性を高める。
+
+次の直接作業は、非対称需要trialの車両配分と出発時刻を簡潔に決めることである。現時点では40対10、35対15、45対5等を確定していない。需要配分は次の作業で決める。ネットワーク、単車線、merge Node、horizon 30、候補上限N=10、clearance 1等を原則維持する案から始める。

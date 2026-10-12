@@ -4687,6 +4687,22 @@ v2の1 timestep差はoffset 0容量補充漏れが原因であり、修正後に
 
 ## 4. 最新再開地点
 
-次の直接作業は、`capacity_refill_v3`の経済的不成立4件をまとめて確認することである。その後、buyer候補なしの理由分類、snapshot固定集合外baseline passage 4件の代表追跡、50台trial監査の終了可否、未発生ケースのための追加trial要否を判断する。10成立取引の詳細反復監査は行わない。
+次の直接作業は、非対称需要trialの流入別Vehicle数と出発時刻を決めることである。経済的不成立4件の確認、buyer候補なしの理由分類、snapshot固定集合外baseline passage 4件の代表追跡、50台trial監査の終了判断は、次節の追加監査で完了した。10成立取引の詳細反復監査は行わない。
 
 今回発生していないものは、複数buyer、複数seller、複数候補、複数候補間のsurplus比較、buyer数比較、local RNG、FIFO false、local unresolved、候補上限到達、nonparticipatingを含むtrade_scope、actual未観測、unsatisfiedである。
+
+## 5. capacity_refill_v3追加監査完了と非対称需要trialへの移行
+
+`capacity_refill_v3`の追加監査を完了し、50台中程度高需要trial監査を現在の範囲で終了する。詳細は第5巻の同日付節「## 7. capacity_refill_v3の追加監査結果」と「## 8. 50台中程度高需要trial監査の終了判断と次trial」を参照する。
+
+- economic infeasible 4件はすべてG < Rによる正常な不成立である。FIFO違反、局所仮想計算未解決、情報不足ではない。
+- buyer候補0件は11時刻である。nonparticipatingによる物理prefix遮断が10件、取引相手なしが1件である。
+- snapshot固定集合外baseline passageは4件である。T=12の代表監査で、候補へ混入せず、baseline交通としては到着後に物理通過することを確認した。
+- 先頭nonparticipating先行確定は14件である。全14件で先行確定後のremainingは0件である。
+- trade_scope外かつ意思決定窓内Visitのbaseline確定事例は0件である。
+- Tで確定した50 Visitについて、T+1のdecision window、remaining、candidate Visit集合、trade_scopeへの再登場違反は0件である。
+- 50台中程度高需要trial監査は現在の範囲で終了する。成立10件はすべてbuyer 1台、seller 1台、唯一候補の同型であり、同じ型の詳細監査を反復しても新しい情報が少ない。candidateとactualの一致は正しさの十分条件ではないという留保は維持する。
+- 次は、一方向を高密度、他方向を低密度にする非対称需要trialの条件を決める。目的は、未発生分岐、とくに複数buyer、複数候補、trade_scope外かつ意思決定窓内Visitのbaseline確定などの観測可能性を高めることである。
+- 車両配分は未確定である。40対10、35対15、45対5等は確定していない。
+
+次の直接作業は、非対称需要trialの流入別Vehicle数と出発時刻を決めることである。
