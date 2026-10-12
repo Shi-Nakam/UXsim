@@ -2636,3 +2636,312 @@ T=12のsnapshot固定集合外3台は、candidate Visit集合、concrete buyer�
 - 複数buyer、複数seller、複数候補、複数候補間のsurplus比較、buyer数比較、local RNG、nonparticipatingのprefix遮断、trade_scope外かつ意思決定窓内Visitのbaseline確定、候補上限への接近の発生可能性を高める。
 
 次の直接作業は、非対称需要trialの車両配分と出発時刻を簡潔に決めることである。現時点では40対10、35対15、45対5等を確定していない。需要配分は次の作業で決める。ネットワーク、単車線、merge Node、horizon 30、候補上限N=10、clearance 1等を原則維持する案から始める。
+
+# 50台非対称需要trialと2流入単車線1共通outlink mergeの候補構造分析（2026-10-13）
+
+本節は50台中程度高需要trialの後に行った非対称需要trialの時系列記録である。
+
+core design上の正本は、第4巻末尾の「2流入単車線1共通outlink mergeのP−1候補構造と将来の二層意思決定窓案（2026-10-13）」である。
+
+本節はtrial条件、成果物、実行結果、診断集計、考察経緯を記録する。
+
+現在の1共通outlink mergeで確認した事項と観測結果を、複数outlinkや十字路へ一般化しない。
+
+## 1. trialと診断の成果物
+
+新規trial script:
+
+- research_scripts/run_tvt_mp_50_vehicle_asymmetric_demand_trial.py
+
+新規診断script:
+
+- research_scripts/diagnose_tvt_mp_50_vehicle_asymmetric_demand_decision_trace.py
+
+trial directory:
+
+- research_outputs/trial/tvt_mp_50_vehicle_asymmetric_demand_seed_1_initial
+
+diagnostic directory:
+
+- research_outputs/trial/tvt_mp_50_vehicle_asymmetric_demand_seed_1_initial_decision_trace
+
+これらは既存の中程度高需要50台trialとは別の成果物である。既存成果物は削除も上書きもしていない。
+
+## 2. 非対称需要trial条件
+
+- Vehicle総数50台
+- 高密度側はorig_a、40台
+- veh_a1からveh_a40
+- orig_aはT=5からT=44まで毎timestep 1台
+- 低密度側はorig_b、10台
+- veh_b1からveh_b10
+- orig_bの出発時刻はT=5、9、13、17、21、25、29、33、37、41
+- T=5ではorig_aとorig_bの両方から出発
+- 同一時刻のspec順はorig_a、orig_b
+- 全50台participating
+- nonparticipating 0台
+- declared VOTはtrue VOTと同値
+- traffic seed 0
+- VOT seed 1
+- evaluation T=0から299
+- INTERNAL_TSIZE 330
+- baseline horizon 30
+- max candidate Visit count 10
+- clearance 1 timestep
+- 2流入1流出
+- 両inlinkは単車線
+- 両inlinkは同じ1本のoutlinkへ合流
+- merge NodeだけTVT-MP対象
+
+## 3. trial実行結果
+
+- evaluation終了検証は全項目合格
+- World.T = 300
+- completed trips 50 / 50
+- transaction count 7
+- feasible 7
+- infeasible 0
+- unavailable 0
+- buyer Visit 7
+- seller Visit 7
+- nonparticipating Visit 0
+- trialの総実行時間は約32.3秒
+
+成立取引時刻:
+
+- T=20
+- T=24
+- T=26
+- T=36
+- T=38
+- T=44
+- T=45
+
+## 4. 診断結果
+
+- driver wrapper call数 300
+- decision summary 300行
+- baseline_information_complete 40
+- not_built_no_right_of_entry 260
+- final-rank selected_candidate_ranks 7
+- final-rank baseline_fallback_ranks 33
+- final-rank no_visits_to_confirm 260
+- right-of-entry selected 40
+- right-of-entry no_right_of_entry 260
+- concrete buyer candidate合計12
+- general trade rank candidate合計12
+- FIFO true 12
+- FIFO false 0
+- local resolved 12
+- local unresolved 0
+- economic evaluation candidate 12
+- economically feasible 7
+- economically infeasible 5
+- selected candidate 7
+- buyer数比較 0
+- local RNG 0
+- candidate limit reached 0
+- snapshot固定集合外baseline passage 43件
+- trial CSVと診断再simulationの成立時刻は完全一致
+
+非対称需要向け集計:
+
+- 1意思決定当たり最大candidate Visit数 2
+- P−1 eligible count before limitの最大 2
+- concrete buyer候補数の最大 1
+- general trade rank候補数の最大 1
+- candidate内buyer数の最大 1
+- candidate内seller数の最大 1
+- 選択trade_scopeの最大件数 2
+- 複数buyer発生時刻なし
+- 複数seller発生時刻なし
+- 複数concrete buyer candidate発生時刻なし
+- 複数general trade rank candidate発生時刻なし
+- 複数候補間surplus比較なし
+- buyer数比較なし
+- local RNGなし
+- candidate limit到達なし
+- trade_scope外かつ意思決定窓内Visitのbaseline確定なし
+- 選択取引buyerはorig_a 4件、orig_b 3件
+- 選択取引sellerはorig_a 3件、orig_b 4件
+
+## 5. 長い物理列とP−1候補母集団の違い
+
+高密度側orig_aには長い物理列が形成された。低密度側orig_bがright-of-entryになった時刻でも、orig_aのsnapshot物理列には多数のVehicleが存在した。
+
+例:
+
+- T=44ではorig_bのveh_b9がright-of-entry
+- P=52
+- orig_aのsnapshot物理列にはveh_a11からveh_a30まで存在
+- しかしcandidate Visitはveh_b9とveh_a14の2台だけ
+- P−1候補母集団も2台
+
+次を同一視しない。
+
+- inlink上に物理的に存在するVehicle
+- 順位未確定Visit
+- baseline arrivalがP−1以前のVisit
+- candidate Visit
+- trade_scope内Visit
+
+過去の意思決定で順位確定済みのVisitは、未確定Visit集合から除外される。未確定でもbaseline arrivalがP−1より後なら、今回の候補母集団へ入らない。
+
+## 6. 複数sellerが生じない理由
+
+right-of-entryをS、そのbaseline passage timestepをPとする。
+
+Sと同じ単車線inlinkの後続車S2はSを追い越せない。S2が対象Nodeへ到着できるのは、早くてもSが物理先頭から外れるP以降である。
+
+候補母集団条件は、baseline_arrival_timestep <= P−1 である。
+
+したがってS2はSに基づくP−1候補母集団へ入らず、同じ取引のsellerにならない。
+
+この結論は、同一inlinkが単車線で追越しがない現行条件を前提とする。
+
+## 7. 現在のmergeにおける複数buyerの観測と未確認事項
+
+ここは、両inlinkが同じ1本のoutlinkへ合流する現在のmergeに限定する。
+
+right-of-entryをS、そのbaseline passage timestepをPとする。反対側inlinkの物理先頭車をB1、その後続車をB2とする。
+
+40対10の非対称需要trialでは、長いorig_a物理列があっても最大P−1母集団は2台だった。candidate内buyer数とseller数の最大は各1台だった。trade_scope最大2台、general trade rank candidate最大1件だった。これは確認済みの観測結果である。今回のtrialでは、反対側inlinkからP−1候補母集団へ入ったbuyerは物理先頭B1の1台だけだった。
+
+共通outlink側の容量不足または入口空間不足でSが通過できない場合、B1も同じ制約を受ける。この場合、B1がSを越えて先行通過し、B2を早期に物理先頭へ進めることはできない。
+
+今回のtrialの限定調査では、比較可能12件のすべてでB1はSより先にbaseline通過せず、全件でB1 passage = P+2だった。したがって、今回のtrialにはB1先行通過事例がなかったことを確認済みである。一方、S側inlink固有またはS固有の一時スキップを意図的に生じさせる別条件を含め、現在のmergeのあらゆる交通状態でB1先行通過が絶対に不可能であることは未証明である。したがって、複数buyerが構造的に絶対不可能とはまだ記録しない。
+
+複数outlinkでは、さらに次が起こり得る。
+
+- Sの進路outlinkだけが混雑
+- B1の進路outlinkは通過可能
+- Sが一時スキップ
+- B1がSより先に通過
+- B2が早く物理先頭となる
+
+この場合、B2がSのP−1以前に到着する可能性を否定できない。したがって、複数buyerが生じないという説明を十字路や複数outlinkへ一般化しない。
+
+## 8. 現段階の限定的結論と未確認事項
+
+確認済み:
+
+- 同一単車線inlink上のS後続車S2は、Sに基づくP−1候補母集団へ入らず、同じ取引のsellerにならない
+- 今回のtrialでは複数buyer・複数seller・複数候補は発生しなかった
+- 共通outlink側制約はB1の先行通過を妨げる
+- 40対10の非対称需要trialでは、長いorig_a物理列があっても最大P−1母集団は2台だった
+- candidate内buyer数とseller数の最大は各1台だった
+- trade_scope最大2台、general trade rank candidate最大1件だった
+
+今回のtrialの限定調査により、次は確認済みである。
+
+- 比較可能ケース12件すべてで、B1はSより先にbaseline通過しなかった
+- B1後続B2を観測できた11件すべてで、B2 arrival > P−1であった
+- 今回のtrialで複数buyerが形成されなかった直接的な時間関係を確認した
+- 今回のtrialに関する原因分析は完了した
+
+一般命題上の留保:
+
+- S側固有の一時スキップを意図的に発生させた別条件で、B1がSより先に通過し、B2がP−1以前に到着できるかは未検証である
+- 現行mergeで複数buyerが構造的に可能か不可能かの最終判断は、4十字路trial等の結果を踏まえて行う
+- 複数buyerが構造的に絶対不可能であることは、現時点では記録しない
+
+これらの確認済み事項と観測結果を、複数outlink、異なる進路、右左折、3流入以上、複車線、進路別待ち列等へ一般化しない。
+
+## 9. S・B1通過順とB2到着時刻の限定調査
+
+本小節は、50台非対称需要trialにおいて、right-of-entry Sと反対側inlink先頭B1のbaseline通過順、およびB1後続B2のbaseline arrival timestepを確認した結果を記録する。
+
+### 比較可能12件（SとB1がともにcandidate Visit）
+
+- T=12: S veh_b1:1、P 19、B1 veh_a1:1 passage 21
+- T=16: S veh_b2:1、P 24、B1 veh_a3:1 passage 26
+- T=20: S veh_b3:1、P 28、B1 veh_a4:1 passage 30
+- T=21: S veh_a5:1、P 31、B1 veh_b4:1 passage 33
+- T=24: S veh_b4:1、P 33、B1 veh_a6:1 passage 35
+- T=26: S veh_a7:1、P 36、B1 veh_b5:1 passage 38
+- T=32: S veh_a9:1、P 39、B1 veh_b6:1 passage 41
+- T=33: S veh_a10:1、P 43、B1 veh_b7:1 passage 45
+- T=36: S veh_b7:1、P 45、B1 veh_a11:1 passage 47
+- T=38: S veh_a12:1、P 48、B1 veh_b8:1 passage 50
+- T=44: S veh_b9:1、P 52、B1 veh_a14:1 passage 54
+- T=45: S veh_a15:1、P 55、B1 veh_b10:1 passage 57
+
+集計:
+
+- 比較可能ケース12件
+- B1がSより先にbaseline通過したケース0件
+- 全件でSが先に通過した
+- 全件でB1 passage = P+2
+
+### B2を観測できた11件
+
+- T=12: B2 veh_a2、arrival 21、P−1 18
+- T=16: B2 veh_a4、arrival 26、P−1 23
+- T=20: B2 veh_a5、arrival 30、P−1 27
+- T=21: B2 veh_b5、arrival 34、P−1 30
+- T=24: B2 veh_a7、arrival 35、P−1 32
+- T=26: B2 veh_b6、arrival 38、P−1 35
+- T=32: B2 veh_b7、arrival 42、P−1 38
+- T=33: B2 veh_b8、arrival 46、P−1 42
+- T=36: B2 veh_a12、arrival 47、P−1 44
+- T=38: B2 veh_b9、arrival 50、P−1 47
+- T=44: B2 veh_a15、arrival 54、P−1 51
+
+集計:
+
+- B2観測11件
+- B2 arrival <= P−1は0件
+- 全件でB2 arrival > P−1
+- B2 arrivalはP+2またはP+3
+- T=45は反対側inlinkにB1後続B2が存在しないため、B2未観測
+
+代表例T=44:
+
+- S = veh_b9:1、P = 52、P−1 = 51
+- B1 = veh_a14:1、B1 baseline arrival = 50、B1 baseline passage = 54
+- B2 = veh_a15、B2 baseline arrival = 54、B2 baseline passage = 55
+- B2 arrival 54 > P−1 51
+
+結論:
+
+- 今回のtrialではB1先行通過は発生しなかった。
+- B2はすべてP−1より後に到着した。
+- したがって今回のtrialで複数buyerが形成されなかった直接的な時間関係を確認した。
+- 今回のtrialに関する原因分析は完了した。
+- 一般的な構造的不可能性は証明していない。
+
+## 10. 二層意思決定窓案の位置付け
+
+第4巻の2026-10-13節に記録した二層案を参照する。
+
+- 近接層: 到着まで1〜3 timestep
+- 遠方層: 到着まで4〜6 timestep
+- 非当事者の近接層はbaseline順位で確定
+- 非当事者の遠方層は未確定のまま後続意思決定へ残す
+
+この案は未採用・未実装である。現在の1共通outlink mergeで複数sellerを発生させる方法とは位置付けない。複数buyerについては、現在のmergeで絶対に発生しないとまだ確定していない。二層案が複数buyer形成へ影響するかも現時点では未確認である。二層案は現在の非対称需要trialおよび今回の限定調査だけでは採用しない。4十字路ネットワークtrialの結果を確認した後で、導入適否を判断する。
+
+## 11. 次のtrial方針
+
+次のtrialは4つの十字路を含むネットワークで行う。非対称需要trialの限定調査は完了し、原因分析は一区切りとする。
+
+確認対象:
+
+- 複数流入
+- 複数流出
+- 異なる進路
+- 右左折
+- 単車線
+- 複数TVT-MP対象Node
+- 3流入以上での複数buyer・複数seller
+- 複数outlinkでSが一時スキップされB1が先行通過するケース
+- 進路別物理条件
+- 複数Node間の交通状態
+- 後続Node訪問との順位整合
+- baseline予測とcandidate予測への交差点間交通の影響
+
+次の直接作業:
+
+1. 4十字路ネットワークtrialの条件整理へ進む。
+2. ネットワーク形状、OD、進路、右左折、TVT-MP対象Node、需要条件を整理する。
+3. 二層案はまだ実装しない。
