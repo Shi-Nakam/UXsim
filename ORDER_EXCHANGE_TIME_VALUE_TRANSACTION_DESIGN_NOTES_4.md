@@ -16390,3 +16390,236 @@ TVT取引当事者の構造:
 5. その結果を踏まえて二層案の導入適否を判断する。
 
 4十字路trialより前に、二層案を実装しない。
+
+# 単独十字路4流入4流出trialで確認した候補形成構造と次段階（2026-10-14）
+
+## 1. ネットワーク構想の段階変更
+
+従来の「4つの十字路交差点を含むネットワーク」へ直ちに進む構想を変更した。
+
+先に、中央Nodeが1つだけの単独十字路ネットワークを使用する。
+
+構成:
+- 中央Node 1つ
+- 外周Node 4つ
+- 中央Nodeへのinlink 4本
+- 中央Nodeからのoutlink 4本
+- Link合計8本
+- 各Linkは200 m
+- 各Linkは単車線
+- 中央NodeだけをTVT-MP対象とする
+- clearanceは1 timestep
+- VehicleにはODだけを指定する
+- specified_routeは使用しない
+- UXsimの通常の動的経路選択を維持する
+- 迂回防止を目的とする人工的なネットワーク制約は設けない
+
+位置付け:
+- 複数交差点間の影響を入れる前に、1つのNodeで複数流入・複数流出・直進・右折・左折を検証するための前段階である
+- 4交差点ネットワーク構想を撤回するものではなく、その前に単独十字路trialを追加する
+- 単独十字路で十分な検証を行った後、必要に応じて複数交差点へ拡張する
+
+## 2. 12台trialで確認した候補形成
+
+単独十字路12台trialでは、T=5、9、13に各方向から1台ずつ出発させた。
+
+- T=5:
+  直接経路では直進に相当する4 OD
+- T=9:
+  直接経路では左折に相当する4 OD
+- T=13:
+  直接経路では右折に相当する4 OD
+
+経路は固定していない。
+
+実現結果:
+- straight 4 Visit
+- left 4 Visit
+- right 4 Visit
+- u_turn 0 Visit
+- unknown 0 Visit
+- 中央Node再訪Vehicle 0台
+
+T=12、16、20の各意思決定で、candidate Visitは4台だった。
+
+各時刻で:
+- concrete buyer candidate 7件
+- general trade rank candidate 7件
+- 最大buyer数 3台
+- 最大seller数 3台
+- FIFO違反 0件
+- local unresolved 0件
+
+3時刻合計:
+- candidate 21件
+- 全21件でFIFO preserved
+- 全21件でcandidate局所仮想計算resolved
+
+この結果により、4流入・4流出の単独十字路では、
+- 複数buyerを含む候補
+- 複数sellerを含む候補
+- 複数候補間の経済比較
+を形成できることを確認した。
+
+ただし、今回の各波では各inlinkから1台ずつしか候補へ入っていない。
+
+したがって、今回確認した複数buyer・複数sellerは、それぞれ異なるinlinkに1台ずつ存在する構造である。
+
+次はまだ確認していない。
+- 同一inlink上の連続する複数buyer
+- 同一inlink上の連続する複数seller
+- それらを含む経済的成立候補
+- それらが最終選択されるケース
+
+## 3. 成立取引の構造
+
+成立取引は2件だった。
+
+T=16:
+- buyer:
+  veh_n2
+- sellers:
+  veh_e2
+  veh_s2
+  veh_w2
+- buyer 1台
+- seller 3台
+- trade_scope 4台
+- 選択理由:
+  unique maximum surplus
+
+T=20:
+- buyer:
+  veh_w3
+- sellers:
+  veh_n3
+  veh_e3
+  veh_s3
+- buyer 1台
+- seller 3台
+- trade_scope 4台
+- 選択理由:
+  unique maximum surplus
+
+T=16とT=20では、複数buyerを含む候補も形成され、一部は経済的に成立した。
+
+しかし、buyer 1台・seller 3台の候補が最大surplusを持ったため選択された。
+
+したがって今回、成立取引のbuyerが1台だった理由は、複数buyer候補を形成できなかったためではない。
+形成された候補間のsurplus比較により、buyer 1台候補が選ばれたためである。
+
+## 4. 2流入mergeとの違い
+
+以前の2流入・単車線・1共通outlink mergeでは、最大P−1候補母集団は2台であり、buyerとsellerは各最大1台だった。
+
+今回の単独十字路では、
+- 最大P−1候補母集団 4台
+- 最大buyer 3台
+- 最大seller 3台
+- 1意思決定当たり最大候補 7件
+となった。
+
+また、成立取引でseller 3台が確認された。
+
+これにより、以前の2流入mergeで複数sellerが確認できなかった結果を、TVT-MP一般の制約として扱わない。
+
+複数流入を持つ単独十字路では、right-of-entryとは異なる複数inlinkからsellerが形成され得ることを確認した。
+
+同一inlink上の複数sellerについては、今回まだ確認していない。
+
+right-of-entryと同じ単車線inlink上の後続車が、そのright-of-entryに基づくP−1候補母集団へ入らないことと、right-of-entryとは別のinlink上で複数sellerが連続して形成され得るかは、別の論点として扱う。
+
+## 5. baseline順位、候補順位、確定順位
+
+T=12では、第一波4台について7候補すべてが経済的不成立となった。
+そのため第一波4台をbaseline順位で確定した。
+
+T=16のcandidate局所仮想計算では、
+- T=12に確定済みの第一波順位を先に維持した
+- その後に、T=16で選択された第二波の取引順位を適用した
+
+過去から後続baseline仮想計算へ引き継ぐのは確定順位である。
+
+進路については、
+- 各baseline仮想World内でUXsimが決定する
+- 過去のbaseline計算で選択された進路へ拘束しない
+- 実WorldでもUXsimがその時点で決定した進路を使用する
+
+なお、同一baseline仮想計算の同一Visitでは、Node到着時に決まったroute_next_linkに従って通過する。
+到着記録のroute_next_link_nameと通過時のlive route_next_linkの一致検査は、この同一Visit内の整合性検査であり、異なるbaseline仮想計算間で進路を固定するものではない。
+
+このroute一致検査について一時的に行ったコード変更とテスト追加は、前提誤認が判明したため採用せず、git restoreにより完全に破棄済みである。
+現在のUXsim本体と既存テストに、この誤修正は残っていない。
+
+## 6. 予測・実績の整合
+
+成立取引の8 Visitについて、今回のtrialでは次の不一致は0件だった。
+
+- candidate passageとactual passageの不一致
+- predicted route情報とactual routeの不一致
+- formal route情報とactual routeの不一致
+- predicted route情報とformal route情報の不一致
+- assigned rankとactual Node passage rankの不一致
+
+今回の少数Vehicle・単純ネットワーク条件では、candidate予測後に結果を変える外乱が少ないため、一致は自然である可能性がある。
+
+一致したことだけを、TVT-MP実装全体が正しいことの十分条件とは扱わない。
+高密度条件または複雑な交通条件では、candidate予測とactual結果に正常な予測差が生じ得る。
+
+## 7. 二層意思決定窓案との関係
+
+二層案は引き続き未採用・未実装とする。
+
+案:
+- 近接層:
+  到着まで1〜3 timestep
+- 遠方層:
+  到着まで4〜6 timestep
+- TVT非当事者の近接層はbaseline順位で確定
+- TVT非当事者の遠方層は未確定のまま後続意思決定へ残す
+
+今回、異なるinlinkに存在する複数buyer・複数seller候補は形成された。
+
+一方、同一inlink上の連続buyer・連続sellerは未確認である。
+
+そのため、今回の12台trialだけでは二層案の導入適否を判断しない。
+
+次の高需要trialで、
+- 同一inlink上の複数buyer
+- 同一inlink上の複数seller
+- 候補形成
+- 経済的成立
+- 最終選択
+を確認する。
+
+それでも連続buyer・sellerが形成されない場合には、
+- 物理的にP−1までに到着できないためか
+- 以前の意思決定で順位確定済みとなったためか
+を区別した上で、二層案の必要性を判断する。
+
+## 8. 次段階
+
+次は、同じ単独十字路ネットワークへ、12台より多いVehicleを投入するtrialを行う。
+
+基本方針:
+- 5 Node・8 Linkを維持
+- 各Link 200 mを維持
+- 単車線を維持
+- 中央NodeだけTVT-MP対象
+- clearance 1を維持
+- OD指定とUXsimの動的経路選択を維持
+- specified_routeは使用しない
+- まずは全車participatingを維持
+- 二層案はまだ実装しない
+
+次trialでは条件を一度に複雑化しすぎず、Vehicle数と出発配置を変更する。
+
+主な確認対象:
+- 同一inlink上に複数Vehicleが連続して候補へ入るか
+- 同一inlink上の複数buyer候補
+- 同一inlink上の複数seller候補
+- 複数buyer・複数seller候補の経済的成立
+- 最終選択される候補のbuyer数・seller数
+- 高需要時のcandidate予測とactual結果の差
+
+4交差点ネットワークへ進む前に、単独十字路で需要を増やしたtrialを行う。

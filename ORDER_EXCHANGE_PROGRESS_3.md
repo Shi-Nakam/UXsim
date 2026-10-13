@@ -4824,3 +4824,216 @@ S側inlink固有またはS自身固有の一時スキップを意図的に生じ
 - core designは第4巻の2026-10-13節
 - trial条件、数値、限定調査の詳細は第5巻の2026-10-13節
 
+# 単独十字路12台trial完了・候補21件監査・高需要trialへの移行（2026-10-14）
+
+## 1. 作成済みscriptと成果物
+
+新規未追跡script:
+- research_scripts/run_tvt_mp_single_cross_intersection_12_vehicle_trial.py
+- research_scripts/diagnose_tvt_mp_single_cross_intersection_12_vehicle_decision_trace.py
+
+trial directory:
+- research_outputs/trial/tvt_mp_single_cross_intersection_12_vehicle_seed_1_initial
+
+diagnostic directory:
+- research_outputs/trial/tvt_mp_single_cross_intersection_12_vehicle_seed_1_initial_decision_trace
+
+## 2. trial条件
+
+- 中央Node 1つ
+- 外周Node 4つ
+- 4 inlink
+- 4 outlink
+- Link合計8本
+- 各Link 200 m
+- 各Link単車線
+- 中央intersectionだけTVT-MP対象
+- clearance 1 timestep
+- Vehicle 12台
+- 全車participating
+- T=5、9、13に各方向から1台ずつ出発
+- ODだけを指定
+- specified_route不使用
+- UXsimの動的経路選択を維持
+- evaluation T=0〜299
+- INTERNAL_TSIZE 330
+- baseline horizon 30
+- candidate上限N=10
+
+## 3. trial実行結果
+
+- completed trips 12 / 12
+- transaction count 2
+- 成立時刻 T=16、20
+- buyer Visit 2
+- seller Visit 6
+- nonparticipating Visit 0
+- straight 4 Visit
+- left 4 Visit
+- right 4 Visit
+- u_turn 0
+- unknown 0
+- intersection再訪Vehicle 0台
+
+## 4. 診断結果
+
+- driver wrapper call 300
+- candidate形成時刻 T=12、16、20
+- candidate Visitは各時刻4台
+- P−1 eligible countは各時刻4台
+- concrete buyer candidate合計21
+- general trade rank candidate合計21
+- 各時刻7候補
+- candidate内buyer最大3台
+- candidate内seller最大3台
+- FIFO true 21
+- FIFO false 0
+- local resolved 21
+- local unresolved 0
+- economically feasible 8
+- economically infeasible 13
+- selected candidate 2
+- buyer数比較 0
+- local RNG 0
+- candidate limit到達 0
+- trial CSVと診断再simulationの成立時刻は完全一致
+
+## 5. 主要監査結果
+
+### T=12
+
+第一波4台:
+- veh_e1
+- veh_s1
+- veh_w1
+- veh_n1
+
+baseline通過順:
+1. veh_e1 T=19
+2. veh_s1 T=21
+3. veh_w1 T=23
+4. veh_n1 T=25
+
+7候補すべて経済的不成立。
+最も成立に近かったveh_n1単独buyer候補も、
+surplus = -0.12658646764008674
+で不成立。
+
+第一波4台をbaseline順位で確定した。
+
+veh_n1候補の局所仮想計算では、T=19、21、23、25に取引対象4台が拘束順位どおり通過し、clearanceと終了条件も整合した。
+
+### T=16
+
+第二波baseline順位:
+- veh_e2
+- veh_s2
+- veh_w2
+- veh_n2
+
+選択候補:
+- buyer veh_n2
+- sellers veh_e2、veh_s2、veh_w2
+
+採用候補順位:
+- veh_n2
+- veh_e2
+- veh_s2
+- veh_w2
+
+- G = 8.744536946368566
+- R = 1.526312266525999
+- surplus = 7.218224679842567
+- unique maximum surplus
+
+candidate局所仮想計算では、T=12で確定済みの第一波順位を先に維持し、その後に第二波の採用候補順位を適用した。
+
+第二波取引対象はT=26、28、30、32に通過し、resolved=Trueとなった。
+
+### T=20
+
+選択候補:
+- buyer veh_w3
+- sellers veh_n3、veh_e3、veh_s3
+- G = 5.074432623897665
+- R = 1.3741551491655684
+- surplus = 3.7002774747320966
+- unique maximum surplus
+
+T=16と同型のため、同じ粒度のtimestep監査は反復していない。
+
+## 6. 候補形成上の結論
+
+今回、次を確認した。
+
+- 複数buyer候補を形成可能
+- 複数seller候補を形成可能
+- buyer最大3台
+- seller最大3台
+- 複数候補間のsurplus比較を実行可能
+- seller 3台を含む取引が成立
+
+成立取引のbuyerが1台だったのは、複数buyer候補を形成できなかったためではない。
+buyer 1台候補が最大surplusを持ったためである。
+
+ただし、今回の複数buyer・複数sellerは、異なるinlinkに各1台ずつ存在する構造である。
+
+未確認:
+- 同一inlink上の連続buyer
+- 同一inlink上の連続seller
+- それらを含む経済的成立候補
+- それらが最終選択されるケース
+
+## 7. 進路契約の確認
+
+- 各baseline仮想Worldでは、UXsimがそのWorld内で進路を決める
+- 過去から後続baselineへ引き継ぐのは確定順位であり、進路ではない
+- 実WorldでもUXsimがその時点のlive routeを使用する
+- route一致検査は、同一baseline仮想計算の同一Visit内で、Node到着時に決まったrouteと通過時のrouteが一致することを確認する整合性検査である
+- 異なるbaseline仮想計算間で進路を固定するものではない
+
+この点を誤認して行った一時的な本体・テスト変更は採用せず、git restoreで完全に破棄済みである。
+
+現在、UXsim本体と既存テストにこの誤修正は残っていない。
+
+## 8. 二層意思決定窓案
+
+未採用・未実装を維持する。
+
+今回の12台trialでは、同一inlink上の連続buyer・sellerを検証できていないため、二層案の導入適否は判断しない。
+
+## 9. 最新再開地点
+
+次の直接作業:
+- 同じ単独十字路ネットワークで、12台より多いVehicleを流す次trialの条件を決める
+
+維持:
+- 5 Node
+- 8 Link
+- Link長200 m
+- 単車線
+- 中央NodeだけTVT-MP
+- clearance 1
+- OD指定
+- UXsimの動的経路選択
+- specified_route不使用
+- 当面は全車participating
+- 二層案は未実装
+
+変更を検討するもの:
+- Vehicle数
+- 出発時刻
+- 方向別投入配置
+
+次trialの主要確認対象:
+- 同一inlink上の複数Vehicleが同じP−1候補母集団へ入るか
+- 同一inlink上の複数buyer候補
+- 同一inlink上の複数seller候補
+- それらの経済的成立
+- それらの最終選択
+- 高需要時のcandidate予測とactual結果の差
+
+参照:
+- core designと次段階は第4巻の2026-10-14節
+- trial条件、候補21件、経済評価、時系列監査は第5巻の2026-10-14節
+

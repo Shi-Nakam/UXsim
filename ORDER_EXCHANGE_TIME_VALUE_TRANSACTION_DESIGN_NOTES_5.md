@@ -2945,3 +2945,835 @@ right-of-entryをS、そのbaseline passage timestepをPとする。反対側inl
 1. 4十字路ネットワークtrialの条件整理へ進む。
 2. ネットワーク形状、OD、進路、右左折、TVT-MP対象Node、需要条件を整理する。
 3. 二層案はまだ実装しない。
+
+# 単独十字路12台trialの実行・候補21件・時系列監査（2026-10-14）
+
+- 本節は、単独十字路12台trialの条件、実行結果、診断集計、候補形成、経済評価、時系列監査を記録する。
+- core design上の整理と次段階は、第4巻末尾の
+  「単独十字路4流入4流出trialで確認した候補形成構造と次段階（2026-10-14）」
+  を正本とする。
+- 今回のtrialは、小規模な4流入・4流出条件でTVT-MPの基本動作を監査するためのtrialである。
+- 同一inlink上の連続する複数buyer・複数sellerを検証する高需要trialではない。
+
+## 1. scriptと成果物
+
+trial script:
+- research_scripts/run_tvt_mp_single_cross_intersection_12_vehicle_trial.py
+
+診断script:
+- research_scripts/diagnose_tvt_mp_single_cross_intersection_12_vehicle_decision_trace.py
+
+trial directory:
+- research_outputs/trial/tvt_mp_single_cross_intersection_12_vehicle_seed_1_initial
+
+diagnostic directory:
+- research_outputs/trial/tvt_mp_single_cross_intersection_12_vehicle_seed_1_initial_decision_trace
+
+trial出力:
+- manifest.json
+- run_summary.txt
+- tvt_mp_nodes.csv
+- tvt_mp_scenario.csv
+- tvt_mp_transactions.csv
+- tvt_mp_vehicles.csv
+- tvt_mp_visits.csv
+- vehicle_vot.csv
+
+診断出力:
+- decision_summary.csv
+- candidate_summary.csv
+- selected_result_summary.csv
+- decision_trace.json
+
+既存のtrial・診断成果物は削除も上書きもしていない。
+
+## 2. ネットワーク条件
+
+Nodeは5つ。
+
+- intersection
+- north
+- east
+- south
+- west
+
+中央Node:
+- intersection
+- TVT-MP対象
+- inlink 4本
+- outlink 4本
+- clearance 1 timestep
+
+Linkは8本。
+
+進入Link:
+- north_to_intersection
+- east_to_intersection
+- south_to_intersection
+- west_to_intersection
+
+退出Link:
+- intersection_to_north
+- intersection_to_east
+- intersection_to_south
+- intersection_to_west
+
+全Link:
+- length 200 m
+- 単車線
+- free-flow speed 60000 / 3600 m/s
+- UXsimの既定容量
+
+経路:
+- Vehicleにはoriginとdestinationだけを指定
+- specified_routeは使用しない
+- 固定Link列を使用しない
+- UXsimの通常の動的経路選択を維持
+- 迂回防止のための人工的なネットワーク制約は設けない
+
+## 3. Vehicle条件
+
+Vehicle総数:
+- 12台
+
+全Vehicle:
+- participating
+- nonparticipating 0台
+- declared VOT = true VOT
+- VOTは既存trialと同じlognormal生成
+- TRAFFIC_SEED = 0
+- VOT_SEED = 1
+
+同一出発時刻のVehicleSpec順:
+1. north
+2. east
+3. south
+4. west
+
+T=5:
+- veh_n1: north -> south
+- veh_e1: east -> west
+- veh_s1: south -> north
+- veh_w1: west -> east
+
+直接経路ではstraightに相当する4 OD。
+
+T=9:
+- veh_n2: north -> east
+- veh_e2: east -> south
+- veh_s2: south -> west
+- veh_w2: west -> north
+
+直接経路ではleftに相当する4 OD。
+
+T=13:
+- veh_n3: north -> west
+- veh_e3: east -> north
+- veh_s3: south -> east
+- veh_w3: west -> south
+
+直接経路ではrightに相当する4 OD。
+
+U-turn ODは設定していない。
+
+ただし、movementはODから決めつけず、中央Nodeで実際に使用したinlinkとoutlinkから事後分類した。
+
+## 4. 時間条件
+
+- evaluation T=0から299
+- INTERNAL_TSIZE = 330
+- baseline horizon 30 timestep
+- candidate上限N=10
+- clearance 1 timestep
+- EXPECTED_DRIVER_CALL_COUNT = 300
+- timestep size 1秒
+
+## 5. trial実行結果
+
+- evaluation終了検証は全項目合格
+- World.T = 300
+- completed trips 12 / 12
+- transaction count 2
+- feasible 2
+- infeasible 0
+- unavailable 0
+- buyer Visit 2
+- seller Visit 6
+- nonparticipating Visit 0
+
+実行時間:
+- setup / finalize 約14.487秒
+- exec_simulation 約4.159秒
+- total 約18.650秒
+
+成立取引時刻:
+- T=16
+- T=20
+
+## 6. 実現movementと経路結果
+
+中央Nodeで実際に使用したinlinkとoutlinkから集計した結果:
+
+- straight 4 Visit
+- left 4 Visit
+- right 4 Visit
+- u_turn 0 Visit
+- unknown 0 Visit
+- intersection再訪Vehicle 0台
+
+全12台について、計画ODに対応する直接movementが実現した。
+
+予想外の迂回、U-turn、中央Node再訪は今回発生しなかった。
+
+ただし、経路を固定した結果ではない。
+UXsimの動的経路選択による今回の実現結果である。
+
+## 7. decision trace診断結果
+
+- driver wrapper call数 300
+- decision summary 300行
+- baseline_information_complete 3
+- not_built_no_right_of_entry 297
+- right-of-entry selected 3
+- right-of-entry no_right_of_entry 297
+- final-rank selected_candidate_ranks 2
+- final-rank baseline_fallback_ranks 1
+- final-rank no_visits_to_confirm 297
+- 候補形成時刻:
+  T=12、16、20
+- concrete buyer candidate合計21
+- general trade rank candidate合計21
+- 1意思決定当たり最大concrete buyer candidate 7
+- 1意思決定当たり最大general trade rank candidate 7
+- FIFO true 21
+- FIFO false 0
+- local resolved 21
+- local unresolved 0
+- economic evaluation candidate 21
+- economically feasible 8
+- economically infeasible 13
+- selected candidate 2
+- buyer数比較による選択 0
+- local RNG使用 0
+- candidate limit到達 0
+- snapshot固定集合外baseline passage 4件
+
+selection reason:
+- no_economically_feasible_candidate 1件
+- unique_maximum_surplus 2件
+- maximum_surplus_then_unique_maximum_buyer_count 0件
+- final_tie_resolved_by_local_rng 0件
+
+trial CSVの成立時刻と診断再simulationの成立時刻は完全一致した。
+
+## 8. 候補形成の規模
+
+T=12、16、20の各意思決定で:
+
+- candidate Visit 4台
+- P−1 eligible count before limit 4台
+- concrete buyer candidate 7件
+- general trade rank candidate 7件
+- candidate内buyer最大3台
+- candidate内seller最大3台
+
+3時刻合計:
+- candidate 21件
+- 全21件でFIFO preserved
+- 全21件でcandidate局所仮想計算resolved
+
+複数buyerを含む候補:
+- T=12、16、20で発生
+
+複数sellerを含む候補:
+- T=12、16、20で発生
+
+複数候補間surplus比較:
+- T=16、20で発生
+
+今回形成された複数buyer・複数sellerは、それぞれ異なるinlinkに1台ずつ存在する構造だった。
+
+同一inlink上の連続buyer・連続sellerは今回未確認である。
+
+## 9. T=12第一波のbaseline
+
+T=12時点の各inlink物理列:
+
+north:
+- veh_n1
+- veh_n2
+
+east:
+- veh_e1
+- veh_e2
+
+south:
+- veh_s1
+- veh_s2
+
+west:
+- veh_w1
+- veh_w2
+
+第一波4台のbaseline arrivalはすべてT=18。
+
+固定tiebreakerによるbaseline通過順:
+1. veh_e1: arrival 18、passage 19
+2. veh_s1: arrival 18、passage 21
+3. veh_w1: arrival 18、passage 23
+4. veh_n1: arrival 18、passage 25
+
+right-of-entry:
+- veh_e1
+- P = 19
+- P−1 = 18
+
+4台すべてarrival <= P−1を満たした。
+
+T=12の意思決定窓内Visit:
+- veh_e1
+- veh_s1
+- veh_w1
+- veh_n1
+
+4台から7候補を形成した。
+
+## 10. T=12の7候補と経済評価
+
+候補1:
+- buyer:
+  veh_w1
+- sellers:
+  veh_e1
+  veh_s1
+- G = 0.17509189607316206
+- R = 3.2445330405768478
+- surplus = -3.0694411445036858
+- economically infeasible
+
+時間変化:
+- veh_w1: 23 -> 19、4 timestep短縮
+- veh_e1: 19 -> 21、2 timestep遅延
+- veh_s1: 21 -> 23、2 timestep遅延
+
+候補2:
+- buyer:
+  veh_s1
+- seller:
+  veh_e1
+- G = 1.0442185618892235
+- R = 2.2003144786876243
+- surplus = -1.1560959167984008
+- economically infeasible
+
+時間変化:
+- veh_s1: 21 -> 19、2 timestep短縮
+- veh_e1: 19 -> 21、2 timestep遅延
+
+候補3:
+- buyers:
+  veh_s1
+  veh_w1
+- seller:
+  veh_e1
+- G = 1.1317645099258045
+- R = 4.400628957375249
+- surplus = -3.2688644474494444
+- economically infeasible
+
+時間変化:
+- veh_s1: 21 -> 19、2 timestep短縮
+- veh_w1: 23 -> 21、2 timestep短縮
+- veh_e1: 19 -> 23、4 timestep遅延
+
+候補4:
+- buyer:
+  veh_n1
+- sellers:
+  veh_e1
+  veh_s1
+  veh_w1
+- G = 3.2054925209733423
+- R = 3.332078988613429
+- surplus = -0.12658646764008674
+- economically infeasible
+
+時間変化:
+- veh_n1: 25 -> 19、6 timestep短縮
+- veh_e1: 19 -> 21、2 timestep遅延
+- veh_s1: 21 -> 23、2 timestep遅延
+- veh_w1: 23 -> 25、2 timestep遅延
+
+候補5:
+- buyers:
+  veh_w1
+  veh_n1
+- sellers:
+  veh_e1
+  veh_s1
+- G = 2.31208691005539
+- R = 6.4890660811536955
+- surplus = -4.1769791710983055
+- economically infeasible
+
+時間変化:
+- veh_w1: 23 -> 19、4 timestep短縮
+- veh_n1: 25 -> 21、4 timestep短縮
+- veh_e1: 19 -> 23、4 timestep遅延
+- veh_s1: 21 -> 25、4 timestep遅延
+
+候補6:
+- buyers:
+  veh_s1
+  veh_n1
+- sellers:
+  veh_e1
+  veh_w1
+- G = 3.1812135758714515
+- R = 4.48817490541183
+- surplus = -1.3069613295403784
+- economically infeasible
+
+時間変化:
+- veh_s1: 21 -> 19、2 timestep短縮
+- veh_n1: 25 -> 21、4 timestep短縮
+- veh_e1: 19 -> 23、4 timestep遅延
+- veh_w1: 23 -> 25、2 timestep遅延
+
+候補7:
+- buyers:
+  veh_s1
+  veh_w1
+  veh_n1
+- seller:
+  veh_e1
+- G = 2.2002620169169185
+- R = 6.600943436062873
+- surplus = -4.400681419145954
+- economically infeasible
+
+時間変化:
+- veh_s1: 21 -> 19、2 timestep短縮
+- veh_w1: 23 -> 21、2 timestep短縮
+- veh_n1: 25 -> 23、2 timestep短縮
+- veh_e1: 19 -> 25、6 timestep遅延
+
+T=12では7候補すべて、
+total_buyer_value_below_required_compensation
+により不成立だった。
+
+候補形成、FIFO、局所仮想計算の失敗ではない。
+
+最も成立に近かったのは候補4であり、
+surplus = -0.12658646764008674
+だった。
+
+内部計算ではToleranceや丸めを使わず、完全比較を行うため不成立である。
+
+T=12の最終結果:
+- no_economically_feasible_candidate
+- 第一波4台をbaseline順位で確定
+
+確定順位:
+1. veh_e1
+2. veh_s1
+3. veh_w1
+4. veh_n1
+
+## 11. T=12候補4の局所仮想計算
+
+対象:
+- buyer veh_n1
+- sellers veh_e1、veh_s1、veh_w1
+
+拘束順位:
+- veh_n1
+- veh_e1
+- veh_s1
+- veh_w1
+
+時系列:
+- T=12〜17:
+  4台ともNode未到着。
+  not_arrived_at_target_nodeで一時スキップ。
+- T=18:
+  veh_n1、veh_e1、veh_s1、veh_w1がNodeへ到着。
+  到着登録は通過試行後なので同時刻には通過しない。
+- T=19:
+  veh_n1通過。
+  veh_e1はclearance未充足で停止。
+- T=20:
+  clearance待ち。
+- T=21:
+  veh_e1通過。
+  veh_s1はclearance未充足で停止。
+- T=22:
+  clearance待ち。
+  veh_n2、veh_e2がNodeへ到着。
+- T=23:
+  veh_s1通過。
+  veh_w1はclearance未充足で停止。
+  veh_s2がNodeへ到着。
+- T=24:
+  clearance待ち。
+- T=25:
+  veh_w1通過。
+  veh_w2がNodeへ到着。
+  取引対象4台の必要な通過観測が揃いresolved=True。
+
+第2波Vehicleも局所仮想Worldの交通から除外されていない。
+
+T=25の拘束順位外FCFS候補には、
+- veh_n2
+- veh_e2
+- veh_s2
+が存在した。
+
+ただし、veh_w1通過直後のclearance不足により、veh_n2から停止した。
+
+取引対象4台の観測が揃ったため、局所仮想計算はT=25で終了した。
+
+## 12. T=16第二波のbaselineと候補形成
+
+T=16時点では、各inlinkに3台ずつ存在した。
+
+north:
+- veh_n1
+- veh_n2
+- veh_n3
+
+east:
+- veh_e1
+- veh_e2
+- veh_e3
+
+south:
+- veh_s1
+- veh_s2
+- veh_s3
+
+west:
+- veh_w1
+- veh_w2
+- veh_w3
+
+第一波4台はT=12で順位確定済み。
+
+第一波baseline通過:
+1. veh_e1: 19
+2. veh_s1: 21
+3. veh_w1: 23
+4. veh_n1: 25
+
+第二波baseline通過:
+5. veh_e2: arrival 22、passage 27
+6. veh_s2: arrival 22、passage 29
+7. veh_w2: arrival 23、passage 31
+8. veh_n2: arrival 25、passage 33
+
+right-of-entry:
+- veh_e2
+- P = 27
+- P−1 = 26
+
+第二波4台すべてarrival <= P−1を満たした。
+
+意思決定窓内Visit:
+- veh_e2
+- veh_s2
+
+P−1候補母集団:
+- veh_e2
+- veh_s2
+- veh_w2
+- veh_n2
+
+意思決定窓とP−1候補母集団は一致しなくてよい。
+これは設計どおりである。
+
+第二波4台から7候補を形成した。
+
+economically feasible:
+- 5件
+
+選択:
+- candidate identity:
+  intersection|veh_n2:1
+- selection reason:
+  unique maximum surplus
+
+## 13. T=16の選択候補
+
+buyer:
+- veh_n2
+
+sellers:
+- veh_e2
+- veh_s2
+- veh_w2
+
+baseline順位:
+- veh_e2
+- veh_s2
+- veh_w2
+- veh_n2
+
+採用候補順位:
+- veh_n2
+- veh_e2
+- veh_s2
+- veh_w2
+
+予測時間変化:
+- veh_n2:
+  baseline 33 -> candidate 26
+  7 timestep短縮
+- veh_e2:
+  baseline 27 -> candidate 28
+  1 timestep遅延
+- veh_s2:
+  baseline 29 -> candidate 30
+  1 timestep遅延
+- veh_w2:
+  baseline 31 -> candidate 32
+  1 timestep遅延
+
+経済計算:
+- G = 8.744536946368566
+- R = 1.526312266525999
+- surplus = 7.218224679842567
+
+この候補が7候補中の一意なmaximum surplusだった。
+
+T=16では複数buyer候補も形成され、一部は経済的に成立した。
+しかし、それらは選択候補よりsurplusが低かった。
+
+## 14. T=16選択候補の局所仮想計算
+
+局所仮想計算では、T=12で確定済みの第一波順位を先に維持し、その後にT=16の採用候補順位を適用した。
+
+全拘束順位:
+1. veh_e1
+2. veh_s1
+3. veh_w1
+4. veh_n1
+5. veh_n2
+6. veh_e2
+7. veh_s2
+8. veh_w2
+
+時系列:
+- T=16〜17:
+  第一波・第二波ともNode未到着。
+- T=18:
+  第一波4台が到着。
+- T=19:
+  veh_e1通過。
+- T=20:
+  clearance待ち。
+- T=21:
+  veh_s1通過。
+- T=22:
+  clearance待ち。
+  veh_e2、veh_s2が到着。
+- T=23:
+  veh_w1通過。
+  veh_w2が到着。
+- T=24:
+  clearance待ち。
+- T=25:
+  veh_n1通過。
+  veh_n2がNodeへ到着。
+  同じT=25の通過試行時点では未到着だったため、veh_n2は一時スキップされた。
+- T=26:
+  buyer veh_n2通過。
+- T=27:
+  clearance待ち。
+- T=28:
+  seller veh_e2通過。
+- T=29:
+  clearance待ち。
+- T=30:
+  seller veh_s2通過。
+- T=31:
+  clearance待ち。
+- T=32:
+  seller veh_w2通過。
+  取引対象4台の必要な通過観測が揃いresolved=True。
+
+到着登録と通過試行の処理順により、VehicleはNodeへ到着した同じtimestepには通過しない。
+
+第一波の確定順位、第二波の採用候補順位、clearance、到着時刻、終了条件は整合していた。
+
+## 15. T=20第三波と成立取引
+
+T=20でもcandidate Visit 4台と7候補が形成された。
+
+選択候補:
+- buyer:
+  veh_w3
+- sellers:
+  veh_n3
+  veh_e3
+  veh_s3
+- buyer 1台
+- seller 3台
+- trade_scope 4台
+- selection reason:
+  unique maximum surplus
+
+予測:
+- veh_w3:
+  baseline 40 -> candidate 33
+  7 timestep短縮
+- veh_n3:
+  baseline 34 -> candidate 35
+  1 timestep遅延
+- veh_e3:
+  baseline 36 -> candidate 37
+  1 timestep遅延
+- veh_s3:
+  baseline 38 -> candidate 39
+  1 timestep遅延
+
+経済計算:
+- G = 5.074432623897665
+- R = 1.3741551491655684
+- surplus = 3.7002774747320966
+
+複数buyer候補も形成され、一部は経済的に成立した。
+ただし、veh_w3単独buyer候補のsurplusが最大だった。
+
+T=20はT=16と同型の構造である。
+全candidateとtrial CSV・診断再simulationの整合は確認済みであり、同じ粒度のtimestep手作業監査は反復しない。
+
+## 16. 成立取引の実績
+
+T=16取引:
+- buyer veh_n2
+- sellers veh_e2、veh_s2、veh_w2
+- buyer支払総額:
+  1.526312266525999
+- seller補償総額:
+  1.526312266525999
+- ex-post feasible
+- buyer satisfied 1
+- seller satisfied 3
+- buyer realized gain:
+  7.218224679842567
+- seller realized gain合計:
+  0
+
+T=20取引:
+- buyer veh_w3
+- sellers veh_n3、veh_e3、veh_s3
+- buyer支払総額:
+  1.3741551491655684
+- seller補償総額:
+  1.3741551491655684
+- ex-post feasible
+- buyer satisfied 1
+- seller satisfied 3
+- buyer realized gain:
+  3.7002774747320966
+- seller realized gain合計:
+  0
+
+sellerはいずれも必要補償額と同額を受領した。
+
+## 17. candidate予測とactual結果
+
+成立取引の8 Visitについて:
+
+- candidate passageとactual passageの不一致 0件
+- predicted route情報とactual routeの不一致 0件
+- formal route情報とactual routeの不一致 0件
+- predicted route情報とformal route情報の不一致 0件
+- assigned rankとactual Node passage rankの不一致 0件
+
+predicted route fieldは、candidate予測記録に付属するroute情報であり、candidate局所仮想計算が進路自体を独自予測したという意味ではない。
+
+candidate局所仮想計算では、baseline処理で得たrouteを使用する。
+
+formal route fieldは順位確定時に保存されたroute情報である。
+
+actual route fieldは実Worldで実際に通過したoutlinkである。
+
+実Worldの進路はformal routeにより強制されず、UXsimがその時点で決定したlive routeを使用する。
+
+今回3者が一致したことは、実Worldへformal routeを強制した結果ではない。
+
+同一baseline仮想計算の同一Visitでは、Node到着時に決まったroute_next_linkに従って通過する。
+到着記録のroute_next_link_nameと通過時のlive route_next_linkの一致検査は、この同一Visit内の整合性検査である。
+
+この一致検査を異なるbaseline計算間の進路固定と誤認して、一時的に一致検査を削除するコード変更とテスト追加を行ったが、前提誤認が判明したため採用しなかった。
+
+変更はgit restoreで完全に破棄済みであり、UXsim本体と既存テストには残っていない。
+
+## 18. 今回確認できたこと
+
+確認済み:
+- 4 inlink・4 outlinkの中央NodeでTVT-MPが完走
+- 12台全車完走
+- straight、left、rightを各4台確認
+- u_turn、unknown、中央Node再訪なし
+- candidate Visit 4台
+- 7候補形成
+- buyer最大3台
+- seller最大3台
+- 21候補すべてFIFO preserved
+- 21候補すべてlocal resolved
+- T=16、20で複数候補間surplus比較
+- buyer 1台・seller 3台の取引が2件成立
+- 第一波のbaseline fallback
+- 確定済み第一波順位を維持した第二波candidate局所仮想計算
+- candidate予測、actual passage、順位の一致
+
+今回未確認:
+- 同一inlink上の連続する複数buyer
+- 同一inlink上の連続する複数seller
+- それらを含む経済的成立候補
+- それらが最終選択されるケース
+- nonparticipatingを含む単独十字路取引
+- candidate limit N=10到達
+- local RNG
+- FIFO false
+- local unresolved
+- 高密度条件での正常なcandidate予測差
+
+## 19. 次のtrial方針
+
+次は、同じ単独十字路ネットワークでVehicle数を増やす。
+
+維持:
+- 5 Node
+- 8 Link
+- 各Link 200 m
+- 単車線
+- 中央NodeだけTVT-MP対象
+- clearance 1
+- OD指定
+- UXsimの動的経路選択
+- specified_route不使用
+- 最初は全車participating
+- 二層意思決定窓案は未実装
+
+変更対象:
+- Vehicle数
+- 出発時刻
+- 方向別投入配置
+
+確認目的:
+- 同一inlink上の複数Vehicleが同じP−1候補母集団へ入るか
+- 同一inlink上の複数buyer候補
+- 同一inlink上の複数seller候補
+- それらの経済的成立
+- それらの最終選択
+- 高需要時のcandidate予測とactual結果の差
+
+同一inlink上の連続buyer・sellerが形成されない場合は、
+- 物理的にP−1までに到着できないためか
+- 過去の意思決定で順位確定済みとなったためか
+を区別する。
+
+この結果を確認するまで、二層意思決定窓案は採用・実装しない。
