@@ -5037,3 +5037,171 @@ buyer 1台候補が最大surplusを持ったためである。
 - core designと次段階は第4巻の2026-10-14節
 - trial条件、候補21件、経済評価、時系列監査は第5巻の2026-10-14節
 
+# 二交差点trialで複数buyer候補を観測し、clearance優先順をbaselineへ反映（2026-10-16）
+
+## 1. 今回の研究上の成果
+
+二交差点のdownstream spillback trialで、同一inlink上の複数buyerを含む正式候補が実際に形成された。
+
+trial条件は次である。
+
+- 二つの交差点
+- downstream spillback
+- 南側extended pulse
+- 東向き入口空間不足
+- 意思決定時刻 T=310
+- 対象Nodeは `west_intersection`
+
+候補構成は次である。sellerはいずれも `veh_wn_115` である。
+
+候補1:
+
+- buyer: `veh_ws_79`
+- seller: `veh_wn_115`
+
+候補2:
+
+- buyers: `veh_ws_79`、`veh_ws_80`
+- seller: `veh_wn_115`
+
+候補3:
+
+- buyers: `veh_ws_79`、`veh_ws_80`、`veh_ws_81`
+- seller: `veh_wn_115`
+
+次を明記する。
+
+- 複数buyer候補が本質的に不可能かもしれないという従来の疑いを反証した。
+- 確認したのは複数buyer候補の形成可能性である。
+- 複数buyer取引の経済的成立を確認したわけではない。
+- clearance優先のproduction修正後にも同じ候補が形成されるかは未確認である。
+- 詳細なbaseline orderとtrade orderは、`ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_4.md` 末尾の2026-10-16節を参照する。
+
+修正前のP、`G_b`、`R_s`、total G、total R、surplus、経済条件、採否の具体値は、この進捗節へ再掲しない。
+
+## 2. T=310診断で発見した問題
+
+clearance優先修正前の診断では、baseline forkとcandidate 3はT=310からT=313まで一致していた。最初の分岐はT=314だった。
+
+先順位の `veh_wn_114` には、clearance未充足とoutlink入口空間不足が同時に存在した。修正前のbaselineは入口空間不足を先に見て `veh_wn_114` を一時スキップした。同じT=314に、異方向の後順位 `veh_ws_77` が通過した。candidate拘束順位走査はclearanceを先に見て、その時刻のNode処理を終了した。
+
+設計原典とproductionを照合した結果、不一致だったのはcandidate側ではなくbaseline側だった。修正前の診断結果は、production修正後の確定結果ではない。
+
+原因と最新仕様の詳細は、第4巻末尾の次の節を正本として参照する。
+
+「TVT-MP物理通過のclearance優先判定順の確定とbaseline実装修正（2026-10-16）」
+
+## 3. 確定した判定順
+
+進捗メモとして、各VisitまたはVehicleは次の順で判定する。
+
+1. 未到着なら、対象Visitだけ一時スキップする。
+2. inlink物理先頭でなければ、対象Visitだけ一時スキップする。
+3. clearance未充足なら、そのtimestepの対象Node処理を終了する。
+4. clearance充足後に、Node流量、inlink流出、outlink流入、入口空間を判定する。
+5. 通常物理制約が不足なら、対象Visitだけ一時スキップし、後続を試す。
+6. 通過成功後にclearance履歴を更新する。
+
+入口空間不足を先に判定すると、先順位をスキップして異方向の後順位が通過し、clearance履歴が後順位方向へ更新される。その結果、入口空間が次時刻に回復しても先順位がさらにclearance待ちとなり、後順位より不当に劣後する。
+
+詳細は第4巻の2026-10-16節と、FCFS設計原典 `ORDER_EXCHANGE_PHASE4-5_CLEARANCE_FCFS_DESIGN_NOTES.md` のX/Y/Z問題を参照する。
+
+## 4. production修正
+
+変更済みファイル:
+
+- `uxsim/order_control_tvt_mp_physical_transfer.py`
+- `tests_order_control_tvt_mp_physical_transfer.py`
+
+production修正:
+
+- `_try_confirmed_candidates`
+- `_try_unconfirmed_baseline_vehicles`
+- `transfer_tvt_mp_passage_attempts` の契約コメント
+- 旧helperを次へ分割した。
+  - `_inlink_physical_head_should_skip`
+  - `_ordinary_physical_limits_should_skip`
+
+次を記録する。
+
+- 実WorldのTVT確定順位と、順位適用baseline forkの確定群・未確定群が、最新順へ統一された。
+- candidate拘束順位走査は既に最新順だったので、変更していない。
+- 汎用baseline fork、FCFS、BATCH、`order_control_type="none"` は変更していない。
+- clearance条件式そのものは変更していない。
+- candidate unbound FCFSは今回の修正対象外であり、別途判断が必要である。
+
+## 5. 回帰テストと独立確認
+
+追加済みテスト:
+
+- `test_confirmed_clearance_precedes_entry_space_skip_and_blocks_later_rank`
+- `test_unconfirmed_clearance_precedes_entry_space_skip_and_blocks_later_arrival`
+
+Terminal独立確認:
+
+- productionとtestの `git diff` を確認した。
+- `tests_order_control_tvt_mp_physical_transfer.py` は73 passedだった。
+- productionとtestの `py_compile` は成功した。
+
+これはproductionと回帰テストの確認であり、修正後の二交差点trial結果の確認ではない。
+
+## 6. 詳細設計メモへの反映
+
+- `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_4.md` 末尾へ、2026-10-16の独立節を追加済みである。
+- 古い記述は削除せず、7か所へ最新節参照の短い注記を追加済みである。
+- 第4巻の新節はTerminalで独立確認済みである。
+- 第5巻は最新判定順の正本ではない。
+- 第5巻の旧記述への一行注記は今回未実施である。
+
+## 7. 修正前結果の扱い
+
+修正前の次の結果は、最新の確定結果として扱わない。
+
+- candidate P
+- candidate側到着登録時刻
+- `G_b`
+- `R_s`
+- total G
+- total R
+- surplus
+- 経済条件
+- 候補採否
+- 交通状態に依存するNode別件数・取引件数
+
+第4巻の2026-10-16節には、これらを「clearance優先修正前の観察」として区別して記録済みである。
+
+複数buyer候補が形成されたという観察自体は重要成果である。修正後に同じ候補構成が再現されるかは、再診断で確認する。
+
+## 8. 未完了事項
+
+- 診断scriptに残る旧helper名 `_physical_passage_limits_should_skip` への参照確認
+- 診断scriptの状態分類処理をproductionのhelper分割へ追随
+- static validation
+- `py_compile`
+- 修正前診断出力directoryの退避
+- production修正後のT=310診断再実行
+- T=314でbaselineとcandidate 3が分岐しなくなったことの確認
+- 複数buyer候補が再形成されるかの確認
+- 候補1、2、3の交通結果の再取得
+- `G_b`、`R_s`、total G、total R、surplus、経済条件、候補採否の再計算
+- Node別候補件数・取引件数への影響確認
+- 二交差点trial全体の交通流変化確認
+- candidate unbound FCFSの判定順に関する別途調査・設計判断
+- 修正後結果を第4巻と進捗第3巻へ追加反映
+- 第5巻への一行注記の要否判断
+
+## 9. 最新再開地点
+
+次の直接作業は、この順で行う。
+
+1. `research_scripts/diagnose_tvt_mp_two_cross_intersections_extended_south_blocked_right_of_entry.py` が旧helper名へ依存する箇所を、読み取り専用で確認する。
+2. 必要な追随修正を行う。
+3. static validationと `py_compile` を実施する。
+4. 修正前診断出力directoryを別名へ退避する。
+5. production修正後のT=310診断を再実行する。
+6. T=314分岐の解消を確認する。
+7. 複数buyer候補と経済結果を再評価する。
+8. 第4巻と進捗第3巻へ修正後結果を追加する。
+
+2026-10-14節の「12台より多い単独十字路」検証は破棄していない。今回の再診断が完了したあと、戻る予定の作業である。
+

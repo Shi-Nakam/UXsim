@@ -2223,6 +2223,8 @@ UXsim の最新経路選択により、ネットワーク上の実際の混雑�
 
 ## 8. 一時スキップ
 
+2026-10-16注記: この一覧の分類は維持する。同一Visitで一時スキップ条件とclearance未充足が同時に起きるときの判定順は、末尾の「TVT-MP物理通過のclearance優先判定順の確定とbaseline実装修正（2026-10-16）」を参照する。
+
 次は正常な物理制約であり、例外にしない。一時スキップは、この一覧に限る。`route_next_link is None` は含めない。
 
 - inlink 物理先頭でない
@@ -2383,6 +2385,8 @@ TVT 順位適用 baseline fork の `Node.transfer` 開始時点の `incoming_veh
 通常 baseline 群は、`Node.transfer` 開始時の固定 snapshot とする。過去確定群の処理後に `incoming_vehicles` から作り直さない。作り直すと、一時スキップした過去確定 Vehicle が通常群へ混ざる。
 
 ## 14. baseline forkの共存処理
+
+2026-10-16注記: 確定群を先に試し、clearance未充足でその時刻を終える分類は維持する。番号2を番号3より先に機械的に適用すると、入口空間不足とclearance未充足が同時のVisitを入口空間不足だけで一時スキップし得る。同時発生時の判定順は、末尾の2026-10-16節を参照する。
 
 次の順は、TVT 順位適用 baseline fork だけである。汎用 baseline fork は、この分類と順位試行へ入らず、従来の通常合流で前進する。
 
@@ -3008,6 +3012,8 @@ TVT 順位適用 baseline fork では、開始時 snapshot を次へ分ける。
 
 ## 24. 通過可否
 
+2026-10-16注記: 通過に必要な条件の一覧は維持する。評価順は、到着と物理先頭のあと、通常容量・入口空間より先にclearanceを見る。同時発生時の正本は末尾の2026-10-16節である。
+
 評価直前に、次が全部真なら通過させる。
 
 - まだ `incoming_vehicles` にいる。
@@ -3025,6 +3031,8 @@ TVT 順位適用 baseline fork では、開始時 snapshot を次へ分ける。
 通常 baseline 群の選択順は §30 の通常合流である。`enforce_order_control_clearance=True` のとき、選ばれた Vehicle の通過前に、上と同じ order-control clearance を確認する。未充足は一時スキップではなく、その時刻の通常群処理の終了である。
 
 ## 25. 一時スキップ
+
+2026-10-16注記: ここに挙げる状態は、clearance充足後の一時スキップとして維持する。clearance未充足と同時のときは、この一覧へ進む前にclearanceでその時刻のNode処理を終える。正本は末尾の2026-10-16節である。
 
 次は `continue` である。例外にしない。台帳からも到着列からも、この理由では削除しない。
 
@@ -14549,6 +14557,8 @@ TVT順位適用baseline forkでは、各対象Nodeについて次の順序で通
 
 ### 4.1 順位確定済みVisit
 
+2026-10-16注記: 一時スキップとclearance停止の分類は維持する。同一Visitで両方が同時のときの判定順は、末尾の2026-10-16節を参照する。
+
 - fork作成時に凍結された順位台帳でconfirmedのVisitを対象とする。
 - 保存済み`assigned_rank`の昇順で通過を試す。
 - 同じ`assigned_rank`の重複は重大不整合として`RuntimeError`とする。
@@ -14560,6 +14570,8 @@ TVT順位適用baseline forkでは、各対象Nodeについて次の順序で通
 - 次のtimestepでは、残る未通過の順位確定済みVisitを`assigned_rank`の先頭から再評価する。
 
 ### 4.2 順位未確定Visit
+
+2026-10-16注記: 未確定群も、一時スキップとclearance停止の分類は維持する。同時発生時の判定順は、末尾の2026-10-16節を参照する。
 
 - fork作成時に凍結された順位台帳でconfirmedではないVisitを対象とする。
 - 正式順位としてrank ledgerへ書き込まない。
@@ -14596,6 +14608,8 @@ FCFSと同じ通過試行契約として、次を採用する。
 - 到着情報がないことを理由に、`merge_priority`またはRNGによる代替順位を作らない。
 
 ### 4.4 通常の通過不能とclearanceの区別
+
+2026-10-16注記: 通常の通過不能とclearance停止の区別は維持する。到着済みで物理先頭であることを確認したあと、clearanceを通常容量・入口空間より先に判定する。正本は末尾の2026-10-16節である。
 
 FCFSと同じ通過試行契約として、次を採用する。
 
@@ -16623,3 +16637,292 @@ T=16のcandidate局所仮想計算では、
 - 高需要時のcandidate予測とactual結果の差
 
 4交差点ネットワークへ進む前に、単独十字路で需要を増やしたtrialを行う。
+
+# TVT-MP物理通過のclearance優先判定順の確定とbaseline実装修正（2026-10-16）
+
+## 1. この節の位置づけ
+
+この節は、TVT-MPの実Worldと順位適用baseline forkにおける物理通過の判定順を、2026-10-16の最新仕様として記録する。
+
+次の古い記述は削除せず、歴史的記録として維持する。
+
+- 2026-09-29の「TVT-MP確定順位の物理通過接続 設計判断」
+- 同じ時期の「TVT-MP確定順位の物理通過接続 完全実装前仕様」
+- 2026-10-09の「TVT順位適用baseline forkの順位未確定Visit通過契約の変更」
+
+今回変更し、明確にするのは、一時スキップ条件とclearance停止条件が同一Visitに同時に成立したときの判定順である。
+
+維持する分類は次である。
+
+- 未到着、物理先頭でない状態、通常容量不足、入口空間不足は一時スキップである。
+- clearance未充足だけが、そのtimestepの対象Node通過処理を終了する。
+
+今回確定したのは、その両方が同時に成立する場合、到着済みと物理先頭を確認したあと、通常容量と入口空間より先にclearanceを判定することである。
+
+この判定順は、FCFS設計原典 `ORDER_EXCHANGE_PHASE4-5_CLEARANCE_FCFS_DESIGN_NOTES.md` の「## 16. 修正版の判定順」と同じ設計原理である。第5巻は、この判定順の正本ではない。
+
+## 2. 二交差点trialで確認した複数buyer候補
+
+二交差点のdownstream spillback trialで、同一inlink上の複数buyerを含む正式候補が実際に形成された。これは、それ以前の「複数buyer候補は本質的に不可能かもしれない」という疑いを反証した、独立した確認である。
+
+trial条件は次である。
+
+- 二つの交差点を持つnetwork
+- downstream spillback
+- 南側extended pulse
+- 東向き入口空間不足
+- 意思決定時刻 T=310
+- 対象Nodeは `west_intersection`
+
+確認した3候補は次である。sellerはいずれも `veh_wn_115` である。
+
+- 候補1のbuyerは `veh_ws_79`
+- 候補2のbuyerは `veh_ws_79` と `veh_ws_80`
+- 候補3のbuyerは `veh_ws_79`、`veh_ws_80`、`veh_ws_81`
+
+3候補に共通するbaseline orderは次である。
+
+1. `veh_wn_115`
+2. `veh_ws_79`
+3. `veh_ws_80`
+4. `veh_ws_81`
+
+trade orderは次である。
+
+候補1:
+
+1. `veh_ws_79`
+2. `veh_wn_115`
+3. `veh_ws_80`
+4. `veh_ws_81`
+
+候補2:
+
+1. `veh_ws_79`
+2. `veh_ws_80`
+3. `veh_wn_115`
+4. `veh_ws_81`
+
+候補3:
+
+1. `veh_ws_79`
+2. `veh_ws_80`
+3. `veh_ws_81`
+4. `veh_wn_115`
+
+確認したのは、複数buyer候補の形成可能性である。複数buyer取引が経済的に成立したことではない。
+
+修正前出力では、3候補とも `economically_feasible=false`、`selected=false` だった。この経済結果は、clearance優先修正前の交通結果に基づく。production修正後の再診断と再計算が必要である。P、`G_b`、`R_s`、total G、total R、surplusの具体値は、この節へ再掲しない。
+
+production修正後も同じ候補構成が再現されるかは、未確認である。T=310の再診断で確認する。
+
+## 3. clearance優先修正前のT=310診断で観察した現象
+
+本節の診断出力は、clearance優先のproduction修正より前の観察である。production修正後の交通結果、通過時刻、経済結果ではない。
+
+診断出力directory:
+
+`research_outputs/trial/tvt_mp_two_cross_intersections_downstream_spillback_extended_south_pulse_seed_1_initial_blocked_right_of_entry_diagnostic/`
+
+修正前の保存結果では、次が観察された。
+
+- baseline forkとcandidate 3は、T=310からT=313まで、同一stageの交通状態が一致した。
+- 最初の分岐はT=314だった。
+- T=314のbaseline forkでは、`veh_wn_114` は到着済みかつinlink物理先頭だった。
+- `veh_wn_114` には、outlink入口空間不足とclearance未充足が同時に存在した。
+- 修正前のbaseline実装は、入口空間不足を先に判定し、`veh_wn_114` を一時スキップした。この記録では `production_clearance_returned_true` はfalseのままだった。
+- 同じT=314に、異方向の後順位 `veh_ws_77` が通過した。
+- T=314のcandidate 3では、`veh_wn_114` のclearance未充足でbinding走査を終了した。
+- candidate 3では `veh_ws_77` は `not_reached_after_clearance_stop` となり、同じ時刻に通過しなかった。`veh_ws_77` 側のclearanceは、その時点では充足していた。
+- このT=314の差が、後続車列の位置差へ伝播した。
+
+`t310_baseline_candidate3_first_divergence.json` 自体は `resolved=false` であり、起点の `cause_class` はnullだった。このJSONが原因を確定したのではない。原因は、その後にscan eventとproductionの判定順を照合して特定した。
+
+修正前の保存記録では、候補1の `veh_wn_115` にbaseline Pとcandidate Pの差があり、候補3の `veh_ws_81` にbaseline到着とcandidate側の到着・通過の差があった。`veh_ws_79` と `veh_ws_80` のPは、修正前の保存記録ではbaselineとcandidateで同一だった。これらはclearance優先修正前の診断結果であり、production修正後の再診断と再計算が必要である。`veh_ws_81` がcandidate側のT=321に未到着だったことは、T=314分岐のあとで見えた結果であり、分岐の原因ではない。
+
+## 4. 発見したbaseline production実装の不備
+
+修正前のproductionは `uxsim/order_control_tvt_mp_physical_transfer.py` である。
+
+対象は `_try_confirmed_candidates` と `_try_unconfirmed_baseline_vehicles` だった。
+
+修正前の問題は次である。
+
+- `_physical_passage_limits_should_skip` が、inlink物理先頭の判定と、通常の容量・入口空間の判定を一つにまとめていた。
+- 呼出側は、このhelperをclearance判定より先に呼んでいた。
+- outlink入口空間不足などでhelperがTrueを返すとcontinueし、clearance判定へ到達しなかった。
+- そのため、clearance未充足と入口空間不足が同時に成立する先順位Visitが、入口空間不足だけを理由に一時スキップされた。
+- 後順位の異方向Visitが、同じtimestepに通過可能となった。
+- これは、最新のclearance優先設計と不一致だった。
+
+不一致が存在した経路は次である。
+
+- 実WorldのTVT確定順位
+- 順位適用baseline forkの確定群
+- 順位適用baseline forkの未確定群
+
+次の経路は、この不備の対象ではなかった。
+
+- 汎用baseline forkの通常合流
+- FCFS
+- BATCH
+- `order_control_type="none"`
+- candidate拘束順位走査
+
+candidate拘束順位走査は、到着と物理先頭のあと、容量と入口空間より先にclearanceを見て、未充足ならその走査を終えていた。
+
+## 5. 2026-10-16に確定した最新判定順
+
+各VisitまたはVehicleは、次の順で判定する。
+
+1. `incoming_vehicles` に存在しない。
+   - 対象Visitだけを一時スキップする。
+   - 後続Visitを試す。
+2. inlink物理先頭でない。
+   - 対象Visitだけを一時スキップする。
+   - 後続Visitを試す。
+3. clearance未充足。
+   - そのtimestepの対象Node通過処理全体を終了する。
+   - 後続の確定順位Visitを処理しない。
+   - 順位適用baseline forkでは、未確定群も開始しない。
+4. clearance充足後に、通常の物理制約を判定する。
+   - Node流量容量
+   - inlink流出容量
+   - outlink流入容量
+   - outlink入口空間
+5. 通常の物理制約が不足している。
+   - 対象Visitだけを一時スキップする。
+   - 後続Visitを試す。
+   - clearance停止とは扱わない。
+6. 全条件が充足している。
+   - Vehicleを通過させる。
+   - 通過成功後にclearance履歴を更新する。
+
+今回の単車線、platoon size 1の研究条件では、未到着だがinlink物理先頭である状態は成立し得る。停止線へまだ届いていないinlink先頭Vehicleがその例である。同じ条件の正常状態では、到着済みだが物理先頭でない状態は成立しない。productionでは、状態の検証と将来の拡張のため、未到着判定と物理先頭判定を分けて保持する。この段落の成立可否は、今回の研究条件に限る。
+
+clearanceの条件式は変更しない。別inlinkのときだけ、`W.T - last_order_control_entry_timestep > order_control_clearance_timesteps` である。
+
+## 6. clearanceを通常物理制約より先に判定する理由
+
+先順位Visitにclearance未充足と入口空間不足が同時に起きているとき、入口空間不足を先に判定すると、その先順位Visitは一時スキップされる。異方向の後順位Visitが通過すると、clearance履歴は後順位Visitの方向へ更新される。次時刻に先順位Visitの入口空間不足が解消していても、新しいclearance待ちが必要になる。先順位Visitは、後順位Visitより不当に劣後する。
+
+そのため、到着済みであることと物理先頭であることを確認したあと、容量と入口空間より先にclearanceを判定する。
+
+この理由は、FCFS設計メモのX/Y/Z問題と同じ設計原理である。先に容量や入口空間でcontinueすると、異方向の後順位が先順位を追い越し、clearance履歴を後順位の方向へ進めてしまう。
+
+## 7. production修正
+
+変更ファイルは `uxsim/order_control_tvt_mp_physical_transfer.py` である。
+
+修正対象は次である。
+
+- `_try_confirmed_candidates`
+- `_try_unconfirmed_baseline_vehicles`
+- `transfer_tvt_mp_passage_attempts` の契約コメント
+
+helperは次の二つに分けた。
+
+- `_inlink_physical_head_should_skip`
+- `_ordinary_physical_limits_should_skip`
+
+修正後の順序は、未到着、物理先頭、clearance、通常の容量・入口空間、通過、clearance履歴の更新である。
+
+確定群でclearance停止した場合、`transfer_tvt_mp_passage_attempts` は未確定群を開始しない。未確定群でも、clearance停止のあとに後続Vehicleを処理しない。clearance充足後の通常容量不足と入口空間不足は、従来どおり一時スキップする。
+
+次は変更していない。
+
+- candidate拘束順位走査。既に最新順と一致していた。
+- clearance条件式そのもの。
+- 1台のVehicleを移動するhelper。
+- candidate local vehicle advance。
+- 汎用baseline fork、FCFS、BATCH、`order_control_type="none"`。
+
+candidate unbound FCFSは、今回の修正対象外である。物理先頭の次にinlink流出容量を見てからclearanceを見る箇所がある。Node流量不足の扱いも、candidate拘束順位の一時スキップとは異なる。同じ最新仕様へ合わせるべきかは未判断である。別途、読み取り専用調査と設計判断が必要である。修正済みではない。
+
+## 8. 追加回帰テストと独立確認
+
+変更ファイルは `tests_order_control_tvt_mp_physical_transfer.py` である。
+
+追加したテストは次である。
+
+- `test_confirmed_clearance_precedes_entry_space_skip_and_blocks_later_rank`
+- `test_unconfirmed_clearance_precedes_entry_space_skip_and_blocks_later_arrival`
+
+どちらのテストも、先順位Visitは到着済み、inlink物理先頭、clearance未充足であり、同時にoutlink入口空間が不足する。後順位の異方向Visitは、通常の物理条件上は通過可能である。期待は、先順位Visitのclearance未充足でNode処理が終わり、後順位Visitも同じtimestepには通過せず、clearance履歴は更新されず、Vehicleは次timestepで再評価できる状態を維持することである。
+
+維持した既存契約は次である。
+
+- clearance充足後に入口空間だけが不足する場合は、一時スキップして後続を試す。
+- Node流量、inlink流出、outlink流入の不足も一時スキップする。
+- clearance未充足では後続を処理しない。
+- 一時スキップしたVisitは、次のtimestepで再評価できる。
+
+production修正時のTerminal独立確認は次である。
+
+- `git diff` でproductionとtestの変更を確認した。
+- `tests_order_control_tvt_mp_physical_transfer.py` は73 passedだった。
+- productionとtestの `py_compile` は成功した。
+
+これは、production単体と回帰テストの確認である。修正後の二交差点trial結果の確認ではない。
+
+## 9. 調査中に退けた説明
+
+次は最新仕様そのものではなく、同じ誤解を繰り返さないための調査上の注意である。
+
+1. `veh_ws_81` がcandidate側のT=321に未到着だったこと自体を原因とする説明。これは原因ではなく、T=314分岐後の結果である。
+2. `veh_ws_79` と `veh_ws_80` のPも1 timestep遅れたという説明。修正前の保存記録では、両車のbaseline Pとcandidate Pは同一だった。この同一も、clearance優先修正前の診断結果であり、production修正後の再確認が必要である。
+3. candidate側のclearance優先順が誤りという説明。candidate拘束順位走査は、最新仕様と一致している。
+4. baselineとcandidateの判定順が異なることを、直ちにcandidate欠陥とする説明。設計原典とproductionを照合した結果、不一致だったのはbaseline側である。
+
+## 10. 診断scriptと保存済み出力
+
+診断scriptは `research_scripts/diagnose_tvt_mp_two_cross_intersections_extended_south_blocked_right_of_entry.py` である。
+
+主な出力と目的は次である。いずれも、現行ファイルはclearance優先修正前の観察である。
+
+- `t310_baseline_timestep_trace.csv`: T=310意思決定のbaseline仮想時刻における車両状態。
+- `t310_baseline_scan_events.json`: baselineの確定群と未確定群について、通過、一時スキップ、clearance停止を記録する。
+- `t310_candidate_timestep_trace.csv`: candidate局所仮想計算の時刻別状態。
+- `t310_candidate_scan_events.json`: candidateのbinding走査結果。
+- `t310_candidate_evidence_summary.json`: candidate 1とcandidate 3の通過差についての、修正前の要約。
+- `t310_baseline_candidate3_motion_trace.csv`: T=310以降のbaselineとcandidate 3の位置比較。
+- `t310_baseline_candidate3_first_divergence.json`: 同じstageだけを比べた最初の位置分岐。
+
+`t310_baseline_candidate3_first_divergence.json` は `resolved=false` である。production修正後の最終結果ではない。原因確定済みのJSONとして扱わない。
+
+診断scriptには、旧helper名 `_physical_passage_limits_should_skip` への参照が残っていることが確認されている。状態からskip理由を付ける処理も、旧helperの順を写している。再実行前に、診断scriptをproductionのhelper分割へ追随させる必要がある。この節の作成時には、診断scriptの追随修正も再実行もしていない。
+
+## 11. 未完了事項
+
+次は未完了である。
+
+- 診断scriptの旧helper名参照と、状態分類処理の追随。
+- 追随後のT=310診断の再実行。
+- T=314でbaselineとcandidate 3が分岐しなくなったことの確認。
+- T=310で複数buyer候補が再形成されるかの確認。
+- 候補1、候補2、候補3の交通結果の再取得。
+- 各buyerの `G_b` の再計算。
+- sellerの `R_s` の再計算。
+- total G、total R、surplus、経済条件、候補採否の再確認。
+- Node別の候補件数と取引件数への影響確認。
+- 二交差点trial全体の交通流変化の確認。
+- candidate unbound FCFSの判定順に関する、別途の読み取り専用調査と設計判断。
+- 第4巻と進捗第3巻の更新後のTerminal独立確認。進捗第3巻の更新は、この節の作成時にはまだ行っていない。
+- 第5巻の旧記述への一行注記は、今回未実施である。必要性は後で判断する。第5巻を、この判定順の正本としては扱わない。
+
+2026-10-14節の「12台より多い単独十字路」検証は破棄しない。今回の再診断が完了したあと、戻る予定の作業として残す。
+
+## 12. 再開手順
+
+次の直接作業は、この順で行う。
+
+1. 診断scriptが旧helper名へ依存している箇所を、読み取り専用で確認する。
+2. 必要な追随修正を行う。
+3. 診断scriptのstatic validationと `py_compile` を実施する。
+4. 現在の修正前診断出力directoryを、別名へ退避する。
+5. production修正後のT=310診断を再実行する。
+6. T=314分岐の解消を確認する。
+7. 複数buyer候補、candidate P、`G_b`、`R_s`、total G、total R、surplus、経済条件、候補採否を再評価する。これらの値は、再実行前に確定結果として扱わない。
+8. 結果を第4巻と進捗第3巻へ追加反映する。
+
+再診断が終わるまで、修正前のP、到着差、経済量、候補採否、交通状態に依存する件数を、最新の確定結果として追記しない。

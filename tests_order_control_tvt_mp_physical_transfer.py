@@ -2802,15 +2802,15 @@ def test_unconfirmed_node_flow_shortage_still_checks_the_later_visit():
         collector, late, baseline_arrival_timestep=12
     )
     checked = []
-    original = physical_transfer._physical_passage_limits_should_skip
+    original = physical_transfer._ordinary_physical_limits_should_skip
 
-    def spy(node, vehicle, inlink, outlink):
-        checked.append(vehicle.name)
-        return original(node, vehicle, inlink, outlink)
+    def spy(node, inlink, outlink):
+        checked.append(inlink.vehicles[0].name)
+        return original(node, inlink, outlink)
 
     with patch.object(
         physical_transfer,
-        "_physical_passage_limits_should_skip",
+        "_ordinary_physical_limits_should_skip",
         spy,
     ):
         junction.transfer()
@@ -2855,6 +2855,107 @@ def test_unconfirmed_clearance_of_earlier_arrival_blocks_later_same_outlink():
     assert late.link.name == "in_b"
     assert junction.last_order_control_inlink is world.get_link("in_a")
     assert junction.last_order_control_entry_timestep == 12
+
+
+def _park_vehicle_at_link_entrance(world, link_name, vehicle_name):
+    """Leave one vehicle at x=0 so that outlink has no entry space."""
+    link = world.get_link(link_name)
+    parked = world.addVehicle("orig_a", "dest", 0, name=vehicle_name)
+    parked.state = "run"
+    parked.link = link
+    parked.x = 0
+    parked.x_old = 0
+    link.vehicles.append(parked)
+    return parked
+
+
+def test_confirmed_clearance_precedes_entry_space_skip_and_blocks_later_rank():
+    """
+    Real-world confirmed ranks stop on unmet clearance before entry space.
+
+    The earlier visit is arrived and is the inlink head, but clearance is
+    unmet and its outlink also has no entry space. The later visit is from
+    another inlink and could pass on capacity and entry space. Clearance
+    ends the timestep, so the later visit does not pass and clearance
+    history stays unchanged.
+    """
+    world = _world("confirmed_clearance_before_entry_space")
+    world.order_control_clearance_timesteps = 1
+    _add_junction_outlink(world, "out_later")
+    _park_vehicle_at_link_entrance(world, "out", "parked_confirmed_out")
+    earlier = _place(world, "rank_earlier", "in_a", visit_id=1, outlink_name="out")
+    later = _place(world, "rank_later", "in_b", visit_id=2, outlink_name="out_later")
+    _confirm(world, [earlier, later])
+    assert getattr(world, "_order_control_baseline_collector", None) is None
+
+    junction = _junction(world)
+    junction.order_control_clearance_timesteps = 1
+    previous_inlink = world.get_link("in_b")
+    entry_timestep = world.T
+    junction.last_order_control_inlink = previous_inlink
+    junction.last_order_control_entry_timestep = entry_timestep
+
+    # This is the real-world passage path. Node.transfer would afterwards
+    # clear incoming_vehicles in _finish_node_transfer. This call does not.
+    physical_transfer.transfer_tvt_mp_passage_attempts(junction)
+
+    assert earlier.link.name == "in_a"
+    assert later.link.name == "in_b"
+    assert earlier in junction.incoming_vehicles
+    assert later in junction.incoming_vehicles
+    assert earlier is world.get_link("in_a").vehicles[0]
+    assert later is world.get_link("in_b").vehicles[0]
+    assert junction.last_order_control_inlink is previous_inlink
+    assert junction.last_order_control_entry_timestep == entry_timestep
+
+
+def test_unconfirmed_clearance_precedes_entry_space_skip_and_blocks_later_arrival():
+    """
+    Rank-applying baseline fork: unmet clearance in the unconfirmed scan
+    stops that scan before a later opposite-direction vehicle.
+
+    No confirmed visit clearance-stops. The earlier unconfirmed vehicle is
+    arrived and is the inlink head, but clearance is unmet and its outlink
+    also has no entry space. The later vehicle could pass. It does not pass
+    in this timestep, and clearance history stays unchanged.
+    """
+    world = _world("unconfirmed_clearance_before_entry_space", flow_capacity=2)
+    world.order_control_clearance_timesteps = 1
+    _add_junction_outlink(world, "out_later")
+    _park_vehicle_at_link_entrance(world, "out", "parked_unconfirmed_out")
+    earlier = _place(
+        world, "unconfirmed_earlier", "in_a", visit_id=1, outlink_name="out"
+    )
+    later = _place(
+        world, "unconfirmed_later", "in_b", visit_id=2, outlink_name="out_later"
+    )
+    _register_only(world, [earlier, later])
+    collector = _as_fork(world)
+    assert collector.apply_copied_tvt_confirmed_ranks is True
+    _register_unconfirmed_baseline_snapshot(
+        collector, earlier, baseline_arrival_timestep=8
+    )
+    _register_unconfirmed_baseline_snapshot(
+        collector, later, baseline_arrival_timestep=12
+    )
+
+    junction = _junction(world)
+    junction.order_control_clearance_timesteps = 1
+    previous_inlink = world.get_link("in_b")
+    entry_timestep = world.T
+    junction.last_order_control_inlink = previous_inlink
+    junction.last_order_control_entry_timestep = entry_timestep
+
+    physical_transfer.transfer_tvt_mp_passage_attempts(junction)
+
+    assert earlier.link.name == "in_a"
+    assert later.link.name == "in_b"
+    assert earlier in junction.incoming_vehicles
+    assert later in junction.incoming_vehicles
+    assert earlier is world.get_link("in_a").vehicles[0]
+    assert later is world.get_link("in_b").vehicles[0]
+    assert junction.last_order_control_inlink is previous_inlink
+    assert junction.last_order_control_entry_timestep == entry_timestep
 
 
 def test_registry_matches_defined_functions():

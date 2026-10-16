@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import copy
 
+from uxsim.order_control_baseline_collector import OrderControlBaselineCollector
 from uxsim.order_control_tvt_mp_candidate_binding_transfer import (
     initialize_tvt_mp_candidate_binding_transfer_state,
     scan_and_transfer_tvt_mp_binding_visits_at_current_timestep,
@@ -20,6 +21,7 @@ from uxsim.order_control_tvt_mp_candidate_local_vehicle_advance import (
     initialize_tvt_mp_candidate_local_vehicle_advance_state,
 )
 from uxsim.order_control_tvt_mp_candidate_virtual_time import (
+    advance_tvt_mp_candidate_virtual_time_one_step,
     initialize_tvt_mp_candidate_virtual_time_state,
 )
 from uxsim.order_control_tvt_mp_concrete_buyer_candidate_set import (
@@ -123,12 +125,12 @@ def _record_existing_arrival(vehicle, node, arrival_time: float, tiebreaker: flo
     vehicle.order_control_node_arrival_tiebreakers[node.name] = tiebreaker
 
 
-def _sequence(visits):
+def _sequence(visits, node_name: str = "merge"):
     buyer_keys = []
     for visit in visits:
         buyer_keys.append(visit.visit_key)
     return OrderControlTvtMpLocalBindingRankSequence(
-        node_name="merge",
+        node_name=node_name,
         baseline_timestep_T=10,
         concrete_buyer_candidate_set=OrderControlTvtMpConcreteBuyerCandidateSet(
             buyers_sorted=(buyer_keys[0],),
@@ -151,13 +153,13 @@ def _open_capacities(local_state) -> None:
         link.capacity_in_remain = 10.0
 
 
-def _prepare(world, visits, before_scan=None):
+def _prepare(world, visits, before_scan=None, node_name: str = "merge"):
     if not getattr(world, "finalized", 0):
         world.finalize_scenario()
     for link in world.LINKS:
         link.update()
     world.T = 10
-    sequence = _sequence(visits)
+    sequence = _sequence(visits, node_name=node_name)
     local_state = build_tvt_mp_candidate_local_state(world, sequence)
     _open_capacities(local_state)
     clock = initialize_tvt_mp_candidate_virtual_time_state(local_state)
@@ -965,6 +967,285 @@ def test_new_arrivals_match_official_record_order_including_revisit():
     )
 
 
+CONNECTOR_LINK_NAME = "west_intersection_to_east_intersection"
+EAST_OUT_LINK_NAME = "east_intersection_to_east_outer"
+TARGET_NODE_NAME = "east_intersection"
+
+
+def _two_intersection_stale_route_case(world_name: str):
+    """One vehicle approaching the east node with the west outlink still selected."""
+    world = World(
+        name=world_name,
+        deltan=1,
+        tmax=40,
+        print_mode=0,
+        save_mode=0,
+        show_mode=0,
+        random_seed=0,
+    )
+    world.addNode("west_outer", -1, 0)
+    world.addNode(
+        "west_intersection",
+        0,
+        0,
+        order_control_eligible=True,
+        order_control_type="time_value",
+        flow_capacity=1.0,
+        number_of_lanes=1,
+    )
+    world.addNode(
+        TARGET_NODE_NAME,
+        1,
+        0,
+        order_control_eligible=True,
+        order_control_type="time_value",
+        flow_capacity=1.0,
+        number_of_lanes=1,
+    )
+    world.addNode("east_outer", 2, 0)
+    world.addLink(
+        "west_outer_to_west_intersection",
+        "west_outer",
+        "west_intersection",
+        length=200,
+        free_flow_speed=20,
+        number_of_lanes=1,
+    )
+    world.addLink(
+        CONNECTOR_LINK_NAME,
+        "west_intersection",
+        TARGET_NODE_NAME,
+        length=200,
+        free_flow_speed=20,
+        number_of_lanes=1,
+    )
+    world.addLink(
+        EAST_OUT_LINK_NAME,
+        TARGET_NODE_NAME,
+        "east_outer",
+        length=200,
+        free_flow_speed=20,
+        number_of_lanes=1,
+    )
+    vehicle = world.addVehicle("west_outer", "east_outer", 0, name="veh_wn_3")
+    connector = world.get_link(CONNECTOR_LINK_NAME)
+    step = connector.u * world.DELTAT
+    _place(world, vehicle, connector, connector, x=connector.length - step)
+    connector.vehicles.append(vehicle)
+    vehicle.begin_order_control_visit_on_link_entry()
+    visit_id = vehicle.order_control_current_visit["visit_id"]
+    visits = (
+        _binding_visit(
+            vehicle,
+            rank=1,
+            route_name=EAST_OUT_LINK_NAME,
+            inlink_name=CONNECTOR_LINK_NAME,
+        ),
+    )
+    return world, visits, visit_id
+
+
+def _register_unarrived_binding_visit(local_state, vehicle) -> OrderControlBaselineCollector:
+    collector = OrderControlBaselineCollector()
+    current_visit = vehicle.order_control_current_visit
+    collector.register_snapshot_visit(
+        vehicle_name=vehicle.name,
+        vehicle_id=vehicle.id,
+        node_name=TARGET_NODE_NAME,
+        inlink_name=CONNECTOR_LINK_NAME,
+        visit_id=current_visit["visit_id"],
+        was_arrived_at_snapshot=False,
+        baseline_arrival_timestep=None,
+        arrival_tiebreaker=None,
+        route_next_link_name=None,
+        baseline_passage_timestep=None,
+    )
+    local_state.local_world._order_control_baseline_collector = collector
+    return collector
+
+
+def test_new_binding_arrival_replaces_stale_upstream_route_with_target_binding_route():
+    world, visits, visit_id = _two_intersection_stale_route_case("stale_upstream_route")
+    binding_rank_before = visits[0].binding_rank
+    binding_route_before = visits[0].route_next_link_name
+    local_state, transfer_state, scan_result, advance_state = _prepare(
+        world,
+        visits,
+        node_name=TARGET_NODE_NAME,
+    )
+    copied = _local_vehicle(local_state, "veh_wn_3")
+    local_world = local_state.local_world
+    stale_route = local_world.get_link(CONNECTOR_LINK_NAME)
+    binding_outlink = local_world.get_link(EAST_OUT_LINK_NAME)
+    assert copied.route_next_link is stale_route
+    assert scan_result.transferred_binding_visit_keys == ()
+    collector = _register_unarrived_binding_visit(local_state, copied)
+    visit_id_before = copied.order_control_visit_id
+
+    result = advance_tvt_mp_candidate_local_vehicles_and_register_new_arrivals(
+        advance_state,
+        scan_result,
+    )
+
+    assert result.newly_arrived_vehicle_names == ("veh_wn_3",)
+    assert result.newly_arrived_binding_visit_keys == (("veh_wn_3", visit_id),)
+    assert _incoming_names(local_state.target_node) == ["veh_wn_3"]
+    assert copied.route_next_link is binding_outlink
+    assert copied.route_next_link.start_node is local_state.target_node
+    assert copied.order_control_current_visit["visit_id"] == visit_id
+    assert copied.order_control_current_visit["node"] is local_state.target_node
+    assert copied.order_control_visit_id == visit_id_before
+    arrival_snapshot = collector.get_baseline_visit_snapshot("veh_wn_3", visit_id)
+    assert arrival_snapshot["route_next_link_name"] == EAST_OUT_LINK_NAME
+    assert visits[0].binding_rank == binding_rank_before
+    assert visits[0].route_next_link_name == binding_route_before
+    assert ("veh_wn_3", visit_id) not in transfer_state.transferred_binding_visit_keys
+
+    advance_tvt_mp_candidate_virtual_time_one_step(transfer_state.virtual_time_state)
+    next_scan = scan_and_transfer_tvt_mp_binding_visits_at_current_timestep(
+        transfer_state
+    )
+    assert next_scan.transferred_binding_visit_keys == (("veh_wn_3", visit_id),)
+    assert copied.link is binding_outlink
+    assert copied not in local_world.get_link(CONNECTOR_LINK_NAME).vehicles
+    assert copied.order_control_visit_id == visit_id_before
+    assert visits[0].binding_rank == binding_rank_before
+
+
+def test_advance_succeeds_when_route_next_link_attribute_was_not_created():
+    world, visits, visit_id = _two_intersection_stale_route_case("missing_route_attr")
+    local_state, transfer_state, scan_result, advance_state = _prepare(
+        world,
+        visits,
+        node_name=TARGET_NODE_NAME,
+    )
+    copied = _local_vehicle(local_state, "veh_wn_3")
+    if hasattr(copied, "route_next_link"):
+        delattr(copied, "route_next_link")
+    assert not hasattr(copied, "route_next_link")
+    binding_outlink = local_state.local_world.get_link(EAST_OUT_LINK_NAME)
+
+    result = advance_tvt_mp_candidate_local_vehicles_and_register_new_arrivals(
+        advance_state,
+        scan_result,
+    )
+
+    assert result.newly_arrived_vehicle_names == ("veh_wn_3",)
+    assert hasattr(copied, "route_next_link")
+    assert copied.route_next_link is binding_outlink
+
+
+def test_failed_binding_arrival_removes_route_next_link_when_attribute_was_absent():
+    world, visits, visit_id = _two_intersection_stale_route_case(
+        "missing_route_attr_rollback"
+    )
+    local_state, _transfer_state, scan_result, advance_state = _prepare(
+        world,
+        visits,
+        node_name=TARGET_NODE_NAME,
+    )
+    copied = _local_vehicle(local_state, "veh_wn_3")
+    if hasattr(copied, "route_next_link"):
+        delattr(copied, "route_next_link")
+    incoming_before = list(local_state.target_node.incoming_vehicles)
+    arrival_before = _visit_arrival(copied)
+    position_before = (copied.x, copied.x_old, copied.x_next, copied.v, copied.move_remain)
+    rng_before = copy.deepcopy(local_state.local_world.rng.bit_generator.state)
+    order_rng_before = copy.deepcopy(
+        local_state.local_world.order_control_rng.bit_generator.state
+    )
+    collector = _register_unarrived_binding_visit(local_state, copied)
+    collector_before = collector.get_baseline_visit_snapshot("veh_wn_3", visit_id)
+    original_record = Vehicle.record_order_control_node_arrival
+
+    def _record_then_fail(self, node):
+        original_record(self, node)
+        raise RuntimeError("forced missing-route arrival failure")
+
+    Vehicle.record_order_control_node_arrival = _record_then_fail
+    try:
+        try:
+            advance_tvt_mp_candidate_local_vehicles_and_register_new_arrivals(
+                advance_state,
+                scan_result,
+            )
+            raise AssertionError("expected the binding arrival record to fail")
+        except RuntimeError as error:
+            assert "forced missing-route arrival failure" in str(error)
+    finally:
+        Vehicle.record_order_control_node_arrival = original_record
+
+    assert not hasattr(copied, "route_next_link")
+    assert list(local_state.target_node.incoming_vehicles) == incoming_before
+    assert _visit_arrival(copied) == arrival_before
+    assert (copied.x, copied.x_old, copied.x_next, copied.v, copied.move_remain) == (
+        position_before
+    )
+    assert local_state.local_world.rng.bit_generator.state == rng_before
+    assert (
+        local_state.local_world.order_control_rng.bit_generator.state
+        == order_rng_before
+    )
+    assert collector.get_baseline_visit_snapshot("veh_wn_3", visit_id) == collector_before
+    assert advance_state.completed_virtual_timesteps == ()
+
+
+def test_failed_new_binding_arrival_restores_previous_route_next_link():
+    world, visits, visit_id = _two_intersection_stale_route_case("stale_route_rollback")
+    local_state, _transfer_state, scan_result, advance_state = _prepare(
+        world,
+        visits,
+        node_name=TARGET_NODE_NAME,
+    )
+    copied = _local_vehicle(local_state, "veh_wn_3")
+    stale_route = copied.route_next_link
+    incoming_before = list(local_state.target_node.incoming_vehicles)
+    arrival_before = _visit_arrival(copied)
+    times_before = dict(copied.order_control_node_arrival_times)
+    tiebreakers_before = dict(copied.order_control_node_arrival_tiebreakers)
+    position_before = (copied.x, copied.x_old, copied.x_next, copied.v, copied.move_remain)
+    rng_before = copy.deepcopy(local_state.local_world.rng.bit_generator.state)
+    order_rng_before = copy.deepcopy(
+        local_state.local_world.order_control_rng.bit_generator.state
+    )
+    collector = _register_unarrived_binding_visit(local_state, copied)
+    collector_before = collector.get_baseline_visit_snapshot("veh_wn_3", visit_id)
+    original_record = Vehicle.record_order_control_node_arrival
+
+    def _record_then_fail(self, node):
+        original_record(self, node)
+        raise RuntimeError("forced binding arrival failure")
+
+    Vehicle.record_order_control_node_arrival = _record_then_fail
+    try:
+        try:
+            advance_tvt_mp_candidate_local_vehicles_and_register_new_arrivals(
+                advance_state,
+                scan_result,
+            )
+            raise AssertionError("expected the binding arrival record to fail")
+        except RuntimeError as error:
+            assert "forced binding arrival failure" in str(error)
+    finally:
+        Vehicle.record_order_control_node_arrival = original_record
+
+    assert copied.route_next_link is stale_route
+    assert list(local_state.target_node.incoming_vehicles) == incoming_before
+    assert _visit_arrival(copied) == arrival_before
+    assert copied.order_control_node_arrival_times == times_before
+    assert copied.order_control_node_arrival_tiebreakers == tiebreakers_before
+    assert (copied.x, copied.x_old, copied.x_next, copied.v, copied.move_remain) == (
+        position_before
+    )
+    assert local_state.local_world.rng.bit_generator.state == rng_before
+    assert (
+        local_state.local_world.order_control_rng.bit_generator.state
+        == order_rng_before
+    )
+    assert collector.get_baseline_visit_snapshot("veh_wn_3", visit_id) == collector_before
+    assert advance_state.completed_virtual_timesteps == ()
+
+
 TESTS = (
     test_same_inlink_preexisting_arrivals_keep_order_and_arrival_record,
     test_binding_transfer_passes_multiple_same_inlink_arrivals_before_advance,
@@ -980,6 +1261,10 @@ TESTS = (
     test_new_arrival_with_both_arrival_fields_changes_nothing,
     test_second_arrival_record_failure_restores_the_whole_advance,
     test_new_arrivals_match_official_record_order_including_revisit,
+    test_new_binding_arrival_replaces_stale_upstream_route_with_target_binding_route,
+    test_advance_succeeds_when_route_next_link_attribute_was_not_created,
+    test_failed_binding_arrival_removes_route_next_link_when_attribute_was_absent,
+    test_failed_new_binding_arrival_restores_previous_route_next_link,
 )
 
 

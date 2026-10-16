@@ -269,14 +269,26 @@ class OrderControlBaselineCollector:
         node_name: str,
     ) -> OrderControlBaselineVisitRecord | None:
         """
-        Validate a fixed visit before UXsim performs the physical node passage.
+        Validate one snapshot-fixed visit before physical node passage.
 
-        Returns None when the vehicle is outside the snapshot-fixed set.
+        If vehicle_name is not registered in this collector, return None without
+        validating visit_id or node_name.
+
+        If vehicle_name is registered, visit_id must be a positive int.
+        None, bool, zero, negative, or non-int visit_id raises ValueError.
+
+        For a registered vehicle with a valid visit_id, lookup uses
+        (vehicle_name, visit_id). A missing key means a later visit outside
+        the snapshot-fixed set; return None and leave the registered snapshot
+        visit unchanged. Physical passage may continue without a collector
+        record.
+
+        When the primary key exists, apply node, arrival, route, and single-
+        passage checks to that snapshot visit only.
         """
         vehicle_name = _require_non_empty_str(vehicle_name, "vehicle_name")
 
-        record_for_vehicle = self._visit_record_by_vehicle_name.get(vehicle_name)
-        if record_for_vehicle is None:
+        if vehicle_name not in self._visit_record_by_vehicle_name:
             return None
 
         visit_id = _require_positive_int(visit_id, "visit_id")
@@ -284,11 +296,7 @@ class OrderControlBaselineCollector:
         primary_key = (vehicle_name, visit_id)
         record = self._visit_records_by_primary_key.get(primary_key)
         if record is None:
-            raise ValueError(
-                f"visit_id mismatch for snapshot-fixed vehicle "
-                f"{vehicle_name!r}: registered visit_id="
-                f"{record_for_vehicle.visit_id}, requested visit_id={visit_id}."
-            )
+            return None
 
         node_name = _require_non_empty_str(node_name, "node_name")
 

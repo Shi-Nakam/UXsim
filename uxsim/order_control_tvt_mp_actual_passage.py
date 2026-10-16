@@ -3556,7 +3556,6 @@ def _build_buyer_individual_ex_post_evaluation_record(
 ) -> OrderControlTvtMpBuyerIndividualExPostEvaluationRecord:
     realized_time_value = record.baseline_minus_actual_time_value
     official_payment = monetary.payment_paid_in_this_transaction
-    true_vot_per_second = record.true_vot_per_second
     realized_gain = realized_time_value - official_payment
 
     if realized_time_value <= 0:
@@ -3588,19 +3587,21 @@ def _build_buyer_individual_ex_post_evaluation_record(
     official_payment_per_saved_second = (
         official_payment / actual_time_saving_seconds
     )
-    if official_payment_per_saved_second >= true_vot_per_second:
-        satisfaction_status = (
-            OrderControlTvtMpIndividualSatisfactionStatus.UNSATISFIED
-        )
-        satisfaction_reason = (
-            OrderControlTvtMpBuyerSatisfactionReason.UNSATISFIED_BY_HIGH_PAYMENT_RATE
-        )
-    else:
+    # Same comparison as realized_gain > 0. The stored per-second rate is
+    # explanatory only; dividing the product back can fall below true VOT.
+    if official_payment < realized_time_value:
         satisfaction_status = (
             OrderControlTvtMpIndividualSatisfactionStatus.SATISFIED
         )
         satisfaction_reason = (
             OrderControlTvtMpBuyerSatisfactionReason.SATISFIED_APPROPRIATE_PAYMENT_RATE
+        )
+    else:
+        satisfaction_status = (
+            OrderControlTvtMpIndividualSatisfactionStatus.UNSATISFIED
+        )
+        satisfaction_reason = (
+            OrderControlTvtMpBuyerSatisfactionReason.UNSATISFIED_BY_HIGH_PAYMENT_RATE
         )
 
     return OrderControlTvtMpBuyerIndividualExPostEvaluationRecord(
@@ -3622,7 +3623,6 @@ def _build_seller_individual_ex_post_evaluation_record(
 ) -> OrderControlTvtMpSellerIndividualExPostEvaluationRecord:
     realized_delay_loss = -record.baseline_minus_actual_time_value
     official_compensation = monetary.payment_received_in_this_transaction
-    true_vot_per_second = record.true_vot_per_second
     actual_delay_seconds = -record.baseline_minus_actual_passage_seconds
     realized_gain = official_compensation - realized_delay_loss
 
@@ -3646,21 +3646,23 @@ def _build_seller_individual_ex_post_evaluation_record(
     official_compensation_per_delayed_second = (
         official_compensation / actual_delay_seconds
     )
-    if official_compensation_per_delayed_second < true_vot_per_second:
-        satisfaction_status = (
-            OrderControlTvtMpIndividualSatisfactionStatus.UNSATISFIED
-        )
-        satisfaction_reason = (
-            OrderControlTvtMpSellerSatisfactionReason
-            .UNSATISFIED_INSUFFICIENT_COMPENSATION_RATE
-        )
-    else:
+    # Same comparison as realized_gain >= 0. The stored per-second rate is
+    # explanatory only; dividing the product back can fall below true VOT.
+    if official_compensation >= realized_delay_loss:
         satisfaction_status = (
             OrderControlTvtMpIndividualSatisfactionStatus.SATISFIED
         )
         satisfaction_reason = (
             OrderControlTvtMpSellerSatisfactionReason
             .SATISFIED_BY_SUFFICIENT_COMPENSATION_RATE
+        )
+    else:
+        satisfaction_status = (
+            OrderControlTvtMpIndividualSatisfactionStatus.UNSATISFIED
+        )
+        satisfaction_reason = (
+            OrderControlTvtMpSellerSatisfactionReason
+            .UNSATISFIED_INSUFFICIENT_COMPENSATION_RATE
         )
 
     return OrderControlTvtMpSellerIndividualExPostEvaluationRecord(

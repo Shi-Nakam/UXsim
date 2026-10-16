@@ -110,9 +110,10 @@ def transfer_tvt_mp_passage_attempts(node):
         rank_state,
         snapshot_vehicles,
     )
-    # Confirmed visits are tried first. A normal physical skip does not move
-    # that visit into the unconfirmed group. Clearance stop ends this timestep
-    # before any unconfirmed visit is tried.
+    # Confirmed visits are tried first. Not-arrived, not-head, and ordinary
+    # capacity or entry-space skips do not move that visit into the
+    # unconfirmed group. Unmet clearance ends this timestep before any
+    # unconfirmed visit is tried.
     clearance_stopped = _try_confirmed_candidates(node, confirmed_candidates)
     if clearance_stopped:
         return None
@@ -271,6 +272,26 @@ def _require_research_candidate(node, vehicle):
 
 
 def _try_confirmed_candidates(node, confirmed_candidates):
+    """
+    Try confirmed visits in assigned_rank order.
+
+    Each visit is judged in this order:
+
+    1. Not in incoming_vehicles: skip this visit and try the next one.
+    2. Not the inlink physical head: skip this visit and try the next one.
+    3. Unmet order-control clearance: end this node's passage for the
+       timestep and return True. Later confirmed visits are not tried.
+       The caller does not start the unconfirmed baseline scan.
+    4. Node flow, inlink outflow, outlink inflow, or entry space is short:
+       skip this visit and try the next one. This is not a clearance stop.
+    5. Otherwise transfer the vehicle.
+    6. After that transfer succeeds, update clearance history.
+
+    Clearance is checked before capacity and entry space. If an earlier
+    visit is waiting for clearance and is also short of entry space, a
+    later visit from another inlink must not pass and rewrite the
+    clearance history.
+    """
     for candidate in confirmed_candidates:
         vehicle = candidate.vehicle
         inlink = candidate.inlink
@@ -282,10 +303,12 @@ def _try_confirmed_candidates(node, confirmed_candidates):
                 f"Node {node.name}: vehicle {vehicle.name} link changed "
                 "after classification."
             )
-        if _physical_passage_limits_should_skip(node, vehicle, inlink, outlink):
+        if _inlink_physical_head_should_skip(vehicle, inlink):
             continue
         if node._order_control_clearance_blocks_passage(vehicle, inlink):
             return True
+        if _ordinary_physical_limits_should_skip(node, inlink, outlink):
+            continue
         # Prepare uses the visit and outlink saved before the move.
         # A baseline fork prepares neither the node passage history nor an
         # actual observation. History covers every confirmed visit. The
@@ -317,19 +340,33 @@ def _try_confirmed_candidates(node, confirmed_candidates):
     return False
 
 
-def _physical_passage_limits_should_skip(node, vehicle, inlink, outlink):
+def _inlink_physical_head_should_skip(vehicle, inlink):
     """
-    Return True when ordinary physical limits block this vehicle.
+    Return True when this vehicle is not the physical head of its inlink.
 
-    Used by both the confirmed rank scan and the unconfirmed baseline scan.
-    This is a temporary skip. It is not an order-control clearance stop.
-    Node flow shortage is also a temporary skip: later visits are still
-    checked, even when they share the same remaining node flow.
+    The caller checks incoming_vehicles first. This check is before
+    order-control clearance. A True result skips only this visit.
     """
     if len(inlink.vehicles) == 0:
         return True
     if vehicle is not inlink.vehicles[0]:
         return True
+    return False
+
+
+def _ordinary_physical_limits_should_skip(node, inlink, outlink):
+    """
+    Return True when capacity or entry space blocks this visit.
+
+    Call this only after the visit is in incoming_vehicles, is the inlink
+    physical head, and clearance is satisfied. A True result skips only
+    this visit. Later visits are still tried. Node flow shortage is a
+    temporary skip, not a clearance stop.
+
+    These limits stay after clearance. Skipping an earlier visit for entry
+    space before clearance would let a later visit from another inlink
+    pass and point the clearance history at that later direction.
+    """
     if node.flow_capacity_remain < node.W.DELTAN:
         return True
     if inlink.capacity_out_remain < node.W.DELTAN:
@@ -665,10 +702,24 @@ def _try_unconfirmed_baseline_vehicles(node, unconfirmed_baseline_vehicles):
     Try one timestep of unconfirmed baseline visits in arrival order.
 
     The set was classified at the start of this timestep. Whether a vehicle
-    can pass is read from the live links after the confirmed scan. A normal
-    physical block skips only that vehicle. Unmet clearance stops the rest
-    of this scan. This helper does not clear incoming_vehicles and does not
-    record an actual passage.
+    can pass is read from the live links after the confirmed scan. This
+    helper does not clear incoming_vehicles and does not record an actual
+    passage.
+
+    Each visit uses the same order as the confirmed scan:
+
+    1. Not in incoming_vehicles: skip this visit and try the next one.
+    2. Not the inlink physical head: skip this visit and try the next one.
+    3. Unmet order-control clearance: stop this scan. Later unconfirmed
+       visits are not tried.
+    4. Node flow, inlink outflow, outlink inflow, or entry space is short:
+       skip this visit and try the next one. This is not a clearance stop.
+    5. Otherwise transfer the vehicle.
+    6. After that transfer succeeds, update clearance history.
+
+    Clearance is before capacity and entry space, for the same reason as
+    the confirmed scan. A later arrival from another inlink must not pass
+    while an earlier arrival is still waiting for clearance.
     """
     candidates = _build_unconfirmed_baseline_candidates(
         node,
@@ -690,10 +741,12 @@ def _try_unconfirmed_baseline_vehicles(node, unconfirmed_baseline_vehicles):
                 f"Node {node.name}: vehicle {vehicle.name} route_next_link "
                 "changed after classification."
             )
-        if _physical_passage_limits_should_skip(node, vehicle, inlink, outlink):
+        if _inlink_physical_head_should_skip(vehicle, inlink):
             continue
         if node._order_control_clearance_blocks_passage(vehicle, inlink):
             return None
+        if _ordinary_physical_limits_should_skip(node, inlink, outlink):
+            continue
         node._transfer_one_vehicle_between_links(vehicle, inlink, outlink)
         node.last_order_control_inlink = inlink
         node.last_order_control_entry_timestep = node.W.T

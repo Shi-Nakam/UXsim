@@ -8,8 +8,11 @@ reaches the end of a link is appended to that link's end node
 ``VEHICLES_LIVING`` in registration order.
 
 This stage follows that order for the candidate's target inlinks and outlinks
-only. It does not call ``Vehicle.update``, so it does not choose a route, end
-a trip, or leave the outlink. Vehicles already waiting in ``incoming_vehicles``
+only. It does not call ``Vehicle.update`` or ``route_next_link_choice``, so it
+does not end a trip or leave the outlink. A new arrival whose current visit is
+a binding visit of this target node receives that visit's outlink as
+``route_next_link`` before the arrival is recorded. Any other new arrival keeps
+the route it already has. Vehicles already waiting in ``incoming_vehicles``
 stay there, including several from the same inlink. Vehicles that reach the
 target node during this advance are appended after that existing queue and are
 not sent back through node passage in the same virtual timestep.
@@ -410,6 +413,73 @@ def _require_new_arrival_visit_is_unrecorded(
         )
 
 
+def _binding_visit_for_new_arrival(candidate_local_state, vehicle):
+    """The binding visit for this vehicle's current visit, or None.
+
+    A missing visit is not an error. This advance does not choose a route for
+    a vehicle that is not in the current target node's binding sequence.
+    """
+    current_visit = vehicle.order_control_current_visit
+    visit_key = (vehicle.name, current_visit["visit_id"])
+    matched_visit = None
+    for pair in candidate_local_state.binding_visit_local_vehicle_pairs:
+        if pair.binding_visit.visit_key != visit_key:
+            continue
+        if matched_visit is not None:
+            raise RuntimeError(
+                f"Node {candidate_local_state.target_node_name!r}: VisitKey "
+                f"{visit_key!r} is listed more than once in the binding sequence."
+            )
+        matched_visit = pair.binding_visit
+    return matched_visit
+
+
+def _require_binding_outlink_of_target_node(target_node, local_world, route_name: str):
+    """Resolve one binding route to the copied outlink of this target node."""
+    node_name = target_node.name
+    if not isinstance(route_name, str) or route_name == "":
+        raise RuntimeError(
+            f"Node {node_name!r}: binding route_next_link_name must be a "
+            f"non-empty str; got {route_name!r}."
+        )
+    outlink = target_node.outlinks.get(route_name)
+    if outlink is None:
+        raise RuntimeError(
+            f"Node {node_name!r}: binding route {route_name!r} is not an "
+            "outlink of the target Node."
+        )
+    registered_outlink = local_world.get_link(route_name)
+    if outlink is not registered_outlink:
+        raise RuntimeError(
+            f"Node {node_name!r}: binding route {route_name!r} is not the "
+            "link registered in the copied World."
+        )
+    if outlink.start_node is not target_node:
+        raise RuntimeError(
+            f"Node {node_name!r}: binding route {route_name!r} does not leave "
+            "the copied target Node."
+        )
+    return outlink
+
+
+def _apply_current_target_binding_route(candidate_local_state, vehicle) -> None:
+    """Replace a stale upstream route with this target node's binding outlink.
+
+    Only the binding visit being evaluated at this target node is updated.
+    A route used at an earlier node is not copied forward, and this binding
+    route is not stored for a later node.
+    """
+    binding_visit = _binding_visit_for_new_arrival(candidate_local_state, vehicle)
+    if binding_visit is None:
+        return
+    outlink = _require_binding_outlink_of_target_node(
+        candidate_local_state.target_node,
+        candidate_local_state.local_world,
+        binding_visit.route_next_link_name,
+    )
+    vehicle.route_next_link = outlink
+
+
 def _snapshot_baseline_collector_arrival_fields(local_world):
     """Arrival fields ``record_order_control_node_arrival`` may write.
 
@@ -448,6 +518,8 @@ def _snapshot_local_advance_for_rollback(
     new_arrival_records = []
     for motion in planned_motions:
         vehicle = motion["vehicle"]
+        route_next_link_existed = hasattr(vehicle, "route_next_link")
+        route_next_link = getattr(vehicle, "route_next_link", None)
         vehicle_motions.append(
             (
                 vehicle,
@@ -456,6 +528,8 @@ def _snapshot_local_advance_for_rollback(
                 vehicle.x_next,
                 vehicle.v,
                 vehicle.move_remain,
+                route_next_link_existed,
+                route_next_link,
             )
         )
         if not motion["is_new_arrival"]:
@@ -489,12 +563,25 @@ def _snapshot_local_advance_for_rollback(
 
 def _restore_local_advance_snapshot(snapshot: dict) -> None:
     """Put back the copied World fields written by one failed advance."""
-    for vehicle, x, x_old, x_next, speed, move_remain in snapshot["vehicle_motions"]:
+    for (
+        vehicle,
+        x,
+        x_old,
+        x_next,
+        speed,
+        move_remain,
+        route_next_link_existed,
+        route_next_link,
+    ) in snapshot["vehicle_motions"]:
         vehicle.x = x
         vehicle.x_old = x_old
         vehicle.x_next = x_next
         vehicle.v = speed
         vehicle.move_remain = move_remain
+        if route_next_link_existed:
+            vehicle.route_next_link = route_next_link
+        elif hasattr(vehicle, "route_next_link"):
+            delattr(vehicle, "route_next_link")
     target_node = snapshot["target_node"]
     target_node.incoming_vehicles[:] = snapshot["incoming_vehicles"]
     for (
@@ -658,6 +745,10 @@ def advance_tvt_mp_candidate_local_vehicles_and_register_new_arrivals(
             advanced_names.append(vehicle.name)
             if not motion["is_new_arrival"]:
                 continue
+            # The binding outlink is the route for this target visit. Set it
+            # before the arrival record reads route_next_link. A non-binding
+            # arrival keeps the route it already has.
+            _apply_current_target_binding_route(candidate_local_state, vehicle)
             # Append in living order, then record that same vehicle. The next
             # new arrival is recorded only after this one has succeeded.
             target_node.incoming_vehicles.append(vehicle)

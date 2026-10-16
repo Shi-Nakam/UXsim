@@ -2493,6 +2493,236 @@ def test_prepare_seller_true_vot_zero_positive_delay_zero_compensation():
     )
 
 
+_FLOAT_BOUNDARY_TRUE_VOT_PER_SECOND = 0.6225373449692903
+_FLOAT_BOUNDARY_POSITIVE_SECONDS = 13
+
+
+def _buyer_seller_specs_for_saved_seconds(
+    saved_seconds,
+    payment,
+    *,
+    true_vot_per_second,
+):
+    return [
+        {
+            "role": OrderControlTvtMpActualPassageRole.BUYER,
+            "vehicle_name": "buyer_a",
+            "baseline_minus_actual_passage_seconds": saved_seconds,
+            "true_vot_per_second": true_vot_per_second,
+            "payment_paid_in_this_transaction": payment,
+        },
+        {
+            "role": OrderControlTvtMpActualPassageRole.SELLER,
+            "vehicle_name": "seller_a",
+            "baseline_minus_actual_passage_seconds": 0,
+            "payment_received_in_this_transaction": 0.0,
+        },
+    ]
+
+
+def _buyer_seller_specs_for_delay_seconds(
+    delay_seconds,
+    compensation,
+    *,
+    true_vot_per_second,
+):
+    return [
+        {
+            "role": OrderControlTvtMpActualPassageRole.BUYER,
+            "vehicle_name": "buyer_a",
+            "baseline_minus_actual_passage_seconds": 120,
+            "payment_paid_in_this_transaction": 0.0,
+        },
+        {
+            "role": OrderControlTvtMpActualPassageRole.SELLER,
+            "vehicle_name": "seller_a",
+            "baseline_minus_actual_passage_seconds": -delay_seconds,
+            "true_vot_per_second": true_vot_per_second,
+            "payment_received_in_this_transaction": compensation,
+        },
+    ]
+
+
+def test_prepare_buyer_equal_payment_float_boundary_is_unsatisfied():
+    true_vot = _FLOAT_BOUNDARY_TRUE_VOT_PER_SECOND
+    saved_seconds = _FLOAT_BOUNDARY_POSITIVE_SECONDS
+    realized_time_value = saved_seconds * true_vot
+    world, _trade, _key, _registry = _ready_world_for_individual_prepare(
+        _buyer_seller_specs_for_saved_seconds(
+            saved_seconds,
+            realized_time_value,
+            true_vot_per_second=true_vot,
+        ),
+    )
+    _prepared, result = _individual_prepared_for_only_trade(world)
+    buyer = result.buyer_evaluation_records[0]
+    assert buyer.realized_gain == 0.0
+    assert buyer.satisfaction_status is (
+        OrderControlTvtMpIndividualSatisfactionStatus.UNSATISFIED
+    )
+    assert buyer.satisfaction_reason is (
+        OrderControlTvtMpBuyerSatisfactionReason.UNSATISFIED_BY_HIGH_PAYMENT_RATE
+    )
+    assert type(buyer.official_payment_per_saved_second) is float
+    assert buyer.official_payment_per_saved_second == (
+        realized_time_value / saved_seconds
+    )
+
+
+def test_prepare_buyer_payment_below_realized_time_value_is_satisfied():
+    true_vot = _FLOAT_BOUNDARY_TRUE_VOT_PER_SECOND
+    saved_seconds = _FLOAT_BOUNDARY_POSITIVE_SECONDS
+    realized_time_value = saved_seconds * true_vot
+    payment = realized_time_value - 1.0
+    world, _trade, _key, _registry = _ready_world_for_individual_prepare(
+        _buyer_seller_specs_for_saved_seconds(
+            saved_seconds,
+            payment,
+            true_vot_per_second=true_vot,
+        ),
+    )
+    _prepared, result = _individual_prepared_for_only_trade(world)
+    buyer = result.buyer_evaluation_records[0]
+    assert buyer.realized_gain > 0
+    assert buyer.satisfaction_status is (
+        OrderControlTvtMpIndividualSatisfactionStatus.SATISFIED
+    )
+    assert buyer.satisfaction_reason is (
+        OrderControlTvtMpBuyerSatisfactionReason.SATISFIED_APPROPRIATE_PAYMENT_RATE
+    )
+    assert buyer.official_payment_per_saved_second == payment / saved_seconds
+
+
+def test_prepare_buyer_payment_above_realized_time_value_is_unsatisfied():
+    true_vot = _FLOAT_BOUNDARY_TRUE_VOT_PER_SECOND
+    saved_seconds = _FLOAT_BOUNDARY_POSITIVE_SECONDS
+    realized_time_value = saved_seconds * true_vot
+    payment = realized_time_value + 1.0
+    world, _trade, _key, _registry = _ready_world_for_individual_prepare(
+        _buyer_seller_specs_for_saved_seconds(
+            saved_seconds,
+            payment,
+            true_vot_per_second=true_vot,
+        ),
+    )
+    _prepared, result = _individual_prepared_for_only_trade(world)
+    buyer = result.buyer_evaluation_records[0]
+    assert buyer.realized_gain < 0
+    assert buyer.satisfaction_status is (
+        OrderControlTvtMpIndividualSatisfactionStatus.UNSATISFIED
+    )
+    assert buyer.satisfaction_reason is (
+        OrderControlTvtMpBuyerSatisfactionReason.UNSATISFIED_BY_HIGH_PAYMENT_RATE
+    )
+    assert buyer.official_payment_per_saved_second == payment / saved_seconds
+
+
+def test_prepare_seller_equal_compensation_float_boundary_is_satisfied():
+    true_vot = _FLOAT_BOUNDARY_TRUE_VOT_PER_SECOND
+    delay_seconds = _FLOAT_BOUNDARY_POSITIVE_SECONDS
+    official_compensation = true_vot * delay_seconds
+    world, _trade, _key, _registry = _ready_world_for_individual_prepare(
+        _buyer_seller_specs_for_delay_seconds(
+            delay_seconds,
+            official_compensation,
+            true_vot_per_second=true_vot,
+        ),
+    )
+    _prepared, result = _individual_prepared_for_only_trade(world)
+    seller = result.seller_evaluation_records[0]
+    rate = seller.official_compensation_per_delayed_second
+    assert seller.realized_gain == 0.0
+    assert seller.satisfaction_status is (
+        OrderControlTvtMpIndividualSatisfactionStatus.SATISFIED
+    )
+    assert seller.satisfaction_reason is (
+        OrderControlTvtMpSellerSatisfactionReason
+        .SATISFIED_BY_SUFFICIENT_COMPENSATION_RATE
+    )
+    assert type(rate) is float
+    assert rate == official_compensation / delay_seconds
+    assert rate < true_vot
+
+
+def test_prepare_seller_compensation_below_delay_loss_is_unsatisfied():
+    true_vot = _FLOAT_BOUNDARY_TRUE_VOT_PER_SECOND
+    delay_seconds = _FLOAT_BOUNDARY_POSITIVE_SECONDS
+    compensation = true_vot * delay_seconds - 1.0
+    world, _trade, _key, _registry = _ready_world_for_individual_prepare(
+        _buyer_seller_specs_for_delay_seconds(
+            delay_seconds,
+            compensation,
+            true_vot_per_second=true_vot,
+        ),
+    )
+    _prepared, result = _individual_prepared_for_only_trade(world)
+    seller = result.seller_evaluation_records[0]
+    assert seller.realized_gain < 0
+    assert seller.satisfaction_status is (
+        OrderControlTvtMpIndividualSatisfactionStatus.UNSATISFIED
+    )
+    assert seller.satisfaction_reason is (
+        OrderControlTvtMpSellerSatisfactionReason
+        .UNSATISFIED_INSUFFICIENT_COMPENSATION_RATE
+    )
+
+
+def test_prepare_seller_compensation_above_delay_loss_is_satisfied():
+    true_vot = _FLOAT_BOUNDARY_TRUE_VOT_PER_SECOND
+    delay_seconds = _FLOAT_BOUNDARY_POSITIVE_SECONDS
+    compensation = true_vot * delay_seconds + 1.0
+    world, _trade, _key, _registry = _ready_world_for_individual_prepare(
+        _buyer_seller_specs_for_delay_seconds(
+            delay_seconds,
+            compensation,
+            true_vot_per_second=true_vot,
+        ),
+    )
+    _prepared, result = _individual_prepared_for_only_trade(world)
+    seller = result.seller_evaluation_records[0]
+    assert seller.realized_gain > 0
+    assert seller.satisfaction_status is (
+        OrderControlTvtMpIndividualSatisfactionStatus.SATISFIED
+    )
+    assert seller.satisfaction_reason is (
+        OrderControlTvtMpSellerSatisfactionReason
+        .SATISFIED_BY_SUFFICIENT_COMPENSATION_RATE
+    )
+
+
+def test_prepare_seller_nonpositive_actual_delay_is_trivially_satisfied():
+    trivial_reason = (
+        OrderControlTvtMpSellerSatisfactionReason
+        .TRIVIALLY_SATISFIED_NONPOSITIVE_ACTUAL_DELAY
+    )
+    for baseline_minus_actual_passage_seconds in (0, 60):
+        world, _trade, _key, _registry = _ready_world_for_individual_prepare(
+            [
+                {
+                    "role": OrderControlTvtMpActualPassageRole.BUYER,
+                    "vehicle_name": "buyer_a",
+                    "baseline_minus_actual_passage_seconds": 120,
+                    "payment_paid_in_this_transaction": 0.0,
+                },
+                {
+                    "role": OrderControlTvtMpActualPassageRole.SELLER,
+                    "vehicle_name": "seller_a",
+                    "baseline_minus_actual_passage_seconds": (
+                        baseline_minus_actual_passage_seconds
+                    ),
+                    "payment_received_in_this_transaction": 0.0,
+                },
+            ],
+        )
+        _prepared, result = _individual_prepared_for_only_trade(world)
+        seller = result.seller_evaluation_records[0]
+        assert seller.satisfaction_status is (
+            OrderControlTvtMpIndividualSatisfactionStatus.SATISFIED
+        )
+        assert seller.satisfaction_reason is trivial_reason
+        assert seller.official_compensation_per_delayed_second is None
+
+
 def test_prepare_evaluates_all_roles_when_ex_post_infeasible():
     world, _trade, _key, _registry = _ready_world_for_individual_prepare(
         [

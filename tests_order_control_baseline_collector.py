@@ -448,18 +448,54 @@ def test_record_baseline_arrival_rejects_node_mismatch():
         assert "Node mismatch" in str(exc)
 
 
-def test_prepare_baseline_passage_recording_rejects_visit_id_mismatch():
+def test_prepare_baseline_passage_recording_returns_none_for_later_visit_of_snapshot_vehicle():
     collector = _new_collector()
-    _register_arrived_a(collector, visit_id=4)
-    try:
-        collector.prepare_baseline_passage_recording(
-            vehicle_name="veh_a",
-            visit_id=99,
-            node_name="merge",
-        )
-        raise AssertionError("Expected ValueError for visit_id mismatch")
-    except ValueError as exc:
-        assert "visit_id mismatch" in str(exc)
+    _register_arrived_a(
+        collector,
+        vehicle_name="veh_a",
+        node_name="west_intersection",
+        visit_id=4,
+        route_next_link_name="west_to_east",
+    )
+    fixed_before = collector.get_baseline_visit_snapshot("veh_a", 4)
+    vehicle_index_before = collector._visit_record_by_vehicle_name["veh_a"]
+
+    result = collector.prepare_baseline_passage_recording(
+        vehicle_name="veh_a",
+        visit_id=5,
+        node_name="downstream_node",
+    )
+
+    assert result is None
+    assert collector.get_baseline_visit_snapshot("veh_a", 5) is None
+    assert collector.get_baseline_visit_snapshot("veh_a", 4) == fixed_before
+    assert collector._visit_record_by_vehicle_name["veh_a"] is vehicle_index_before
+    assert vehicle_index_before.visit_id == 4
+    assert vehicle_index_before.baseline_passage_timestep is None
+
+
+def test_prepare_baseline_passage_recording_rejects_invalid_visit_id_for_registered_vehicle():
+    collector = _new_collector()
+    _register_arrived_a(
+        collector,
+        vehicle_name="veh_a",
+        visit_id=4,
+    )
+    fixed_before = collector.get_baseline_visit_snapshot("veh_a", 4)
+    invalid_visit_ids = (None, True, 0, -1, "5")
+    for bad_visit_id in invalid_visit_ids:
+        try:
+            collector.prepare_baseline_passage_recording(
+                vehicle_name="veh_a",
+                visit_id=bad_visit_id,
+                node_name="merge",
+            )
+            raise AssertionError(
+                f"Expected ValueError for visit_id={bad_visit_id!r}"
+            )
+        except ValueError as exc:
+            assert "visit_id" in str(exc)
+        assert collector.get_baseline_visit_snapshot("veh_a", 4) == fixed_before
 
 
 def test_prepare_baseline_passage_recording_rejects_node_mismatch():
@@ -681,7 +717,8 @@ TESTS = [
     test_register_arrived_a_rejects_missing_arrival_fields,
     test_register_not_arrived_b_rejects_arrival_fields_present,
     test_record_baseline_arrival_rejects_node_mismatch,
-    test_prepare_baseline_passage_recording_rejects_visit_id_mismatch,
+    test_prepare_baseline_passage_recording_returns_none_for_later_visit_of_snapshot_vehicle,
+    test_prepare_baseline_passage_recording_rejects_invalid_visit_id_for_registered_vehicle,
     test_prepare_baseline_passage_recording_rejects_node_mismatch,
     test_prepare_baseline_passage_recording_rejects_missing_arrival_tiebreaker,
     test_prepare_baseline_passage_recording_rejects_missing_route_next_link_name,
