@@ -17673,3 +17673,226 @@ test 4ファイル:
 - 旧数値との差の有無
 
 再simulation後の結果を新しい正本とする。
+
+### BATCH処理について修正すべき事項・baseline collectorテスト契約の不一致
+
+本小節は、BATCH処理について修正すべき事項のうち、baseline collectorのテスト契約の不一致を記録する。上の「BATCH古いtest契約問題は別件である」は、同じ事項の短い別件宣言である。本小節が、原因、現行契約、古いテスト期待、修正候補、推奨方向、未完了状態の詳細である。上の物理通過順の本文、134件成功の記録、candidate結果の再検証待ちは変更しない。第5巻は本問題の正本ではない。
+
+この件はBATCH処理の未解決問題である。症状はBATCH関連のテストエラーである。BATCHのbaseline計算で、BATCH車両が物理通過する前の不整合検査が、古いテストの期待どおりには止まらなかった。ずれの中身は、Visit IDまたはVisitKeyの不一致を古いテストが例外として扱うことと、現行collectorが未登録VisitKeyを別Visitとして受け入れることの差である。解決済みではない。コードとテストはまだ変更していない。
+
+#### 1. 発見した症状
+
+物理通過判定順の関連回帰確認中に、次のテストが単独実行でも失敗した。
+
+`test_batch_passage_stops_before_physical_transfer_on_inconsistency`
+
+テストは、BATCH車両が物理通過する前にVisit ID不一致を検出し、`ValueError`で停止することを期待している。期待されている動作は、BATCH車両が物理通過する前の不整合検査で物理移動へ進まないことである。
+
+しかし実際には、BATCH車両は通過した。collector側の登録済みVisitには、passage timestepが記録されなかった。BATCHのbaseline計算は、通過そのものは許し、登録済みの別Visitへは通過時刻を書かなかった。
+
+#### 2. 今回の物理通過順修正との関係
+
+この失敗は、今回のTVT・FCFS物理通過判定順修正による回帰ではない。今回の物理通過順修正とは別に存在していた、BATCH関連の古いテスト契約問題である。
+
+確認済み事項は次である。
+
+- 今回の`uxsim.py`変更はclearanceありFCFS Node本体に限定されていた
+- BATCHのservice queue処理は今回変更していない
+- 失敗テストは単独実行でも再現した
+- したがって、テスト実行順による状態汚染でもない
+- 今回の物理通過順修正とは別に存在していた、BATCH関連の古いテスト契約問題である
+
+この別問題のコード修正を、今回の物理通過順修正コミットへ混ぜない。長時間trialの再実行の前提条件にもしない。
+
+#### 3. テストが作っている状態
+
+古いテストは概ね次の状態を作っている。
+
+- Vehicle名: `bad_batch`
+- service queueの`registered_visit_id`: 1
+- Vehicleのcurrent visitの`visit_id`: 1
+- baseline collectorへ登録した`visit_id`: 2
+
+service queueとcurrent visitのVisit IDは一致している。
+
+不一致があるのは、物理通過対象のVisit 1と、collectorへ登録済みのVisit 2との間である。同じVehicle名`bad_batch`のうえで、通過対象のVisitKeyと、collectorに存在するVisitKeyが違う。Visit IDまたはVisitKeyの不一致は、この「1」と「2」の間にある。
+
+#### 3種類のVisit ID関係
+
+今回の問題では、次の3種類のVisit IDを区別する必要がある。
+
+1. service unitへ登録・保存されたVisit ID
+2. Vehicleのcurrent visitが保持するVisit ID
+3. baseline collectorへsnapshot登録されたVisit ID
+
+BATCH本体の既存`visit_id mismatch`検査が照合するのは、次の2値である。
+
+- service unitへ保存されたVisit ID
+- Vehicleのcurrent visit ID
+
+今回失敗した古いテストでは、この2値はどちらも`1`であり、一致している。
+
+一方、不一致があるのは次の2値である。
+
+- 物理通過対象のcurrent visit ID: `1`
+- baseline collectorへsnapshot登録されたVisit ID: `2`
+
+したがって、このテスト状態は、BATCH本体のservice unitとcurrent visitの`visit_id mismatch`契約に違反していない。
+
+baseline collectorの現行契約では、物理通過対象のVisitKeyがcollectorに未登録なら、同じVehicle名の別Visitが登録済みでも、snapshot固定集合外の別Visitとして`None`を返す。
+
+そのため、次を混同してはならない。
+
+- service unitとcurrent visitのVisit ID不一致
+  - BATCH本体の既存検査対象
+  - 不一致なら物理通過前に`ValueError`
+
+- current visitとbaseline collector登録VisitのVisit ID不一致
+  - 現行collector契約では、未登録VisitKeyとして`None`になり得る
+  - それだけでは`ValueError`にならない
+
+この区別により、BATCH正式設計にある「service unitの登録Visit IDとcurrent visit IDが不一致なら停止する」という契約と、baseline collectorがsnapshot固定集合外のVisitを記録対象外として受け入れる契約は、互いに矛盾しない。
+
+今回問題なのは、この二つの異なる照合関係を、古いテストが同じ`visit_id mismatch`として扱っていたことである。
+
+#### 4. 現行baseline collector契約
+
+`OrderControlBaselineCollector.prepare_baseline_passage_recording()`の現行契約は次である。本小節は、この契約をメモ作成のために変更した記録ではない。現行collector契約は、この関数のdocstringに既に書かれているものを正本とする。
+
+- Vehicle名自体がcollectorに未登録なら`None`を返す
+- Vehicle名が登録済みでも、指定されたVisitKeyがcollectorに存在しない場合は`None`を返す
+- この未登録VisitKeyは、snapshot-fixed set外の後続Visitとして扱う
+- 物理通過はcollector記録なしで継続できる
+- collectorへ登録済みの別Visitは変更しない
+
+したがって、次の状態だけでは、現行契約上の`ValueError`にはならない。
+
+- collector登録: `bad_batch:2`
+- 通過対象: `bad_batch:1`
+
+`prepare_baseline_passage_recording()`は`None`を返し、BATCHの物理通過を許す。登録済みのVisit 2へ`baseline_passage_timestep`は書かない。
+
+#### 5. 古いテスト期待と現行仕様の不一致
+
+ここで確定しているのは、baseline collectorの契約不一致である。古いテスト期待と現行仕様の不一致は次のとおりである。
+
+古いテストは、同じVehicle名に異なるVisit IDのcollector recordが存在すれば、物理通過前にvisit_id mismatchとして停止することを期待している。Visit IDまたはVisitKeyの不一致があれば`ValueError`、という期待である。
+
+現行collector契約では、異なるVisitKeyはsnapshot外の別Visitとして扱い、`None`を返す。未登録VisitKeyは、そのことだけではエラーにしない。
+
+したがって、次が不一致である。
+
+- 古いテスト期待: 異なるVisit IDが存在すれば`ValueError`
+- 現行collector契約: 未登録VisitKeyはsnapshot外の別Visitとして`None`を返し、物理通過を許す
+
+これは、productionの新しいBATCH不具合が今回発生したと確定したものではない。現時点で確定しているのは、古いテストと現行collector契約が一致していないことである。production修正が必要だとは断定しない。現行collector契約を、このメモで変更したわけでもない。
+
+#### 6. 修正候補
+
+BATCH処理で今後判断する事項は、次の二案である。どちらも未採用である。コードとテストは変更していない。
+
+修正候補A:
+
+現行collector契約を維持し、古いテストを次の正常系テストへ変更する。
+
+- snapshot外の未登録VisitKeyはcollector recordなしで物理通過できる
+- 既存の別Visit recordは変更されない
+- `prepare_baseline_passage_recording()`は`None`を返す
+- `baseline_passage_timestep`は誤って別Visitへ記録されない
+
+修正候補B:
+
+「BATCH車両が不整合時に物理通過前停止する」テスト自体を維持する場合は、未登録VisitKeyではなく、現行collector契約が明示的に例外とする真正な不整合を作る。
+
+候補例:
+
+- collectorとservice queueで同じprimary keyを使い、`node_name`を不一致にする
+- baseline arrivalが未記録のVisitを通過させる
+- `arrival_tiebreaker`が未記録のVisitを通過させる
+- `route_next_link_name`が未記録のVisitを通過させる
+- baseline passageを二重記録しようとする
+
+この場合、`prepare_baseline_passage_recording()`が物理通過前に`ValueError`を出し、Vehicleが元inlinkに残ることを確認できる。
+
+#### 7. 現時点の推奨方向
+
+現行collector契約を正本として維持する方向を優先する。古いテストを直す必要はあるか、という問いへの現時点の答えは、古いvisit_id mismatch期待を削除するか、正常系へ変更する方向である。利用者はまだ最終確定していない。
+
+理由は次である。
+
+- `prepare_baseline_passage_recording()`のdocstringに、未登録VisitKeyをsnapshot外の後続Visitとして`None`で受け入れる契約が明記されている
+- baseline forkでは、snapshot時点の固定対象外となる後続Visitが物理通過する可能性がある
+- 未登録VisitKeyを一律エラーにすると、snapshot外の正常な後続Visitまで停止させる可能性がある
+
+そのため、推奨案は次の組合せである。
+
+- 古いvisit_id mismatch期待を削除または正常系へ変更する
+- 物理通過前停止の異常系テストは、同じprimary keyに対する真正な不整合を使って作り直す
+
+これは現時点の推奨方向である。利用者が最終確定しておらず、コードとテストも変更していない。production変更が不要だと最終確認した記録でもない。その最終確認は未完了事項に残す。
+
+#### 8. 未完了状態
+
+このBATCH関連問題は未解決である。未完了のBATCH関連作業は次である。BATCH処理の続きは、ここから判断する。
+
+- 古いテストを正常系へ変更するか判断
+- 真正な不整合を使った物理通過前停止テストを追加するか判断
+- current visit、service queue、collector recordの3者整合契約を明文化するか判断
+- production変更が本当に不要か最終確認
+- BATCH専用テストを修正後に再実行
+- 関連collectorテストを再実行
+
+今回の物理通過順修正コミットへ、この別問題のコード修正を混ぜない。BATCHコード修正を、今回のTVT再simulationへ混ぜない。このBATCH問題を、長時間trial再実行の前提条件にはしない。
+
+#### 9. 再開時に読む原典
+
+関係ファイル:
+
+- `tests_order_control_baseline_collector_uxsim.py`
+- `uxsim/order_control_baseline_collector.py`
+- `uxsim/uxsim.py`
+
+関係test:
+
+`test_batch_passage_stops_before_physical_transfer_on_inconsistency`
+
+関係関数:
+
+- `OrderControlBaselineCollector.prepare_baseline_passage_recording`
+- `Node._serve_order_control_batch_service_queue_internal`
+- `Node.serve_order_control_batch_service_queue`
+
+原典確認ポイント:
+
+- `prepare_baseline_passage_recording()`が未登録VisitKeyへ`None`を返す契約
+- BATCH service queueが`registered_visit_id`を渡す箇所
+- physical transferより前にprepareを呼ぶ箇所
+- `None`の場合に物理通過を継続する契約
+
+#### 10. 一般的な依頼からの再開方法
+
+利用者が将来、メモの巻番号、節番号、正確な見出し、テスト関数名、production関数名、baseline collectorという固有名称、VisitKeyという専門用語、発見日、コミット名を覚えていなくても、次のような一般的で曖昧な依頼からこの記録を全文検索して見つける。
+
+- BATCH処理について修正すべき事項を探して
+- BATCHで残っている問題は何か
+- BATCHのテストエラーの続き
+- BATCH処理の続き
+- BATCH関連の未完了事項を探して
+- BATCHについて未解決のことを探して
+- baseline collectorで未解決の問題
+- baseline collectorの問題
+- baseline計算で修正すべきこと
+- Visit ID関連で直すべきテスト
+- Visit ID関連の問題
+- 古いテストと現行仕様が合っていない問題
+- 古いテストを直す必要はあるか
+- テスト期待値と現行仕様の不一致
+- BATCH車両の通過前検査について確認して
+- BATCHのbaseline計算に残る問題
+- 以前見つけたBATCHの不具合またはテスト問題
+
+AIは、メモ番号、節番号、正確な固有見出しを利用者へ要求しない。上記の一般語から複数メモを全文検索し、本小節と、進捗第3巻末尾の「BATCH処理について修正すべき事項・未解決のテストエラー」を見つける。
+
+#### 検索性に関する恒久方針
+
+今後の研究メモは、メモ番号、巻番号、節番号、正確な見出しを利用者が覚えていることを前提にしない。一般的で曖昧な言葉から発見できるようにする。対象機能、症状、関連語、同義語、未完了状態、具体的識別子を本文へ併記する。進捗メモには一般語による検索入口を残す。詳細設計メモには原因、契約、修正候補、推奨案、再開原典を残す。AIは利用者へメモ番号を求めず、一般語で複数メモを全文検索する。今後メモが増えても、位置情報だけに依存しない。
