@@ -5039,6 +5039,8 @@ buyer 1台候補が最大surplusを持ったためである。
 
 # 二交差点trialで複数buyer候補を観測し、clearance優先順をbaselineへ反映（2026-10-16）
 
+2026-10-17訂正注記: この節の修正前T=310観察は、baseline実装不備の発見契機としては有効だった。T=314の分岐と、clearance未充足と入口空間不足の同時発生時の判定順問題を発見した。ただし、誤ったbaseline物理通過処理に基づく。複数buyer候補の形成可能性、交通結果、経済条件、採否の正式結果としては扱わない。「複数buyer候補が本質的に不可能かもしれないという疑いを反証した」という既存表現は撤回する。修正後の正式結果は、本巻末尾の「clearance優先修正後の二交差点trialで複数buyer・複数seller取引を確認（2026-10-17）」と、`ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_4.md` 末尾の2026-10-17追記を正本とする。以下の本文は歴史記録として残す。
+
 ## 1. 今回の研究上の成果
 
 二交差点のdownstream spillback trialで、同一inlink上の複数buyerを含む正式候補が実際に形成された。
@@ -5174,6 +5176,8 @@ Terminal独立確認:
 
 ## 8. 未完了事項
 
+2026-10-17注記: clearance優先修正後のtrial再実行、西側複数buyer取引の確認、東側T=35の全7候補監査は完了した。最新の未完了事項と再開地点は、本巻末尾の2026-10-17節を参照する。下記の古い一覧は歴史記録として残す。
+
 - 診断scriptに残る旧helper名 `_physical_passage_limits_should_skip` への参照確認
 - 診断scriptの状態分類処理をproductionのhelper分割へ追随
 - static validation
@@ -5192,6 +5196,8 @@ Terminal独立確認:
 
 ## 9. 最新再開地点
 
+2026-10-17注記: clearance優先修正後の診断は完了した。最新再開地点は、本巻末尾の「clearance優先修正後の二交差点trialで複数buyer・複数seller取引を確認（2026-10-17）」§10を参照する。下記はこの節作成時点の計画であり、歴史記録として残す。
+
 次の直接作業は、この順で行う。
 
 1. `research_scripts/diagnose_tvt_mp_two_cross_intersections_extended_south_blocked_right_of_entry.py` が旧helper名へ依存する箇所を、読み取り専用で確認する。
@@ -5204,4 +5210,227 @@ Terminal独立確認:
 8. 第4巻と進捗第3巻へ修正後結果を追加する。
 
 2026-10-14節の「12台より多い単独十字路」検証は破棄していない。今回の再診断が完了したあと、戻る予定の作業である。
+
+# clearance優先修正後の二交差点trialで複数buyer・複数seller取引を確認（2026-10-17）
+
+本節は、clearance優先修正後のseed 1二交差点trialと、post-fix診断の正式結果を記録する。修正前T=310観察は正式成果として扱わない。詳細な当事者数値は `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_4.md` 末尾の2026-10-17追記を参照する。第5巻は最新仕様の正本ではない。
+
+## 1. 修正後trialの全体結果
+
+- scenario: `tvt_mp_two_cross_intersections_downstream_spillback_extended_south_pulse`
+- seed 1
+- Vehicle数 551
+- 実Worldの評価対象 T=0〜599
+- simulation内部の計算可能期間 630 timestep
+- 完了trip 453
+- 未完了Vehicle 98
+- spillbackリンク最大Vehicle数 37
+- 入口閉塞 182 timestep
+- 総取引 158件
+- `east_intersection` 83件
+- `west_intersection` 75件
+
+修正前との参考比較:
+
+- 総取引 153 → 158
+- west 70 → 75
+- east 83 → 83
+- 入口閉塞 173 → 182
+- 完了trip 453 → 453
+
+修正前結果との一致を成功条件にはしていない。修正後結果を新しい基準結果として扱う。
+
+## 2. 西側の複数buyer成立取引
+
+次の5件を確認した。
+
+- T=310: buyer 2、seller 1
+- T=316: buyer 3、seller 1
+- T=331: buyer 3、seller 1
+- T=338: buyer 2、seller 1
+- T=344: buyer 4、seller 1
+
+正式結論:
+
+- clearance優先修正後のproductionで、西側交差点における複数buyer成立取引を確認した。
+- 最大buyer数は4台である。
+- buyerは同一inlink上に並んでいる。
+- candidateでも同一inlink内の相対順を維持した。
+- 全5件で `economically_feasible` である。
+- production FIFO inspection合格である。
+- 診断側による同一inlink内のbaseline相対順とcandidate相対順の再比較でも違反0である。
+- candidate Pとactual Pが一致した。
+- `ex_post_feasible` である。
+
+right-of-entry holderは、保存済みright-of-entry selection resultとbaseline順位から特定した。sellerを推測で決めていない。
+
+各取引の要約:
+
+- T=310: right holder `veh_wn_115:1`、buyer 2、seller 1、total G=`0.09516982161181473`、total R=`0`、surplus=`0.09516982161181473`
+- T=316: right holder `veh_wn_116:1`、buyer 3、seller 1、total G=`4.370585099169093`、total R=`0.03138719231443882`、surplus=`4.339197906854654`
+- T=331: right holder `veh_wn_119:1`、buyer 3、seller 1、total G=`6.42072205967094`、total R=`0`、surplus=`6.42072205967094`
+- T=338: right holder `veh_wn_120:1`、buyer 2、seller 1、total G=`4.026539258886592`、total R=`0`、surplus=`4.026539258886592`
+- T=344: right holder `veh_wn_121:1`、buyer 4、seller 1、total G=`5.143360572823888`、total R=`0`、surplus=`5.143360572823888`
+
+全当事者のA、baseline順位、candidate順位、baseline P、candidate P、`G_b`、`R_s` は、第4巻の2026-10-17追記を参照する。
+
+## 3. 東側T=35の全7候補監査
+
+「全7候補」は、東側交差点 T=35 のbaseline trade-scope内で、権利保有車両より後方の3 Visitから形成される非空buyer集合 2^3 − 1 = 7通りを指す。
+
+- baseline trade-scope order:
+  1. `veh_en_5:1`
+  2. `veh_ee_6:1`
+  3. `veh_es_7:1`
+  4. `veh_wn_3:2`
+- right-of-entry holderは `veh_en_5:1` である。
+- 権利保有車両より後方の3 Visitがbuyer候補である。
+- 3 Visitの非空buyer集合は 2^3 − 1 = 7通りである。
+- この7通りがT=35で生成された全7候補である。
+
+確認結果:
+
+- 全7候補をconcrete candidateとして生成した。
+- 全7候補がFIFO inspection合格した。
+- 全7候補のcandidate局所仮想計算がresolvedになった。
+- 全7候補を経済評価した。
+- 全7候補がeconomically feasibleだった。
+- 最大surplus候補を選択した。
+- `rng_was_used=false` である。
+
+候補構造とsurplus:
+
+1. seller / buyer — surplus=`0.19891607175535292`
+2. seller / seller / buyer — surplus=`0.7639025475923659`
+3. seller / buyer / buyer — surplus=`0.42013781793536276`
+4. seller / seller / seller / buyer — surplus=`0.6601299576552979`
+5. seller / buyer / seller / buyer — surplus=`0.6978728426357835`
+6. seller / seller / buyer / buyer — surplus=`1.5686450281692361` — **selected**
+7. seller / buyer / buyer / buyer — surplus=`0.780227076465583`
+
+未採用6件もすべてeconomically feasibleだったが、選択候補よりsurplusが小さいため未採用だった。候補形成漏れ、FIFO誤除外、経済評価漏れは確認されなかった。
+
+## 4. 非連続buyer候補の経済計算確認
+
+対象は、全7候補のうち seller / buyer / seller / buyer である。buyers = `veh_ee_6:1` | `veh_wn_3:2`。
+
+Baseline順:
+
+1. `veh_en_5:1` seller / right holder
+2. `veh_ee_6:1` buyer
+3. `veh_es_7:1` seller
+4. `veh_wn_3:2` buyer
+
+Candidate順:
+
+1. `veh_ee_6:1` buyer
+2. `veh_wn_3:2` buyer
+3. `veh_en_5:1` seller
+4. `veh_es_7:1` seller
+
+基本情報:
+
+- `veh_ee_6:1`: A=43、baseline P=49、candidate P=47、2 timestep短縮、`G_b=0.4057868837686981`
+- `veh_wn_3:2`: A=45、baseline P=53、candidate P=49、4 timestep短縮、`G_b=1.133920141087131`
+- `veh_en_5:1`: A=41、baseline P=47、candidate P=51、4 timestep遅延、`R_s=0.41374162402669035`
+- `veh_es_7:1`: A=45、baseline P=51、candidate P=53、2 timestep遅延、`R_s=0.428092558193355`
+
+確認した意味:
+
+- 前方buyerはseller 1台を追い越し、2 timestep短縮した。
+- 後方buyerはseller 2台を追い越し、4 timestep短縮した。
+- 追越し台数を直接金額へ掛けていない。
+- baseline Pとcandidate Pの差に申告VOTを掛けて `G_b` と `R_s` を計算する。
+- 追越し構造の違いは時間差を通じて経済量へ反映される。
+- buyer短縮量合計とseller遅延量合計はいずれも6 timestepである。
+
+取引単位:
+
+- total G=`1.5397070248558289`
+- total R=`0.8418341822200454`
+- surplus=`0.6978728426357835`
+- economically feasible
+- 最大surplus候補ではないため未採用
+
+## 5. FIFO監査
+
+- productionのFIFO inspection結果を確認した。
+- 診断側でも、同一inlink内のbaseline順位の相対順と、その候補自身のcandidate順位の相対順を再比較した。
+- 対象7取引で違反0である。
+- 東側T=35は4台すべて異なるinlinkなので、同一inlink FIFOは実質的に自明である。
+- 西側5件は同一inlink上の複数buyerが対象なので、実質的なFIFO確認である。
+- T=344では `veh_ws_96` → `veh_ws_97` → `veh_ws_98` → `veh_ws_99` の順序をcandidateでも維持した。
+
+## 6. T=582の評価終了時未観測
+
+- predicted total G=`1.7498961694249975`
+- predicted total R=`1.0883724461985338`
+- predicted surplus=`0.6615237232264637`
+- economically feasible
+- buyer `veh_es_83:1` はactual passage未観測である。
+- seller / right holder `veh_en_74:1` もactual passage未観測である。
+- 実World評価対象は T=0〜599 である。
+- T=600以後のactual passageは未観測として扱う。
+- `trade_ex_post_evaluation_status=evaluation_unavailable`
+- transaction-level actual totalsは `None` である。
+- predicted `G_b` と `R_s` は全当事者で計算済みである。
+- `t582_unavailable_contract_consistent=true` である。
+
+結論: 空欄は予測計算漏れではない。research outputの単純な出力漏れでもない。評価終了時未観測を含む取引全体を事後評価不能とする現行契約どおりである。
+
+## 7. 診断scriptと出力
+
+診断script:
+
+`research_scripts/diagnose_tvt_mp_two_cross_intersections_post_fix_multiple_buyer_transactions.py`
+
+出力:
+
+- `multiple_buyer_transaction_summary.csv`
+- `multiple_buyer_transaction_parties.csv`
+- `east_t35_all_candidate_audit.csv`
+
+取得範囲:
+
+- 対象7取引の当事者情報
+- 東側T=35の全7候補（後方3 Visitの非空buyer集合7通り）
+- 全Vehicle位置traceは保存していない
+- 対象外decisionの全候補詳細も保存していない
+- 出力量を限定した
+
+出力件数:
+
+- summary 7取引
+- parties 27当事者
+- east T=35 audit 7候補・24当事者行
+
+## 8. 第4巻への反映
+
+- `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_4.md` の2026-10-16節へ、2026-10-17の訂正・正式結果を追記済みである。
+- 修正前本文は歴史記録として維持している。
+- 修正前T=310を正式成果として扱わない。
+- 第4巻の修正後結果はTerminalで独立確認済みである。
+- 第5巻は最新仕様の正本ではない。
+
+## 9. 未完了事項
+
+- 第5巻の旧記述への注記要否判断
+- candidate unbound FCFSの判定順に関する別途調査・設計判断
+- 二交差点trial全体の交通工学的評価
+- 単独十字路高需要trialへの復帰
+- 診断script、メモ、未追跡trial script・出力のコミット範囲整理
+- 必要なtest・static validationの最終確認
+- コミット・push
+
+## 10. 最新再開地点
+
+**本節が、clearance優先修正後診断完了後の最新再開地点である。**
+
+1. 進捗第3巻の更新をTerminalで独立確認する。
+2. 診断scriptとメモのコミット範囲を整理する。
+3. 診断scriptのstatic validationと `py_compile` を最終確認する。
+4. tracked・untrackedの状態を確認する。
+5. コミット名を提案する。
+6. コミット・pushする。
+7. その後、candidate unbound FCFS調査または単独十字路高需要trialへ進む。
 
