@@ -5041,6 +5041,8 @@ buyer 1台候補が最大surplusを持ったためである。
 
 2026-10-17訂正注記: この節の修正前T=310観察は、baseline実装不備の発見契機としては有効だった。T=314の分岐と、clearance未充足と入口空間不足の同時発生時の判定順問題を発見した。ただし、誤ったbaseline物理通過処理に基づく。複数buyer候補の形成可能性、交通結果、経済条件、採否の正式結果としては扱わない。「複数buyer候補が本質的に不可能かもしれないという疑いを反証した」という既存表現は撤回する。修正後の正式結果は、本巻末尾の「clearance優先修正後の二交差点trialで複数buyer・複数seller取引を確認（2026-10-17）」と、`ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_4.md` 末尾の2026-10-17追記を正本とする。以下の本文は歴史記録として残す。
 
+2026-10-17追記: 上の「修正後の正式結果」「正本とする」という位置づけは、candidate unbound FCFS追加修正前の当時の記録である。現在は撤回済みである。旧post-fix結果は unbound FCFS追加修正前の履歴として残す。candidate P以後の数値は再検証待ちである。現在の物理通過判定順の正本は第4巻 ## 22 である。数値結果の正本は再simulation後に更新する。最新再開地点は、本巻末尾の「candidate unbound FCFSを含む物理通過順を再統一（2026-10-17）」§7である。
+
 ## 1. 今回の研究上の成果
 
 二交差点のdownstream spillback trialで、同一inlink上の複数buyerを含む正式候補が実際に形成された。
@@ -5213,7 +5215,11 @@ Terminal独立確認:
 
 # clearance優先修正後の二交差点trialで複数buyer・複数seller取引を確認（2026-10-17）
 
+2026-10-17訂正注記: 本節に記録した candidate 数値結果は、candidate unbound FCFS 追加修正前に取得した。コミット `1cdc019` の記録である。本文は削除せず、履歴として残す。baseline A、baseline順位、candidate形成、general trade rank、FIFO inspectionまで直ちに無効とは断定しない。ただし candidate P 以後の数値的結論、すなわち `G_b`、`R_s`、total G、total R、surplus、economically feasible、candidate選択、candidate Pとactual Pの一致は再検証待ちである。修正後再simulationまで、本節を正式成果として確定しない。「影響があった」とも「影響がなかった」とも未確認のため断定しない。詳細は第4巻の ## 22「candidate unbound FCFSを含む物理通過判定順の再統一（2026-10-17）」を参照する。第5巻は正本ではない。
+
 本節は、clearance優先修正後のseed 1二交差点trialと、post-fix診断の正式結果を記録する。修正前T=310観察は正式成果として扱わない。詳細な当事者数値は `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_4.md` 末尾の2026-10-17追記を参照する。第5巻は最新仕様の正本ではない。
+
+この「正式結果」という位置づけは現在撤回済みである。本節は unbound FCFS追加修正前の履歴である。baseline A、baseline順位、candidate形成、general trade rank、FIFO inspectionまで直ちに無効とは断定しない。candidate P、`G_b`、`R_s`、total G、total R、surplus、economically feasible、候補選択、candidate Pとactual Pの一致は再検証待ちである。数値結果の正本は再simulation後に更新する。判定順の正本は第4巻 ## 22 である。
 
 ## 1. 修正後trialの全体結果
 
@@ -5238,7 +5244,7 @@ Terminal独立確認:
 - 入口閉塞 173 → 182
 - 完了trip 453 → 453
 
-修正前結果との一致を成功条件にはしていない。修正後結果を新しい基準結果として扱う。
+修正前結果との一致を成功条件にはしていない。修正後結果を新しい基準結果として扱う。この「新しい基準結果」は、unbound FCFS追加修正前の当時の位置づけである。現在は旧post-fix結果として残し、candidate P以後は再検証待ちである。
 
 ## 2. 西側の複数buyer成立取引
 
@@ -5251,6 +5257,8 @@ Terminal独立確認:
 - T=344: buyer 4、seller 1
 
 正式結論:
+
+この「正式結論」は unbound FCFS追加修正前の履歴である。candidate形成とFIFO inspectionまで直ちに無効とは断定しない。candidate P、経済量、economically feasible、候補選択、candidate Pとactual Pの一致は再検証待ちである。
 
 - clearance優先修正後のproductionで、西側交差点における複数buyer成立取引を確認した。
 - 最大buyer数は4台である。
@@ -5406,11 +5414,11 @@ Candidate順:
 
 ## 8. 第4巻への反映
 
-- `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_4.md` の2026-10-16節へ、2026-10-17の訂正・正式結果を追記済みである。
+- `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_4.md` の2026-10-16節へ、2026-10-17時点で訂正と当時のpost-fix結果を追記済みである。ただしcandidate P以後の数値は現在再検証待ちである。第4巻 ## 22 の物理通過順再統一後の再simulation結果ではない。
 - 修正前本文は歴史記録として維持している。
 - 修正前T=310を正式成果として扱わない。
-- 第4巻の修正後結果はTerminalで独立確認済みである。
-- 第5巻は最新仕様の正本ではない。
+- 第4巻の当時の旧post-fix結果は、当時Terminalで独立確認済みである。candidate P以後は現在再検証待ちである。
+- 第5巻は最新仕様の正本ではない。判定順の正本は第4巻 ## 22 である。
 
 ## 9. 未完了事項
 
@@ -5424,6 +5432,8 @@ Candidate順:
 
 ## 10. 最新再開地点
 
+2026-10-17追記: 本小節は、clearance優先修正後診断完了時点の再開地点である。candidate unbound FCFS 追加修正後の最新再開地点は、直後の「candidate unbound FCFSを含む物理通過順を再統一（2026-10-17）」§7である。
+
 **本節が、clearance優先修正後診断完了後の最新再開地点である。**
 
 1. 進捗第3巻の更新をTerminalで独立確認する。
@@ -5433,4 +5443,92 @@ Candidate順:
 5. コミット名を提案する。
 6. コミット・pushする。
 7. その後、candidate unbound FCFS調査または単独十字路高需要trialへ進む。
+
+# candidate unbound FCFSを含む物理通過順を再統一（2026-10-17）
+
+本節は再開用要約である。詳細は `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_4.md` 末尾の ## 22 を正本とする。第5巻は正本ではない。直前の2026-10-17節は削除しない。その数値は unbound FCFS 追加修正前の暫定記録である。
+
+## 1. 旧順序の問題
+
+コミット `1cdc019` の clearance 優先修正後、原典確認により candidate unbound FCFS の判定順が共通仕様と不一致だった。
+
+旧 unbound FCFS の順序は次だった。
+
+1. 到着済み
+2. 物理先頭
+3. inlink流出容量
+4. clearance
+5. Node流量
+6. outlink側制約
+7. 通過
+
+clearanceより先に inlink流出を見ていた。さらに最初の修正では、Node流量とinlink流出の順も経路ごとに不統一だった。
+
+## 2. 最終共通順序
+
+1. 到着済み
+2. inlink物理先頭
+3. clearance
+4. inlink流出容量
+5. Node流量容量
+6. outlink流入容量
+7. outlink入口空間
+8. 通過
+9. 通過成功後にclearance履歴を更新する
+
+対象は、実WorldのTVT確定順位処理、順位適用baseline forkの確定群・未確定群、candidate binding transfer、candidate unbound FCFS、clearanceありFCFS Node本体である。
+
+clearance未充足は temporary skip ではない。その走査を終了し、後続を処理せず、clearance履歴を更新しない。通常物理制約不足だけが対象Vehicle単位の一時スキップである。同時不足時は、上の共通順序で最初の不足理由を採用する。
+
+単車線・platoon size 1では、FCFSの非物理先頭問題は実質発生しにくい。それでも FCFS Node 本体の判定順は形式上統一した。
+
+可読性方針: 研究の根幹処理では、短い・技巧的なPythonより、初学者が交通上の意味と順序を追える明示的実装を優先する。複雑な一括論理式へ詰め込まない。今後のCursor実装指示にも必ず明記する。
+
+## 3. 変更8ファイル
+
+production:
+
+- `uxsim/order_control_tvt_mp_physical_transfer.py`
+- `uxsim/order_control_tvt_mp_candidate_binding_transfer.py`
+- `uxsim/order_control_tvt_mp_candidate_unbound_fcfs_transfer.py`
+- `uxsim/uxsim.py`
+
+test:
+
+- `tests_order_control_tvt_mp_physical_transfer.py`
+- `tests_order_control_tvt_mp_candidate_binding_transfer.py`
+- `tests_order_control_tvt_mp_candidate_unbound_fcfs_transfer.py`
+- `tests_fcfs_order_control_clearance_0.py`
+
+## 4. Terminal独立確認
+
+合計134件の専用テストが成功した。
+
+- candidate binding transfer: 21 tests passed
+- candidate unbound FCFS: 27 tests passed
+- 実World・順位適用baseline: 80 tests passed
+- FCFS Node物理順: 6 tests passed
+- FCFS clearance=0 simulation: passed
+
+変更8ファイルの `py_compile` は成功した。`git diff --check` も成功した。関連回帰 `tests_fcfs_order_control_revisit_ranking.py`、`tests_order_control_current_visit_arrival.py`、`tests_order_control_current_visit_state.py` は passed である。
+
+## 5. BATCH異常系1件は別の既存契約問題
+
+`tests_order_control_baseline_collector_uxsim.py` の `test_batch_passage_stops_before_physical_transfer_on_inconsistency` は失敗した。今回の回帰ではない。今回の `uxsim.py` 変更はclearanceありFCFSだけで、BATCH処理は変更していない。古いtestは visit_id mismatch 例外を期待し、現行collector契約と一致しない。今回修正しない。解決済みではない。
+
+## 6. 長時間trialはまだ再実行していない
+
+修正後の長時間trialとpost-fix診断は未実施である。`1cdc019` の数値結果は暫定である。candidate P以後は再検証待ちである。新しい simulation 結果を捏造しない。影響の有無も未確認である。
+
+## 7. 最新再開地点
+
+**本節が、物理通過判定順の再統一後における最新再開地点である。**
+
+1. 今回の物理通過順修正をコミット・pushする。
+2. 修正後の extended-south-pulse trial を再実行する。
+3. post-fix multiple-buyer diagnostic を再実行する。
+4. 西側5件、東側T=35全7候補、T=582を再集計する。
+5. 旧数値との差を確認する。差があったとも、なかったとも、再実行前には断定しない。
+6. 第4巻と進捗第3巻の暫定注記を正式結果へ更新する。
+7. BATCH古いtest契約問題は別途判断する。
 

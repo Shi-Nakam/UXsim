@@ -1963,21 +1963,83 @@ class Node:
 
         s.incoming_vehicles = []
 
+    def _fcfs_clearance_passage_judgment(s, veh):
+        """
+        Judge one arrived FCFS candidate, from top to bottom.
+
+        The return value is the first stage that applies:
+
+        1. ``not_in_incoming``
+        2. ``not_physical_head``
+        3. ``clearance_not_satisfied``
+        4. ``inlink_outflow_capacity_unavailable``
+        5. ``node_flow_capacity_unavailable``
+        6. ``outlink_missing``
+        7. ``outlink_inflow_capacity_unavailable``
+        8. ``outlink_entry_space_unavailable``
+        9. ``pass``
+
+        Clearance uses the existing direction-change rule. A different inlink
+        from the most recent entry must wait until
+        ``W.T - last_order_control_entry_timestep`` is greater than
+        ``order_control_clearance_timesteps``. This method does not move the
+        vehicle and does not update clearance history.
+        """
+        if veh not in s.incoming_vehicles:
+            return "not_in_incoming"
+
+        inlink = veh.link
+        outlink = veh.route_next_link
+        is_physical_head = (
+            len(inlink.vehicles) > 0
+            and veh == inlink.vehicles[0]
+        )
+        if not is_physical_head:
+            return "not_physical_head"
+
+        clearance_required = (
+            s.last_order_control_inlink is not None
+            and inlink != s.last_order_control_inlink
+        )
+        if clearance_required:
+            clearance_ok = (
+                s.W.T - s.last_order_control_entry_timestep
+                > s.order_control_clearance_timesteps
+            )
+            if not clearance_ok:
+                return "clearance_not_satisfied"
+
+        if inlink.capacity_out_remain < s.W.DELTAN:
+            return "inlink_outflow_capacity_unavailable"
+        if s.flow_capacity_remain < s.W.DELTAN:
+            return "node_flow_capacity_unavailable"
+        if outlink == None:
+            return "outlink_missing"
+        if outlink.capacity_in_remain < s.W.DELTAN:
+            return "outlink_inflow_capacity_unavailable"
+
+        entry_has_room = (
+            len(outlink.vehicles) < outlink.number_of_lanes
+            or outlink.vehicles[-outlink.number_of_lanes].x > outlink.delta_per_lane*s.W.DELTAN
+        )
+        if not entry_has_room:
+            return "outlink_entry_space_unavailable"
+        return "pass"
+
     def transfer_fcfs_clearance(s):
         """
         FCFS vehicle transfer at an order-control node with direction-change clearance.
 
         Candidates are evaluated in order of current-visit (arrival_time, tiebreaker,
-        veh.id) via ``Vehicle.get_order_control_fcfs_rank_key()``. A different inlink
-        from the most recent entry is treated as a direction change.
-        If direction change is required and clearance is not yet satisfied, evaluation stops
-        before the clearance-free FCFS passability check (break). When clearance is not
-        required, or when the required clearance has been satisfied, the same passability
-        rules as transfer_fcfs_no_clearance() apply. If the vehicle cannot pass under those
-        rules, the next candidate is considered in the same timestep (continue). On
-        successful transfer, last_order_control_inlink is updated with the inlink recorded
-        before transfer, and last_order_control_entry_timestep is updated with the current
-        timestep.
+        veh.id) via ``Vehicle.get_order_control_fcfs_rank_key()``. Each candidate is
+        then judged from top to bottom: still incoming, inlink physical head,
+        clearance, inlink outflow, node flow, outlink inflow, and outlink entry
+        space. A vehicle that is not the physical head is skipped, and the next
+        candidate is tried. Unmet clearance stops this node scan. An ordinary
+        physical-limit shortage skips only that vehicle. On successful transfer,
+        last_order_control_inlink is updated with the inlink recorded before
+        transfer, and last_order_control_entry_timestep is updated with the
+        current timestep.
         """
         candidates = [
             veh for veh in s.incoming_vehicles
@@ -1992,30 +2054,25 @@ class Node:
             outlink = veh.route_next_link
             inlink = current_inlink
 
-            clearance_required = (
-                s.last_order_control_inlink is not None
-                and current_inlink != s.last_order_control_inlink
-            )
-            if clearance_required:
-                clearance_ok = (
-                    s.W.T - s.last_order_control_entry_timestep
-                    > s.order_control_clearance_timesteps
-                )
-                if not clearance_ok:
-                    break
+            judgment = s._fcfs_clearance_passage_judgment(veh)
+            if judgment == "not_in_incoming":
+                continue
+            if judgment == "not_physical_head":
+                continue
+            if judgment == "clearance_not_satisfied":
+                break
+            if judgment == "inlink_outflow_capacity_unavailable":
+                continue
+            if judgment == "node_flow_capacity_unavailable":
+                continue
+            if judgment == "outlink_missing":
+                continue
+            if judgment == "outlink_inflow_capacity_unavailable":
+                continue
+            if judgment == "outlink_entry_space_unavailable":
+                continue
 
-            if (
-                outlink != None
-                and len(inlink.vehicles) > 0
-                and veh == inlink.vehicles[0]
-                and (
-                    len(outlink.vehicles) < outlink.number_of_lanes
-                    or outlink.vehicles[-outlink.number_of_lanes].x > outlink.delta_per_lane*s.W.DELTAN
-                )
-                and outlink.capacity_in_remain >= s.W.DELTAN
-                and inlink.capacity_out_remain >= s.W.DELTAN
-                and s.flow_capacity_remain >= s.W.DELTAN
-            ):
+            if judgment == "pass":
                 baseline_collector = s.W._order_control_baseline_collector
                 pending_passage_record = None
                 if baseline_collector is not None:

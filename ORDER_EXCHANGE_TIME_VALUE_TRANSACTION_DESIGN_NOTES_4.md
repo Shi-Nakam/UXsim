@@ -16663,9 +16663,11 @@ T=16のcandidate局所仮想計算では、
 
 2026-10-17注記: この節の判定順確定とproduction修正の記録は維持する。ただし、## 2 と ## 3 のT=310観察はclearance優先修正前の記録であり、複数buyer候補形成可能性の正式確認結果ではない。修正後の正式結果は、同じ節末尾の ## 13 以降を正本とする。第5巻は最新仕様の正本ではない。
 
+2026-10-17追記（candidate unbound FCFS追加修正後）: 上の「正式結果」「## 13 以降を正本とする」という正本指定は、unbound FCFS追加修正前の当時の記録である。この正本指定は現在撤回済みである。## 13 以降の本文は削除しない。ただし ## 14〜## 20 の candidate P以後は再検証待ちである。現在の判定順の正本は ## 22 である。数値結果の正本は再simulation後に更新する。第5巻は正本ではない。
+
 ## 2. 二交差点trialで確認した複数buyer候補
 
-2026-10-17訂正注記: この小節はclearance優先修正前の観察記録である。誤ったbaseline物理通過判定順の下で得られたT=310観察であり、複数buyer候補の形成可能性、交通結果、経済条件、採否を立証する正式確認結果ではない。「複数buyer候補は本質的に不可能かもしれない」という疑いを、この修正前観察で反証したという表現は撤回する。最新結果は、同じ節末尾のclearance優先修正後診断小節（## 13 以降、特に ## 14 と ## 15）を参照する。本文は歴史記録として残す。
+2026-10-17訂正注記: この小節はclearance優先修正前の観察記録である。誤ったbaseline物理通過判定順の下で得られたT=310観察であり、複数buyer候補の形成可能性、交通結果、経済条件、採否を立証する正式確認結果ではない。「複数buyer候補は本質的に不可能かもしれない」という疑いを、この修正前観察で反証したという表現は撤回する。clearance優先修正後の記録は、同じ節末尾の ## 13 以降である。ただしその数値も、candidate unbound FCFS追加修正前であり、candidate P以後は再検証待ちである。最新の判定順は ## 22 を参照する。本文は歴史記録として残す。
 
 二交差点のdownstream spillback trialで、同一inlink上の複数buyerを含む正式候補が実際に形成された。これは、それ以前の「複数buyer候補は本質的に不可能かもしれない」という疑いを反証した、独立した確認である。
 
@@ -16724,6 +16726,8 @@ production修正後も同じ候補構成が再現されるかは、未確認で�
 
 2026-10-17注記: この小節もclearance優先修正前の観察記録である。T=314でbaselineとcandidateが分岐したこと、およびclearanceと入口空間不足の同時発生時の判定順を見直す契機としては有効だった。ただし、複数buyer候補の形成可能性や経済的成立を立証する正式結果としては扱わない。修正後の正式結果は ## 13 以降を正本とする。
 
+この正本指定は現在撤回済みである。当時の位置づけとして残した文章である。candidate P以後は再検証待ちである。旧post-fix結果は unbound FCFS追加修正前の履歴である。現在の判定順の正本は ## 22 である。数値結果の正本は再simulation後に更新する。
+
 本節の診断出力は、clearance優先のproduction修正より前の観察である。production修正後の交通結果、通過時刻、経済結果ではない。
 
 診断出力directory:
@@ -16778,6 +16782,8 @@ production修正後も同じ候補構成が再現されるかは、未確認で�
 candidate拘束順位走査は、到着と物理先頭のあと、容量と入口空間より先にclearanceを見て、未充足ならその走査を終えていた。
 
 ## 5. 2026-10-16に確定した最新判定順
+
+2026-10-17追記: この小節のclearance優先そのものは維持する。ただし「4.」の通常物理制約は、当時Node流量をinlink流出より先に書いていた。その後、inlink流出をNode流量より先とする共通順序へ再統一した。最新の共通順序は ## 22 を正本とする。本文は歴史記録として残す。
 
 各VisitまたはVehicleは、次の順で判定する。
 
@@ -16959,11 +16965,35 @@ production修正時のTerminal独立確認は次である。
 
 「複数buyer候補が本質的に不可能かもしれないという疑いを、修正前観察で反証した」という ## 2 の既存表現は撤回する。修正後の正式結果は、後続小節を正本とする。
 
+この「後続小節を正本とする」は、当時の位置づけとして残した文章である。この正本指定は現在撤回済みである。candidate unbound FCFS追加修正により、後続 ## 14〜## 20 の数値的結論は現在再検証待ちである。現在の判定順の正本は ## 22 である。数値結果の正本は再simulation後に更新する。sellerとright-of-entry holderの特定方法、およびbaseline A・baseline順位の記録まで直ちに無効とは断定しない。
+
 sellerとright-of-entry holderの特定は、推測ではなく、保存済みright-of-entry selection result、baseline到着時刻A、baseline順位に基づく。第5巻は最新仕様の正本ではない。
 
 ## 14. clearance優先修正後の二交差点trial全体結果
 
-clearance優先修正後のseed 1 trialを、新しい基準結果として扱う。修正前結果との一致は成功条件ではない。
+2026-10-17訂正注記（candidate unbound FCFS追加修正後）: この小節から ## 20 までのtrial・candidate数値は、コミット `1cdc019` で記録したclearance優先修正後の結果である。その後の原典確認により、当時のcandidate unbound FCFSの通常物理制約判定順が共通仕様と不一致だった。さらに最初の修正では、Node流量とinlink流出の順も不統一だった。最終的な共通順序は ## 22 を正本とする。
+
+この小節の数値を削除しない。修正前判定順で得られた履歴として残す。再simulation後の結果を新しい正本とする。
+
+直ちに無効とは断定しないもの:
+
+- baseline A
+- baseline順位
+- candidate形成そのもの
+- general trade rank
+- FIFO inspectionの記録
+
+修正後の再simulationまで正式確定しないもの:
+
+- candidate P
+- `G_b`、`R_s`、total G、total R、surplus
+- economically feasible
+- candidate選択
+- candidate Pとactual Pの一致
+
+西側5件、東側T=35全7候補、T=582の数値結果は再検証待ちである。影響があったとも、なかったとも、未確認のため断定しない。第5巻は正本ではない。
+
+clearance優先修正後のseed 1 trialを、新しい基準結果として扱う。修正前結果との一致は成功条件ではない。この「新しい基準結果」は unbound FCFS追加修正前の当時の位置づけである。現在は旧post-fix結果として残す。candidate P以後は再検証待ちである。数値結果の正本は再simulation後に更新する。
 
 trial条件は次である。
 
@@ -16992,6 +17022,8 @@ trial条件は次である。
 - 完了trip 453 → 453
 
 ## 15. 修正後の西側複数buyer成立取引5件
+
+2026-10-17訂正注記: この小節の数値はcandidate unbound FCFS追加修正前に取得した。baseline A、baseline順位、candidate形成、FIFO inspectionの記録まで直ちに無効とは断定しない。candidate P、`G_b`、`R_s`、total G、total R、surplus、economically feasible、candidate選択、candidate Pとactual Pの一致は再検証待ちである。本文は履歴として残す。詳細は ## 14 冒頭と ## 22 を参照する。
 
 clearance優先修正後の正しいproductionで、西側交差点における複数buyer成立取引を確認した。最大buyer数は4台である。西側のbuyerは同一inlink上に並び、candidateでも相対順を維持した。
 
@@ -17180,6 +17212,8 @@ clearance優先修正後の正しいproductionで、西側交差点における�
 
 ## 16. 東側T=35の全7候補の監査
 
+2026-10-17訂正注記: この小節の数値はcandidate unbound FCFS追加修正前に取得した。baseline A、baseline順位、candidate形成、general trade rank、FIFO inspectionの記録まで直ちに無効とは断定しない。candidate P、経済量、economically feasible、候補選択は再検証待ちである。本文は履歴として残す。詳細は ## 14 冒頭と ## 22 を参照する。
+
 この小節の「全7候補」は、東側交差点 T=35 のbaseline trade-scope内で、権利保有車両より後方の3 Visitから形成される非空buyer集合 2^3 − 1 = 7通りを指す。何を基準とした全候補かが分からない書き方はしない。
 
 T=35のbaseline trade-scope orderは次である。
@@ -17272,6 +17306,8 @@ baseline共通情報は次である。Aは到着時刻、Pは通過時刻であ�
 
 ## 17. 非連続buyer集合 seller / buyer / seller / buyer の詳細
 
+2026-10-17訂正注記: この小節の数値はcandidate unbound FCFS追加修正前に取得した。baseline Aとcandidate形成の記録まで直ちに無効とは断定しない。candidate P、`G_b`、`R_s`、surplus、economically feasible、未採用という結論は再検証待ちである。本文は履歴として残す。詳細は ## 14 冒頭と ## 22 を参照する。
+
 東側T=35の全7候補のうち、buyers = `veh_ee_6:1` | `veh_wn_3:2` は、baseline順では seller / buyer / seller / buyer という非連続buyer集合である。候補構造をseller数とbuyer数だけでは表さない。この候補は除外せず、経済評価まで進んだ。economically feasibleだが、selected candidateよりsurplusが小さいため未採用である。
 
 Baseline順:
@@ -17348,6 +17384,8 @@ Candidate順:
 
 ## 18. FIFO監査
 
+2026-10-17訂正注記: この小節のFIFO inspection記録まで直ちに無効とは断定しない。ただしcandidate unbound FCFS追加修正前の記録である。修正後再simulationでの再確認は未実施である。影響があったとも、なかったとも断定しない。詳細は ## 14 冒頭と ## 22 を参照する。
+
 対象7取引のselected candidateについて、次の二つの確認を行った。
 
 1. productionのFIFO inspection結果。`preserves_inlink_fifo=true`。
@@ -17360,6 +17398,8 @@ Candidate順:
 東側T=35の全7候補についても、同じ同一inlink相対順の再比較を行い、production FIFO inspection合格と一致した。
 
 ## 19. T=582の評価終了時未観測契約
+
+2026-10-17訂正注記: この小節の数値は unbound FCFS 追加修正前の履歴である。評価終了時未観測契約そのものを直ちに無効とは断定しない。T=582の candidate P、経済量、選択結果、actual未観測の当事者構成は再検証待ちである。詳細は ## 14 冒頭と ## 22 を参照する。
 
 東側交差点 T=582 のselected candidateは、buyer 3、seller 1である。right-of-entry holderは、保存済みright-of-entry selection resultとbaseline順位から特定した `veh_en_74:1` である。
 
@@ -17416,6 +17456,8 @@ Candidate順:
 
 ## 20. 診断scriptと出力
 
+2026-10-17訂正注記: この小節が指す診断出力は unbound FCFS 追加修正前の保存結果である。診断scriptの契約そのものを直ちに無効とは断定しない。保存済みCSVの candidate P以後の数値は再検証待ちである。詳細は ## 14 冒頭と ## 22 を参照する。
+
 新規診断script:
 
 `research_scripts/diagnose_tvt_mp_two_cross_intersections_post_fix_multiple_buyer_transactions.py`
@@ -17446,7 +17488,9 @@ Candidate順:
 
 ## 21. 未完了事項と再開地点の更新
 
-完了扱いへ変更するものは次である。
+2026-10-17訂正注記: 下の「完了扱い」一覧は、clearance優先修正後かつ candidate unbound FCFS 追加修正前の記録である。当時完了とした trial・candidate 数値確認は、## 22 の判定順再統一後に再検証待ちへ戻す。一覧そのものは履歴として残す。
+
+完了扱いへ変更するものは次である。当時の記録であり、数値確認は再検証待ちである。
 
 - clearance優先修正後のtrial再実行
 - 西側複数buyer取引の再形成確認
@@ -17456,22 +17500,176 @@ Candidate順:
 - 東側T=35の全7候補の形成・FIFO・candidate計算・経済評価・選択監査
 - 非連続buyer集合の経済計算確認
 - T=582の経済量空欄契約確認
+- 修正後結果の進捗第3巻への反映。ただしその反映も、unbound FCFS 追加修正前の数値に基づく暫定記録である。
 
 引き続き未完了なものは次である。
 
-- 修正後結果を進捗第3巻へ反映
-- 第5巻の旧記述への注記要否判断。第5巻は最新仕様の正本ではない。
-- candidate unbound FCFSの判定順に関する別途調査・設計判断
+- 今回の物理通過順修正をコミット・pushする
+- 修正後の extended-south-pulse trial を再実行する
+- post-fix multiple-buyer diagnostic を再実行する
+- 西側5件、東側T=35全7候補、T=582を再集計する
+- 旧数値との差を確認する。差があったとも、なかったとも、再実行前には断定しない
+- 第4巻と進捗第3巻の暫定注記を、再simulation後の正式結果へ更新する
+- BATCH古いtest契約問題は別途判断する。今回の8ファイル変更による回帰ではない
+- 第5巻の旧記述への注記要否判断。第5巻は最新仕様の正本ではない
 - 二交差点trial全体の交通工学的評価
 - 2026-10-14に予定していた「12台より多い単独十字路」検証への復帰
-- 診断scriptと今回のメモ更新を含むコミット範囲の整理
 
 最新再開地点は次である。
 
-1. 第4巻更新をTerminalで独立確認する。
-2. 進捗第3巻を訂正・追記する。
-3. 進捗第3巻をTerminalで独立確認する。
-4. 診断script、メモ、未追跡ファイルのコミット範囲を整理する。
-5. 必要なtest・static validationを最終確認する。
-6. コミット・pushする。
-7. その後、candidate unbound FCFS調査または単独十字路高需要trialへ進む。
+1. 今回の物理通過順修正をコミット・pushする。
+2. 修正後の extended-south-pulse trial を再実行する。
+3. post-fix multiple-buyer diagnostic を再実行する。
+4. 西側5件、東側T=35全7候補、T=582を再集計する。
+5. 旧数値との差を確認する。
+6. 第4巻と進捗第3巻の暫定注記を正式結果へ更新する。
+7. BATCH古いtest契約問題は別途判断する。
+
+## 22. candidate unbound FCFSを含む物理通過判定順の再統一（2026-10-17）
+
+この小節は、clearance優先修正後に判明した candidate unbound FCFS の判定順不一致と、その後の全経路再統一を記録する。## 13〜## 20 の数値は削除しない。それらは追加修正前の履歴である。この小節は新しい simulation 結果を作らない。第5巻は正本ではない。
+
+### 発見経緯
+
+コミット `1cdc019` で記録した clearance 優先修正後の trial・candidate 診断のあと、原典確認を行った。その結果、candidate unbound FCFS の通常物理制約判定順が、実Worldと順位適用baselineの共通仕様と不一致だった。
+
+旧 candidate unbound FCFS の順序は次だった。
+
+1. 到着済み
+2. 物理先頭
+3. inlink流出容量
+4. clearance
+5. Node流量
+6. outlink側制約
+7. 通過
+
+この旧順序が共通仕様と不一致だった理由は次である。
+
+- 共通仕様では、clearanceは通常物理制約より先である。旧 unbound FCFS では、inlink流出容量を clearance より先に見ていた。
+- 共通仕様では、clearance未充足は一時スキップではない。その timestep または virtual timestep の対象 Node 走査を終了し、後続 Vehicle を処理しない。
+- 最初の修正では、clearanceを通常物理制約より先へ直した。しかしその修正では、Node流量とinlink流出の順が経路ごとに不統一だった。
+- 実Worldと順位適用baselineは、当時 Node流量を inlink流出より先に見ていた。
+- candidate binding transfer は、clearance後に inlink流出、outlink流入、Node流量、入口空間の順だった。
+- clearanceあり FCFS Node 本体は、一括条件の短絡順で入口空間と outlink流入を inlink流出と Node流量より先に見ていた。
+
+したがって、clearance優先だけでは不十分だった。通常物理制約の内部順も、関連する全経路で共通順序へ揃える必要があった。
+
+### 最終共通順序
+
+最終的な共通順序は次である。
+
+1. 到着済み
+2. inlink物理先頭
+3. clearance
+4. inlink流出容量
+5. Node流量容量
+6. outlink流入容量
+7. outlink入口空間
+8. 通過
+9. 通過成功後にclearance履歴を更新する
+
+対象経路は次の5つである。
+
+1. 実WorldのTVT確定順位処理
+2. 順位適用baseline forkの確定群・未確定群
+3. candidate binding transfer
+4. candidate unbound FCFS
+5. clearanceありFCFS Node本体
+
+BATCH、`order_control_type="none"`、通常UXsim merge、clearanceなしFCFSは変更していない。
+
+### clearance停止と通常物理制約一時スキップの違い
+
+clearance未充足の契約は次である。
+
+- temporary skipではない
+- そのtimestepまたはvirtual timestepの対象Node走査を終了する
+- 後続Vehicleを処理しない
+- clearance未充足Vehicleをtemporary skipへ追加しない
+- 通過していないため、clearance履歴を更新しない
+
+通常物理制約不足の契約は次である。
+
+- 対象Vehicleだけを一時スキップする
+- 後続Vehicleを試す
+- clearance停止にはしない
+- 通過していないため、clearance履歴を更新しない
+- 同時に複数の通常物理制約が不足しているときは、上の共通順序で最初に不足した理由を採用する
+
+同時不足時のreason優先順は次である。
+
+- inlink流出とNode流量が同時不足: inlink流出不足
+- outlink流入と入口空間が同時不足: outlink流入不足
+
+unbound FCFSとbinding transferでは、inlink流出不足は `INLINK_OUTFLOW_CAPACITY_UNAVAILABLE`、Node流量不足は `NODE_FLOW_CAPACITY_UNAVAILABLE`、outlink流入不足は `OUTLINK_INFLOW_CAPACITY_UNAVAILABLE`、入口空間不足は `OUTLINK_ENTRY_SPACE_UNAVAILABLE` である。
+
+candidate unbound FCFSの古いstop reason `NODE_FLOW_CAPACITY_UNAVAILABLE_BEFORE_START` と `NODE_FLOW_CAPACITY_UNAVAILABLE` は、古い保存結果との互換性のためenumに残す。現行走査は返さない。
+
+### FCFS Node本体の形式統一
+
+clearanceありFCFS Node本体 `transfer_fcfs_clearance` も、同じ共通順序へ揃えた。通過処理本体とclearance条件式は動かしていない。一括条件では不足理由の前後が保証できないため、段階判定へ分けた。
+
+今回の単車線・platoon size 1では、到着済みで物理先頭でない正常状態は実質的に発生しにくい。それでも、コード上の順序は共通順序へ形式統一した。FCFS順位キーは変更していない。
+
+### 変更ファイル
+
+production 4ファイル:
+
+- `uxsim/order_control_tvt_mp_physical_transfer.py`
+- `uxsim/order_control_tvt_mp_candidate_binding_transfer.py`
+- `uxsim/order_control_tvt_mp_candidate_unbound_fcfs_transfer.py`
+- `uxsim/uxsim.py`
+
+test 4ファイル:
+
+- `tests_order_control_tvt_mp_physical_transfer.py`
+- `tests_order_control_tvt_mp_candidate_binding_transfer.py`
+- `tests_order_control_tvt_mp_candidate_unbound_fcfs_transfer.py`
+- `tests_fcfs_order_control_clearance_0.py`
+
+### 可読性方針
+
+研究の根幹処理では、短い・技巧的・美しいPythonより、初学者が交通上の意味と順序を追える明示的実装を優先する。到着、物理先頭、clearance、各通常物理制約、通過を上から読める構造にする。複数制約を一つの複雑な一括論理式へ詰め込まない。条件を巧妙にまとめない。少し長くなっても、各条件の意味と処理結果が明確な実装にする。今後のCursor実装指示にも、この可読性方針を必ず明記する。
+
+### Terminal独立確認
+
+専用テストの独立確認は次である。合計134件成功した。
+
+- candidate binding transfer: 21 tests passed
+- candidate unbound FCFS: 27 tests passed
+- 実World・順位適用baseline: 80 tests passed
+- FCFS Node物理順: 6 tests passed
+- FCFS clearance=0 simulation: passed
+
+変更8ファイルの `py_compile` は成功した。`git diff --check` も成功した。
+
+関連回帰は次である。
+
+- `tests_fcfs_order_control_revisit_ranking.py`: passed
+- `tests_order_control_current_visit_arrival.py`: passed
+- `tests_order_control_current_visit_state.py`: passed
+
+長時間trialとpost-fix診断は、この修正後にはまだ再実行していない。したがって、## 14〜## 20 の数値をこの修正後の結果として扱わない。
+
+### BATCH古いtest契約問題は別件である
+
+`tests_order_control_baseline_collector_uxsim.py` の `test_batch_passage_stops_before_physical_transfer_on_inconsistency` は失敗した。これは今回の8ファイル変更による回帰ではない。
+
+理由は次である。
+
+- 今回の `uxsim.py` 変更はclearanceありFCFSだけで、BATCH処理は変更していない
+- collectorの現行契約では、同じVehicle名でも未登録VisitKeyはsnapshot外の後続Visitとして `None` を返し、物理通過を許す
+- 古いtestは visit_id mismatch 例外を期待しており、現行collector契約と一致しない
+
+このBATCH問題は今回修正しない。独立した既存test契約問題として未完了事項へ残す。解決済みではない。
+
+### この小節が確定しないこと
+
+この小節は判定順と専用テスト結果を確定する。次は確定しない。
+
+- 修正後の長時間trial結果
+- 西側5件、東側T=35全7候補、T=582の再集計
+- candidate P以後の経済量
+- 旧数値との差の有無
+
+再simulation後の結果を新しい正本とする。

@@ -5,6 +5,24 @@ One call handles one virtual timestep. It does not advance the clock, refill
 capacity, move vehicles along a link, or write the rank ledger or baseline
 collector. Binding visits stay on the binding scan even if that scan skipped
 them.
+
+Candidates come only from ``target_node.incoming_vehicles``. In UXsim that
+list holds vehicles that have already arrived at the Node, so an unbound
+candidate is arrived when it is extracted. This scan removes a candidate
+from that list only when that same candidate passes. A not-yet-processed
+candidate therefore stays arrived until its own turn.
+
+Each candidate is judged in this order:
+
+1. still arrived (still in ``incoming_vehicles``)
+2. inlink physical head; otherwise skip only that vehicle
+3. clearance; if unmet, end this virtual timestep and do not try later vehicles
+4. inlink outflow capacity; if short, skip only that vehicle
+5. node flow capacity; if short, skip only that vehicle
+6. route decision
+7. outlink inflow capacity; if short, skip only that vehicle
+8. outlink entry space; if short, skip only that vehicle
+9. pass; clearance history is updated inside the existing one-vehicle transfer
 """
 
 from __future__ import annotations
@@ -38,6 +56,7 @@ class OrderControlTvtMpUnboundTemporarySkipReason(Enum):
     """Ordinary inability. The scan continues with the next candidate."""
 
     NOT_INLINK_PHYSICAL_HEAD = "not_inlink_physical_head"
+    NODE_FLOW_CAPACITY_UNAVAILABLE = "node_flow_capacity_unavailable"
     INLINK_OUTFLOW_CAPACITY_UNAVAILABLE = "inlink_outflow_capacity_unavailable"
     OUTLINK_INFLOW_CAPACITY_UNAVAILABLE = "outlink_inflow_capacity_unavailable"
     OUTLINK_ENTRY_SPACE_UNAVAILABLE = "outlink_entry_space_unavailable"
@@ -48,11 +67,16 @@ class OrderControlTvtMpUnboundFcfsStopReason(Enum):
     """Why this timestep's unbound FCFS scan ended."""
 
     BINDING_CLEARANCE_STOPPED_NOT_STARTED = "binding_clearance_stopped_not_started"
+    # Kept so older saved results still name this reason. The current scan
+    # does not return it. Node-flow shortage is a per-vehicle temporary skip
+    # after clearance, not a stop before the candidate walk.
     NODE_FLOW_CAPACITY_UNAVAILABLE_BEFORE_START = (
         "node_flow_capacity_unavailable_before_start"
     )
     CANDIDATES_COMPLETED = "candidates_completed"
     CLEARANCE_NOT_SATISFIED = "clearance_not_satisfied"
+    # Kept so older saved results still name this reason. The current scan
+    # does not return it. Node-flow shortage does not end the Node scan.
     NODE_FLOW_CAPACITY_UNAVAILABLE = "node_flow_capacity_unavailable"
 
 
@@ -362,6 +386,12 @@ def _extract_unbound_candidates(
     target_node,
     candidate_local_state,
 ):
+    """
+    Take unbound candidates from vehicles that have already arrived.
+
+    ``incoming_vehicles`` is the Node's arrived list. A vehicle still on an
+    inlink but not in that list has not arrived and is not a candidate.
+    """
     incoming = list(target_node.incoming_vehicles)
     seen_ids = set()
     for local_vehicle in incoming:
@@ -453,8 +483,13 @@ def scan_and_transfer_tvt_mp_unbound_fcfs_vehicles_at_current_timestep(
     Try unbound vehicles once, in this timestep's FCFS order.
 
     A second call at the same virtual timestep raises and changes nothing.
-    Clearance or node-flow shortage ends the scan. Ordinary inability skips
-    only that vehicle.
+    Candidates are the arrived vehicles in ``incoming_vehicles`` that are
+    outside the binding sequence. Unmet clearance, after confirming that the
+    vehicle is still arrived and is the inlink physical head, ends this
+    virtual timestep. After clearance, ordinary limits are inlink outflow,
+    node flow, route, outlink inflow, and entry space. A shortage of one
+    of those skips only that vehicle. The first shortage is the recorded
+    reason. Clearance history is not updated for a skip or a clearance stop.
     """
     if not isinstance(
         unbound_fcfs_transfer_state,
@@ -517,19 +552,6 @@ def scan_and_transfer_tvt_mp_unbound_fcfs_vehicles_at_current_timestep(
                 ),
             ),
         )
-    if target_node.flow_capacity_remain < deltan:
-        return _complete(
-            unbound_fcfs_transfer_state,
-            virtual_timestep,
-            _empty_result(
-                node_name=target_node.name,
-                virtual_timestep=virtual_timestep,
-                stop_reason=(
-                    OrderControlTvtMpUnboundFcfsStopReason.NODE_FLOW_CAPACITY_UNAVAILABLE_BEFORE_START
-                ),
-            ),
-        )
-
     candidates = _extract_unbound_candidates(
         unbound_state=unbound_fcfs_transfer_state,
         target_node=target_node,
@@ -541,6 +563,15 @@ def scan_and_transfer_tvt_mp_unbound_fcfs_vehicles_at_current_timestep(
     collector = unbound_fcfs_transfer_state.baseline_collector
 
     for local_vehicle in candidates:
+        # Extraction copied only arrived incoming vehicles. This scan removes
+        # one of them only when that vehicle itself passes, so a later
+        # candidate is still arrived here. Leaving incoming earlier is not a
+        # normal temporary skip.
+        if local_vehicle not in target_node.incoming_vehicles:
+            raise RuntimeError(
+                f"Node {target_node.name!r}: Vehicle {local_vehicle.name!r} "
+                "left incoming_vehicles before this unbound scan reached it."
+            )
         inlink = local_vehicle.link
         if len(inlink.vehicles) == 0 or inlink.vehicles[0] is not local_vehicle:
             skipped.append(
@@ -548,16 +579,6 @@ def scan_and_transfer_tvt_mp_unbound_fcfs_vehicles_at_current_timestep(
                     vehicle_name=local_vehicle.name,
                     skip_reason=(
                         OrderControlTvtMpUnboundTemporarySkipReason.NOT_INLINK_PHYSICAL_HEAD
-                    ),
-                )
-            )
-            continue
-        if inlink.capacity_out_remain < deltan:
-            skipped.append(
-                OrderControlTvtMpUnboundTemporarySkip(
-                    vehicle_name=local_vehicle.name,
-                    skip_reason=(
-                        OrderControlTvtMpUnboundTemporarySkipReason.INLINK_OUTFLOW_CAPACITY_UNAVAILABLE
                     ),
                 )
             )
@@ -578,22 +599,26 @@ def scan_and_transfer_tvt_mp_unbound_fcfs_vehicles_at_current_timestep(
                     candidate_vehicle_names_in_fcfs_order=candidate_names,
                 ),
             )
-        if target_node.flow_capacity_remain < deltan:
-            return _complete(
-                unbound_fcfs_transfer_state,
-                virtual_timestep,
-                OrderControlTvtMpUnboundFcfsTransferResult(
-                    node_name=target_node.name,
-                    virtual_timestep=virtual_timestep,
-                    stop_reason=(
-                        OrderControlTvtMpUnboundFcfsStopReason.NODE_FLOW_CAPACITY_UNAVAILABLE
+        if inlink.capacity_out_remain < deltan:
+            skipped.append(
+                OrderControlTvtMpUnboundTemporarySkip(
+                    vehicle_name=local_vehicle.name,
+                    skip_reason=(
+                        OrderControlTvtMpUnboundTemporarySkipReason.INLINK_OUTFLOW_CAPACITY_UNAVAILABLE
                     ),
-                    transferred_vehicle_records=tuple(transferred),
-                    temporary_skips=tuple(skipped),
-                    stopped_vehicle_name=local_vehicle.name,
-                    candidate_vehicle_names_in_fcfs_order=candidate_names,
-                ),
+                )
             )
+            continue
+        if target_node.flow_capacity_remain < deltan:
+            skipped.append(
+                OrderControlTvtMpUnboundTemporarySkip(
+                    vehicle_name=local_vehicle.name,
+                    skip_reason=(
+                        OrderControlTvtMpUnboundTemporarySkipReason.NODE_FLOW_CAPACITY_UNAVAILABLE
+                    ),
+                )
+            )
+            continue
 
         visit_key = _current_visit_key(target_node, local_vehicle)
         snapshot = _collector_snapshot(

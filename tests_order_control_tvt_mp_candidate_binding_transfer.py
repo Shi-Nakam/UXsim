@@ -851,6 +851,224 @@ def test_transferred_binding_visit_keys_are_protected_via_public_api():
     assert transfer_state.transferred_binding_visit_keys == (("second_veh", 1),)
 
 
+def _history(local_state):
+    node = local_state.target_node
+    inlink_name = None
+    if node.last_order_control_inlink is not None:
+        inlink_name = node.last_order_control_inlink.name
+    return (inlink_name, node.last_order_control_entry_timestep)
+
+
+def _incoming_names(local_state):
+    names = []
+    for vehicle in local_state.target_node.incoming_vehicles:
+        names.append(vehicle.name)
+    return names
+
+
+def test_inlink_outflow_precedes_node_flow_when_both_are_short():
+    """
+    The first binding visit is short of inlink outflow and node flow.
+
+    The skip reason is inlink outflow. The later visit is still tried, and
+    its first shortage is node flow. Clearance does not stop the scan.
+    """
+    _world_object, local_state, _clock, transfer_state = _two_vehicle_case()
+    local_world = local_state.local_world
+    in_a = local_world.get_link("in_a")
+    in_b = local_world.get_link("in_b")
+    in_a.capacity_out_remain = 0.0
+    in_b.capacity_out_remain = 10.0
+    local_state.target_node.flow_capacity_remain = 0.0
+    history_before = _history(local_state)
+    incoming_before = _incoming_names(local_state)
+    result = scan_and_transfer_tvt_mp_binding_visits_at_current_timestep(
+        transfer_state
+    )
+    assert (
+        result.stop_reason
+        is OrderControlTvtMpBindingTransferStopReason.BINDING_SEQUENCE_COMPLETED
+    )
+    assert result.stopped_binding_visit_key is None
+    assert result.transferred_binding_visit_keys == ()
+    assert [
+        (skip.binding_visit_key, skip.skip_reason)
+        for skip in result.temporarily_skipped_visits
+    ] == [
+        (
+            ("first_veh", 1),
+            OrderControlTvtMpBindingVisitTemporarySkipReason.INLINK_OUTFLOW_CAPACITY_UNAVAILABLE,
+        ),
+        (
+            ("second_veh", 1),
+            OrderControlTvtMpBindingVisitTemporarySkipReason.NODE_FLOW_CAPACITY_UNAVAILABLE,
+        ),
+    ]
+    assert _local_vehicle(local_state, "first_veh").link.name == "in_a"
+    assert _local_vehicle(local_state, "second_veh").link.name == "in_b"
+    assert _incoming_names(local_state) == incoming_before
+    assert in_a.capacity_out_remain == 0.0
+    assert local_state.target_node.flow_capacity_remain == 0.0
+    assert _history(local_state) == history_before
+
+
+def test_clearance_precedes_inlink_outflow_and_does_not_skip():
+    """
+    Unmet clearance ends the binding scan before an outflow skip.
+
+    The first visit is also short of inlink outflow. It is not added to
+    temporary skips. The later visit could pass and does not.
+    """
+    _world_object, local_state, _clock, transfer_state = _two_vehicle_case()
+    local_world = local_state.local_world
+    node = local_state.target_node
+    in_a = local_world.get_link("in_a")
+    in_a.capacity_out_remain = 0.0
+    node.flow_capacity_remain = 10.0
+    node.last_order_control_inlink = local_world.get_link("side")
+    node.last_order_control_entry_timestep = 10
+    node.order_control_clearance_timesteps = 3
+    history_before = _history(local_state)
+    incoming_before = _incoming_names(local_state)
+    result = scan_and_transfer_tvt_mp_binding_visits_at_current_timestep(
+        transfer_state
+    )
+    assert (
+        result.stop_reason
+        is OrderControlTvtMpBindingTransferStopReason.CLEARANCE_NOT_SATISFIED
+    )
+    assert result.stopped_binding_visit_key == ("first_veh", 1)
+    assert result.temporarily_skipped_visits == ()
+    assert result.transferred_binding_visit_keys == ()
+    assert _local_vehicle(local_state, "first_veh").link.name == "in_a"
+    assert _local_vehicle(local_state, "second_veh").link.name == "in_b"
+    assert _incoming_names(local_state) == incoming_before
+    assert in_a.capacity_out_remain == 0.0
+    assert _history(local_state) == history_before
+
+
+def test_clearance_precedes_node_flow_and_does_not_skip():
+    """
+    Unmet clearance ends the binding scan before a node-flow skip.
+
+    Node flow is also short. The first visit is not recorded as a node-flow
+    skip, and the later visit is not processed.
+    """
+    _world_object, local_state, _clock, transfer_state = _two_vehicle_case()
+    local_world = local_state.local_world
+    node = local_state.target_node
+    in_a = local_world.get_link("in_a")
+    in_a.capacity_out_remain = 10.0
+    node.flow_capacity_remain = 0.0
+    node.last_order_control_inlink = local_world.get_link("side")
+    node.last_order_control_entry_timestep = 10
+    node.order_control_clearance_timesteps = 3
+    history_before = _history(local_state)
+    result = scan_and_transfer_tvt_mp_binding_visits_at_current_timestep(
+        transfer_state
+    )
+    assert (
+        result.stop_reason
+        is OrderControlTvtMpBindingTransferStopReason.CLEARANCE_NOT_SATISFIED
+    )
+    assert result.stopped_binding_visit_key == ("first_veh", 1)
+    assert result.temporarily_skipped_visits == ()
+    assert result.transferred_binding_visit_keys == ()
+    assert _local_vehicle(local_state, "second_veh").link.name == "in_b"
+    assert node.flow_capacity_remain == 0.0
+    assert in_a.capacity_out_remain == 10.0
+    assert _history(local_state) == history_before
+
+
+def test_node_flow_shortage_after_available_outflow_tries_later_visit():
+    """Inlink outflow is available, so node flow is the skip reason."""
+    _world_object, local_state, _clock, transfer_state = _two_vehicle_case()
+    local_world = local_state.local_world
+    in_a = local_world.get_link("in_a")
+    in_b = local_world.get_link("in_b")
+    in_a.capacity_out_remain = 10.0
+    in_b.capacity_out_remain = 10.0
+    local_state.target_node.flow_capacity_remain = 0.0
+    history_before = _history(local_state)
+    result = scan_and_transfer_tvt_mp_binding_visits_at_current_timestep(
+        transfer_state
+    )
+    assert (
+        result.stop_reason
+        is OrderControlTvtMpBindingTransferStopReason.BINDING_SEQUENCE_COMPLETED
+    )
+    assert result.stop_reason is not (
+        OrderControlTvtMpBindingTransferStopReason.CLEARANCE_NOT_SATISFIED
+    )
+    assert result.transferred_binding_visit_keys == ()
+    assert [
+        (skip.binding_visit_key, skip.skip_reason)
+        for skip in result.temporarily_skipped_visits
+    ] == [
+        (
+            ("first_veh", 1),
+            OrderControlTvtMpBindingVisitTemporarySkipReason.NODE_FLOW_CAPACITY_UNAVAILABLE,
+        ),
+        (
+            ("second_veh", 1),
+            OrderControlTvtMpBindingVisitTemporarySkipReason.NODE_FLOW_CAPACITY_UNAVAILABLE,
+        ),
+    ]
+    assert _local_vehicle(local_state, "first_veh").link.name == "in_a"
+    assert _local_vehicle(local_state, "second_veh").link.name == "in_b"
+    assert in_a.capacity_out_remain == 10.0
+    assert local_state.target_node.flow_capacity_remain == 0.0
+    assert _history(local_state) == history_before
+
+
+def test_outlink_inflow_precedes_entry_space_when_both_are_short():
+    """
+    The first visit lacks outlink inflow and entry space.
+
+    The skip reason is outlink inflow. The later visit uses another outlink
+    and passes. Clearance does not stop the scan.
+    """
+    _world_object, local_state, _clock, transfer_state = _two_vehicle_case()
+    local_world = local_state.local_world
+    outlink = local_world.get_link("out")
+    in_a = local_world.get_link("in_a")
+    parked = local_world.addVehicle("orig_a", "dest", 0, name="parked_out")
+    parked.state = "run"
+    parked.link = outlink
+    parked.x = 0.0
+    parked.x_old = 0.0
+    outlink.vehicles.append(parked)
+    outlink.capacity_in_remain = 0.0
+    in_a.capacity_out_remain = 10.0
+    local_state.target_node.flow_capacity_remain = 10.0
+    local_world.get_link("side").capacity_in_remain = 10.0
+    result = scan_and_transfer_tvt_mp_binding_visits_at_current_timestep(
+        transfer_state
+    )
+    assert (
+        result.stop_reason
+        is OrderControlTvtMpBindingTransferStopReason.BINDING_SEQUENCE_COMPLETED
+    )
+    assert result.stopped_binding_visit_key is None
+    assert [
+        (skip.binding_visit_key, skip.skip_reason)
+        for skip in result.temporarily_skipped_visits
+    ] == [
+        (
+            ("first_veh", 1),
+            OrderControlTvtMpBindingVisitTemporarySkipReason.OUTLINK_INFLOW_CAPACITY_UNAVAILABLE,
+        )
+    ]
+    assert result.transferred_binding_visit_keys == (("second_veh", 1),)
+    assert _local_vehicle(local_state, "first_veh").link.name == "in_a"
+    assert _local_vehicle(local_state, "second_veh").link.name == "side"
+    assert "first_veh" in _incoming_names(local_state)
+    assert "second_veh" not in _incoming_names(local_state)
+    assert outlink.capacity_in_remain == 0.0
+    assert in_a.capacity_out_remain == 10.0
+    assert _history(local_state) == ("in_b", local_state.local_world.T)
+
+
 TESTS = (
     test_public_scan_result_is_frozen,
     test_one_transfer_matches_uxsim_passage_update,
@@ -866,6 +1084,11 @@ TESTS = (
     test_transferred_binding_visit_keys_are_protected_via_public_api,
     test_outlink_entry_space_shortage_skips_only_that_visit,
     test_clearance_stops_the_scan_before_later_visits,
+    test_inlink_outflow_precedes_node_flow_when_both_are_short,
+    test_clearance_precedes_inlink_outflow_and_does_not_skip,
+    test_clearance_precedes_node_flow_and_does_not_skip,
+    test_node_flow_shortage_after_available_outflow_tries_later_visit,
+    test_outlink_inflow_precedes_entry_space_when_both_are_short,
     test_skipped_visit_is_retried_from_the_front_next_timestep,
     test_binding_sequence_still_contains_a_skipped_visit,
 )

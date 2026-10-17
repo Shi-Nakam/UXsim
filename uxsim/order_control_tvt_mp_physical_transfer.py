@@ -111,8 +111,9 @@ def transfer_tvt_mp_passage_attempts(node):
         snapshot_vehicles,
     )
     # Confirmed visits are tried first. Not-arrived, not-head, and ordinary
-    # capacity or entry-space skips do not move that visit into the
-    # unconfirmed group. Unmet clearance ends this timestep before any
+    # physical-limit skips do not move that visit into the unconfirmed
+    # group. Ordinary limits are inlink outflow, node flow, outlink inflow,
+    # then entry space. Unmet clearance ends this timestep before any
     # unconfirmed visit is tried.
     clearance_stopped = _try_confirmed_candidates(node, confirmed_candidates)
     if clearance_stopped:
@@ -282,8 +283,9 @@ def _try_confirmed_candidates(node, confirmed_candidates):
     3. Unmet order-control clearance: end this node's passage for the
        timestep and return True. Later confirmed visits are not tried.
        The caller does not start the unconfirmed baseline scan.
-    4. Node flow, inlink outflow, outlink inflow, or entry space is short:
-       skip this visit and try the next one. This is not a clearance stop.
+    4. Inlink outflow, node flow, outlink inflow, or entry space is short.
+       These ordinary limits are checked in that order. Skip this visit
+       and try the next one. This is not a clearance stop.
     5. Otherwise transfer the vehicle.
     6. After that transfer succeeds, update clearance history.
 
@@ -354,32 +356,51 @@ def _inlink_physical_head_should_skip(vehicle, inlink):
     return False
 
 
-def _ordinary_physical_limits_should_skip(node, inlink, outlink):
+def _first_ordinary_physical_shortage(node, inlink, outlink):
     """
-    Return True when capacity or entry space blocks this visit.
+    Return the first ordinary physical limit that blocks this visit.
 
     Call this only after the visit is in incoming_vehicles, is the inlink
-    physical head, and clearance is satisfied. A True result skips only
-    this visit. Later visits are still tried. Node flow shortage is a
-    temporary skip, not a clearance stop.
+    physical head, and clearance is satisfied. The checks stay in this
+    order, as separate steps:
 
-    These limits stay after clearance. Skipping an earlier visit for entry
-    space before clearance would let a later visit from another inlink
-    pass and point the clearance history at that later direction.
+    1. inlink outflow capacity
+    2. node flow capacity
+    3. outlink inflow capacity
+    4. outlink entry space
+
+    When two limits are short together, the earlier one is returned.
+    ``None`` means every ordinary limit is available. A returned shortage
+    skips only this visit. Later visits are still tried. It is not a
+    clearance stop, and it does not update clearance history.
     """
-    if node.flow_capacity_remain < node.W.DELTAN:
-        return True
     if inlink.capacity_out_remain < node.W.DELTAN:
-        return True
+        return "inlink_outflow_capacity_unavailable"
+    if node.flow_capacity_remain < node.W.DELTAN:
+        return "node_flow_capacity_unavailable"
     if outlink.capacity_in_remain < node.W.DELTAN:
-        return True
+        return "outlink_inflow_capacity_unavailable"
     entry_has_room = len(outlink.vehicles) < outlink.number_of_lanes
     if not entry_has_room:
         entrance_vehicle = outlink.vehicles[-outlink.number_of_lanes]
         entry_gap = outlink.delta_per_lane * node.W.DELTAN
         if entrance_vehicle.x <= entry_gap:
-            return True
-    return False
+            return "outlink_entry_space_unavailable"
+    return None
+
+
+def _ordinary_physical_limits_should_skip(node, inlink, outlink):
+    """
+    Return True when an ordinary physical limit blocks this visit.
+
+    The first shortage is inlink outflow, then node flow, then outlink
+    inflow, then outlink entry space. A True result skips only this visit.
+    Later visits are still tried. This is not a clearance stop.
+    """
+    shortage = _first_ordinary_physical_shortage(node, inlink, outlink)
+    if shortage is None:
+        return False
+    return True
 
 
 def _baseline_arrival_sort_key(candidate):
@@ -712,8 +733,9 @@ def _try_unconfirmed_baseline_vehicles(node, unconfirmed_baseline_vehicles):
     2. Not the inlink physical head: skip this visit and try the next one.
     3. Unmet order-control clearance: stop this scan. Later unconfirmed
        visits are not tried.
-    4. Node flow, inlink outflow, outlink inflow, or entry space is short:
-       skip this visit and try the next one. This is not a clearance stop.
+    4. Inlink outflow, node flow, outlink inflow, or entry space is short.
+       These ordinary limits are checked in that order. Skip this visit
+       and try the next one. This is not a clearance stop.
     5. Otherwise transfer the vehicle.
     6. After that transfer succeeds, update clearance history.
 

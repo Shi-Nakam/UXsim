@@ -2958,6 +2958,349 @@ def test_unconfirmed_clearance_precedes_entry_space_skip_and_blocks_later_arriva
     assert junction.last_order_control_entry_timestep == entry_timestep
 
 
+def _watch_ordinary_physical_checks(junction):
+    """Record which inlink heads reach the ordinary-limit check."""
+    checked = []
+    original = physical_transfer._ordinary_physical_limits_should_skip
+
+    def spy(node, inlink, outlink):
+        if len(inlink.vehicles) > 0:
+            checked.append(inlink.vehicles[0].name)
+        return original(node, inlink, outlink)
+
+    return checked, original, spy
+
+
+def test_inlink_outflow_precedes_node_flow_when_both_are_short():
+    """
+    The same confirmed vehicle is short of inlink outflow and node flow.
+
+    The ordinary-limit result is the inlink outflow shortage. The scan does
+    not stop for clearance, and the later vehicle is still checked.
+    """
+    world = _world("confirmed_outflow_before_node_flow", flow_capacity=2)
+    junction = _junction(world)
+    junction.flow_capacity_remain = 0
+    earlier = _place(world, "outflow_earlier", "in_a", visit_id=1)
+    later = _place(world, "outflow_later", "in_b", visit_id=2)
+    in_a = world.get_link("in_a")
+    in_b = world.get_link("in_b")
+    outlink = world.get_link("out")
+    in_a.capacity_out_remain = 0
+    in_b.capacity_out_remain = 10
+    _confirm(world, [earlier, later])
+    history = (
+        junction.last_order_control_inlink,
+        junction.last_order_control_entry_timestep,
+    )
+    flow_before = junction.flow_capacity_remain
+    incoming_before = list(junction.incoming_vehicles)
+
+    shortage = physical_transfer._first_ordinary_physical_shortage(
+        junction, in_a, outlink
+    )
+    assert shortage == "inlink_outflow_capacity_unavailable"
+    assert shortage != "node_flow_capacity_unavailable"
+
+    checked, original, spy = _watch_ordinary_physical_checks(junction)
+    with patch.object(
+        physical_transfer,
+        "_ordinary_physical_limits_should_skip",
+        spy,
+    ):
+        physical_transfer.transfer_tvt_mp_passage_attempts(junction)
+
+    assert checked == ["outflow_earlier", "outflow_later"]
+    assert earlier.link.name == "in_a"
+    assert later.link.name == "in_b"
+    assert earlier in junction.incoming_vehicles
+    assert later in junction.incoming_vehicles
+    assert list(junction.incoming_vehicles) == incoming_before
+    assert junction.flow_capacity_remain == flow_before
+    assert in_a.capacity_out_remain == 0
+    assert (
+        junction.last_order_control_inlink,
+        junction.last_order_control_entry_timestep,
+    ) == history
+    assert original is physical_transfer._ordinary_physical_limits_should_skip
+
+
+def test_confirmed_clearance_precedes_inlink_outflow_and_blocks_later_rank():
+    """
+    Unmet clearance stops the confirmed scan before an inlink-outflow skip.
+
+    The earlier vehicle is arrived and is the physical head. Clearance is
+    unmet and its inlink outflow is also short. The later vehicle could
+    pass. It is not checked and does not pass.
+    """
+    world = _world("confirmed_clearance_before_outflow", flow_capacity=2)
+    world.order_control_clearance_timesteps = 1
+    earlier = _place(world, "clearance_earlier", "in_a", visit_id=1)
+    later = _place(world, "clearance_later", "in_b", visit_id=2)
+    _confirm(world, [earlier, later])
+    junction = _junction(world)
+    junction.order_control_clearance_timesteps = 1
+    previous_inlink = world.get_link("side")
+    entry_timestep = world.T
+    junction.last_order_control_inlink = previous_inlink
+    junction.last_order_control_entry_timestep = entry_timestep
+    in_a = world.get_link("in_a")
+    in_a.capacity_out_remain = 0
+    flow_before = junction.flow_capacity_remain
+    out_in_before = world.get_link("out").capacity_in_remain
+
+    assert physical_transfer._first_ordinary_physical_shortage(
+        junction, in_a, world.get_link("out")
+    ) == "inlink_outflow_capacity_unavailable"
+
+    checked, _original, spy = _watch_ordinary_physical_checks(junction)
+    with patch.object(
+        physical_transfer,
+        "_ordinary_physical_limits_should_skip",
+        spy,
+    ):
+        physical_transfer.transfer_tvt_mp_passage_attempts(junction)
+
+    assert checked == []
+    assert earlier.link.name == "in_a"
+    assert later.link.name == "in_b"
+    assert earlier in junction.incoming_vehicles
+    assert later in junction.incoming_vehicles
+    assert in_a.capacity_out_remain == 0
+    assert junction.flow_capacity_remain == flow_before
+    assert world.get_link("out").capacity_in_remain == out_in_before
+    assert junction.last_order_control_inlink is previous_inlink
+    assert junction.last_order_control_entry_timestep == entry_timestep
+
+
+def test_confirmed_clearance_precedes_node_flow_and_blocks_later_rank():
+    """
+    Unmet clearance stops the confirmed scan before a node-flow skip.
+
+    Node flow is also short. The later vehicle is not given a node-flow
+    skip, and clearance history stays unchanged.
+    """
+    world = _world("confirmed_clearance_before_node_flow", flow_capacity=2)
+    world.order_control_clearance_timesteps = 1
+    earlier = _place(world, "flow_clearance_earlier", "in_a", visit_id=1)
+    later = _place(world, "flow_clearance_later", "in_b", visit_id=2)
+    _confirm(world, [earlier, later])
+    junction = _junction(world)
+    junction.order_control_clearance_timesteps = 1
+    junction.flow_capacity_remain = 0
+    previous_inlink = world.get_link("side")
+    entry_timestep = world.T
+    junction.last_order_control_inlink = previous_inlink
+    junction.last_order_control_entry_timestep = entry_timestep
+    in_a = world.get_link("in_a")
+    in_a.capacity_out_remain = 10
+
+    assert physical_transfer._first_ordinary_physical_shortage(
+        junction, in_a, world.get_link("out")
+    ) == "node_flow_capacity_unavailable"
+
+    checked, _original, spy = _watch_ordinary_physical_checks(junction)
+    with patch.object(
+        physical_transfer,
+        "_ordinary_physical_limits_should_skip",
+        spy,
+    ):
+        physical_transfer.transfer_tvt_mp_passage_attempts(junction)
+
+    assert checked == []
+    assert earlier.link.name == "in_a"
+    assert later.link.name == "in_b"
+    assert earlier in junction.incoming_vehicles
+    assert later in junction.incoming_vehicles
+    assert junction.flow_capacity_remain == 0
+    assert in_a.capacity_out_remain == 10
+    assert junction.last_order_control_inlink is previous_inlink
+    assert junction.last_order_control_entry_timestep == entry_timestep
+
+
+def test_node_flow_shortage_after_available_outflow_tries_later_visit():
+    """
+    Inlink outflow is available and node flow is short.
+
+    That is a temporary skip of the earlier vehicle, not a clearance stop.
+    The later vehicle is still checked.
+    """
+    world = _world("confirmed_node_flow_after_outflow", flow_capacity=2)
+    junction = _junction(world)
+    junction.flow_capacity_remain = 0
+    earlier = _place(world, "node_flow_earlier", "in_a", visit_id=1)
+    later = _place(world, "node_flow_later", "in_b", visit_id=2)
+    in_a = world.get_link("in_a")
+    in_b = world.get_link("in_b")
+    in_a.capacity_out_remain = 10
+    in_b.capacity_out_remain = 10
+    _confirm(world, [earlier, later])
+    history = (
+        junction.last_order_control_inlink,
+        junction.last_order_control_entry_timestep,
+    )
+
+    assert physical_transfer._first_ordinary_physical_shortage(
+        junction, in_a, world.get_link("out")
+    ) == "node_flow_capacity_unavailable"
+
+    checked, _original, spy = _watch_ordinary_physical_checks(junction)
+    with patch.object(
+        physical_transfer,
+        "_ordinary_physical_limits_should_skip",
+        spy,
+    ):
+        physical_transfer.transfer_tvt_mp_passage_attempts(junction)
+
+    assert checked == ["node_flow_earlier", "node_flow_later"]
+    assert earlier.link.name == "in_a"
+    assert later.link.name == "in_b"
+    assert earlier in junction.incoming_vehicles
+    assert later in junction.incoming_vehicles
+    assert junction.flow_capacity_remain == 0
+    assert in_a.capacity_out_remain == 10
+    assert (
+        junction.last_order_control_inlink,
+        junction.last_order_control_entry_timestep,
+    ) == history
+
+
+def test_outlink_inflow_precedes_entry_space_when_both_are_short():
+    """
+    The same confirmed vehicle lacks outlink inflow and entry space.
+
+    The ordinary-limit result is the inflow shortage. Clearance does not
+    stop the scan, so the later vehicle on an open outlink can pass.
+    """
+    world = _world("confirmed_inflow_before_entry_space", flow_capacity=2)
+    junction = _junction(world)
+    out_later = _add_junction_outlink(world, "out_later")
+    _park_vehicle_at_link_entrance(world, "out", "parked_out")
+    earlier = _place(world, "inflow_earlier", "in_a", visit_id=1, outlink_name="out")
+    later = _place(
+        world, "inflow_later", "in_b", visit_id=2, outlink_name="out_later"
+    )
+    outlink = world.get_link("out")
+    in_a = world.get_link("in_a")
+    outlink.capacity_in_remain = 0
+    in_a.capacity_out_remain = 10
+    junction.flow_capacity_remain = 10
+    out_later.capacity_in_remain = 10
+    _confirm(world, [earlier, later])
+
+    shortage = physical_transfer._first_ordinary_physical_shortage(
+        junction, in_a, outlink
+    )
+    assert shortage == "outlink_inflow_capacity_unavailable"
+    assert shortage != "outlink_entry_space_unavailable"
+
+    physical_transfer.transfer_tvt_mp_passage_attempts(junction)
+
+    assert earlier.link.name == "in_a"
+    assert later.link.name == "out_later"
+    assert earlier in junction.incoming_vehicles
+    assert later not in junction.incoming_vehicles
+    assert outlink.capacity_in_remain == 0
+    assert in_a.capacity_out_remain == 10
+    assert junction.last_order_control_inlink is world.get_link("in_b")
+    assert junction.last_order_control_entry_timestep == world.T
+    assert earlier is in_a.vehicles[0]
+
+
+def test_unconfirmed_inlink_outflow_precedes_node_flow_when_both_are_short():
+    """Baseline arrival scan uses the same ordinary-limit order."""
+    world = _world("unconfirmed_outflow_before_node_flow", flow_capacity=2)
+    junction = _junction(world)
+    junction.flow_capacity_remain = 0
+    earlier = _place(world, "base_outflow_earlier", "in_a", visit_id=1)
+    later = _place(world, "base_outflow_later", "in_b", visit_id=2)
+    in_a = world.get_link("in_a")
+    in_a.capacity_out_remain = 0
+    world.get_link("in_b").capacity_out_remain = 10
+    _register_only(world, [earlier, later])
+    collector = _as_fork(world)
+    _register_unconfirmed_baseline_snapshot(
+        collector, earlier, baseline_arrival_timestep=8
+    )
+    _register_unconfirmed_baseline_snapshot(
+        collector, later, baseline_arrival_timestep=12
+    )
+    history = (
+        junction.last_order_control_inlink,
+        junction.last_order_control_entry_timestep,
+    )
+
+    assert physical_transfer._first_ordinary_physical_shortage(
+        junction, in_a, world.get_link("out")
+    ) == "inlink_outflow_capacity_unavailable"
+
+    checked, _original, spy = _watch_ordinary_physical_checks(junction)
+    with patch.object(
+        physical_transfer,
+        "_ordinary_physical_limits_should_skip",
+        spy,
+    ):
+        physical_transfer.transfer_tvt_mp_passage_attempts(junction)
+
+    assert checked == ["base_outflow_earlier", "base_outflow_later"]
+    assert earlier.link.name == "in_a"
+    assert later.link.name == "in_b"
+    assert earlier in junction.incoming_vehicles
+    assert later in junction.incoming_vehicles
+    assert in_a.capacity_out_remain == 0
+    assert junction.flow_capacity_remain == 0
+    assert (
+        junction.last_order_control_inlink,
+        junction.last_order_control_entry_timestep,
+    ) == history
+
+
+def test_unconfirmed_clearance_precedes_inlink_outflow_and_blocks_later_arrival():
+    """
+    Unmet clearance in the baseline scan is not an outflow skip.
+
+    The later arrival could pass. It does not, and clearance history stays
+    on the previous inlink.
+    """
+    world = _world("unconfirmed_clearance_before_outflow", flow_capacity=2)
+    world.order_control_clearance_timesteps = 1
+    earlier = _place(world, "base_clearance_earlier", "in_a", visit_id=1)
+    later = _place(world, "base_clearance_later", "in_b", visit_id=2)
+    in_a = world.get_link("in_a")
+    in_a.capacity_out_remain = 0
+    _register_only(world, [earlier, later])
+    collector = _as_fork(world)
+    _register_unconfirmed_baseline_snapshot(
+        collector, earlier, baseline_arrival_timestep=8
+    )
+    _register_unconfirmed_baseline_snapshot(
+        collector, later, baseline_arrival_timestep=12
+    )
+    junction = _junction(world)
+    junction.order_control_clearance_timesteps = 1
+    previous_inlink = world.get_link("side")
+    entry_timestep = world.T
+    junction.last_order_control_inlink = previous_inlink
+    junction.last_order_control_entry_timestep = entry_timestep
+
+    checked, _original, spy = _watch_ordinary_physical_checks(junction)
+    with patch.object(
+        physical_transfer,
+        "_ordinary_physical_limits_should_skip",
+        spy,
+    ):
+        physical_transfer.transfer_tvt_mp_passage_attempts(junction)
+
+    assert checked == []
+    assert earlier.link.name == "in_a"
+    assert later.link.name == "in_b"
+    assert earlier in junction.incoming_vehicles
+    assert later in junction.incoming_vehicles
+    assert in_a.capacity_out_remain == 0
+    assert junction.last_order_control_inlink is previous_inlink
+    assert junction.last_order_control_entry_timestep == entry_timestep
+
+
 def test_registry_matches_defined_functions():
     defined_names = []
     defined_functions = []

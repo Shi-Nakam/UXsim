@@ -2,13 +2,16 @@
 Pass binding-rank vehicles through one target Node at the current virtual time.
 
 The scan walks the completed binding sequence from the front. A visit that
-has not arrived, is not the physical head of its inlink, lacks ordinary
-capacity, or lacks outlink entry space stays in the sequence and is skipped
-for this timestep. The next binding visit is still tried.
+has not arrived, is not the physical head of its inlink, or lacks an
+ordinary physical limit stays in the sequence and is skipped for this
+timestep. The next binding visit is still tried.
 
-Only unmet clearance ends node passage for this timestep. Skipped visits are
-tried again from the front at the next virtual timestep. This stage does not
-advance vehicles along a link, refill capacity, or move the virtual clock.
+Ordinary limits, after clearance, are inlink outflow, node flow, outlink
+inflow, then outlink entry space. Only unmet clearance ends node passage
+for this timestep. That vehicle is not added as a temporary skip. Skipped
+visits are tried again from the front at the next virtual timestep. This
+stage does not advance vehicles along a link, refill capacity, or move the
+virtual clock.
 """
 
 from __future__ import annotations
@@ -320,8 +323,12 @@ def scan_and_transfer_tvt_mp_binding_visits_at_current_timestep(
     Try the binding sequence once at the current virtual timestep.
 
     Already passed visits are left alone. Temporary skips do not remove a
-    visit. Unmet clearance returns immediately and does not look at later
-    binding visits.
+    visit. After arrival and the physical-head check, the formal outlink is
+    resolved. Unmet clearance then returns immediately, without a temporary
+    skip, and does not look at later binding visits. After clearance, the
+    ordinary limits are inlink outflow, node flow, outlink inflow, and
+    entry space. The first shortage is the temporary-skip reason. Clearance
+    history is updated only after a successful pass.
     """
     if not isinstance(
         binding_transfer_state,
@@ -453,21 +460,21 @@ def scan_and_transfer_tvt_mp_binding_visits_at_current_timestep(
                 )
             )
             continue
-        if outlink.capacity_in_remain < deltan:
-            skipped_this_scan.append(
-                _skip(
-                    binding_visit,
-                    local_vehicle,
-                    OrderControlTvtMpBindingVisitTemporarySkipReason.OUTLINK_INFLOW_CAPACITY_UNAVAILABLE,
-                )
-            )
-            continue
         if target_node.flow_capacity_remain < deltan:
             skipped_this_scan.append(
                 _skip(
                     binding_visit,
                     local_vehicle,
                     OrderControlTvtMpBindingVisitTemporarySkipReason.NODE_FLOW_CAPACITY_UNAVAILABLE,
+                )
+            )
+            continue
+        if outlink.capacity_in_remain < deltan:
+            skipped_this_scan.append(
+                _skip(
+                    binding_visit,
+                    local_vehicle,
+                    OrderControlTvtMpBindingVisitTemporarySkipReason.OUTLINK_INFLOW_CAPACITY_UNAVAILABLE,
                 )
             )
             continue

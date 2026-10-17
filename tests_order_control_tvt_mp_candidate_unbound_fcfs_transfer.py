@@ -359,8 +359,12 @@ def test_binding_clearance_and_node_capacity_do_not_start():
     result2 = _scan(unbound2)
     assert (
         result2.stop_reason
-        is OrderControlTvtMpUnboundFcfsStopReason.NODE_FLOW_CAPACITY_UNAVAILABLE_BEFORE_START
+        is OrderControlTvtMpUnboundFcfsStopReason.CANDIDATES_COMPLETED
     )
+    assert result2.transferred_vehicle_records == ()
+    assert [item.skip_reason for item in result2.temporary_skips] == [
+        OrderControlTvtMpUnboundTemporarySkipReason.NODE_FLOW_CAPACITY_UNAVAILABLE
+    ]
     assert _local(local2, "free").link.name == "in_b"
     assert unbound2.completed_virtual_timesteps == (10,)
     try:
@@ -688,11 +692,12 @@ def test_node_capacity_and_clearance_stop_without_looking_further():
     local_state.target_node.flow_capacity_remain = 1.0
     result = _scan(unbound_state)
     assert [record.vehicle_name for record in result.transferred_vehicle_records] == ["first"]
-    assert result.stop_reason is (
-        OrderControlTvtMpUnboundFcfsStopReason.NODE_FLOW_CAPACITY_UNAVAILABLE
+    assert result.stop_reason is OrderControlTvtMpUnboundFcfsStopReason.CANDIDATES_COMPLETED
+    assert result.stopped_vehicle_name is None
+    assert [item.vehicle_name for item in result.temporary_skips] == ["second"]
+    assert result.temporary_skips[0].skip_reason is (
+        OrderControlTvtMpUnboundTemporarySkipReason.NODE_FLOW_CAPACITY_UNAVAILABLE
     )
-    assert result.stopped_vehicle_name == "second"
-    assert result.temporary_skips == ()
     assert _local(local_state, "first").link.name == "side"
     assert _local(local_state, "second").link.name == "in_b"
 
@@ -809,6 +814,298 @@ def test_research_excluded_vehicle_is_not_a_candidate():
     assert taxi.link.name == "in_b"
 
 
+def _block_clearance_from(local_state, inlink_name: str) -> None:
+    node = local_state.target_node
+    node.last_order_control_inlink = local_state.local_world.get_link(inlink_name)
+    node.last_order_control_entry_timestep = 10
+    node.order_control_clearance_timesteps = 5
+
+
+def _clearance_history(local_state):
+    node = local_state.target_node
+    return (
+        None if node.last_order_control_inlink is None else node.last_order_control_inlink.name,
+        node.last_order_control_entry_timestep,
+    )
+
+
+def test_clearance_precedes_inlink_outflow_capacity():
+    """Arrived physical head with both unmet clearance and no inlink outflow stops the scan."""
+    _world, local_state, _binding, unbound_state, _collector = _build(
+        [
+            _spec("bound", "in_a", "out", 9.0, 0.1, binding=True, incoming=False, arrived=True, collector_route="out"),
+            _spec("first", "in_b", "side", 1.0, 0.1, collector_route="side"),
+            _spec("later", "in_c", "out", 2.0, 0.1, collector_route="out"),
+        ]
+    )
+    _block_clearance_from(local_state, "in_a")
+    history_before = _clearance_history(local_state)
+    local_state.local_world.get_link("in_b").capacity_out_remain = 0.0
+    result = _scan(unbound_state)
+    assert result.stop_reason is OrderControlTvtMpUnboundFcfsStopReason.CLEARANCE_NOT_SATISFIED
+    assert result.stopped_vehicle_name == "first"
+    assert result.transferred_vehicle_records == ()
+    assert result.temporary_skips == ()
+    assert OrderControlTvtMpUnboundTemporarySkipReason.INLINK_OUTFLOW_CAPACITY_UNAVAILABLE not in [
+        item.skip_reason for item in result.temporary_skips
+    ]
+    assert _local(local_state, "first").link.name == "in_b"
+    assert _local(local_state, "later").link.name == "in_c"
+    assert _clearance_history(local_state) == history_before
+
+
+def test_clearance_precedes_node_flow_capacity():
+    """Unmet clearance is not reported as a node-flow stop, before or during the walk."""
+    _world, local_state, _binding, unbound_state, _collector = _build(
+        [
+            _spec("bound", "in_a", "out", 9.0, 0.1, binding=True, incoming=False, arrived=True, collector_route="out"),
+            _spec("first", "in_b", "side", 1.0, 0.1, collector_route="side"),
+            _spec("later", "in_c", "out", 2.0, 0.1, collector_route="out"),
+        ]
+    )
+    _block_clearance_from(local_state, "in_a")
+    history_before = _clearance_history(local_state)
+    local_state.target_node.flow_capacity_remain = 0.0
+    result = _scan(unbound_state)
+    assert result.stop_reason is OrderControlTvtMpUnboundFcfsStopReason.CLEARANCE_NOT_SATISFIED
+    assert result.stop_reason is not (
+        OrderControlTvtMpUnboundFcfsStopReason.NODE_FLOW_CAPACITY_UNAVAILABLE_BEFORE_START
+    )
+    assert result.stop_reason is not (
+        OrderControlTvtMpUnboundFcfsStopReason.NODE_FLOW_CAPACITY_UNAVAILABLE
+    )
+    assert result.stopped_vehicle_name == "first"
+    assert result.transferred_vehicle_records == ()
+    assert result.temporary_skips == ()
+    assert _local(local_state, "later").link.name == "in_c"
+    assert _clearance_history(local_state) == history_before
+
+
+def test_clearance_satisfied_then_inlink_outflow_skip_tries_later_vehicle():
+    _world, local_state, _binding, unbound_state, _collector = _build(
+        [
+            _spec("bound", "in_a", "out", 9.0, 0.1, binding=True, incoming=False, arrived=True, collector_route="out"),
+            _spec("first", "in_b", "side", 1.0, 0.1, collector_route="side"),
+            _spec("later", "in_c", "out", 2.0, 0.1, collector_route="out"),
+        ]
+    )
+    local_state.local_world.get_link("in_b").capacity_out_remain = 0.0
+    result = _scan(unbound_state)
+    assert result.stop_reason is OrderControlTvtMpUnboundFcfsStopReason.CANDIDATES_COMPLETED
+    assert result.stopped_vehicle_name is None
+    assert [(item.vehicle_name, item.skip_reason) for item in result.temporary_skips] == [
+        (
+            "first",
+            OrderControlTvtMpUnboundTemporarySkipReason.INLINK_OUTFLOW_CAPACITY_UNAVAILABLE,
+        )
+    ]
+    assert [record.vehicle_name for record in result.transferred_vehicle_records] == ["later"]
+    assert _local(local_state, "first").link.name == "in_b"
+    assert _local(local_state, "later").link.name == "out"
+    assert _clearance_history(local_state) == ("in_c", 10)
+
+
+def test_clearance_satisfied_then_node_flow_skip_does_not_stop_the_scan():
+    """Node flow is shared, so later vehicles also skip, but the scan is not a clearance stop."""
+    _world, local_state, _binding, unbound_state, _collector = _build(
+        [
+            _spec("bound", "in_a", "out", 9.0, 0.1, binding=True, incoming=False, arrived=True, collector_route="out"),
+            _spec("first", "in_b", "side", 1.0, 0.1, collector_route="side"),
+            _spec("later", "in_c", "out", 2.0, 0.1, collector_route="out"),
+        ]
+    )
+    history_before = _clearance_history(local_state)
+    local_state.target_node.flow_capacity_remain = 0.0
+    result = _scan(unbound_state)
+    assert result.stop_reason is OrderControlTvtMpUnboundFcfsStopReason.CANDIDATES_COMPLETED
+    assert result.stopped_vehicle_name is None
+    assert result.transferred_vehicle_records == ()
+    assert [(item.vehicle_name, item.skip_reason) for item in result.temporary_skips] == [
+        ("first", OrderControlTvtMpUnboundTemporarySkipReason.NODE_FLOW_CAPACITY_UNAVAILABLE),
+        ("later", OrderControlTvtMpUnboundTemporarySkipReason.NODE_FLOW_CAPACITY_UNAVAILABLE),
+    ]
+    assert _local(local_state, "first").link.name == "in_b"
+    assert _local(local_state, "later").link.name == "in_c"
+    assert _clearance_history(local_state) == history_before
+
+
+def test_not_physical_head_precedes_clearance():
+    """A queued vehicle is skipped before its unmet clearance can end the scan."""
+    _world, local_state, _binding, unbound_state, _collector = _build(
+        [
+            _spec("bound", "in_a", "out", 9.0, 0.1, binding=True, incoming=False, arrived=True, collector_route="out"),
+            _spec("blocker", "in_b", "side", 8.0, 0.1, incoming=False, register=False),
+            _spec("early", "in_b", "side", 1.0, 0.1, collector_route="side"),
+            _spec("later", "in_c", "out", 2.0, 0.1, collector_route="out"),
+        ]
+    )
+    in_b = local_state.local_world.get_link("in_b")
+    blocker = _local(local_state, "blocker")
+    early = _local(local_state, "early")
+    in_b.vehicles.clear()
+    in_b.vehicles.append(blocker)
+    in_b.vehicles.append(early)
+    _block_clearance_from(local_state, "in_c")
+    history_before = _clearance_history(local_state)
+    result = _scan(unbound_state)
+    assert result.candidate_vehicle_names_in_fcfs_order[0] == "early"
+    assert [(item.vehicle_name, item.skip_reason) for item in result.temporary_skips] == [
+        ("early", OrderControlTvtMpUnboundTemporarySkipReason.NOT_INLINK_PHYSICAL_HEAD)
+    ]
+    assert result.stop_reason is OrderControlTvtMpUnboundFcfsStopReason.CANDIDATES_COMPLETED
+    assert [record.vehicle_name for record in result.transferred_vehicle_records] == ["later"]
+    assert _local(local_state, "early").link.name == "in_b"
+    assert _local(local_state, "later").link.name == "out"
+    assert _clearance_history(local_state)[0] == "in_c"
+    assert history_before[0] == "in_c"
+
+
+def test_binding_clearance_stop_prevents_unbound_start():
+    """Binding clearance stop is inherited and unbound candidates are not walked."""
+    _world, local_state, _binding, unbound_state, _collector = _build(
+        [
+            _spec("bound", "in_a", "out", 1.0, 0.1, binding=True, arrived=True, collector_route="out"),
+            _spec("free", "in_b", "side", 2.0, 0.2, collector_route="side"),
+        ]
+    )
+    clearance = OrderControlTvtMpBindingTransferScanResult(
+        node_name="merge",
+        virtual_timestep=10,
+        transferred_binding_visit_keys=(),
+        temporarily_skipped_visits=(),
+        stop_reason=OrderControlTvtMpBindingTransferStopReason.CLEARANCE_NOT_SATISFIED,
+        stopped_binding_visit_key=("bound", 1),
+    )
+    result = _scan(unbound_state, clearance)
+    assert (
+        result.stop_reason
+        is OrderControlTvtMpUnboundFcfsStopReason.BINDING_CLEARANCE_STOPPED_NOT_STARTED
+    )
+    assert result.candidate_vehicle_names_in_fcfs_order == ()
+    assert result.temporary_skips == ()
+    assert result.transferred_vehicle_records == ()
+    assert _local(local_state, "free").link.name == "in_b"
+
+
+def test_unbound_candidates_are_only_arrived_incoming_vehicles():
+    """
+    A vehicle still on an inlink but absent from incoming_vehicles has not
+    arrived. Extraction does not turn that vehicle into an unbound candidate.
+    """
+    _world, local_state, _binding, unbound_state, _collector = _build(
+        [
+            _spec("bound", "in_a", "out", 9.0, 0.1, binding=True, incoming=False, arrived=True, collector_route="out"),
+            _spec("waiting", "in_b", "side", 1.0, 0.1, incoming=False, collector_route="side"),
+            _spec("arrived", "in_c", "out", 2.0, 0.1, incoming=True, collector_route="out"),
+        ]
+    )
+    node = local_state.target_node
+    waiting = _local(local_state, "waiting")
+    arrived = _local(local_state, "arrived")
+    assert waiting not in node.incoming_vehicles
+    assert waiting.link.name == "in_b"
+    assert arrived in node.incoming_vehicles
+    result = _scan(unbound_state)
+    assert result.candidate_vehicle_names_in_fcfs_order == ("arrived",)
+    assert "waiting" not in result.candidate_vehicle_names_in_fcfs_order
+    assert [record.vehicle_name for record in result.transferred_vehicle_records] == ["arrived"]
+    assert waiting.link.name == "in_b"
+
+
+def test_inlink_outflow_precedes_node_flow_when_both_are_short():
+    """
+    One vehicle is short of both inlink outflow and node flow.
+
+    The temporary skip reason is inlink outflow. The later vehicle is still
+    tried, and its own first shortage is node flow. This is not a clearance
+    stop.
+    """
+    _world, local_state, _binding, unbound_state, _collector = _build(
+        [
+            _spec("bound", "in_a", "out", 9.0, 0.1, binding=True, incoming=False, arrived=True, collector_route="out"),
+            _spec("first", "in_b", "side", 1.0, 0.1, collector_route="side"),
+            _spec("later", "in_c", "out", 2.0, 0.1, collector_route="out"),
+        ]
+    )
+    history_before = _clearance_history(local_state)
+    local_world = local_state.local_world
+    in_b = local_world.get_link("in_b")
+    in_c = local_world.get_link("in_c")
+    in_b.capacity_out_remain = 0.0
+    in_c.capacity_out_remain = 10.0
+    local_state.target_node.flow_capacity_remain = 0.0
+    incoming_before = [vehicle.name for vehicle in local_state.target_node.incoming_vehicles]
+    result = _scan(unbound_state)
+    assert result.stop_reason is OrderControlTvtMpUnboundFcfsStopReason.CANDIDATES_COMPLETED
+    assert result.stopped_vehicle_name is None
+    assert result.transferred_vehicle_records == ()
+    assert [(item.vehicle_name, item.skip_reason) for item in result.temporary_skips] == [
+        (
+            "first",
+            OrderControlTvtMpUnboundTemporarySkipReason.INLINK_OUTFLOW_CAPACITY_UNAVAILABLE,
+        ),
+        (
+            "later",
+            OrderControlTvtMpUnboundTemporarySkipReason.NODE_FLOW_CAPACITY_UNAVAILABLE,
+        ),
+    ]
+    assert OrderControlTvtMpUnboundFcfsStopReason.NODE_FLOW_CAPACITY_UNAVAILABLE not in (
+        result.stop_reason,
+    )
+    assert _local(local_state, "first").link.name == "in_b"
+    assert _local(local_state, "later").link.name == "in_c"
+    assert [vehicle.name for vehicle in local_state.target_node.incoming_vehicles] == incoming_before
+    assert in_b.capacity_out_remain == 0.0
+    assert local_state.target_node.flow_capacity_remain == 0.0
+    assert _clearance_history(local_state) == history_before
+
+
+def test_outlink_inflow_precedes_entry_space_when_both_are_short():
+    """
+    One vehicle lacks both outlink inflow and entry space.
+
+    The temporary skip reason is outlink inflow. The later vehicle, whose
+    outlink is open, still passes. Clearance does not stop the scan.
+    """
+    _world, local_state, _binding, unbound_state, _collector = _build(
+        [
+            _spec("bound", "in_a", "out", 9.0, 0.1, binding=True, incoming=False, arrived=True, collector_route="out"),
+            _spec("first", "in_b", "out", 1.0, 0.1, collector_route="out"),
+            _spec("later", "in_c", "side", 2.0, 0.1, collector_route="side"),
+        ]
+    )
+    local_world = local_state.local_world
+    outlink = local_world.get_link("out")
+    parked = local_world.addVehicle("orig_a", "dest", 0, name="parked_out")
+    parked.state = "run"
+    parked.link = outlink
+    parked.x = 0.0
+    parked.x_old = 0.0
+    outlink.vehicles.append(parked)
+    outlink.capacity_in_remain = 0.0
+    local_state.target_node.flow_capacity_remain = 10.0
+    local_world.get_link("in_b").capacity_out_remain = 10.0
+    result = _scan(unbound_state)
+    assert result.stop_reason is OrderControlTvtMpUnboundFcfsStopReason.CANDIDATES_COMPLETED
+    assert result.stopped_vehicle_name is None
+    assert [(item.vehicle_name, item.skip_reason) for item in result.temporary_skips] == [
+        (
+            "first",
+            OrderControlTvtMpUnboundTemporarySkipReason.OUTLINK_INFLOW_CAPACITY_UNAVAILABLE,
+        )
+    ]
+    assert OrderControlTvtMpUnboundTemporarySkipReason.OUTLINK_ENTRY_SPACE_UNAVAILABLE not in [
+        item.skip_reason for item in result.temporary_skips
+    ]
+    assert [record.vehicle_name for record in result.transferred_vehicle_records] == ["later"]
+    assert _local(local_state, "first").link.name == "in_b"
+    assert _local(local_state, "later").link.name == "side"
+    assert "first" in [vehicle.name for vehicle in local_state.target_node.incoming_vehicles]
+    assert "later" not in [vehicle.name for vehicle in local_state.target_node.incoming_vehicles]
+    assert outlink.capacity_in_remain == 0.0
+    assert _clearance_history(local_state) == ("in_c", 10)
+
+
 def test_fcfs_third_key_uses_stored_real_vehicle_id():
     world, local_state, binding_state, collector = _prepare(
         [
@@ -860,6 +1157,15 @@ def _run_all() -> None:
         test_passage_updates_traffic_and_leaves_outside_state_unchanged,
         test_duplicate_incoming_vehicle_raises_before_completion,
         test_research_excluded_vehicle_is_not_a_candidate,
+        test_clearance_precedes_inlink_outflow_capacity,
+        test_clearance_precedes_node_flow_capacity,
+        test_clearance_satisfied_then_inlink_outflow_skip_tries_later_vehicle,
+        test_clearance_satisfied_then_node_flow_skip_does_not_stop_the_scan,
+        test_not_physical_head_precedes_clearance,
+        test_binding_clearance_stop_prevents_unbound_start,
+        test_unbound_candidates_are_only_arrived_incoming_vehicles,
+        test_inlink_outflow_precedes_node_flow_when_both_are_short,
+        test_outlink_inflow_precedes_entry_space_when_both_are_short,
         test_fcfs_third_key_uses_stored_real_vehicle_id,
     ]
     for test in tests:
