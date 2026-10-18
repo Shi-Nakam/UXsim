@@ -3691,6 +3691,10 @@ sellerはいずれも必要補償額と同額を受領した。
 - predicted route情報とformal route情報の不一致 0件
 - assigned rankとactual Node passage rankの不一致 0件
 
+当時の記録は、この12台trialの観察事実である。当該trialでは不一致が0件だった。
+
+今回の最新結論は、C順位（Node連続・通過試行優先順位）とActual順位（Node連続）の一致を必須としない。順位不一致、temporary skip、downstream spillback下のoutlink入口空間、Candidate P Actual P全件一致の静的反証監査、および未完了の動的反証診断は、末尾の「Candidate P対Actual P全件一致の静的反証監査、Node連続順位の再解釈、および動的反証診断の未完了事項（2026-10-19）」を正本とする。C順位（Node連続）をCandidate予測通過順位と読まない。
+
 predicted route fieldは、candidate予測記録に付属するroute情報であり、candidate局所仮想計算が進路自体を独自予測したという意味ではない。
 
 candidate局所仮想計算では、baseline処理で得たrouteを使用する。
@@ -3728,6 +3732,8 @@ actual route fieldは実Worldで実際に通過したoutlinkである。
 - 第一波のbaseline fallback
 - 確定済み第一波順位を維持した第二波candidate局所仮想計算
 - candidate予測、actual passage、順位の一致
+
+上記「順位の一致」は、2026-10-14時点の12台trial観察である。C順位（Node連続）とActual順位の一致必須契約ではない。最新結論は末尾の2026-10-19節を読む。
 
 今回未確認:
 - 同一inlink上の連続する複数buyer
@@ -3777,3 +3783,538 @@ actual route fieldは実Worldで実際に通過したoutlinkである。
 を区別する。
 
 この結果を確認するまで、二層意思決定窓案は採用・実装しない。
+
+2026-10-14時点の次trial方針は、上記の単独十字路でのVehicle増加である。この方針の本文は当時の記録として残す。
+
+2026-10-19時点の未完了作業は、downstream spillback extended south pulse trialにおけるCandidate P対Actual P全件一致の動的反証診断である。再開手順の正本は、末尾の「Candidate P対Actual P全件一致の静的反証監査、Node連続順位の再解釈、および動的反証診断の未完了事項（2026-10-19）」である。
+
+# Candidate P対Actual P全件一致の静的反証監査、Node連続順位の再解釈、および動的反証診断の未完了事項（2026-10-19）
+
+本節は、downstream spillback extended south pulse trialの研究CSV、診断スクリプトの順位表示修正、T=316のNode連続順位の入れ替わり、全158取引の予測通過時刻と実通過時刻の集計、および全観測件一致に対する静的反証監査を、実装再開用に記録する。
+
+検索時は、見出しを覚えていなくても、次の語で本文を探す。Candidate P Actual P 全件一致。予測通過時刻。実通過時刻。C順位。Actual順位。Node連続順位。通過試行優先順位。順位不一致。情報漏洩。循環参照。共有状態。downstream spillback。outlink入口空間。outlink終端境界。動的反証診断。未完了。再開手順。診断スクリプトの順位表示修正。
+
+状態は未完了である。静的監査の分類はCである。動的反証診断は未実施である。productionコード、テスト、trialスクリプト、診断スクリプトは、本節を書いた時点で変更していない。
+
+## 1. 対象trialと出力
+
+trial名:
+
+- `tvt_mp_two_cross_intersections_downstream_spillback_extended_south_pulse_seed_1_initial`
+
+研究CSV:
+
+- `research_outputs/trial/tvt_mp_two_cross_intersections_downstream_spillback_extended_south_pulse_seed_1_initial/tvt_mp_visits.csv`
+
+診断スクリプト:
+
+- `research_scripts/diagnose_tvt_mp_two_cross_intersections_post_fix_multiple_buyer_transactions.py`
+
+この診断スクリプトのhookは、production本体の通過判定ではない。`tvt_mp_visits.csv` の生成経路は production の research output である。診断hookの表示不具合を、UXsim本体の通過不具合と混ぜて読まない。
+
+## 2. 既存記述との関係
+
+2026-10-10節「TVT-MP意思決定診断scriptの最新baseline契約整合・詳細監査結果」は、当時の小規模診断スクリプト `diagnose_tvt_mp_small_scale_initial_decision_trace.py` の記録である。そこでの `candidate_baseline_local_rank` は、そのスクリプト当時のlocal baseline順位の名前である。本節の4順位は、上記の two-cross 診断スクリプトと production の順位objectを読む現在の契約である。古い節の本文は削除していない。
+
+2026-10-14節「単独十字路12台trialの実行・候補21件・時系列監査」の「assigned rankとactual Node passage rankの不一致 0件」と「順位の一致」は、その12台trialの観察事実である。一致必須の契約として読まない。最新結論は本節である。
+
+## 3. 参加属性とtrade scope外の順位確定
+
+`nonparticipating` は、時間価値取引への非参加車両という参加属性である。
+
+trade scope外Visitの確定を「nonparticipatingとして順位確定」と書かない。必要な表現は次のどちらかである。
+
+- TVTの非当事者として順位確定
+- trade scope外のVisitとしてBaseline順位で確定
+
+参加属性がnonparticipatingである先頭連続Visitを、driverがCandidate形成前に確定する処理は別である。それは参加属性の話であり、trade scope外Visitの言い換えではない。
+
+## 4. 正式な4順位
+
+「C順位」だけで比較しない。C順位（ローカル）とC順位（Node連続・通過試行優先順位）を分ける。C順位（Node連続）はCandidate予測通過順位ではない。Candidate PはCandidate局所仮想計算による予測通過時刻である。Actual Pは実Worldで物理通過した時点の `node.W.T` である。
+
+### 4.1 B順位（ローカル）
+
+- field: `baseline_local_rank`
+- 保存済み `candidate_visits` の順番を再ソートせず、1始まりで数える
+- 取引前のCandidate Visit集合内順位
+
+### 4.2 C順位（ローカル）
+
+- field: `post_trade_local_rank`
+- 取得元: `OrderControlTvtMpGeneralTradeRankResult.assigned_rank(visit_key)`
+- B順位と同じ母集団の取引後順位
+- `rank_change = baseline_local_rank - post_trade_local_rank`
+
+### 4.3 C順位（Node連続・通過試行優先順位）
+
+- field: `OrderControlTvtNodeRankState.assigned_rank`
+- 成立記録上の対応値: `ledger_assigned_rank`
+- Node全体で1から続く確定順位
+- 実Worldで通過を試す優先順位
+- 通過予定時刻順ではない
+- 通常物理制約によるtemporary skipにより、後順位Visitが先に実通過し得る
+
+### 4.4 Actual順位（Node連続）
+
+- field: `actual_node_passage_rank`
+- 実WorldにおけるNode実通過順
+- `new_rank = len(existing_records) + 1`
+
+### 4.5 比較契約
+
+- B順位とC順位（ローカル）は同一母集団・同一尺度で比較できる。
+- C順位（Node連続）とActual順位は意味が異なり、一致は必須ではない。
+- `binding_rank` は完全拘束順位列上の補助位置であり、4順位の代用ではない。
+- 診断では `binding_sequence_auxiliary_rank` としてのみ残す。
+
+## 5. k_confirmed_before
+
+Node連続順位は次で作る。
+
+`ledger_assigned_rank = k_confirmed_before + final_rank_visit.final_local_rank`
+
+`k_confirmed_before = rank_state.k_confirmed()`
+
+この値には次が含まれる。
+
+- 過去までの確定Visit
+- 今回先行確定した到着済みVisit
+- 今回先行確定したleading nonparticipating Visit
+
+最後の1項は、参加属性がnonparticipatingであるVisitの先行確定である。trade scope外Visitをnonparticipatingと呼ぶ意味ではない。
+
+driverは同じ `rank_states` を、次の順で使う。
+
+1. 到着済みVisit確定
+2. leading nonparticipating確定
+3. Candidate形成・評価
+4. final rank作成
+5. atomic apply
+
+したがって、今回先行確定したVisitも、後続CandidateのNode連続順位へ反映される。
+
+## 6. 診断スクリプトの順位表示修正
+
+対象は `research_scripts/diagnose_tvt_mp_two_cross_intersections_post_fix_multiple_buyer_transactions.py` だけである。productionの順位計算は、この表示修正では変更していない。
+
+parties CSVに横並びで出す正式順位は次の4つである。
+
+- `baseline_local_rank`
+- `post_trade_local_rank`
+- `assigned_rank`
+- `actual_node_passage_rank`
+
+B-C差分列は追加していない。C-Actual差分列も追加していない。
+
+summary:
+
+- `baseline_order_visit_keys` は `baseline_local_rank` 昇順
+- `candidate_order_visit_keys` は `post_trade_local_rank` 昇順
+
+east T=35全候補監査:
+
+- baselineは同じcandidate Visit集合の `baseline_local_rank`
+- candidateは `post_trade_local_rank`
+- `binding_rank` は使わない
+
+この修正後の確認結果:
+
+- `python -m py_compile` 成功
+- `--static-validate-only` 成功
+- 出力に `Static contract validation passed.`
+
+構文検査と静的契約検証の段階では、長時間simulationを実行していない。その後、修正済み診断スクリプトで630 timestep simulationを複数回実行した。4順位の出力、Node連続順位不一致、実World到着時刻、T=324〜334のphysical trace、passed VisitKey修正後の出力を確認した。
+
+## 7. T=316のNode連続順位不一致
+
+対象:
+
+- decision T=316
+- Node = `west_intersection`
+- mismatch Visit = `veh_wn_116:1`
+
+これはC順位（Node連続・通過試行優先順位）とActual順位（Node連続）の順位不一致である。予測通過時刻と実通過時刻の不一致ではない。
+
+### 7.1 主要データ
+
+`veh_ws_83:1`
+
+- buyer
+- C連続198、Actual198
+- Baseline A=326、Actual arrival=325
+- Baseline P=328、Candidate P=326、Actual P=326
+
+`veh_ws_84:1`
+
+- buyer
+- C連続199、Actual199
+- Baseline A=328、Actual arrival=326
+- Baseline P=332、Candidate P=327、Actual P=327
+
+`veh_wn_116:1`
+
+- seller
+- B local=1、C local=4
+- C連続200、Actual201
+- Baseline A=322、Actual arrival=322
+- Baseline P=330、Candidate P=331、Actual P=331
+
+`veh_ws_85:1`
+
+- T=316のtrade scope外
+- TVTの非当事者
+- C連続201、Actual200
+- Baseline A=332、Actual arrival=328
+- T=316の正式Candidate Pなし
+- Actual P=329
+
+`veh_wn_117:1`
+
+- C連続202、Actual202
+- Baseline A=330、Actual arrival=331、Actual P=332
+
+`veh_ws_86:1`
+
+- C連続203、Actual203
+- Baseline A=336、Actual arrival=329、Actual P=334
+
+Baseline Aは同一decisionのcollector snapshotである。Actual arrivalは実Worldの到着登録である。両者を同じ値として読まない。
+
+### 7.2 trade scope外だった理由
+
+`veh_ws_85:1` がT=316のtrade scope外だった理由は次である。
+
+- right holder / seller `veh_wn_116:1` のBaseline P=330
+- 境界はP-1=329
+- `veh_ws_85:1` のBaseline A=332
+- 332 > 329
+
+`veh_ws_85:1` はT=316ではtrade scope外のTVT非当事者だった。最終的にC順位（Node連続）201を付与されたが、その順位を確定した正確なdecision Tとfinalization sourceは追加追跡していないため、T=316にBaseline順位として確定したとは断定しない。nonparticipatingとして順位確定した、とは記録しない。
+
+### 7.3 後続車両が早着した原因
+
+- `veh_ws_83:1` はBaseline P=328からCandidate P=326、Actual P=326へ2 timestep前進した
+- `veh_ws_84:1` はBaseline P=332からCandidate P=327、Actual P=327へ5 timestep前進した
+- 前方車両が早く通過したため、後続 `veh_ws_85:1` はBaseline A=332より4 timestep早いT=328に実到着した
+- `veh_ws_86:1` もBaseline A=336より7 timestep早いT=329に実到着した
+
+### 7.4 物理処理
+
+- T=324: `veh_ws_81:1` 通過後、`veh_wn_116:1` でclearance停止
+- T=325: `veh_ws_82:1` 通過後、同様
+- T=326: `veh_ws_83:1` 通過後、同様
+- T=327: `veh_ws_84:1` 通過後、同様
+- T=328: 前timestepのwest_south通過によりclearance停止
+- T=329:
+  - `veh_wn_116:1` は到着済み、物理先頭、clearance充足
+  - inlink流出、Node流量、outlink流入容量は充足
+  - east側outlink入口空間不足でtemporary skip
+  - 後順位 `veh_ws_85:1` はwest_outer側へ通過可能
+  - `veh_ws_85:1` がT=329通過
+- T=330: T=329のwest_south通過によるclearance停止
+- T=331: `veh_wn_116:1` 通過
+
+### 7.5 結論
+
+- Node連続順位200と201だけがActualでは入れ替わった。
+- production本体の実装エラーではない。
+- 直接原因はT=329のeast側outlink入口空間不足である。
+- C順位（Node連続）は通過試行優先順位であり、Actual順位との不一致は許容される。
+- 取引当事者 `veh_wn_116:1` はCandidate P=Actual P=331であり、経済条件予測への実害はない。
+- `veh_ws_85:1` は取引当事者ではなく、本人の経済条件用Candidate Pはない。
+
+## 8. 診断スクリプト固有の修正
+
+ここはproduction本体の問題と分ける。
+
+### 8.1 Baseline AとActual arrivalの混同
+
+初期表示はBaseline AをActual到着のように扱い、不可能な時系列を表示した。
+
+修正後は別field、別取得元である。
+
+- Baseline A: 同一decisionのcollector snapshot
+- Actual arrival: 実World到着登録後の軽量観測
+- Actual P: Actual passage history
+
+T=316のBaseline AをActual arrivalとして扱わない。
+
+### 8.2 trade scope外VisitのBaseline A欠落
+
+trade scope外でも、同一decisionのcollectorに正式なBaseline Aがあり得る。
+
+取得元は、`mismatch_decision_timestep` とNodeに対応するcollectorである。T=316固定ではない。
+
+Candidate Pは、正式recordがなければ補完しない。`veh_ws_85:1` にT=316の正式Candidate Pがある、とは書かない。
+
+### 8.3 passed VisitKeyの誤記録
+
+production通過後の `current_visit` を読むと次Visitになる。このため `veh_wn_116:1` を `veh_wn_116:2` と誤記録した。
+
+修正後は、通過呼出し前のVisitKeyを保存し、正常終了後だけpassedを記録する。例外時はpassedを記録しない。元関数は1回だけ呼び、return valueは変えない。
+
+### 8.4 標準出力の未修正事項
+
+`first blocking reason at or before swapped passage` は、最初の阻害理由であり、直接原因ではない。
+
+T=316では表示上clearanceが選ばれる。順位入れ替わりの直接原因は、T=329のoutlink入口空間不足である。
+
+これは診断表示上の低優先度事項であり、UXsim本体の問題ではない。本節の時点では未修正である。
+
+## 9. 全158取引のCandidate P対Actual P
+
+母数は `tvt_mp_visits.csv` の集計である。
+
+- transaction_count = 158
+- visit_row_count = 458
+- Candidate PとActual Pの双方を観測できた当事者 = 449
+- Actual P未観測 = 9
+- 観測済み449件の全件で Candidate P = Actual P
+- buyer観測206件すべて一致
+- seller観測243件すべて一致
+- 全458件中455件で Baseline P ≠ Candidate P
+- 全458件中3件で Baseline P = Candidate P
+
+455/458は、449件の内訳ではない。449件中455件とは書かない。
+
+206と243は、双方観測449件のrole内訳である。206 + 243 = 449。未観測9件は、この206と243には入らない。458 = 449 + 9。
+
+Actual未観測9件:
+
+- 評価終了付近
+- Candidate P = 600〜615
+- Actual status = `actual_passage_unobserved_at_evaluation_end`
+- Actual P = None
+- 実Worldを評価終了後へ進めない設計と整合する
+
+Baseline P − Candidate P の分布は、全458件に対する件数である。正値は前進、負値は後退である。正値は Baseline P より Candidate P が早い。負値は Baseline P より Candidate P が遅い。
+
+- -6: 9
+- -4: 36
+- -3: 2
+- -2: 38
+- -1: 159
+- 0: 3
+- 1: 8
+- 2: 54
+- 3: 68
+- 4: 45
+- 5: 7
+- 7: 29
+
+この分布の合計は458である。0が3件なので、不一致は455件である。
+
+追加の幅:
+
+- buyer最大前進 = 7 timestep
+- seller最大後退 = 6 timestep
+- Candidate P − decision T は 7〜20 timestep
+
+## 10. 静的反証監査
+
+Copilotの原典確認と、Cursor Grok 4.6による独立した読み取り専用監査を実施した。監査は、一致が正常であると仮定せず、情報漏洩、循環参照、共有状態、Candidate Pの実Worldへの間接適用、出力の誤対応を探した。
+
+最終分類はCである。
+
+Cの意味:
+
+- 全件一致を不正に生む具体的な実装不備は、静的監査で確認されなかった。
+- Candidate PとActual Pは独立生成と判断される。
+- ただし449件全一致が交通条件から自然であることは、静的解析だけでは未確定である。
+- 動的反証診断が必要である。
+
+分類AでもBでもDでもない。Aは、一致を不正に生む具体経路が確認された場合である。Bは、直接経路は未確定だが共有状態・循環・誤対応の具体的危険がある場合である。Dは、独立生成に加え、全件一致が設計と交通条件から説明でき、動的診断が追加保証にとどまる場合である。今回はDにしない。outlink終端境界が実World下流の完全再現ではないため、全件一致は自明ではない。
+
+### 10.1 反証済み
+
+次の経路は、production原典上は確認されなかった。
+
+- Candidate PからActual Pへの直接コピー
+- Actual PのCandidate Pによるfallback
+- CSV列の取り違え
+- Actual未観測へのCandidate P補完
+- Candidate Pによる実World通過時刻の強制
+- Candidate局所Worldの位置・容量・outlink状態の実Worldへの書戻し
+- Candidate計算による実World未来状態の再参照
+- 主要Node、Link、Vehicle、`route_next_link` の共有
+- Vehicle名だけによるCandidateとActualの誤結合
+
+### 10.2 生成経路
+
+Candidate P:
+
+- decision時点の `World.copy` は `pickle.loads(pickle.dumps(W))` である（`uxsim/uxsim.py` の `World.copy`）。
+- 候補状態の構築は `build_tvt_mp_candidate_local_state` である。
+- 仮想時刻は baseline T + offset であり、コピーの `local_world.T` と一致しないと停止する。
+- binding transferがコピー上で通過させた仮想時刻を、`candidate_passage_timestep` としてtraffic observationとpassage recordへ書く。
+- 同じVisitへCandidate Pを再代入すると停止する。
+
+Actual P:
+
+- 実Worldの time_value 通過は `transfer_tvt_mp_passage_attempts` から `_try_confirmed_candidates` へ進む。
+- 通過すると決めた後にだけ、`actual_passage_timestep=node.W.T` でhistoryとobservationをprepareする。
+- history側は、渡された時刻が `node.W.T` と違うと拒否する。
+- `_transfer_one_vehicle_between_links` が正常に戻った後だけcommitする。
+- 未通過ならprepareされない。Actual Pは保存されない。
+- 評価終了時の未観測recordは `actual_passage_timestep=None` のままである。WaitEntry上のCandidate Pは予測値として残る。fallbackではない。
+
+CSV:
+
+- Visit行の `candidate_passage_timestep` と `actual_passage_timestep` は別fieldである。
+- `candidate_minus_actual` は、WaitEntryに保存済みのCandidate Pと、今回の `node.W.T` の差である。同じ一時変数を両方の値として使っていない。
+- 結合キーは `(node_name, visit_key)` と、transactionの `(tvt_decision_timestep, node_name, buyers_sorted)` である。同一VisitKeyが複数TradeWaitに属すると停止する。
+
+実Worldへatomic applyが渡すものは、台帳上のassigned rank、formal route名、payment、compensation、establishment log、WaitEntryである。establishment logとWaitEntryにCandidate Pが入るのは記録である。Vehicle位置、速度、capacity、clearance、`incoming_vehicles`、outlink列、通過時刻は戻さない。formal route名は、`vehicle.route_next_link` への代入ではない。実Worldの通過は `vehicle.route_next_link` を使う。
+
+assigned rankは通過試行優先順位である。通過予定時刻ではない。Candidate Pを実Worldの通過条件と比較していない。`order_control_tvt_mp_physical_transfer.py` は `candidate_passage` を参照しない。
+
+Candidate側の通過走査はbinding順である。実Worldの通過走査は、その後の台帳に入ったassigned rank順である。予測に使った順と実現時の試行順は同じ関数ではない。したがって、同じ時刻変数を両方へ書いて一致させている構造ではない。
+
+### 10.3 限定的な残存事項
+
+- rank ledgerとActual passage registryは、pickleで通常は別objectになる。ただし、Node、Link、Vehicle、`route_next_link` ほど明示的なidentity検査はない。構築直後の検査が拒否するのは、対象Node、inlink、outlink、車両、leader、follower、`route_next_link` が実Worldの同一objectである場合である。
+- Candidate側outlink終端近似と実World下流交通の差が、今回のoutlink入口空間へ影響しなかった理由は、静的には未確認である。
+
+候補計算後のコードが、実World objectを交通状態の読込み先として保持している経路は、この監査では見つかっていない。保持されるのは時刻の整数と、構築時の名前・ID対応である。候補ファイルから `exec_simulation` や driver の再入は見つかっていない。
+
+## 11. 全件一致が自明でない理由
+
+Candidate側のoutlink終端境界は、実World下流交通の完全再現ではない。downstream spillbackがあるtrialでは、この差が予測通過時刻を動かし得る。
+
+boundary mode:
+
+- `OBSERVED_WAIT_WITH_OUTFLOW`
+  - baseline平均流出率をflow allowanceへ加算する
+- `OBSERVED_WAIT_WITHOUT_OUTFLOW`
+  - baselineで待ちがあり、流出がゼロである
+  - Candidate側でも除去しない
+- `NO_OBSERVED_WAIT_CONSTRAINED_SINK`
+  - baselineで待ちがない
+  - 容量が許せばsinkとして除去する
+
+Candidate仮想timestepの順:
+
+1. capacity refill
+2. binding transfer
+3. unbound FCFS
+4. Candidate P記録
+5. local Vehicle advance
+6. outlink boundary処理
+7. 次のtimestep
+
+終端近似の差は、主に次timestep以降のoutlink入口空間へ影響する。
+
+今回の条件:
+
+- リンク長 200 m
+- 自由流速度 約16.67 m/s（`60000 / 3600`）
+- `DELTAT = reaction_time * deltan = 1` 秒
+- 自由流リンク通過 約12 timestep
+- 予測距離 7〜20 timestep
+
+下流境界の差が入口空間へ波及し得る時間幅を含む。449件のCandidate P Actual P全件一致は不可能ではない。自明でもない。
+
+「同じロジックだから一致した」では説明しない。binding transferは、実Worldの `transfer_tvt_mp_passage_attempts` を呼ばない。同順の条件を、コピー上で別実装している。初期状態がdecision時点のpickleと揃い、当該Visitの通過を止めていた条件が両方で同じ時刻に外れたとき、時刻は一致し得る。入口空間が束縛条件だった場合は、終端近似が時刻を分け得る。後続decisionがassigned rankを変えても、そのVisitがまだ物理先頭でない、またはclearance待ちなら、通過時刻は変わらず順位だけ変わり得る。T=316の200と201の入れ替わりは、その例である。当事者 `veh_wn_116:1` の予測通過時刻と実通過時刻はどちらも331である。
+
+## 12. 未完了の動的反証診断
+
+最初は次の2件だけを対象とする。全449件へ先に広げない。
+
+最大前進buyer:
+
+- T=60
+- `east_intersection`
+- `veh_ee_10:1`
+- Baseline P=80
+- Candidate P=73
+- Actual P=73
+- 7 timestep前進
+
+最大後退seller:
+
+- T=135
+- `east_intersection`
+- `veh_ee_19:1`
+- Baseline P=149
+- Candidate P=155
+- Actual P=155
+- 6 timestep後退
+
+Candidate局所Worldと実Worldで、各timestepの次を比較する。
+
+- 到着
+- inlink物理先頭
+- clearance
+- inlink流出容量
+- Node流量容量
+- outlink流入容量
+- outlink入口空間
+- temporary skip
+- clearance停止
+- passage
+- outlink内車両数
+- Candidate boundary mode
+- Candidate終端除去Vehicle
+- 実World下流流出
+
+分類:
+
+1. 強い独立一致
+   - 通過時刻だけでなく、停止理由と入口空間推移も一致する
+2. 時刻だけ一致
+   - 時刻は一致するが、途中状態が異なる
+3. 実装不整合疑い
+   - 同じ状態で異なる判定、説明不能な共有状態、予測値の不正流入がある
+
+2件とも強い独立一致なら、全449件へ拡張しない。それ以外なら、spillbackが強いケースを追加する。
+
+実装方針:
+
+- 既存CSVだけでは不足する
+- 読み取り専用hookによる再simulationが必要である
+- productionコードは変更しない
+- 元関数を各1回だけ呼ぶ
+- return valueや交通状態を変更しない
+- 乱数消費と `World.copy` を追加しない
+
+この動的反証診断は未完了である。本節の作成時点では、診断コードもsimulationも開始していない。
+
+## 13. 追加追跡を中止した事項
+
+`veh_ws_85:1` について、次の追跡は中止した。
+
+- 順位201を確定した正確なdecision T
+- finalization source
+- T=316 Candidate局所World内のunbound FCFS参考通過時刻
+
+中止理由:
+
+- transaction_count = 0
+- buyer_count = 0
+- seller_count = 0
+- nonparticipating_count = 0
+- trade scope observation = 0
+- TVTの非当事者である
+- 本人の経済条件算定対象ではない
+- `veh_wn_116:1` は Candidate P = Actual P = 331
+- 追加診断の研究価値が小さい
+
+`nonparticipating_count = 0` は、このVisitを参加属性nonparticipatingとして扱った件数が0という意味で記録する。trade scope外であることをnonparticipating確定とは呼ばない。
+
+## 14. 再開手順
+
+1. 本節を読む。
+2. `ORDER_EXCHANGE_PROGRESS_3.md` の最新節を確認する。進捗第3巻は、本節を書いた時点では未更新である。
+3. T=60 buyer `veh_ee_10:1` と T=135 seller `veh_ee_19:1` だけを対象に、動的反証診断を設計する。
+4. Candidate側・Actual側hookの対象関数と時刻範囲を原典確認する。
+5. static contractを先に設計する。
+6. productionコードを変更しない。
+7. CursorにGit操作をさせない。
+8. Terminalで差分、`py_compile`、static validationを独立確認する。
+9. 既存出力directoryを削除せず退避する。
+10. 630 timestep simulationを実行する。
+11. Candidate側とActual側を横並びにして、強い独立一致、時刻だけ一致、実装不整合疑いの3分類をする。
+12. 結果を本詳細設計メモと `ORDER_EXCHANGE_PROGRESS_3.md` へ反映する。
+
+標準出力の `first blocking reason at or before swapped passage` は、再開時の必須修正ではない。診断表示の低優先度事項として残っている。
