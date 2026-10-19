@@ -3695,6 +3695,8 @@ sellerはいずれも必要補償額と同額を受領した。
 
 今回の最新結論は、C順位（Node連続・通過試行優先順位）とActual順位（Node連続）の一致を必須としない。順位不一致、temporary skip、downstream spillback下のoutlink入口空間、Candidate P Actual P全件一致の静的反証監査、および未完了の動的反証診断は、末尾の「Candidate P対Actual P全件一致の静的反証監査、Node連続順位の再解釈、および動的反証診断の未完了事項（2026-10-19）」を正本とする。C順位（Node連続）をCandidate予測通過順位と読まない。
 
+ただし、上記の「未完了の動的反証診断」は2026-10-19時点の記録である。動的反証診断は2026-10-20に完了した。最新正本は、同節末尾の「動的反証診断完了、Candidate P対Actual Pの強い物理的一致、およびnonparticipating約20％混入trialへの移行（2026-10-20）」である。
+
 predicted route fieldは、candidate予測記録に付属するroute情報であり、candidate局所仮想計算が進路自体を独自予測したという意味ではない。
 
 candidate局所仮想計算では、baseline処理で得たrouteを使用する。
@@ -3788,6 +3790,8 @@ actual route fieldは実Worldで実際に通過したoutlinkである。
 
 2026-10-19時点の未完了作業は、downstream spillback extended south pulse trialにおけるCandidate P対Actual P全件一致の動的反証診断である。再開手順の正本は、末尾の「Candidate P対Actual P全件一致の静的反証監査、Node連続順位の再解釈、および動的反証診断の未完了事項（2026-10-19）」である。
 
+この未完了記述は当時の記録である。動的反証診断は2026-10-20に完了した。最新正本は同節末尾の2026-10-20追記である。次の未完了作業は、全参加条件の次のtrialとして、nonparticipating約20％の非参加車両混入trialを設計することである。
+
 # Candidate P対Actual P全件一致の静的反証監査、Node連続順位の再解釈、および動的反証診断の未完了事項（2026-10-19）
 
 本節は、downstream spillback extended south pulse trialの研究CSV、診断スクリプトの順位表示修正、T=316のNode連続順位の入れ替わり、全158取引の予測通過時刻と実通過時刻の集計、および全観測件一致に対する静的反証監査を、実装再開用に記録する。
@@ -3795,6 +3799,8 @@ actual route fieldは実Worldで実際に通過したoutlinkである。
 検索時は、見出しを覚えていなくても、次の語で本文を探す。Candidate P Actual P 全件一致。予測通過時刻。実通過時刻。C順位。Actual順位。Node連続順位。通過試行優先順位。順位不一致。情報漏洩。循環参照。共有状態。downstream spillback。outlink入口空間。outlink終端境界。動的反証診断。未完了。再開手順。診断スクリプトの順位表示修正。
 
 状態は未完了である。静的監査の分類はCである。動的反証診断は未実施である。productionコード、テスト、trialスクリプト、診断スクリプトは、本節を書いた時点で変更していない。
+
+この4文は本節作成時点（2026-10-19）の記録である。「動的反証診断は未実施」「状態は未完了」は、当時の動的反証診断待ちを指す。2026-10-20追記が最新正本である。静的監査の分類C自体は維持する。動的反証診断完了後の次の未完了作業と再開手順は、同節末尾の2026-10-20追記を読む。
 
 ## 1. 対象trialと出力
 
@@ -4124,6 +4130,8 @@ Cの意味:
 - ただし449件全一致が交通条件から自然であることは、静的解析だけでは未確定である。
 - 動的反証診断が必要である。
 
+「動的反証診断が必要である」は、2026-10-19の静的監査時点の判断である。当時は動的反証診断待ちだった。2026-10-20に代表2件の動的反証診断を完了した。最新正本は本節末尾の2026-10-20追記である。静的監査の分類Cは維持する。449件すべてを動的traceしたわけではない。
+
 分類AでもBでもDでもない。Aは、一致を不正に生む具体経路が確認された場合である。Bは、直接経路は未確定だが共有状態・循環・誤対応の具体的危険がある場合である。Dは、独立生成に加え、全件一致が設計と交通条件から説明でき、動的診断が追加保証にとどまる場合である。今回はDにしない。outlink終端境界が実World下流の完全再現ではないため、全件一致は自明ではない。
 
 ### 10.1 反証済み
@@ -4219,6 +4227,8 @@ Candidate仮想timestepの順:
 
 ## 12. 未完了の動的反証診断
 
+本12節の見出しと本文は、2026-10-19時点の計画である。当時は動的反証診断待ちであり、診断コードもsimulationも開始していなかった。この「未完了」は歴史的記録として残す。2026-10-20に代表2件の動的反証診断は完了した。最新正本は本節末尾の2026-10-20追記である。
+
 最初は次の2件だけを対象とする。全449件へ先に広げない。
 
 最大前進buyer:
@@ -4280,6 +4290,8 @@ Candidate局所Worldと実Worldで、各timestepの次を比較する。
 
 この動的反証診断は未完了である。本節の作成時点では、診断コードもsimulationも開始していない。
 
+上の2文は2026-10-19作成時点の記録である。動的反証診断待ちという状態は当時の未完了事項である。2026-10-20追記が最新正本である。
+
 ## 13. 追加追跡を中止した事項
 
 `veh_ws_85:1` について、次の追跡は中止した。
@@ -4304,6 +4316,8 @@ Candidate局所Worldと実Worldで、各timestepの次を比較する。
 
 ## 14. 再開手順
 
+本14節の手順は、2026-10-19時点の動的反証診断待ちに対する再開手順である。歴史的記録として残す。動的反証診断は2026-10-20に完了した。最新の未完了作業と再開手順は、本節末尾の2026-10-20追記を読む。
+
 1. 本節を読む。
 2. `ORDER_EXCHANGE_PROGRESS_3.md` の最新節を確認する。進捗第3巻は、本節を書いた時点では未更新である。
 3. T=60 buyer `veh_ee_10:1` と T=135 seller `veh_ee_19:1` だけを対象に、動的反証診断を設計する。
@@ -4318,3 +4332,368 @@ Candidate局所Worldと実Worldで、各timestepの次を比較する。
 12. 結果を本詳細設計メモと `ORDER_EXCHANGE_PROGRESS_3.md` へ反映する。
 
 標準出力の `first blocking reason at or before swapped passage` は、再開時の必須修正ではない。診断表示の低優先度事項として残っている。
+
+## 15. 動的反証診断完了、Candidate P対Actual Pの強い物理的一致、およびnonparticipating約20％混入trialへの移行（2026-10-20）
+
+本15節は、2026-10-19節の動的反証診断待ちを完了した記録である。2026-10-19節本文の「未完了」「動的反証診断は未実施」は当時の記録として残す。Candidate P Actual P 全件一致に関する最新正本は本15節である。次のtrialは、全参加条件のまま複雑なnetworkへ進むことではなく、同一networkへのnonparticipating 20％前後の非参加車両混入である。再開手順は本15節末尾である。
+
+検索時は、次の語で本文を探す。Candidate P Actual P 全件一致。strong_physical_match。強い物理的一致。動的反証診断。情報漏洩。通過時刻の強制。未到着。clearance。outlink入口空間。走査手続。物理状態。nonparticipating 20％。非参加車両混入。全参加条件。次のtrial。未完了。再開手順。
+
+### 15.1 診断対象
+
+新規診断スクリプト:
+
+- `research_scripts/diagnose_tvt_mp_candidate_actual_physical_reason_comparison.py`
+
+対象trial:
+
+- `tvt_mp_two_cross_intersections_downstream_spillback_extended_south_pulse_seed_1_initial`
+
+対象は次の2件だけである。全458当事者中の最大前進buyerと最大後退sellerとして選んだ。全449観測件へ動的traceを広げていない。
+
+最大前進buyer:
+
+- `case_id=buyer_t60_veh_ee_10_1`
+- decision T=60
+- Node=`east_intersection`
+- VisitKey=`veh_ee_10:1`
+- role=buyer
+- Baseline P=80
+- Candidate P=73
+- Actual P=73
+- 7 timestep前進
+- 比較時刻=T=60〜73
+
+最大後退seller:
+
+- `case_id=seller_t135_veh_ee_19_1`
+- decision T=135
+- Node=`east_intersection`
+- VisitKey=`veh_ee_19:1`
+- role=seller
+- Baseline P=149
+- Candidate P=155
+- Actual P=155
+- 6 timestep後退
+- 比較時刻=T=135〜155
+
+### 15.2 診断目的
+
+静的監査までに確認できていたのは次である。
+
+- Candidate PとActual Pは別経路で生成される
+- Candidate PからActual Pへの直接コピーはない
+- Candidate Pを実Worldの通過時刻として強制する処理はない
+- 情報漏洩として、Candidate PをActual Pへ直接流す経路は見つかっていない
+- Actual Pは実World物理通過時の `node.W.T`
+- 観測可能な449件でCandidate P=Actual P
+
+静的監査だけでは、次の3つを区別できなかった。
+
+1. Candidate局所Worldと実Worldが同じ物理状態から同じ通過時刻へ到達した
+2. 途中の物理状態は異なるが、偶然同じ通過時刻になった
+3. 未発見の共有状態や間接的強制がある
+
+今回の動的反証診断では、Candidate局所Worldと実Worldについて、各時刻の物理状態と停止・通過理由を別々に観測し、同じ通過時刻が同じ物理過程から生じたかを確認した。
+
+### 15.3 診断スクリプトの安全契約
+
+- UXsim production本体は変更していない
+- trialは変更していない
+- 既存診断スクリプトは変更していない
+- 新規の読み取り専用診断スクリプト1本だけを作成した
+- wrapperは元production関数を各呼出しにつき1回だけ実行する
+- return valueは変更しない
+- capacity、clearance履歴、Vehicle位置、incoming、outlink車列を変更しない
+- Actual passage historyと順位台帳を変更しない
+- 追加の `World.copy` なし
+- 追加の乱数消費なし
+- passageは元関数正常終了後だけ、通過前に保存したVisitKeyへ記録する
+- hookは例外時を含めて `finally` で復元する
+- baseline forkをActual観測へ混入させない
+- Candidate側official reasonは凍結済みbinding resultから取得する
+- Actual側official reasonはproduction関数の正式返値から取得する
+
+`py_compile` と `--static-validate-only` はいずれも成功した。630 timestep simulationも正常終了した。
+
+### 15.4 診断設計の修正履歴
+
+診断の結論だけでなく、比較契約を誤ると誤判定するため、修正経緯を原因付きで残す。比較契約の誤りは診断設計の誤りである。UXsim本体の不具合ではない。
+
+#### 15.4.1 初期診断
+
+初期診断では、通過時刻と一部の正式理由を比較した。
+
+結果:
+
+- buyerはT=72でCandidate側 `not_arrived_at_target_node`、Actual側 `not_scanned`
+- sellerはT=142〜152でCandidate側 `not_scanned`、Actual側 `not_observable`
+- 両ケースとも暫定的に「時刻だけ一致」
+
+これは実際の物理状態差を確定した結果ではない。Actual側の走査到達状態の記録不足を含んでいた。
+
+#### 15.4.2 走査到達状態追加後の問題
+
+次に、confirmed candidatesへの所属、走査位置、先行Visitのclearance stopを記録した。未到着期間に多数の理由差が現れた。
+
+原因:
+
+Candidate側:
+
+- 将来到着するVisitもbinding sequenceに含まれる
+- 先行Visitのclearance stopで対象Visitまで走査が到達しない場合がある
+
+実World側:
+
+- 未到着Visitはconfirmed candidatesに含まれない場合がある
+
+これはUXsim本体の目的に応じた正常な走査手続の違いである。
+
+- Candidate局所計算は将来交通を予測する
+- 実Worldは現時点の到着済みVehicleを通過候補として扱う
+
+走査手続の違いを物理状態の不一致として数えた比較契約が誤りだった。productionの通過判定そのものが壊れていたわけではない。
+
+#### 15.4.3 最終的な段階別物理比較
+
+最終版では、物理状態と走査手続を分離した。
+
+物理状態はproductionの判定順に比較する。
+
+1. 到着
+2. inlink物理先頭
+3. clearance
+4. inlink流出容量
+5. Node流量容量
+6. outlink流入容量
+7. outlink入口空間
+8. passage
+
+後段の項目は、前段が両側で充足した場合だけ比較する。
+
+例:
+
+- 両側が未到着なら、到着状態だけを比較する
+- 未到着時にclearance、容量、入口空間、車列を比較しない
+- 両側が物理先頭でなければ、clearance以降を比較しない
+- clearance未充足なら容量以降を比較しない
+
+この修正により、走査方法の違いを物理状態差として誤計上しない。
+
+次を別fieldとして保持した。
+
+- physical state
+- official reason
+- scan reach status
+
+Candidate側とActual側でscan reach statusが異なっても、段階別physical stateが一致すれば物理的不一致にはしない。
+
+### 15.5 buyerの最終結果
+
+`buyer_t60_veh_ee_10_1`
+
+- Candidate P=73
+- Actual P=73
+- 全時刻数=14
+- 到着前時刻数=13
+- 物理状態比較可能時刻数=14
+- physical state mismatch数=0
+- scan procedure mismatch数=13
+- exact official reason mismatch数=12
+- physical official reason mismatch数=0
+- passage flag mismatch数=0
+- 最終分類=`strong_physical_match`
+
+時系列の要点:
+
+- T=60〜72:
+  - Candidate局所Worldと実Worldの両方で対象Visitは未到着
+  - 走査手続は異なる時刻がある
+  - ただし段階別物理状態は一致
+- T=72:
+  - Candidate側 `not_arrived_at_target_node`
+  - Actual側 `not_arrived_at_target_node`
+  - `physical_state_match=True`
+  - `official_reason_semantic_status=exact_match`
+- T=73:
+  - 両側とも到着済み
+  - 両側とも通過条件充足
+  - 両側とも `passed`
+  - `physical_state_match=True`
+  - `official_reason_semantic_status=exact_match`
+
+Candidate P=Actual P=73は、単なるCSV値の一致ではない。両Worldで未到着状態から同じ時刻に通過可能状態へ移行した結果である。
+
+### 15.6 sellerの最終結果
+
+`seller_t135_veh_ee_19_1`
+
+- Candidate P=155
+- Actual P=155
+- 全時刻数=21
+- 到着前時刻数=18
+- 物理状態比較可能時刻数=21
+- physical state mismatch数=0
+- scan procedure mismatch数=7
+- exact official reason mismatch数=7
+- physical official reason mismatch数=0
+- passage flag mismatch数=0
+- 最終分類=`strong_physical_match`
+
+時系列の要点:
+
+- T=135〜152:
+  - Candidate局所Worldと実Worldの両方で対象Visitは未到着
+  - 一部時刻で走査手続は異なる
+  - 段階別物理状態は一致
+- T=153:
+  - 両側とも到着済み
+  - 両側ともinlink物理先頭
+  - 両側とも `clearance_not_satisfied`
+  - `physical_state_match=True`
+  - `official_reason_semantic_status=exact_match`
+- T=154:
+  - T=153と同様に、両側ともclearance未充足
+- T=155:
+  - 両側ともclearanceと通常物理制約を充足
+  - 両側とも `passed`
+  - `physical_state_match=True`
+  - `official_reason_semantic_status=exact_match`
+
+Candidate P=Actual P=155は、通過時刻だけの偶然一致ではない。T=153〜154に同じ理由で停止し、T=155に同じ物理条件で通過した。sellerの通過直前はclearance停止であり、outlink入口空間不足ではない。
+
+### 15.7 最終分類の意味
+
+`strong_physical_match` は強い物理的一致である。次を意味する。
+
+- Candidate P=Actual P
+- 全比較時刻で段階別physical stateが一致する
+- passage flagが一致する
+- 通過直前から通過までのphysical official reasonが一致する
+- official reasonと保存済み状態に矛盾がない
+- Candidate PのActual側への不正流入が確認されない
+
+未到着期間のscan procedure差は、物理状態差ではないため、この分類を妨げない。通過時刻の一致だけで強い物理的一致とはしない。
+
+outlink終端比較は、Candidate側がlocal Vehicle advance後、Actual側がVehicle advance前であり、同一処理時点ではない。
+
+したがって:
+
+- `comparison_phase=not_equivalent`
+- 終端除去Vehicleの一致はstrong physical matchの必須条件にしない
+- 参考情報としてのみ保存する
+
+outlink終端近似が一般に完全であるとは書かない。
+
+### 15.8 今回追加的に言えるようになったこと
+
+静的監査後に言えたのは、Candidate PとActual Pが独立生成であり、不正な直接コピーと通過時刻の強制が見つからないことまでだった。
+
+今回の動的反証診断により、次が追加的に確認された。
+
+- 最大前進buyerと最大後退sellerの両方で、通過時刻だけでなく物理過程も一致した
+- buyerは未到着から通過可能状態への移行が一致した
+- sellerは通過直前のclearance停止2 timestepと、その後の通過が一致した
+- 両ケースでphysical state mismatchは0件
+- physical official reason mismatchも0件
+- passage flag mismatchも0件
+- Candidate PとActual Pの一致が、同じ物理状態から導かれたことを確認した
+
+したがって、このtrialにおける449観測件のCandidate P=Actual P全件一致は、現時点では実装不備ではなく、Candidate局所計算が実Worldを適切に予測した結果と暫定評価する。
+
+ただし、動的traceを確認したのは代表2件である。449件すべてについて同じ物理過程を個別確認したわけではない。全件を `strong_physical_match` と個別判定したわけでもない。
+
+### 15.9 結論の適用範囲
+
+正式な限定付き結論:
+
+現在の2交差点downstream spillback extended south pulse trialの全参加条件では、観測可能な449当事者でCandidate PとActual Pが一致した。静的監査では両時刻を不正に一致させる具体的経路を確認できず、最大前進buyerと最大後退sellerの動的反証診断では、通過時刻だけでなく段階別物理状態と通過直前理由も一致した。したがって、本trialのCandidate P対Actual P全件一致は、Candidate局所計算が実Worldを適切に予測した結果と暫定評価する。
+
+次は書かない。
+
+- すべてのnetworkでCandidate PとActual Pが常に一致する
+- 全449件で `strong_physical_match` を個別確認した
+- outlink終端近似が一般に完全である
+- より複雑なnetworkでも予測誤差が生じない
+- nonparticipating混入後も同じ結果になる
+
+### 15.10 全449件への拡張判断
+
+今回の2ケースは次を代表する。
+
+- 最大前進buyer
+- 最大後退seller
+
+両ケースで強い物理的一致（`strong_physical_match`）を確認したため、現trialの全449件へ詳細な動的traceを拡張しない。
+
+理由:
+
+- 既に全449観測件でCandidate P=Actual P
+- 静的監査で直接コピー・情報漏洩・通過時刻の強制を確認できない
+- 最大変化2ケースで物理過程まで一致
+- 全件traceの追加研究価値が小さい
+- 次の実験条件へ時間を配分する方が有益
+
+### 15.11 次の実験段階
+
+複雑なnetworkへ移行する前に、同じnetwork設定へnonparticipating車両を約20％混入させる。
+
+目的:
+
+- 全参加条件から参加構成を変更する
+- nonparticipating Visitの手続的処理を確認する
+- 非参加車両の存在がTVT成立、順位確定、Candidate P、Actual P、参加者の経済評価へ与える影響を確認する
+- nonparticipatingへのpredicted/actual外部効果記録を確認する
+- Candidate P−Actual Pの分布が全参加条件から変化するか確認する
+
+現時点では、nonparticipating約20％混入trialは未設計・未実行である。これが次の未完了作業である。
+
+約20％の具体的な割当方法、seed、対象Vehicle選択規則、参加属性固定方法、期待件数、static contractは次の作業で設計する。
+
+複雑なnetwork trialは、その後の段階とする。
+
+### 15.12 未完了事項
+
+最優先:
+
+- 同一networkへのnonparticipating約20％混入trialの設計
+
+設計項目:
+
+- nonparticipating割当seed
+- 約20％の正確な定義
+- Vehicle単位かVisit単位か
+- 全対象Vehicleからの抽出か、VOT適格Vehicleからの抽出か
+- 既存VOT生成との独立性
+- 再現可能な選択規則
+- buyer・seller・nonparticipatingの期待件数
+- 取引数とCandidate P−Actual P分布の比較
+- nonparticipating predicted/actual external effect
+- baseline順位保護
+- 実通過時の外部効果
+- 評価終了時未観測の扱い
+- static contract
+- 出力directoryとreference trialの分離
+
+低優先度:
+
+- 既存診断標準出力 `first blocking reason at or before swapped passage` の表示改善
+- UXsim production本体の問題ではない
+- 次のnonparticipating trial開始前の必須作業ではない
+
+### 15.13 再開手順
+
+後日、次の順で再開する。
+
+1. 本動的反証診断完了節（本15節）を読む
+2. `ORDER_EXCHANGE_PROGRESS_3.md` の最新再開地点を読む
+3. nonparticipating約20％混入trialの設計を開始する
+4. 既存trialを直接変更するか、新規trialを作るかを原典確認する
+5. 参加属性の現在の生成・保存経路を確認する
+6. Vehicle単位の再現可能な抽出契約を設計する
+7. 既存VOT RNGと独立したseedを使用するか決定する
+8. static contractを先に設計する
+9. productionコードは変更しない
+10. 既存出力directoryを上書きしない
+11. trial実行後、全参加referenceと主要指標を比較する
+12. Candidate P−Actual Pに差が出た場合だけ、最大差ケースへ今回の動的診断を適用する

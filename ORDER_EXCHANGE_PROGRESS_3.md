@@ -5557,6 +5557,8 @@ old testはVisit ID不一致例外を期待している。現行collectorは、�
 
 本節は再開用要約である。技術的正本は `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_5.md` 末尾の「Candidate P対Actual P全件一致の静的反証監査、Node連続順位の再解釈、および動的反証診断の未完了事項（2026-10-19）」である。直前の2026-10-17節は削除しない。物理通過順再統一後の再開地点は、本節が上書きする。
 
+本節は2026-10-19時点の記録である。動的反証診断は2026-10-20に完了した。TVT-MP実装・実験側の最新再開地点は、末尾の「Candidate P対Actual P動的反証診断完了・nonparticipating約20％混入trial設計待ち（2026-10-20）」である。
+
 検索語の例: Candidate P Actual P 全件一致。予測通過時刻。実通過時刻。C順位。Actual順位。Node連続順位。通過試行優先順位。順位不一致。静的反証監査。動的反証診断。T=316。outlink入口空間。診断スクリプトの順位表示修正。
 
 対象trial:
@@ -5798,7 +5800,9 @@ T=316ではclearance未充足と表示されるが、直接原因はT=329のoutl
 
 ## 10. 最新再開地点
 
-**本節が、Candidate P対Actual P監査完了後における最新再開地点である。**
+**本節は2026-10-19時点の最新再開地点であった。** TVT-MP実装・実験側の現在の最新再開地点は、末尾の2026-10-20節である。
+
+当時の手順:
 
 1. 動的反証診断を、T=60 buyerとT=135 sellerの2件だけから設計・実装する。
 2. static contractを先に書き、`py_compile` と `--static-validate-only` を通す。
@@ -5825,4 +5829,113 @@ T=316ではclearance未充足と表示されるが、直接原因はT=329のoutl
 - 次の文献対象はSchepperle・Böhm系列。次の文献作業は、正式書誌、全文資料、auctionとexchangeの系列内分担、出典箇所を固定し、第二段階5台帳へ初回適用すること。
 
 TVT-MP実装仕様は変更しない。直前のTVT-MP実装側最新再開地点は、上の「Candidate P対Actual P全件一致の静的反証監査完了・動的反証診断待ち（2026-10-19）」§10のままである。本節はそれを置換しない。Candidate P対Actual Pの動的反証診断は開始しない。最大前進buyer（T=60 `veh_ee_10:1`）と最大後退seller（T=135 `veh_ee_19:1`）の診断対象を変更しない。文献メモのcommit・push完了後、実装側は既存の再開地点へ戻ってよい。
+
+# Candidate P対Actual P動的反証診断完了・nonparticipating約20％混入trial設計待ち（2026-10-20）
+
+本節は再開用要約である。技術的正本は `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_5.md` の「## 15. 動的反証診断完了、Candidate P対Actual Pの強い物理的一致、およびnonparticipating約20％混入trialへの移行（2026-10-20）」である。2026-10-19節は当時の記録として残す。Lin・Jabari文献調査進捗節は変更しない。
+
+検索語の例: Candidate P Actual P 全件一致。strong_physical_match。動的反証診断。段階別物理比較。走査手続。nonparticipating 20％。非参加車両混入。全参加条件。
+
+対象trial:
+
+- `tvt_mp_two_cross_intersections_downstream_spillback_extended_south_pulse_seed_1_initial`
+
+新規診断script:
+
+- `research_scripts/diagnose_tvt_mp_candidate_actual_physical_reason_comparison.py`
+
+## 1. 完了した作業
+
+- 上記読み取り専用診断スクリプトを作成した
+- UXsim production本体は変更していない
+- trialは変更していない
+- 既存診断スクリプトは変更していない
+- `py_compile` 成功
+- `--static-validate-only` 成功
+- 630 timestep simulation 正常終了
+- Candidate局所Worldと実Worldについて、代表2件の各時刻の物理状態を比較した
+
+代表2件（全458当事者中の最大前進buyerと最大後退seller）:
+
+1. 最大前進buyer: T=60、`east_intersection`、`veh_ee_10:1`、Baseline P=80、Candidate P=73、Actual P=73、7 timestep前進
+2. 最大後退seller: T=135、`east_intersection`、`veh_ee_19:1`、Baseline P=149、Candidate P=155、Actual P=155、6 timestep後退
+
+## 2. 診断設計で確定した比較契約
+
+Candidate側とActual側では、未到着期間の走査手続が異なる。
+
+- Candidate側: 将来到着するVisitもbinding sequenceに含む。先行Visitのclearance stopにより対象Visitまで走査が到達しない場合がある。
+- Actual側: 未到着Visitはconfirmed candidatesに含まれない場合がある。
+
+これはUXsim本体の目的に応じた正常な差である（Candidate局所計算は将来交通を予測する。実Worldは現時点の到着済みVehicleを通過候補として扱う）。
+
+走査手続と物理状態を分離して比較した。物理状態はproductionの判定順に、両側が到達した段階までだけ比較する（到着、inlink物理先頭、clearance、inlink流出容量、Node流量容量、outlink流入容量、outlink入口空間、passage）。未到着時にはclearance、容量、入口空間などを比較しない。
+
+初期診断では走査記録不足、その後の版では走査手続差を物理状態差として数える問題があった。これらは診断スクリプトの比較設計上の問題であり、UXsim production本体の不具合ではない。
+
+## 3. 最終結果
+
+buyer `veh_ee_10:1`:
+
+- Candidate P=Actual P=73
+- 全時刻数=14、到着前時刻数=13、物理状態比較可能時刻数=14
+- physical state mismatch数=0、physical official reason mismatch数=0、passage flag mismatch数=0
+- T=60〜72は両側未到着。T=73は両側で通過条件充足・passed
+- 最終分類=`strong_physical_match`
+
+seller `veh_ee_19:1`:
+
+- Candidate P=Actual P=155
+- 全時刻数=21、到着前時刻数=18、物理状態比較可能時刻数=21
+- physical state mismatch数=0、physical official reason mismatch数=0、passage flag mismatch数=0
+- T=135〜152は両側未到着。T=153〜154は両側でclearance未充足。T=155は両側で通過条件充足・passed
+- 最終分類=`strong_physical_match`
+
+未到着期間の走査手続の違いは、物理状態の違いではない。
+
+## 4. 限定付き結論
+
+現在の2交差点downstream spillback extended south pulse trialの全参加条件では、観測可能な449当事者でCandidate PとActual Pが一致した。静的監査では直接コピー、情報漏洩、通過時刻の強制を確認できなかった。最大前進buyerと最大後退sellerの動的反証診断では、通過時刻だけでなく段階別物理状態と通過直前理由も一致した。したがって、本trialでCandidate PとActual Pに差が出なかったことは、現時点では実装不備ではなく、Candidate局所計算が実Worldを適切に予測した結果と暫定評価する。
+
+限定: 動的traceは代表2件のみ。全449件を個別に `strong_physical_match` と確認したわけではない。全networkで常に一致するとは結論づけない。outlink終端近似が一般に完全とは結論づけない。nonparticipating混入後の結果は未確認。
+
+## 5. 全449件へ拡張しない判断
+
+現trialでは全449件へ詳細な動的traceを拡張しない。全449観測件で一致、静的監査で不正経路なし、最大変化2件で物理過程まで一致、全件traceの研究価値が小さい、次の実験条件へ時間を配分する方が有益、という理由による。
+
+## 6. 次の未完了作業
+
+最優先: 同一networkへのnonparticipating車両約20％混入trialの設計（未設計・未実行）。複雑なnetwork trialはその後。
+
+設計が必要な事項: 約20％の定義、Vehicle単位かVisit単位か、割当seed、抽出母集団、VOT RNGとの独立性、再現可能な選択規則、参加属性の固定、buyer・seller・nonparticipatingの期待件数、全参加referenceとの比較、Candidate P−Actual P分布、nonparticipating predicted/actual external effect、baseline順位保護、評価終了時未観測、static contract、新規出力directory。
+
+## 7. 再開手順
+
+1. `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_5.md` 第15節を読む
+2. 本進捗節を読む
+3. nonparticipating約20％混入trialを設計する
+4. 既存trialを直接変更せず新規trialとする必要性を原典確認する
+5. 参加属性の生成・保存経路を確認する
+6. Vehicle単位かVisit単位かを決定する
+7. 約20％の算定方法を決定する
+8. VOT RNGとは独立したseedを使用するか決定する
+9. static contractを先に設計する
+10. productionコードは変更しない
+11. 既存出力directoryを上書きしない
+12. 実行後、全参加referenceと比較する
+13. Candidate P−Actual Pに差が出た場合だけ、最大差ケースへ今回の動的診断を適用する
+14. 結果を詳細設計メモと本進捗メモの双方へ反映する
+
+## 8. 低優先度事項
+
+既存multiple-buyer診断の `first blocking reason at or before swapped passage` は最初の阻害理由であり、順位入れ替わりの直接原因ではない。診断表示の低優先度事項であり、UXsim production本体の問題ではない。nonparticipating約20％混入trial開始前の必須修正ではない。
+
+## 9. 最新再開地点
+
+**本節が、TVT-MP実装・実験側の最新再開地点である。**
+
+1. nonparticipating約20％混入trialを設計する（static contractを先に書く）。
+2. productionコードと既存全参加reference trialは変更しない。
+3. 新規trial実行後、全参加referenceと主要指標を比較する。
+4. Candidate P−Actual Pに差が出た場合だけ、代表2件と同型の動的診断を最大差ケースへ適用する。
 
