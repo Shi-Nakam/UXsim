@@ -5808,3 +5808,21 @@ T=316ではclearance未充足と表示されるが、直接原因はT=329のoutl
 
 物理通過順再統一（2026-10-17）節のBATCH未解決問題は別件として残す。動的反証診断の前提条件にはしない。
 
+## Lin・Jabari系列への第二段階台帳初回適用完了（2026-10-19）
+
+本節は文献調査の最新進捗だけを記録する。詳細文献台帳の転載はしない。詳細正本は `ORDER_EXCHANGE_LITERATURE_FIRST_STAGE_SCORING_AND_POSITIONING.md` の§21。方法論要約は `ORDER_EXCHANGE_LITERATURE_POSITIONING_FRAMEWORK.md` の§5C。
+
+- Lin・Jabari系列の中核文献 LJ-P1（2019 IEEE ITSC）と LJ-P2（2022 T-ITS）を固定した。
+- 第二段階の5台帳へ初回適用した。
+- 第一段階採点は変更していない。
+- Lin・Jabari系列は強い直接競合として維持した。
+- Budget balanceと利用者間直接移転をFixedとした。
+- Group-level TU rationalityとVehicle-level individual rationalityを分離した。
+- Misreporting deterrenceは限定されたsimulation resultとして固定した。Strategy-proofnessとDSICはNot demonstratedとした。
+- VOT=0 VehicleはTU gameとpaymentから除外される。非参加Vehicleのbaseline順位、discharge time、traffic outcomeの保護は確認できない。
+- 系列全体の構造的前提依存性はLowからMedium候補とした。Low、Medium、Highの正式閾値は未確定。重大な非現実的前提によって研究価値を大幅に割り引ける系列ではない。
+- TVT-MPとの差別化は単独要素ではなく組合せとして評価する。予測discharge time差、budget balance、非参加Vehicleのpayment除外等をTVT-MPの単独独自貢献としない。
+- 次の文献対象はSchepperle・Böhm系列。次の文献作業は、正式書誌、全文資料、auctionとexchangeの系列内分担、出典箇所を固定し、第二段階5台帳へ初回適用すること。
+
+TVT-MP実装仕様は変更しない。直前のTVT-MP実装側最新再開地点は、上の「Candidate P対Actual P全件一致の静的反証監査完了・動的反証診断待ち（2026-10-19）」§10のままである。本節はそれを置換しない。Candidate P対Actual Pの動的反証診断は開始しない。最大前進buyer（T=60 `veh_ee_10:1`）と最大後退seller（T=135 `veh_ee_19:1`）の診断対象を変更しない。文献メモのcommit・push完了後、実装側は既存の再開地点へ戻ってよい。
+

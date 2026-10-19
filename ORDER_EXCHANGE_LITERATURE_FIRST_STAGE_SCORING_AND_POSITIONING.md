@@ -1709,3 +1709,514 @@ Lin・Jabari系列の未確認事項、Schepperle・Böhm系列内のauctionとe
 - PEXICの書誌同定は、詳細比較の順番とは別に並行して先に実施してよい。
 - 文献調査の再開地点は本§20である。
 - TVT-MP実装作業の再開地点は、本節では変更しない。実装側の最新再開地点は `ORDER_EXCHANGE_PROGRESS_3.md` の「最新の再開地点（2026-10-03・seller非空契約実装検証完了後）」である。actual passage実装項目4は、文献メモの保存・push完了まで開始しない。
+
+## 21. Lin・Jabari系列への第二段階台帳初回適用と構造的前提評価（2026-10-19）
+
+本§21は、Lin・Jabari系列に関する第二段階5台帳への初回適用結果と、第三段階へ向けた構造的前提の暫定評価の詳細正本である。§8.4、§10.2、§19、§20は削除・置換しない。それらの「第二段階は未開始」「再開地点は本§20」は、各節作成時点の歴史的記録である。Lin・Jabari系列の最新文献状態は本節である。
+
+本節の確定事項は次である。
+
+- 第一段階採点は変更しない。Lin・Jabari系列は X=10、Y=6、制度High・network Mediumのままである。
+- Lin・Jabari系列は直接競合として維持する。強い直接競合である。
+- 今回は第二段階5台帳への初回適用結果を記録する。
+- 論文の事実、著者の主張、simulation結果、こちらの評価を分離する。
+- 未確認事項を推測で埋めない。
+- TVT-MP実装側の仕様と再開地点は変更しない。
+
+研究系列IDは `LJ` とする。論文IDは `LJ-P1`、`LJ-P2` とする。主要結論IDは `LJ-C01` から `LJ-C06` とする。前提IDは `LJ-A01` から `LJ-A13` とする。依存関係IDは `LJ-E01` 以降とする。
+
+本ファイルには、本節以前に `LJ-A01` から `LJ-A10` のIDは未割当であった。本§21の初回台帳適用で、確認済み制度構造から `LJ-A01` から `LJ-A10` を割当し、`LJ-A11` から `LJ-A13` を追加する。FRAMEWORK側の未確認事項は、確認できた範囲だけを本節へ移し、未確認のままの項目は§21.13に残す。
+
+### 21.1 中核文献（A. 資料・書誌台帳）
+
+#### LJ-P1
+
+- 研究系列ID：LJ
+- 論文ID：LJ-P1
+- 正式題名：Transferable Utility Games based Intersection Control for Connected Vehicles
+- 著者：DianChao Lin、Saif Eddin Jabari
+- 掲載：2019 IEEE Intelligent Transportation Systems Conference（ITSC）
+- 開催地：Auckland, New Zealand
+- 会期：2019年10月27日から30日
+- ページ：pp. 3496–3501
+- DOI：10.1109/ITSC.2019.8917486
+- 資料種別：前身conference論文
+- 書誌：Fixed
+- 本文詳細抽出：Provisional
+- 備考：LJ-P2の前身。中核journalの制度構造を読む第一資料ではない。
+
+#### LJ-P2
+
+- 研究系列ID：LJ
+- 論文ID：LJ-P2
+- 正式題名：Pay for Intersection Priority: A Free Market Mechanism for Connected Vehicles
+- 著者：DianChao Lin、Saif Eddin Jabari
+- 掲載誌：IEEE Transactions on Intelligent Transportation Systems
+- 巻号：Vol. 23, No. 6
+- 年：2022
+- DOI：10.1109/TITS.2020.3048475
+- IEEE文書番号：9325933
+- 補助資料：arXiv:2001.01813v2
+- 資料種別：LJ-P1を拡張した中核journal論文
+- 出典固定状態：題名、著者、掲載誌、巻号、年、DOIはFixed
+- 未確認：IEEE版の正式ページ範囲。IEEE版とarXiv版との差。
+- 備考：第二段階の制度構造、支払、誘因実験、arterial実験の中核資料とする。ページ・式番号を未確認のまま断定しない。
+
+### 21.2 制度構造（B. 取引構造比較台帳・前半）
+
+原論文の制度は、旧control strategy `S(t)` と更新後strategy `S*(t)` を比較する。Vehicleごとの予測discharge time差を計算する。「予測時間差を使うこと」自体はLin・Jabariにもある。TVT-MPの独自性にしない。
+
+Vehicleごとの分類は、VOTと予測時間差の積による。
+
+- 積が正：Group A、payer
+- 積が負：Group B、payee
+- 積が0：Group C、indifferent
+
+非参加VehicleはVOTを0に設定し、Group Cへ入る。Group CはTU gameとpayment transactionへ参加しない。支払0、受取0である。
+
+VOT=0で積が0でも、予測時間差自体が0とは限らない。したがって、indifferentを交通上の時刻・順位不変と解釈しない。Baseline順位不変、Baseline discharge time不変、Delay増加防止は、この分類からは導かない。
+
+原論文のformalなVehicle groupingでは、時間利益側をpayer、時間損失側をpayee、VOT-weighted travel-time gainが0のVehicleをindifferent vehicleと呼ぶ。一方、abstractでは、winnersをtime buyers、losersをtime sellersとも表現する。したがって、buyer・sellerという語が原論文に存在しないとは扱わない。ただし、formalな支払・補償構造の比較ではpayer・payeeを基本用語とし、Lin・Jabariのtime sellerと、TVT-MPにおける順位変化上のsellerおよびactualなpayeeを同一視しない。
+
+### 21.3 Payment・compensation・budget balance
+
+Formal TU gameのplayerは、個々のVehicleではなくGroup AとGroup Bである。Group AとGroup Bのaggregate payoff合計を最大化する。Threat payoffを満たすPareto-optimal frontier上のmidpointをnatural compromiseとして採用する。AからBへの総side paymentを `α` とする。
+
+配分規則：
+
+- Payer側では、`α` を各Vehicleの予測時間利得価値に比例配分する
+- Payee側では、`α` を各Vehicleの予測時間損失価値に比例配分する
+- Group Cの支払・受取は0
+- 総payer支払額は `α`
+- 総payee受取額も `α`
+
+Budget balanceはFixedである。利用者間直接移転はFixedである。Mechanism内のoperator revenueは0となる構造である。Mechanism内で外部補助金は不要である。
+
+TVT-MPとの違い（こちらの評価）：
+
+- Lin・Jabariは総side payment `α` をTU gameで決める
+- Payer・payee双方へ予測gain比例で配分する
+- 各payeeが自身の時間損失価値全額を必ず受け取る構造ではない
+- TVT-MPは各sellerの `R_s` を個別に満たし、その合計 `R` だけをbuyer側へ配分する
+- Budget balance自体はTVT-MPの独自貢献ではない
+- 各sellerの必要補償額を個別に満たす構造が差別化候補である
+
+### 21.4 Pareto improvementとindividual rationality
+
+Formalに確認できること（論文の形式的性質）：
+
+- Group AとGroup Bのaggregate payoff合計を最大化する
+- TU solutionはPareto-optimal frontier上にある
+- Group AとGroup Bは各threat payoff以上のexpected payoffを得る
+- Group-level TU rationalityが成立する
+
+Formalに確認できないこと（未確認。推測で成立と書かない）：
+
+- 全Vehicleがstatus quo以上
+- 各payerの純benefitが必ず非負
+- 各payeeが時間損失価値全額を受け取る
+- Vehicle-level individual rationality
+- Every-user Pareto improvement
+- Ex-post Pareto improvement
+
+Group-level rationalityとVehicle-level IRを混同しない。LJ-C系のbudget balance確認から、IR・公平性・非参加者保護を自動導出しない。
+
+### 21.5 VOT misreportingと誘因性質
+
+確認済みの実験（simulation result）：
+
+- 1台のVehicleがfalse VOTを申告する
+- 他Vehicleはtruthful
+- 3-lane、4-leg isolated intersection
+- 平均traffic volumeは1200 veh/h
+- True VOTとdeclared VOTの組合せを変更する
+- Truthfulな対角線から離れると追加benefitが負になる傾向
+- Side paymentなしではVOTを誇張する誘因が報告される
+
+Gaming実験（simulation result）：
+
+- Vehicleがapproachで意図的に停止する
+- VOTは1–40 $/h
+- Arrival rateは100–900 veh/h/lane
+- 検証した全scenarioでbenefit-per-unit-timeは負
+
+正式判定：
+
+- Misreporting deterrenceは、限定されたsimulation resultとしてFixed（LJ-C04）
+- Strategy-proofnessはNot demonstrated
+- DSICはNot demonstrated
+- Truthful reportingが支配戦略とは示されていない
+- 共謀、繰返しgame、route虚偽申告、arrival time操作等は未検証
+
+X5=1の第一段階採点は維持する。制度全体のdominant-strategy保証としては2にしない。
+
+### 21.6 VOT=0 Vehicle・非参加者処理
+
+確認済み（論文の事実）：
+
+- 非参加VehicleはVOT=0
+- Group Cへ入る
+- TU gameへ参加しない
+- 支払0
+- 受取0
+
+未保証（確認できない。保護と記録しない）：
+
+- Baseline順位不変
+- Baseline discharge time不変
+- 他者間取引による順位後退防止
+- Delay増加防止
+- Traffic outcome不変
+
+Controller別整理：
+
+- Phase switchingでは、VOT=0 Vehicleのtime changeはobjectiveへ0で入る
+- Reservation-based controlでは、admissible permutation内に存在するが、価値寄与は0
+- Max-weight controlでは、traffic state内に存在するが、VOT-weighted価値寄与は0
+- Network stabilityは、個別非参加Vehicleの順位保護を意味しない
+
+TVT-MPとの差異（こちらの評価）：
+
+- Lin・Jabariは金銭取引上の非参加を保護する
+- TVT-MPは参加状態をVOTから分離する
+- TVT-MPは、他者間取引による非参加Visitの直接的baseline順位後退を防ぐ
+- TVT-MPの差別化候補は支払除外ではなく、手続的baseline順位保護である
+
+§8.4の「非参加はVOT=0であり、TVT-MP型baseline順位保護ではない」は、本節でも維持する。
+
+### 21.7 3種類のcontroller
+
+Lin・Jabari系列は、共通するeconomic frameworkおよびside-payment mechanismを、次の3種類のcontrollerへ接続する。各controllerは、それぞれの候補strategy集合とtraffic stateに基づいて更新後strategy `S*(t)` を生成する。その後、旧strategy `S(t)` と更新後strategy `S*(t)` のVehicle別予測discharge time差からGroup A、Group B、Group Cを形成し、Group AとGroup BのTU gameによって総side paymentと個別配分を決定する。
+
+したがって、traffic control strategyを選ぶ目的関数と、strategy選択後のTU gameによるpayment決定を混同しない。Controller compatibilityはLJ-C01としてConfirmedである。Max-weightのnetwork stabilityを、individual rationality、公平性、非参加者保護と混同しない。
+
+#### Phase switching method
+
+- 対象：isolated signalized intersection
+- 候補：所定のsignal cycleを構成するconflict-free phase sequenceのpermutation
+- Strategy選択目的：候補phase sequenceごとに予測される、全対象VehicleのVOT-weighted travel-time gain合計を最大化する
+- 更新：cycle全体だけでなく、各phase終了時またはminimum green後など、rolling horizon型の再評価も可能と説明される
+- 主な物理的制約：候補はconflict-free movementから構成されるphase sequenceである
+- VOT=0 Vehicle：予測時間変化があってもVOT-weighted objectiveへの直接的寄与は0になる
+- 確認できない保護：非参加Vehicleのbaseline順位、予測discharge time、actual traffic outcomeの維持
+
+#### Reservation-based control
+
+- 対象：isolated intersectionにおけるconnected Vehicleのdischarge sequence
+- 更新契機：新しいVehicleがcontrol zoneへ入りrequestを送ると、controllerがstrategyを更新する
+- 旧strategy `S(t)`：新規Vehicleをsequenceの最後に置いた、到着前strategyを基礎とする
+- 候補：control zone内の既存Vehicleと新規Vehicleを含むadmissible discharge permutation
+- Strategy選択目的：候補permutationごとに予測される、全対象VehicleのVOT-weighted travel-time gain合計を最大化する
+- 主な物理的制約：impossible overtakingを伴うsequenceなど、実行不能なpermutationを候補から除外する
+- 注意：「同一approachのFIFO等」を、確認済みの原文範囲を超えて一般化しない
+- VOT=0 Vehicle：admissible permutation内には存在するが、VOT-weighted objectiveへの直接的寄与は0になる
+- 確認できない保護：非参加Vehicleのbaseline順位維持、順位後退防止、予測discharge time維持
+
+#### Max-weight control
+
+- 対象：network-wide decentralized intersection control
+- 候補：network内の各junctionで次に選択するphase
+- Strategy選択目的：VehicleのVOT-weighted travel-time gain、movement queue、下流movement情報等から構成されるmax-weight objectiveに基づいて、各junctionのphaseを選択する
+- 分散性：各junctionでphaseを選択するdecentralized controlとして構成される
+- 主な形式的性質：論文はLyapunov driftに基づくnetwork-level traffic stabilityを示す
+- VOT=0 Vehicle：traffic queueとnetwork stateには存在するが、そのVehicle自身のVOT-weighted travel-time gainの直接的寄与は0になる
+- 注意：network stabilityは、各Vehicleのindividual rationality、公平性、非参加Vehicleのbaseline順位、traffic position、通過時刻の保護を意味しない
+
+### 21.8 Arterial実験
+
+確認済みのsimulation実装（LJ-C05）：
+
+- 4-intersection arterial
+- Max-weight control
+- Decentralized control
+- Vehicleと4交差点間で通信
+- Controller間通信あり
+- Cycle 40秒
+- Yellow 1.8秒
+- Offset 20秒
+- Coor-Pay、Iso-Pay、Coor-TVを比較
+- 検証したvolumeではCoor-Payのmean lossが最小
+
+一般networkで常に優位というformal保証ではない。Y3=2（4交差点arterialによる流の連結）とY5=1（限定的な交差点間参照）の第一段階採点は維持する。Y2をarterial存在だけで2に戻さない（§10.2維持）。spillbackの明示的処理は未確認のままである。
+
+### 21.9 主要結論台帳（C）
+
+#### LJ-C01 Controller compatibility
+
+- 研究系列ID：LJ
+- 関連論文：LJ-P2（LJ-P1は前身）
+- 正規化ラベル：Controller compatibility
+- 結論の種類：Framework constructionおよびsimulation implementation
+- 保証または主張の強さ：Confirmed
+- こちらの解釈：同一支払mechanismをphase switching、reservation-based、max-weightへ結合できる
+- 補足：3種類のcontrollerとの接続はmechanismの数式的構成として示され、一部はsimulation実装されている。独立した一般定理としてのcontroller compatibilityとは扱わない。
+- 未確認事項：各controllerの定理番号・式番号
+
+#### LJ-C02 Direct compensated priority exchange
+
+- 正規化ラベル：Direct compensated priority exchange
+- 結論の種類：Formal property
+- 保証または主張の強さ：Confirmed
+- こちらの解釈：予測discharge time差に基づきpayerとpayeeを分け、winnerからloserへ直接補償する
+- 混同禁止：各payeeが時間損失価値全額を受け取る構造ではない
+
+#### LJ-C03 Majority-user average benefit
+
+- 正規化ラベル：Majority-user average benefit
+- 結論の種類：Simulation result
+- 保証または主張の強さ：Simulation resultとしてConfirmed
+- こちらの解釈：検証した実験条件での平均benefitであり、every-user Pareto improvementではない
+
+#### LJ-C04 Misreporting deterrence
+
+- 正規化ラベル：Misreporting deterrence
+- 結論の種類：Simulation result
+- 保証または主張の強さ：限定simulation resultとしてFixed
+- こちらの解釈：single-agent marginal misreportおよびapproach停止gamingの範囲に限る
+- Strategy-proofness、DSIC：Not demonstrated
+
+#### LJ-C05 Arterial applicability
+
+- 正規化ラベル：Arterial applicability
+- 結論の種類：Simulation implementation
+- 保証または主張の強さ：Simulation implementationとしてConfirmed
+- こちらの解釈：4交差点arterialでの実装と比較結果。一般network優位のformal保証ではない
+
+#### LJ-C06 Direct-transfer budget balance
+
+- 正規化ラベル：Direct-transfer budget balance
+- 結論の種類：Formal property
+- 保証または主張の強さ：Fixed
+- こちらの解釈：総payer支払 `α` と総payee受取 `α` が一致する。operator revenueは0。外部補助金は不要
+- 混同禁止：budget balanceからIR、strategy-proofness、非参加者traffic保護を導かない。TVT-MPの独自貢献ではない
+
+### 21.10 前提条件台帳（D）
+
+普及度は直接競合3系列の調査完了前であるため、本節ではProvisionalとする。数値閾値は§20.6どおり未確定である。
+
+本台帳では、論文がassumptionまたはconditionとして置く前提だけでなく、主要結論またはmechanismの成立に不可欠なmechanism requirement、calculation requirement、simulation settingも追跡する。ただし、それらをすべて原論文の「明示的前提」と呼ばない。各項目を、少なくとも次のいずれかへ分類する。
+
+- Explicit assumption or condition
+- Mechanism definition
+- Calculation requirement
+- Physical implementation requirement
+- Explicit simulation setting
+- Conditional interpretive assumption
+- こちらの推論のみで原論文では未検証
+
+#### LJ-A01 旧strategyと新strategyの比較可能性
+
+- 内容：旧control strategy `S(t)` と更新後 `S*(t)` を比較できる
+- 分類：Mechanism definitionおよびcalculation requirement
+- 技術による解決可能性：Technology-resolvable（予測計算）
+- 結論への不可欠性：LJ-C02へEssential
+- 確認状態：Fixed
+
+#### LJ-A02 予測discharge time差の計算可能性
+
+- 内容：Vehicleごとの予測discharge time差が計算できる
+- 分類：Calculation requirement
+- 技術による解決可能性：Partly resolvable。予測誤差とactual resultの関係は未確認
+- 結論への不可欠性：LJ-C02へEssential
+- 確認状態：Fixed（予測を使うこと）。Predictedとactualの比較はUnverified
+
+#### LJ-A03 VOT×予測時間差によるGroup分類
+
+- 内容：VOTと予測時間差の積でGroup A、B、Cを分類できる
+- 分類：Mechanism definition
+- 交通上の意味：積0は金銭取引上のindifferentであり、時刻・順位不変ではない
+- 結論への不可欠性：LJ-C02へEssential
+- 確認状態：Fixed
+
+#### LJ-A04 Group-level TU game
+
+- 内容：Formal TU gameのplayerは個々のVehicleではなくGroup AとGroup Bである
+- 分類：Mechanism definition
+- 結論への不可欠性：LJ-C06およびgroup-level rationalityへEssential。Vehicle-level IRを主張する場合はLJ-A11がEssentialになる
+- 確認状態：Fixed
+
+#### LJ-A05 Natural compromiseとしてのmidpoint
+
+- 内容：Threat payoffを満たすPareto-optimal frontier上のmidpointをnatural compromiseとして採用できる
+- 分類：Mechanism design choice
+- 備考：原論文が採用するnatural compromise solutionであり、外生的な交通前提ではない
+- 結論への不可欠性：総side payment `α` の決定へEssential
+- 確認状態：Fixed
+
+#### LJ-A06 予測gain比例配分
+
+- 内容：`α` をpayer側の予測時間利得価値、payee側の予測時間損失価値へ比例配分できる
+- 分類：Mechanism design choiceおよびcalculation requirement
+- 交通上の意味：各payeeの時間損失価値全額受取を意味しない
+- 結論への不可欠性：LJ-C06の個別配分へEssential
+- 確認状態：Fixed
+
+#### LJ-A07 非参加はVOT=0でGroup C
+
+- 内容：非参加VehicleはVOT=0に設定し、Group Cへ入り、TU gameとpaymentへ参加しない
+- 分類：Mechanism definition
+- 交通上の意味：支払除外。Baseline順位保護ではない
+- 結論への不可欠性：payment不参加としてEssential。traffic position保護としてはLJ-A13を見よ
+- 確認状態：Fixed
+
+#### LJ-A08 Admissible discharge ordering
+
+- 内容：物理的に不可能な追越しを除外したadmissible discharge permutationが候補空間を制約する
+- 分類：Physical implementation requirement
+- 備考：reservation-based controlにおける明示的な候補制約（§8.4でも確認）
+- 適用範囲：とくにreservation-based control
+- 技術による解決可能性：Technology-resolvable
+- 結論への不可欠性：LJ-C01のreservation経路へEssential。Y1=2の根拠
+- 確認状態：Fixed
+
+#### LJ-A09 3種類のcontrollerがstrategyを生成できる
+
+- 内容：Phase switching、reservation-based、max-weightが `S(t)` と `S*(t)` を生成できる
+- 分類：Physical implementation requirementおよびframework construction requirement
+- 結論への不可欠性：LJ-C01へEssential
+- 混同禁止：max-weightのnetwork stabilityをIR・公平性・非参加者保護としない
+- 確認状態：Fixed
+
+#### LJ-A10 Arterial通信と制御設定
+
+- 内容：4交差点arterialで、Vehicle–交差点通信、controller間通信、cycle 40秒、yellow 1.8秒、offset 20秒の設定が使える
+- 分類：Explicit simulation setting
+- 技術による解決可能性：Technology-resolvable
+- 結論への不可欠性：LJ-C05へEssential。一般network保証へはPeripheral
+- 確認状態：Fixed（実験設定として）。一般network優位はNot demonstrated
+
+#### 原論文の確認済み結論を越えて解釈する場合の条件付き前提
+
+LJ-A11からLJ-A13は、Lin・Jabariが実際に提示した限定結論の成立に必要な前提ではない。原論文の結果を、Vehicle-level individual rationality、一般的strategy-proofness、交通上の非参加者保護まで拡張して読む場合にだけ必要となる条件付き解釈前提である。これらが満たされないことを理由に、原論文が実際に示したgroup-level TU rationality、限定misreporting simulation、payment不参加まで否定しない。
+
+#### LJ-A11 Group-level TU rationalityをVehicle-level IRの代替として扱える
+
+- 分類：Conditional interpretive assumption
+- 根拠区分：こちらの推論のみで、原論文では未検証（Vehicle-level IRとして読む場合）
+- 技術による解決可能性：Structurally difficult
+- 結論への不可欠性：Vehicle-level IRへ拡張する場合のみEssential。Group-level TU solutionだけならPeripheral
+- 確認状態：こちらの評価として記録。原論文の明示的主張ではない
+- 保護措置：未確認
+
+#### LJ-A12 Single-agent marginal misreport実験で一般的戦略行動を十分評価できる
+
+- 分類：Conditional interpretive assumption
+- 根拠区分：シミュレーション設定によって固定
+- 技術による解決可能性：Structurally difficult
+- 結論への不可欠性：一般的strategy-proofnessへ拡張する場合のみEssential。限定simulation結論ならPeripheral
+- 確認状態：LJ-C04を限定simulation resultとして読む場合はPeripheral扱い
+- 未検証：共謀、繰返しgame、route虚偽申告、arrival time操作、Sybil attack
+
+#### LJ-A13 VOT=0によるtransaction除外で非参加者保護として十分
+
+- 分類：Conditional interpretive assumption
+- 根拠区分：制度運用上必要（payment不参加を保護と読む場合）
+- 技術による解決可能性：Structurally difficult
+- 結論への不可欠性：交通上の非参加者保護へ拡張する場合のみEssential。Payment不参加だけならPeripheral
+- Baseline順位保護は確認できない
+- 確認状態：payment不参加はFixed。traffic position保護はUnverified
+
+### 21.11 結論・前提依存関係台帳（E）と第三段階への暫定評価
+
+#### 依存関係の初回記録
+
+- LJ-E01：LJ-C01 ← LJ-A08、LJ-A09。不可欠性 Essential。判定確度 Fixed
+- LJ-E02：LJ-C02 ← LJ-A01、LJ-A02、LJ-A03、LJ-A04、LJ-A05、LJ-A06。不可欠性 Essential。旧strategyと新strategyの比較、予測discharge time差、Group分類、Group-level TU game、natural compromiseによる総side payment決定、予測gain比例配分によってdirect compensated priority exchangeが構成される。判定確度 Fixed
+- LJ-E03：LJ-C03 ← 実験条件（isolated交差点volume等）。Simulation result。weaker conclusionとして平均benefitに限定。Every-user Paretoはなし
+- LJ-E04：LJ-C04 ← 明示された実験条件（1台だけがfalse VOTを申告し、他Vehicleはtruthful、3-lane・4-leg isolated intersection、平均traffic volume 1200 veh/h等）。当該条件は、限定されたmisreporting simulation resultの適用範囲を定めるためEssential。LJ-A12はLJ-C04そのものの成立前提ではなく、この限定結果を一般的strategy-proofnessへ拡張解釈する場合だけEssentialとなる。一般的strategy-proofness自体はNot demonstrated
+- LJ-E05：LJ-C05 ← LJ-A10、LJ-A09（max-weight）。不可欠性 Essential（当該実験）。一般network保証はなし
+- LJ-E06：LJ-C06 ← LJ-A04、LJ-A05、LJ-A06。不可欠性 Essential。判定確度 Fixed
+
+#### 原論文が提示していない強い結論への条件付き依存関係
+
+LJ-E07とLJ-E08は、原論文が提示した主要結論（LJ-C01からLJ-C06）への依存関係ではない。未提示の強い結論への条件付き依存関係である。LJ-C01からLJ-C06と同列の確認済み主要結論として扱わない。
+
+- LJ-E07：Vehicle-level IR（原論文では未提示）← LJ-A11
+- LJ-E08：非参加者traffic position保護（原論文では未提示）← LJ-A13
+
+#### 系列全体の暫定評価
+
+Lin・Jabari系列全体の構造的前提依存性は、LowからMedium候補である。重大な非現実的前提によって価値を大幅に割り引ける研究ではない。強い直接競合として維持する。
+
+第三段階のLow、Medium、Highの正式閾値は§20.10どおり未確定である。以下は暫定ラベルであり、第三段階の正式判定ではない。
+
+内訳：
+
+- Budget balance：Low dependency
+- Controller compatibility：Low dependency
+- Majority-user benefit：Medium dependency
+- Misreporting deterrence：限定simulation結論としてMedium dependency
+- 一般的strategy-proofnessとして読む場合：High dependencyだがformal proofなし
+- Group-level TU rationality：Low dependency
+- Vehicle-level IRとして読む場合：MediumからHigh dependency
+- 非参加者のpayment不参加：Low dependency
+- 非参加者のtraffic position保護：保証自体が示されていない
+
+Technology-resolvableな通信・予測計算前提を、重大欠点として扱わない（§19.5維持）。
+
+### 21.12 TVT-MPとの比較更新
+
+Lin・Jabariにもあるため、TVT-MPの単独独自貢献としないもの：
+
+- Baseline strategyとnew strategyの比較
+- Vehicleごとの予測discharge time差
+- 時間利益側・損失側の分類
+- VOTとpredicted time differenceの積
+- Payerとpayee
+- Winnerからloserへの直接補償
+- 利用者間budget balance
+- 非参加Vehicleのpayment除外
+- Admissible discharge ordering
+- Arterial評価
+- VOT虚偽申告simulation
+- Max-weight controlとの統合
+
+引き続き有力なTVT-MP差別化候補（こちらの評価。実装仕様の変更ではない）：
+
+- 参加状態をVOTと分離
+- 非参加Visitのbaseline順位保護
+- 順位上のsellerとactual payeeの分離
+- 各sellerの必要補償額 `R_s` の個別充足
+- Buyer側だけが必要補償総額 `R` を分担
+- 順位変化と時間変化の分離
+- Candidate予測とactual passageの比較
+- Nonparticipatingへのactual外部効果記録
+- 複雑なtraffic simulation条件との統合
+
+「予測時間差を使うこと」自体をTVT-MPの独自性としない。Budget balance単独を独自貢献としない（§20.9維持）。
+
+### 21.13 未確認事項
+
+少なくとも次は未確認のまま残す。推測で埋めない。
+
+- IEEE最終版（LJ-P2）の正式ページ範囲
+- IEEE版とarXiv:2001.01813v2との差
+- Vehicle-level IRの別証明
+- Predicted discharge timeとactual resultの比較
+- 予測が外れた場合のsettlement
+- Long-run fairness
+- Collusion
+- Route虚偽申告
+- Arrival time操作
+- Sybil attack
+- VOT=0 Vehicleのactual delay分布
+- Spillbackの明示的処理
+- 詳細OD構造
+- Route choice
+- 定理番号、式番号、LJ-P2本文のページ引用
+- LJ-P1本文の詳細抽出（Provisionalのまま）
+- Common、Cluster-specific、Rare、Paper-specificの数値閾値
+- 第三段階のLow、Medium、Highの正式閾値
+
+§8.4に残していた「非参加車両のdischarge順位変化のcontroller条件」のうち、金銭取引上の扱い（VOT=0、Group C、価値寄与0）は本節で確認した。Actual delay分布とbaseline順位保護は、引き続き未確認である。
+
+### 21.14 文献調査の現在地
+
+- 第一段階採点は変更していない。
+- 第二段階の比較方法と記録様式は§20のままである。
+- Lin・Jabari系列への第二段階5台帳初回適用は、本§21で完了した。
+- Lin・Jabari系列は強い直接競合として維持する。
+- 次の文献作業は、Schepperle・Böhm系列への第二段階台帳適用である。比較順は§20.7どおり第2対象である。
+- PEXICの書誌同定は、詳細比較の順番とは別に並行して先に実施してよい。
+- 文献調査の再開地点は本§21である。
+- TVT-MP実装側の仕様と再開地点は変更しない。

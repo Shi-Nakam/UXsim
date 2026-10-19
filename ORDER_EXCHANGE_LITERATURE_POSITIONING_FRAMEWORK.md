@@ -789,6 +789,73 @@ baseline処理順位の維持率は、制度性能の優劣を測る主要な結
 
 第二段階の具体的な論文比較、全文確認、書誌固定、台帳記入は未開始である。次の文献作業は、必要な原論文、全文資料、書誌、出典箇所の固定と、Lin・Jabari系列への台帳初回適用である。文献調査の再開地点は詳細正本§20である。TVT-MP実装作業の再開地点は本節で変更しない。
 
+## 5C. Lin・Jabari系列への第二段階初回適用結果（2026-10-19）
+
+詳細正本は `ORDER_EXCHANGE_LITERATURE_FIRST_STAGE_SCORING_AND_POSITIONING.md` の§21である。本§5Cは要約であり、台帳の全文転載ではない。第一段階採点（Lin・Jabari系列 X=10、Y=6）は変更しない。TVT-MP実装仕様、実装側の再開地点、Candidate P対Actual Pの動的反証診断は本節で変更しない。
+
+### 5C.1 中核文献
+
+- **LJ-P1：** *Transferable Utility Games based Intersection Control for Connected Vehicles*（2019 IEEE ITSC）。前身conference論文。
+- **LJ-P2：** *Pay for Intersection Priority: A Free Market Mechanism for Connected Vehicles*（*IEEE Transactions on Intelligent Transportation Systems*, Vol. 23, No. 6, 2022）。LJ-P1を拡張した中核journal論文。
+- IEEE最終版の正式ページ範囲とarXiv版との差は未確認。
+
+### 5C.2 直接競合としての位置付け
+
+- Lin・Jabari系列は強い直接競合として維持する。
+- 重大な非現実的前提によって研究価値を大幅に割り引ける系列ではない。
+- 系列全体の構造的前提依存性はLowからMedium候補（第三段階の正式判定ではなく暫定評価。Low・Medium・Highの正式閾値は未確定）。
+
+### 5C.3 Formal mechanismの確認結果
+
+- 旧strategyと更新後strategyの予測discharge time差を計算する。
+- VOT-weighted time gainによりpayer、payee、indifferentを分類する。
+- Group AとGroup Bを2playerとするTU gameを用いる。
+- 総side paymentを各payerとpayeeへ予測gain比例で配分する。
+- 総payer支払額と総payee受取額が一致する（budget balanceはFixed。利用者間直接移転はFixed）。
+- Budget balance自体はTVT-MPの独自貢献ではない。
+
+### 5C.4 Group-level rationalityとVehicle-level IR
+
+- Group AとGroup Bについて、threat payoffを基準とするgroup-level TU rationalityを確認した。
+- TU solutionはPareto-optimal frontier上のnatural compromiseとして構成される。
+- Vehicle-level individual rationality、every-user Pareto improvementは確認できない。
+- 各payeeが時間損失価値全額を受け取る構造ではない。
+- Group-level TU rationalityをVehicle-level IRと書かない。
+
+### 5C.5 誘因性質
+
+- Single-agent marginal VOT misreport実験と、physical obstructionによるgaming実験を確認した。
+- Misreporting deterrenceは限定されたsimulation resultとしてFixed。
+- Strategy-proofness、DSICはNot demonstrated。
+- 共謀、繰返しgame、route虚偽申告、arrival time操作等は未検証。
+- 限定simulation resultを一般的strategy-proofnessへ拡張しない。
+
+### 5C.6 非参加Vehicle
+
+- 非参加VehicleはVOT=0としてGroup Cへ入り、TU gameとpayment transactionから除外される（支払0、受取0）。
+- VOT-weighted gainが0でも予測時間差そのものが0とは限らない。
+- Baseline順位保護、baseline discharge timeの維持、traffic outcome不変は確認できない。
+- 金銭的非参加と交通上の保護を区別する。
+
+### 5C.7 Controller compatibility
+
+Phase switching、reservation-based control、max-weight controlへの接続を確認した。
+
+- Controller strategyの選択と、選択後のTU gameによるpayment決定は別処理である。
+- Controller compatibilityはFramework constructionおよびsimulation implementationであり、独立した一般定理としてのcompatibilityではない。
+- Max-weightのnetwork stabilityをIR、公平性、非参加者保護と混同しない。
+
+### 5C.8 TVT-MPとの差別化候補
+
+Lin・Jabariにも存在するため、TVT-MPの単独独自貢献としないもの：予測discharge time差、VOTと予測時間差の積、payerとpayee、winnerからloserへの直接補償、budget balance、非参加Vehicleのpayment除外、admissible discharge ordering、arterial評価、VOT虚偽申告simulation、max-weight controlとの統合。
+
+引き続き有力なTVT-MP差別化候補（組合せとして評価する。未実装・未評価のTVT-MP機能を確定済み成果として扱わない）：参加状態とVOTの分離、非参加Visitの手続的baseline順位保護、順位上のsellerとactual payeeの分離、各sellerの必要補償額R_sの個別充足、buyer側だけが必要補償総額Rを分担、順位変化と時間変化の分離、Candidate予測とactual passageの比較、nonparticipatingへのactual外部効果記録、複雑なtraffic simulation条件との統合。
+
+### 5C.9 次の文献作業
+
+- 次の直接対象はSchepperle・Böhm系列（正式書誌、全文資料、系列内のauctionとexchangeの分担、出典箇所の固定の後、第二段階5台帳へ初回適用）。
+- Lin・Jabari系列の未確認事項は詳細正本§21.13を参照する。
+
 ## 6. 図における点数の扱い
 
 - 点数化は内部分析として使用する。
