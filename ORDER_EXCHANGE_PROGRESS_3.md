@@ -6073,3 +6073,200 @@ seller `veh_ee_19:1`:
 
 **本節が、TVT-MP実装・実験側の最新再開地点である。**
 
+# 西側・東側NodeのC順位連続性と2回目Visitの順位台帳登録確認完了（2026-10-21）
+
+本節は再開用要約である。**技術的正本**は `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_5.md` の **### 16.15 西側・東側NodeのC順位連続性と2回目Visitの順位台帳登録確認（2026-10-21）** である。需要の時間帯や監査手順の詳細は正本を参照し、本節へ重複記載しない。
+
+直前の「# nonparticipating約20％混入trial・順位保護・difference=1境界反証・同一inlink複数buyer比較完了（2026-10-20）」は当時の最新再開地点として残す。**最新再開地点**は本節を参照する。
+
+## 1. 確認方法
+
+- 確認対象は **C順位** である `assigned_rank`
+- `actual_node_passage_rank` の全件連続性監査ではない
+- 成立取引partyだけのCSVではなく、simulation終了時WorldのNode別 **rank ledger** を直接監査した
+- `OrderControlTvtNodeRankState.export_state()` の `confirmed_visits` と `undetermined_visits` を使用した
+- nonparticipating約20％混入trialを研究出力の保存なしで再実行した
+- productionコード、trialスクリプト、研究出力は変更していない
+
+## 2. 西側交差点
+
+- `west_north` 発生150台、`west_south` 発生101台、合計 **西側251台**
+- 西側交差点では1 Vehicleにつき対象Visitは最大1回
+- confirmed Visit=251、undetermined Visit=0
+- **C順位1〜251**、欠番0、C順位重複0、VisitKey重複0
+- `assigned_rank_sequence_is_continuous=True`
+
+**限定付き結論**: 西側交差点へ向けて発生させた251台すべてについて、C順位1〜251が一意に確定した。ただし、C順位確定だけから全251台の実Node通過完了を結論づけない。
+
+**西側最後の成立取引**
+
+- T=367、C順位216〜219、buyer3台、seller1台
+- T=367より後の成立取引なし
+- C順位220〜251の32 Visitも確定済み
+- その32 Visitの実通過完了を順位台帳だけから断定しない
+
+## 3. 東側交差点
+
+**期待Visit**
+
+- Visit ID=1: 300
+- Visit ID=2: 99（西側北側から発生し、西側交差点通過後に東側交差点へ進むVehicle）
+- 合計 **東側399 Visit**
+
+**終了時点**
+
+- **316 confirmed**、**83 undetermined**
+- Visit ID=1: confirmed 240、undetermined 60、合計300
+- Visit ID=2: **76 confirmed**、**23 undetermined**、合計99
+
+**照合結果**
+
+- expected Visit ID=1の **未登録・欠落0**
+- expected Visit ID=2の **未登録・欠落0**
+- 想定外confirmed Visit 0、想定外undetermined Visit 0
+- **316 confirmed + 83 undetermined = 399 expected**
+- **76 confirmed + 23 undetermined = 99 expected**
+
+西側交差点通過後に東側交差点へ向かう **2回目Visit** 99件は、確定76・未確定23として全件rank ledgerへ登録され、**欠落0**だった。
+
+## 4. 東側C順位の連続性
+
+- `k_confirmed=316`
+- **C順位1〜316**、欠番0、C順位重複0、VisitKey重複0、想定範囲外順位0
+- export保存順とassigned rank順が一致
+- `assigned_rank_sequence_is_continuous=True`
+
+**未確定83 Visit**
+
+- 消失・未登録ではない。rank ledgerの `undetermined_visits` として保持されている
+- 評価終了時点までにC順位が確定しなかったVisitである
+
+次は断定しない: 未確定83が必ず317位以降へ確定する／評価期間延長で全件確定する／C順位確定済みVisitがすべて実Node通過済みである。
+
+## 5. 結論
+
+- 西側では期待251台とC順位確定251件が一致した
+- 東側では期待399 Visitが確定316または未確定83として全件台帳に存在した
+- 東側の確定済みC順位1〜316は欠番・重複なしだった
+- 2回目Visit 99件も全件登録され、欠落0だった
+- Visit ID=1とVisit ID=2の混同は確認されなかった
+- 複数交差点を通るVehicleについても、VisitKeyを用いた順位台帳登録に明確な不整合は確認されなかった
+
+今回のnetwork、需要、seed、nonparticipating抽出、評価終了時点T=600に限定した結果である。
+
+## 6. 最新再開地点
+
+**今回追加で完了**
+
+- 西側C順位1〜251の連続性確認
+- 西側期待Vehicle 251台との照合
+- 東側期待399 Visitとの照合
+- 東側C順位1〜316の連続性確認
+- Visit ID=2の99件について、確定76・未確定23・未登録0の確認
+- 詳細設計第5巻§16.15への技術記録
+- §16.15の全文独立確認
+
+**次の作業**
+
+1. 今回の順位台帳監査を再実行可能な診断スクリプトとして保存するか判断する
+2. 保存する場合は既存trialを変更せず、新規診断スクリプトとする
+3. 保存不要なら、メモ変更だけを保存する
+4. 保存対象と作業ツリーを確認する
+5. `document`を含むコミット名を検討する
+6. コミット確認後、pushは別指示で行う
+7. その後、複雑network検証へ進むか判断する
+
+**本節が、TVT-MP実装・実験側の最新再開地点である。**
+
+### 再実行可能な診断スクリプトと本体実行
+
+**新規診断スクリプト**
+
+- `research_scripts/diagnose_tvt_mp_nonparticipating_20_node_rank_ledger_continuity.py`
+
+**目的**
+
+- Terminalの一時監査を再実行可能にする
+- `west_intersection` と `east_intersection` のrank ledgerを直接監査する
+- C順位である `assigned_rank` の連続性を確認する
+- 東側のVisit ID=1とVisit ID=2を期待集合と照合する
+- `actual_node_passage_rank` の全件連続性監査ではない
+
+**安全契約**
+
+- `trial.main()` は呼ばない
+- simulationは1回だけ、追加World.copyなし
+- 研究CSVを書き出さない、`research_outputs` を新規作成・上書きしない
+- 出力は標準出力だけ
+- spillback observation hookは `run_simulation_once()` 内の `finally` で1回だけ復元
+- recursion limitは `main()` の `finally` で復元
+
+**二重restore**
+
+実装確認中、hook restoreが `run_simulation_once()` と `main()` の両方から呼ばれる **二重restore** を発見した。`main()` 側の余分なrestoreを削除し、hookのinstallとrestoreを `run_simulation_once()` へ一元化した。restore関数の冪等性に依存しない構造へ修正した。
+
+**静的検証**
+
+- `py_compile` 成功
+- `--static-validate-only` 成功
+- 出力: `Static contract validation passed.`
+
+**本体実行**
+
+- 630 timestepのtrial simulationを1回実行
+- simulation終了時 `world_T=600`
+- 実行時間は出力上、約1737秒（約29分）
+- 終了コード0
+- 最終出力: `final_overall_status=passed`、`Node rank ledger continuity diagnostic passed.`
+
+**西側**
+
+- expected=251、confirmed=251、undetermined=0
+- missing_unregistered=0、unexpected confirmed=0、unexpected undetermined=0
+- C順位1〜251、missing rank=0、duplicate rank=0、duplicate VisitKey=0
+- **west continuity=True**
+
+**東側**
+
+- Visit ID=1: expected=300、confirmed=240、undetermined=60、missing=0
+- Visit ID=2: expected=99、confirmed=76、undetermined=23、missing=0
+- 全体: expected=399、confirmed=316、undetermined=83
+- unexpected confirmed=0、unexpected undetermined=0
+- C順位1〜316、missing rank=0、duplicate rank=0、duplicate VisitKey=0
+- **east continuity=True**
+
+**結論**
+
+- 詳細設計第5巻§16.15の一時監査結果を、新規診断スクリプトでも再現した
+- 西側・東側とも確定済みC順位の連続性監査に合格した
+- 東側の2回目Visit 99件は、確定76・未確定23として全件登録され、欠落0だった
+- production、既存trial、既存診断、研究出力は変更していない
+
+### 最新再開地点（診断スクリプト本体実行後）
+
+**完了**
+
+- 順位台帳監査の診断スクリプト化
+- 二重restore修正
+- `py_compile`
+- static validation
+- 630 timestep本体実行
+- 西側・東側の監査合格
+- 詳細設計第5巻への本体実行結果の記録
+- 詳細設計追記内容の独立確認
+
+**次の作業**
+
+1. 保存対象を次の3ファイルとして確認する
+   - `ORDER_EXCHANGE_PROGRESS_3.md`
+   - `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_5.md`
+   - `research_scripts/diagnose_tvt_mp_nonparticipating_20_node_rank_ledger_continuity.py`
+2. `git diff --check` と作業ツリーを確認する
+3. 新規診断スクリプトの検証状態を最終確認する
+4. `document`を含むコミット名を検討する
+5. コミット結果と残存変更を確認する
+6. pushはコミット確認後の別指示で行う
+7. 保存完了後、複雑network検証へ進むか判断する
+
+**本小見出しが、TVT-MP実装・実験側の最新再開地点である。**
+

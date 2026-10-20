@@ -5480,3 +5480,265 @@ difference=1 Visitが存在しなかったのではない。**candidate_visits�
 5. コミット結果と残存変更を確認する
 6. pushはコミット確認後の別指示で行う
 7. 文書保存後、複雑network検証へ進むか判断する
+
+### 16.15 西側・東側NodeのC順位連続性と2回目Visitの順位台帳登録確認（2026-10-21）
+
+本節（2026-10-21）は、nonparticipating約20％混入trialの評価終了時点における **C順位（連続）**（`assigned_rank`）と **順位台帳**（**rank ledger**）の整合を確認した記録である。`actual_node_passage_rank` の全件連続性監査ではない。
+
+検索用の問いの例: **C順位が1から最後まで連続しているか**。**C順位に数字の抜けがないか**（**欠番**）。**二つ目の交差点**へ来るVehicleにもC順位が付いているか。**西側交差点**通過後に**東側交差点**へ来るVehicleの順位。**2回目Visit**が順位台帳から**欠落**していないか（**未登録**・**欠落**0）。
+
+#### 確認目的
+
+- ある対象Nodeについて、**C順位**（連続）が1から最終確定順位まで**欠番**なく連続しているか
+- 同じC順位が複数Visitへ**重複**していないか
+- 同じ **VisitKey** へ複数のC順位が割り当てられていないか
+- **西側交差点**通過後に**東側交差点**へ向かう、対象交差点Visitが**2回目Visit**となるVehicleについても、東側Nodeの順位台帳へ漏れなく登録されているか
+- **Visit ID=1** と **Visit ID=2** が混同されていないか
+- 評価終了時点でC順位未確定のVisitが、消失せず未確定集合として保持されているか
+
+#### 検証方法
+
+- 成立取引のpartyだけを保存した `tvt_mp_visits.csv` では、trade scope外Visit、baseline fallback確定Visit、先行確定Visitなどが含まれないため、Node全体のC順位連続性確認には使用しなかった
+- nonparticipating約20％混入trialを、既存研究出力を上書きせず、研究出力を新規保存しない方法で再実行した
+- simulation終了時のWorldにあるNode別順位台帳を直接監査した
+- 対象属性: `world.order_control_tvt_rank_states_by_node_name`
+- 各Nodeの `OrderControlTvtNodeRankState.export_state()` から `confirmed_visits`、`undetermined_visits`、`assigned_rank`、`vehicle_name`、`visit_id` を取得した
+- 検査項目: 最小・最大C順位、1から最大までの欠番、C順位重複、VisitKey重複、想定範囲外順位、`confirmed_visits` の保存順と `assigned_rank` 順の一致、`k_confirmed()` と確定Visit件数の一致、期待Visit集合と確定済み・未確定・未登録Visit集合の照合
+- productionコード、trialスクリプト、診断スクリプト、研究出力は変更していない
+
+#### rank ledger（順位台帳）の意味
+
+**rank ledger** は対象Nodeごとに次を保持する。
+
+- どのVisitのC順位が確定したか
+- 各Visitへ何位を割り当てたか（`assigned_rank`）
+- まだC順位未確定の登録済みVisitはどれか
+
+管理単位はVehicle単体ではなく **VisitKey** `(vehicle_name, visit_id)` である。同一Vehicleの1つ目の対象交差点Visitと **2回目Visit**（**複数交差点**）を区別できる。
+
+#### 西側交差点の需要構成
+
+西側交差点へ向けて発生させたVehicleは合計 **251台**。
+
+| 発生元 | 台数 |
+|--------|------|
+| `west_north` | 150台 |
+| `west_south` | 101台 |
+| 合計 | **251台** |
+
+**`west_north`**
+
+- T=15〜114に各timestep 1台（100台）
+- T=115〜219は発生なし
+- T=220〜269に各timestep 1台（50台）
+- 合計150台、同一timestepでの複数台発生なし
+
+**`west_south`**
+
+- T=15〜113の奇数timestepに各1台（50台）
+- T=115〜219は発生なし
+- T=220〜320の偶数timestepに各1台（51台）
+- 合計101台、同一timestepでの複数台発生なし
+
+このnetworkでは西側交差点へ向かうVehicleは西側通過後に同交差点へ戻らないため、**西側交差点**については1 Vehicleにつき対象Visitは最大1回である。
+
+#### 西側交差点のC順位結果
+
+評価終了時点: `world_T=600`、Node=`west_intersection`。
+
+| 項目 | 結果 |
+|------|------|
+| `k_confirmed` | 251 |
+| confirmed Visit | 251 |
+| unique VisitKey | 251 |
+| unique assigned rank | 251 |
+| 最小C順位 | 1 |
+| 最大C順位 | 251 |
+| 欠番 | 0 |
+| C順位重複 | 0 |
+| VisitKey重複 | 0 |
+| 想定範囲外順位 | 0 |
+| export保存順とassigned rank順の一致 | True |
+| undetermined Visit | 0 |
+| `assigned_rank_sequence_is_continuous` | True |
+
+西側交差点へ向けて発生させた **251台** と、C順位確定Visit 251件が一致した。
+
+**限定付き結論（西側）**: 北側・南側から発生させた251台すべてについて、**C順位1〜251** が1 Visitにつき1つ、欠番・重複なく確定した。確認したのはC順位（`assigned_rank`）であり、251台すべての実Node通過完了をこの結果だけから結論づけない。
+
+#### 西側交差点の最後の成立取引
+
+- 意思決定時刻 T=367、Node=`west_intersection`
+- buyer 3台、seller 1台、nonparticipating 0台
+
+当事者（C順位と **VisitKey**）:
+
+- C順位216: `veh_ws_94:1`、buyer
+- C順位217: `veh_ws_95:1`、buyer
+- C順位218: `veh_ws_96:1`、buyer
+- C順位219: `veh_wn_123:1`、seller
+
+この取引以後にもC順位220〜251の32 Visitが確定しているが、西側交差点でT=367より後に成立したTVT取引はない。「C順位220〜251が実際に通過済み」とは、本順位台帳確認だけからは記録しない。
+
+#### 東側交差点の期待Visit集合
+
+**Visit ID=1** — 東側で発生し、東側交差点が最初の対象交差点となるVehicle
+
+- `east_north`: 100台
+- `east_outer`: 100台
+- `east_south`: 100台
+- 合計 **300** Visit
+
+**Visit ID=2** — 西側北側から発生し、西側交差点通過後に東側交差点へ進むVehicle
+
+- orig=`west_north`、dest=`east_outer`、planned_movement=`left`
+- **99台**（東側交差点では **Visit ID=2**）
+
+東側交差点の期待Visit合計: Visit ID=1が300 + Visit ID=2が99 = **399 Visit**。
+
+次のVehicleは東側交差点へ進まない: `west_north → west_south` 51台、`west_south → west_outer` 101台。
+
+#### 東側交差点の順位台帳結果
+
+評価終了時点: `world_T=600`、Node=`east_intersection`。
+
+| 区分 | Visit ID=1 | Visit ID=2 | 合計 |
+|------|------------|------------|------|
+| 期待 | 300 | 99 | **399** |
+| confirmed | 240 | **76 confirmed** | **316 confirmed** |
+| undetermined | 60 | **23 undetermined** | **83 undetermined** |
+
+照合:
+
+- Visit ID=1: 240 confirmed + 60 undetermined = 300 expected
+- Visit ID=2: **76 confirmed + 23 undetermined = 99 expected**
+- 全体: **316 confirmed + 83 undetermined = 399 expected**
+
+欠落・想定外:
+
+- expected Visit ID=1の未登録・欠落=0
+- expected Visit ID=2の未登録・欠落=0
+- 想定外のconfirmed Visit=0
+- 想定外のundetermined Visit=0
+
+西側交差点通過後に東側交差点へ向かう99台すべてが、東側Nodeの順位台帳へ **Visit ID=2** として登録されていた（C順位確定済み76、登録済みだがC順位未確定23、**未登録・欠落=0**）。
+
+#### 東側交差点の確定済みC順位連続性
+
+- `k_confirmed=316`
+- 最小C順位=1、最大C順位=316
+- unique assigned rank=316
+- 欠番=0、C順位重複=0、VisitKey重複=0、想定範囲外順位=0
+- export保存順とassigned rank順の一致=True
+- `assigned_rank_sequence_is_continuous=True`
+
+東側交差点で評価終了時点までに確定したC順位は **1〜316** まで欠番・重複なく連続している。未確定83 Visitに対して、確定済みC順位列の途中へ予約順位や穴を設けていない。
+
+**未確定83 Visitの意味**
+
+未確定83 Visitは消失・未登録ではない。評価終了時点までにC順位が確定しなかったため、順位台帳の `undetermined_visits` として保持されている。将来の順位付与を実際に継続実行して確認したわけではないため、「未確定83 Visitは必ず317位以降へ確定する」「評価期間を延長すれば全件確定する」とは断定しない。
+
+#### 限定付き結論
+
+- **西側交差点**では、期待Vehicle **251台** とC順位確定Visit 251件が一致し、C順位1〜251は欠番・重複なしだった
+- **東側交差点**では、期待 **399 Visit** の全件が、確定316または未確定83として順位台帳に存在した
+- 東側で確定済みのC順位1〜316は欠番・重複なしだった
+- 西側通過後に東側へ進む2回目Visit 99件は、確定76、未確定23として全件登録され、未登録・欠落0だった
+- **Visit ID=1** と **Visit ID=2** の期待集合との不一致はなかった
+- 同一Vehicleの複数対象交差点Visitを、VisitKeyにより区別して管理できていた
+- **複数交差点**を通るVehicleについても、東側Nodeの順位台帳登録とC順位確定済み部分の連続性に明確な不整合は確認されなかった
+
+**限定**
+
+- 確認したのはC順位である `assigned_rank`。`actual_node_passage_rank` の全件連続性監査ではない
+- C順位確定は実Node通過完了と同義ではない
+- 東側の未確定83 Visitについて、将来の最終C順位までは確認していない
+- 今回のnetwork、需要、seed、nonparticipating抽出、評価終了時点T=600に対する結果である
+
+#### 最新再開地点
+
+**今回追加で完了**
+
+- 西側交差点のC順位1〜251の連続性確認
+- 西側期待Vehicle 251台との照合
+- 東側交差点の期待399 Visitとの照合
+- 東側C順位1〜316の連続性確認
+- Visit ID=2の99件について、確定76・未確定23・未登録0の確認
+- 複数交差点Visitの順位台帳登録確認
+
+**次の作業**
+
+1. 本§16.15の独立確認
+2. `ORDER_EXCHANGE_PROGRESS_3.md`へ短い再開用要約を別作業で追記
+3. 必要なら今回の監査を再実行可能な診断スクリプトとして保存するか判断
+4. 保存する場合は、既存trialを変更せず新規診断スクリプトとする
+5. 記録・検証完了後、複雑network検証へ進むか判断する
+
+#### 再実行可能な順位台帳診断の作成と本体実行完了
+
+Terminalへ貼り付けた一時監査だけで終わらせず、再実行可能な新規診断スクリプトを作成した。
+
+- 新規ファイル: `research_scripts/diagnose_tvt_mp_nonparticipating_20_node_rank_ledger_continuity.py`
+- 既存trialの `main()` は、既存出力directory拒否と研究出力書込みを行うため使用しない
+- trialのWorld構築・Vehicle追加・simulation実行経路だけを再利用する
+- 研究CSVを書き出さない。`research_outputs` を新規作成・上書きしない
+- simulationは1回だけ実行する。追加World.copyは行わない
+- spillback observation hookは `run_simulation_once()` 内の `finally` で **1回だけ** 復元する
+- Python recursion limitは `main()` の `finally` で復元する
+- **二重restore解消**: 実装前独立確認で `main()` の `finally` にも `restore` があり二重実行となる構造を発見し、`main()` 側の余分な `restore_real_world_spillback_observation()` を削除した（restore関数の冪等性には依存しない）
+- 出力は標準出力だけである
+
+**静的検証**
+
+- `py_compile` 成功
+- `--static-validate-only` 成功
+- 出力: `Static contract validation passed.`
+
+**本体実行**
+
+- nonparticipating約20％混入trialを630 timestep実行
+- simulation終了時 `world_T=600`
+- 実行時間は出力上、約1737秒（約29分）
+- 終了コード0
+- 最終出力: `final_overall_status=passed`、`Node rank ledger continuity diagnostic passed.`
+
+**西側再現結果**
+
+- expected=251、confirmed=251、undetermined=0
+- missing_unregistered=0、unexpected_confirmed=0、unexpected_undetermined=0
+- rank min=1、rank max=251
+- missing ranks=0、duplicate ranks=0、duplicate VisitKeys=0
+- **west continuity=True**
+
+**東側再現結果**
+
+- Visit ID=1: expected=300、confirmed=240、undetermined=60、missing=0
+- Visit ID=2: expected=99、confirmed=76、undetermined=23、missing=0
+- 全体: expected=399、confirmed=316、undetermined=83
+- unexpected confirmed=0、unexpected undetermined=0
+- rank min=1、rank max=316
+- missing ranks=0、duplicate ranks=0、duplicate VisitKeys=0
+- **east continuity=True**
+
+**結論**
+
+- §16.15へ記録した一時監査結果は、新規診断スクリプトの本体実行でも再現された
+- 西側・東側とも、確定済みC順位の連続性監査に合格した
+- 東側の **Visit ID=2** についても、期待99件が確定76・未確定23として全件登録され、欠落0だった
+- 確認対象は `assigned_rank` であり、`actual_node_passage_rank` の全件監査ではない
+- production、trial、既存診断、研究出力は変更していない
+
+#### 最新再開地点（診断スクリプト本体実行後）
+
+**完了**
+
+- 順位台帳監査の診断スクリプト化判断は完了
+- 新規診断スクリプトのstatic validationと本体実行は完了
+
+**次の作業**
+
+1. `ORDER_EXCHANGE_PROGRESS_3.md`へ短い完了要約を別作業で追記する
+2. 保存対象と作業ツリーを確認する
+3. `document`を含むコミット名を検討する
+4. pushはコミット確認後の別指示で行う
+5. 保存後、複雑network検証へ進むか判断する
