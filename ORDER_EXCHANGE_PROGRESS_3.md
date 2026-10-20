@@ -5939,3 +5939,137 @@ seller `veh_ee_19:1`:
 3. 新規trial実行後、全参加referenceと主要指標を比較する。
 4. Candidate P−Actual Pに差が出た場合だけ、代表2件と同型の動的診断を最大差ケースへ適用する。
 
+# nonparticipating約20％混入trial・順位保護・difference=1境界反証・同一inlink複数buyer比較完了（2026-10-20）
+
+本節は再開用要約である。**技術的正本**は `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_5.md` の **## 16. nonparticipating約20％混入trial、順位保護、difference=1境界候補反証、および同一inlink複数buyer比較（2026-10-20）** である。詳細な数値・候補別経済量・全party表は正本を参照し、本節へ重複記載しない。
+
+**旧節の位置づけ**
+
+- 直上の「# Candidate P対Actual P動的反証診断完了・nonparticipating約20％混入trial設計待ち（2026-10-20）」は、nonparticipating trial設計前の当時の記録である（削除・書換えしない）
+- 現在はtrial設計・実行、順位保護、**difference=1**境界反証、**同一inlink**・**複数buyer**比較まで完了している
+- **最新再開地点**は本ファイル末尾の本節を参照する
+- 技術的正本は詳細設計第5巻§16である
+
+検索語の例: **nonparticipating 20％**、**非参加車両**、**順位保護**、**Baseline順位**、**Candidate順位**、**difference=1**、**差1**、**G < R**、**同一inlink**、**複数buyer**、**T=367**、**全参加reference**、**5取引対1取引**、**payment balance**、**28取引**、**35取引**。
+
+## 1. trialと結果の要約
+
+**trial（nonparticipating約20％混入）**
+
+- Vehicle総数551台、**nonparticipating** 110台、participating 441台（率約19.96％）
+- nonparticipation seed=3、Vehicle単位で参加属性を固定
+- **全参加reference**と交通・OD・departure・true VOT条件を揃えた
+- production変更なし
+
+**trial結果**
+
+- 成立**130取引**
+- buyer数の延べ合計150台、seller数の延べ合計193台
+- trade scope内nonparticipating数の延べ合計24台
+- Candidate PとActual Pの双方観測360、Candidate P=Actual Pは360、不一致0
+- Actual P未観測7
+
+**詳細診断（63取引・233 party行）**
+
+- 抽出63取引、233 party行
+- 233/233行の限定自動検査pass、fail 0
+- **payment balance** 63/63成立
+
+## 2. nonparticipating順位保護
+
+- trade scope内nonparticipating **24件**
+- **Baseline順位**（Baselineローカル順位）と**Candidate順位**（Candidateローカル順位）の一致24、不一致0
+- payment recordなし、compensation recordなし
+- effective payment=0、effective compensation=0
+
+## 3. 人間レビューと同一inlink条件
+
+**人間による横並びレビュー**
+
+- T順の第1〜第3群、27取引
+- 追加条件に該当した**T=367**の1取引
+- 合計**28取引**
+
+**追加条件（63取引横断）**
+
+- 同一取引・同一inlinkにbuyerが2台以上、または同一取引・同一inlinkにsellerが2台以上
+
+**63取引全体の集計**
+
+- 条件該当1取引、同一inlink複数buyer取引1、同一inlink複数seller取引0
+
+**該当取引（T=367）**
+
+- west_intersection、同一inlinkのbuyer 3台
+- buyerの相対順をBaselineとCandidateで維持
+- Candidate P=Actual P、Candidate Node連続順位=Actual順位
+- 明確な整合違反なし
+
+**残る35取引**
+
+- 今回の追加条件に該当しない
+- 現時点では追加の人間レビュー対象外
+- 「未完了35取引」とは位置づけない
+- 新たな疑問または条件が生じた場合にreview CSVから再抽出する
+
+## 4. 全参加referenceとの比較
+
+- **全参加reference**: 同一inlink複数buyer成立取引**5取引**（T=310、316、331、338、344）。正本は詳細設計第4巻§15。旧実装の誤ったclearance処理下の観察を比較値へ使用しない
+- **nonparticipating約20％混入trial**: 同条件の成立取引**1取引**（**T=367**）
+
+**限定付き解釈**
+
+- 今回の2 trialでは5取引から1取引へ減少したが、ゼロにはならなかった
+- nonparticipatingはparticipating prefixを途中で止めるため、複数buyer候補を減らす方向へ作用し得る
+- ただし発生は到着、物理順、参加Vehicleの連続配置、VOT、交通状態などの組合せにも依存する
+- 各条件1 trialなので、一般則・単調性・5分の1になる関係として扱わない
+
+## 5. difference=1境界反証
+
+**選択63取引**
+
+- difference=2が47取引、difference=4が16取引、difference=1は0取引
+
+**全候補診断**
+
+- candidate_visits内のdifference=1 Visitは**44**
+- 正式なbuyer候補になった一意なVisitは3
+- difference=1を含むconcrete candidateは4
+- FIFO通過4、Candidate局所計算resolved 4、経済評価到達4
+- economically feasible 0、final selected 0
+- 全4候補で**G < R**、不成立理由は `total_buyer_value_below_required_compensation`
+
+**結論**
+
+- difference=1は実装で不当に排除されていない
+- 成立取引にdifference=1がなかった直接原因は経済条件不成立
+- 今回のnetwork・seed・需要・VOT条件に限定する
+- difference=1が構造的に成立不可能とは結論づけない
+
+3 Visitと4候補の詳細は詳細設計第5巻§16.13を参照。
+
+## 6. 最新再開地点
+
+**今回完了**
+
+- nonparticipating約20％混入trial
+- 順位保護確認
+- payment balance確認
+- 取引別review
+- 同一inlink追加抽出とT=367確認
+- 全参加referenceとの比較
+- difference=1境界反証
+- 詳細設計第5巻§16への技術記録
+
+**次の作業**
+
+1. 変更範囲と作業ツリーを確認する
+2. trial・診断スクリプトのstatic validationと必要な検証結果を整理する
+3. 保存対象ファイルを確定する
+4. `document`を含むコミット名を検討する
+5. コミット後に状態を確認する
+6. pushはコミット確認後の別指示で行う
+7. 文書保存後、複雑network検証へ進むか判断する
+
+**本節が、TVT-MP実装・実験側の最新再開地点である。**
+

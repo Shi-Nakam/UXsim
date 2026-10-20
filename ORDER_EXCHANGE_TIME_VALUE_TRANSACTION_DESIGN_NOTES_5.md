@@ -4697,3 +4697,786 @@ outlink終端近似が一般に完全であるとは書かない。
 10. 既存出力directoryを上書きしない
 11. trial実行後、全参加referenceと主要指標を比較する
 12. Candidate P−Actual Pに差が出た場合だけ、最大差ケースへ今回の動的診断を適用する
+
+## 16. nonparticipating約20％混入trial、順位保護、difference=1境界候補反証、および同一inlink複数buyer比較（2026-10-20）
+
+### 16.1 記録の位置づけ
+
+本節は、同一networkへ **nonparticipating（非参加車両）** を約 **20％** 混入させたTVT-MP trialと、その成立取引・診断結果を記録する。作業の対象は次に限定する。
+
+- 同一networkへのnonparticipating約20％混入trial（nonparticipating **110台** / 総数551台）
+- Vehicle単位で固定したnonparticipating属性（simulation中に変更しない）
+- 交通・OD・departure・true VOTを全参加referenceと揃えた比較trial
+- 成立取引の集計と、全参加referenceとの主要指標比較
+- nonparticipatingを含む取引、および **複数buyer**・ **複数seller** 取引の抽出（詳細診断対象 **63取引**、**233 party行**）
+- trade scope内nonparticipatingの **Baseline順位** と取引後ローカル順位の **順位保護** 確認
+
+検索用キーワード: nonparticipating、非参加車両、20％、110台、fixed seed、seed 3、Baseline順位、Candidate順位、順位保護、複数buyer、複数seller、trade scope、63取引、233 party行、payment recordなし、effective amount 0、未完了、分割記録。
+
+本節全体（difference=1境界候補反証、同一inlink複数buyer比較、payment balance、人間レビュー等）は **分割記録** として段階的に追記する。今回の追記は前半（trial設計〜nonparticipating順位保護）に限定する。
+
+### 16.2 trial設計
+
+**基準trial（全参加reference）**
+
+- スクリプト: `research_scripts/run_tvt_mp_two_cross_intersections_downstream_spillback_extended_south_pulse_trial.py`
+
+**新規trial（nonparticipating約20％混入）**
+
+- スクリプト: `research_scripts/run_tvt_mp_two_cross_intersections_downstream_spillback_extended_south_pulse_nonparticipating_20_trial.py`
+- scenario名: `tvt_mp_two_cross_intersections_downstream_spillback_extended_south_pulse_nonparticipating_20_trial`
+- 出力directory: `research_outputs/trial/tvt_mp_two_cross_intersections_downstream_spillback_extended_south_pulse_seed_1_nonparticipation_seed_3_initial/`
+
+**構成方針**
+
+- 基準trialを複製せず、import wrapper方式で構成した
+- production変更なし、基準trialスクリプト変更なし
+
+**Vehicle数と参加属性**
+
+- Vehicle総数は551台
+- participatingは441台
+- nonparticipatingは110台
+- nonparticipating率は110/551（約19.96％）
+- 参加属性はVehicle単位で固定し、simulation中に参加属性を変更しない
+
+**nonparticipating抽出（fixed seed）**
+
+- `NONPARTICIPATION_SEED=3`
+- `random.Random(3).sample` を用いて、551台から110台を重複なしで抽出する
+- 抽出後はreference Vehicle順へ戻す
+
+**交通・VOT・network（referenceと同一）**
+
+- 交通、OD、departure、traffic group、planned movement、Vehicle順、true VOTは全参加referenceと同一
+- nonparticipatingのみ `participating=False`（`participates_in_order_exchange=False`）
+- nonparticipatingのdeclared VOTは `None`
+- nonparticipatingにもtrue VOTは保持する
+- participatingではdeclared VOT=true VOT
+- traffic seed=0
+- east destination seed=1
+- west-north destination seed=2
+- VOT seed=1
+- networkは同一
+
+**simulation・TVT設定**
+
+- 実World評価期間はT=0〜599
+- simulation内部TSIZEは630
+- horizonは30
+- TVT candidate上限は10
+- clearanceは1
+
+**nonparticipating Vehicle名一覧のstatic contract**
+
+- 110台の完全一覧はメモ本文へ重複羅列しない
+- 一覧の正本は新規trialスクリプト内の `NONPARTICIPATING_VEHICLE_NAMES`
+- 一覧のSHA-256（母集団順のVehicle名を改行結合して計算）: `f91065b60888f0c2d9a8bf1a60efad5d40828546445bd0909dde25897c1ca111`
+- hashは交通計算や抽出には使わない。一覧の不意な変更を検出するためのstatic contractである
+
+### 16.3 trial全体結果
+
+**nonparticipating約20％混入trial**
+
+- 成立取引数=130取引
+- 複数取引におけるbuyer数の延べ合計=150台
+- seller数の延べ合計=193台
+- trade scope内nonparticipating数の延べ合計=24台
+- trade scope party合計=367
+- Candidate PとActual Pの双方を観測できたparty=360
+- Candidate P=Actual P=360
+- Candidate P≠Actual P=0
+- Actual P未観測=7
+- spillback link最大Vehicle数=36
+- entrance blocked timestep数=137
+
+**全参加referenceとの主要指標比較**
+
+| 指標 | 全参加reference | nonparticipating約20％ | 差 |
+|------|-----------------|-------------------------|-----|
+| 成立取引数 | 158 | 130 | −28 |
+| trade scope party合計 | 458 | 367 | −91 |
+| buyer数の延べ合計 | 209 | 150 | −59 |
+| seller数の延べ合計 | 249 | 193 | −56 |
+| trade scope内nonparticipating数の延べ合計 | 0 | 24 | +24 |
+| Candidate PとActual Pの双方観測 | 449 | 360 | −89 |
+| Actual P未観測 | 9 | 7 | −2 |
+| spillback link最大Vehicle数 | 37 | 36 | −1 |
+| entrance blocked timestep数 | 182 | 137 | −45 |
+
+用語統一: 取引ごとのbuyer数、複数取引におけるbuyer数の延べ合計、seller数の延べ合計、trade scope内nonparticipating数の延べ合計。異なる取引間では同一Vehicleが再登場する可能性があるため、複数取引の合計には「延べ」を付ける。
+
+### 16.4 詳細診断対象63取引の抽出
+
+成立130取引から、次のいずれかを満たす取引を抽出した。
+
+- trade scope内nonparticipating数が1以上
+- 取引ごとのbuyer数が2以上
+- 取引ごとのseller数が2以上
+
+重複を除いた抽出結果:
+
+- 63取引
+- 233 party行
+- buyer数の延べ合計83台
+- seller数の延べ合計126台
+- trade scope内nonparticipating数の延べ合計24台
+
+**63取引の排他的な条件内訳**
+
+- nonparticipatingだけ: 7取引
+- 複数buyerだけ: 8取引
+- 複数sellerだけ: 27取引
+- nonparticipatingかつ複数buyer: 4取引
+- nonparticipatingかつ複数seller: 10取引
+- 複数buyerかつ複数seller: 7取引
+- 3条件すべて: 0取引
+
+合計確認: 7 + 8 + 27 + 4 + 10 + 7 = 63取引
+
+**条件別の重複込み取引数**
+
+- nonparticipatingを含む: 21取引
+- buyerが2台以上: 19取引
+- sellerが2台以上: 44取引
+
+**buyer数と取引数の関係**
+
+- buyerが1台の取引は44取引。この44取引のbuyer数は44台
+- buyerが2台以上の取引は19取引。この19取引に含まれるbuyer数の延べ合計は83−44=39台
+- 複数buyer取引における平均buyer数は39/19（約2.05台/取引）
+
+### 16.5 nonparticipating 24件の順位保護
+
+対象は、詳細診断63取引のtrade scopeに含まれるnonparticipating Visit 24件である。
+
+**順位保護（同一trade scope母集団上のローカル順位同士）**
+
+- 比較: `baseline_local_rank` と `post_trade_local_rank`
+- 一致=24、不一致=0
+
+次の値は順位保護判定へ代用していない: binding rank、assigned rank、actual node passage rank、passage timestep。
+
+**参加属性とVOT**
+
+- `participates_in_order_exchange=False`: 24
+- `declared_vot_per_second=None`: 24
+- `true_vot_per_second` は保持されている
+
+**支払・補償（正式対象外と実効額の区別）**
+
+nonparticipatingの `official_payment` と `official_compensation` が空欄なのは、金額が不明だからではない。`participates_in_order_exchange=False` であるため、payment transactionから正式に除外され、payment recordとcompensation recordが作られないためである。
+
+| 区分 | production・research outputの生値 | 実際の金銭移転額 |
+|------|-----------------------------------|------------------|
+| 支払 | `official_payment=None` | `effective_payment_amount=0` |
+| 補償 | `official_compensation=None` | `effective_compensation_amount=0` |
+
+診断上の集計:
+
+- payment record不存在、`absent_not_applicable`: 24
+- compensation record不存在、`absent_not_applicable`: 24
+- `effective_payment_amount=0`: 24
+- `effective_compensation_amount=0`: 24
+- unexpected payment record=0
+- unexpected compensation record=0
+
+None、空欄、数値0、正式な対象外を混同しない。
+
+### 16.6 分割記録状態
+
+**今回の記録で完了した範囲**
+
+- trial設計
+- trial全体結果
+- 63取引の抽出関係
+- nonparticipating 24件の順位保護
+- nonparticipatingの支払・補償対象外契約
+
+**同じ## 16へ後続作業で追記する予定の範囲**
+
+- payment balanceの浮動小数点丸め差
+- 取引別横並びレビュー
+- T=367の同一inlink buyer 3台取引
+- 全参加reference 5取引対nonparticipating条件1取引の比較
+- difference=1境界候補反証
+- 限定付き結論
+- 最新再開地点
+
+上記後続事項は、チャット上では調査済みであるが、本メモへの **分割記録は未完了** である。今回の追記時点では完了済みとして扱わない。
+
+`ORDER_EXCHANGE_PROGRESS_3.md` への反映は、詳細設計第5巻の## 16が完成した後に別作業で行う。
+
+### 16.7 payment balanceの浮動小数点丸め差
+
+初回診断では、buyer支払合計とseller補償合計を浮動小数点の完全一致（`==`）で比較したため、実際には収支が成立している取引を **13取引** 不一致と誤判定した。
+
+**確認された生の差**
+
+- 非0の生差があった取引: 13取引
+- 絶対差の範囲: 約6.94e-18から2.22e-16
+- 最大絶対差: `2.220446049250313e-16`
+- 特定の1取引だけの問題ではない
+
+**原因**
+
+- 複数の浮動小数点数を別々に加算したことによる丸め差
+- productionの支払・補償計算の不整合ではない
+- 診断スクリプト側の完全一致判定が不適切だった
+
+**修正後の契約**
+
+- `payment_balance_difference` には生の差をそのまま保存する（0へ丸めたり書き換えたりしない）
+- `payment_balance_satisfied` は `math.isclose()` で判定する（`rel_tol=1e-12`、`abs_tol=1e-12`）
+- `None`、`bool`、非数値、NaN、正負のinfinityは成立扱いにしない
+- buyerのofficial paymentだけを支払合計へ入れる
+- sellerのofficial compensationだけを補償合計へ入れる
+- nonparticipatingのeffective amount 0を正式合計へ重複加算しない
+
+**修正後の結果（詳細診断63取引）**
+
+- payment balance satisfied: 63取引
+- payment balance unsatisfied: 0取引
+- 最大絶対差: `2.220446049250313e-16`（生値として残る）
+
+初回出力は削除せず、次へ退避した。
+
+`research_outputs/trial/tvt_mp_two_cross_intersections_downstream_spillback_extended_south_pulse_seed_1_nonparticipation_seed_3_selected_transaction_fundamentals_diagnostic_before_payment_tolerance_fix_20261020/`
+
+### 16.8 取引別横並びreviewと人間による確認範囲
+
+**review生成スクリプト**
+
+- `research_scripts/summarize_tvt_mp_nonparticipating_20_selected_transaction_review.py`
+
+**主要出力**
+
+- `research_outputs/trial/tvt_mp_two_cross_intersections_downstream_spillback_extended_south_pulse_seed_1_nonparticipation_seed_3_selected_transaction_fundamentals_diagnostic/selected_transaction_fundamentals_review.csv`
+
+**review CSVの構造**
+
+- 1行は、1選択取引のtrade scope内1 Visit
+- 233行、63取引
+- 対象decision Tは15〜596
+- 各行にdecision T、Node、candidate identityを明示
+- 同一取引の全party行を連続配置
+- 取引内はBaselineローカル順位順
+
+**横並びにした主要情報**
+
+- Baseline A、Actual A、Baseline P、Candidate P、Actual P
+- Baselineローカル順位、Candidateローカル順位、Candidate Node連続順位、Actual Node連続順位
+- role、inlink、true VOT、declared VOT
+- 個人経済条件、buyer価値G_b、seller必要補償R_s
+- official payment、official compensation、effective payment、effective compensation、satisfaction
+- nonparticipatingの予測・実績時間影響、payment balance、限定整合検査
+
+**限定自動検査結果**
+
+- 233/233行pass、fail 0
+- nonparticipating順位保護fail 0
+- role別金銭契約fail 0
+- payment balance fail 0
+- 到着・通過・順位差分の算術不一致0
+- 順位列整合fail 0
+
+**限定の明記**
+
+この自動検査は、明確な算術関係と既確定契約の確認である。全セルの経済的・交通工学的意味を網羅的に判断したものではない。
+
+**人間がT順に横並び表を確認した範囲**
+
+- 第1群: 第1〜第9取引
+- 第2群: 第10〜第18取引
+- 第3群: 第19〜第27取引
+- 合計27取引、T=15〜253
+
+この27取引で確認した範囲:
+
+- Baseline AとActual Aについて、保存値・再計算上の明確な矛盾なし
+- Candidate PとActual Pの明確な不一致なし
+- Candidate Node連続順位とActual順位の明確な不一致なし
+- buyer経済条件は全buyerで適合
+- sellerへの必要補償は支給
+- payment balance成立
+- nonparticipating順位保護成立
+- 明確な保存値・算術・role契約上の矛盾なし
+
+残り36取引を無条件にすべて人間レビューする方針は採用しなかった。
+
+### 16.9 同一inlink複数buyer・seller取引の全63取引横断抽出
+
+T順レビュー後に、詳細診断63取引全体へ次の追加条件を適用した。
+
+**追加確認条件**
+
+- 同一取引・同一inlinkにbuyerが2台以上
+- または、同一取引・同一inlinkにsellerが2台以上
+
+この条件では、buyerとsellerが同じinlinkに1台ずついるだけの取引は対象にしない。
+
+**集計結果**
+
+- 63取引全体の該当: 1取引
+- 第1〜第3群の27取引内の該当: 0取引
+- 残り36取引内の該当: 1取引
+- 同一inlink複数buyer取引: 1取引
+- 同一inlink複数seller取引: 0取引
+
+**唯一の該当取引**
+
+- T=367、Node=west_intersection
+- buyer 3台、seller 1台、nonparticipating 0台
+- buyerのinlink: `west_south_to_west_intersection`
+- buyer: `veh_ws_94:1`、`veh_ws_95:1`、`veh_ws_96:1`
+
+この1取引を追加で人間が横並びレビューした。
+
+**人間によるレビュー済み取引**
+
+- T順の先行27取引
+- 追加条件該当T=367の1取引
+- 合計28取引
+
+**残る35取引の位置づけ**
+
+- 今回の追加確認条件には該当しない
+- 現時点では追加の人間レビュー対象外
+- 「人間レビュー未完了の35取引」と位置づけない
+- 別の明確な疑問または追加条件が生じた場合に、review CSVから再抽出する
+
+### 16.10 T=367の同一inlink buyer 3台取引と全参加referenceとの比較
+
+#### 取引構成
+
+- T=367、Node=west_intersection
+- buyer 3台、seller 1台、nonparticipating 0台
+
+**Baseline順**
+
+1. `veh_wn_123:1`、seller
+2. `veh_ws_94:1`、buyer
+3. `veh_ws_95:1`、buyer
+4. `veh_ws_96:1`、buyer
+
+**Candidate順**
+
+1. `veh_ws_94:1`、buyer
+2. `veh_ws_95:1`、buyer
+3. `veh_ws_96:1`、buyer
+4. `veh_wn_123:1`、seller
+
+buyer 3台は同じinlink `west_south_to_west_intersection`。同一inlink内の相対順は `veh_ws_94:1` → `veh_ws_95:1` → `veh_ws_96:1` で、BaselineとCandidateの両方で維持された。
+
+#### 横並び結果（party別）
+
+**`veh_ws_94:1`**
+
+- role=buyer
+- Baseline A=375、Actual A=375
+- Baseline P=377、Candidate P=376、Actual P=376
+- Baselineローカル順位=2、Candidateローカル順位=1
+- Candidate Node連続順位=216、Actual Node通過順位=216
+- 期待時間短縮=1、G_b=0.9883854144118044
+- official payment=0、satisfaction=satisfied
+
+**`veh_ws_95:1`**
+
+- role=buyer
+- Baseline A=377、Actual A=376
+- Baseline P=379、Candidate P=377、Actual P=377
+- Baselineローカル順位=3、Candidateローカル順位=2
+- Candidate Node連続順位=217、Actual Node通過順位=217
+- 期待時間短縮=2、G_b=0.5540288683520574
+- official payment=0、satisfaction=satisfied
+
+**`veh_ws_96:1`**
+
+- role=buyer
+- Baseline A=379、Actual A=377
+- Baseline P=383、Candidate P=378、Actual P=378
+- Baselineローカル順位=4、Candidateローカル順位=3
+- Candidate Node連続順位=218、Actual Node通過順位=218
+- 期待時間短縮=5、G_b=8.795254834296866
+- official payment=0、satisfaction=satisfied
+
+**`veh_wn_123:1`**
+
+- role=seller、inlink=`west_north_to_west_intersection`
+- Baseline A=373、Actual A=373
+- Baselineローカル順位=1、Candidateローカル順位=4
+- Baseline P=381、Candidate P=380、Actual P=380
+- expected delay=0、R_s=0
+- official compensation=0、satisfaction=satisfied
+
+**重要な意味**
+
+- sellerはローカル順位では1位から4位へ後退したが、Candidate PはBaseline Pより1 timestep早い
+- 順位後退が時間的損失を必ず生むわけではない（expected delay=0、R_s=0）
+- buyer 3台のofficial paymentも0、payment total=0、compensation total=0、payment balance成立
+
+**本取引の確認結果**
+
+- 同一inlink内のbuyer順序逆転なし
+- buyer 3台はBaseline順位2・3・4からCandidate順位1・2・3へ移動
+- Candidate P=Actual P、Candidate Node連続順位=Actual順位
+- buyer全3台でpasses_positive_buyer_value_condition
+- 全4行limited check pass
+- 明確な保存値・算術・role契約上の矛盾なし
+
+#### 全参加referenceとの比較
+
+比較値の正本は `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_4.md` の **## 15. 修正後の西側複数buyer成立取引5件** を参照する。旧実装の誤ったclearance処理下のT=310観察を比較値に使用しない。比較値の5取引は、詳細設計第4巻の修正後正本である。
+
+**全参加reference**（西側交差点・同一inlink上の複数buyerを含む成立取引5取引）
+
+- T=310: buyer 2、seller 1
+- T=316: buyer 3、seller 1
+- T=331: buyer 3、seller 1
+- T=338: buyer 2、seller 1
+- T=344: buyer 4、seller 1
+
+全5取引で次を確認済みである: west_intersection、buyerは同一inlink上、Candidateでも同一inlink内相対順を維持、production FIFO inspection合格、診断側の再比較でもFIFO違反0。
+
+**nonparticipating約20％混入trial**
+
+- 同じ条件に該当する成立取引は1取引（T=367、buyer 3台、同一inlink内相対順維持）
+
+**比較結果**
+
+- 全参加reference: 5取引
+- nonparticipating約20％混入: 1取引
+
+今回の2 trial間では5取引から1取引へ減少したが、ゼロにはならなかった。
+
+#### 比較の限定付き解釈
+
+**当初の予想**
+
+nonparticipating Vehicleが同一inlinkのparticipating prefixを途中で遮断するため、同一inlink複数buyer取引は発生しにくくなると予想した。
+
+**今回の結果**
+
+- 全参加reference=5取引、nonparticipating約20％混入=1取引
+- 今回の比較では減少したが、T=367でbuyer 3台の取引が成立し、ゼロにはならなかった
+
+**限定付き解釈**
+
+- nonparticipatingは同一inlinkのparticipating prefixを途中で停止させるため、複数buyer候補を減らす方向へ作用し得る
+- しかし、参加属性の変更により他の取引の成立・不成立、順位確定、実World交通状態も連鎖的に変化する
+- 別の時点では、同一inlink上にparticipating Vehicleが連続して並び、複数buyerとして成立する条件が生じ得る
+- 発生はnonparticipating率だけでは決まらない。到着時刻、inlink上の物理順、参加車両の連続配置、VOT、Baseline P、Candidate P、seller必要補償額、既往の順位確定、交通状態などの具体的な組合せに依存する
+- 利用者の表現でいう「車両間の偶然の巡り合わせ」の影響を受ける。研究記録では「偶然」だけで終わらせず、上記の構成要因を併記する
+- **各条件1 trial** のため、一般則や統計的傾向とはしない
+- 「nonparticipatingを約20％にすると必ず5分の1になる」とは結論づけない
+- 「nonparticipating率に対して単調に減少する」とも結論づけない
+- 複数seedまたは複数nonparticipating率の感度分析なしに単調性を評価しない
+
+#### 今回の分割追記状態
+
+§16.6の記録時点に加え、今回までにメモ記録が完了した範囲:
+
+- trial設計
+- trial全体結果
+- 63取引抽出
+- nonparticipating順位保護
+- payment balance
+- 取引別review CSV
+- 人間レビュー28取引
+- 同一inlink追加条件抽出
+- T=367横並びレビュー
+- 全参加reference 5取引対1取引の比較
+- 限定付き解釈
+
+メモへの後続追記として残る範囲:
+
+- difference=1境界候補反証
+- 3 Visitから4候補の正確な構造
+- difference=1の限定付き結論
+- §16全体の最新再開地点
+- 進捗メモへの短い要約
+
+### 16.11 difference=1境界候補の疑問とproduction原典
+
+検索用の問い（境界候補・不当除外の疑い）: 最後のbuyerの到着が権利保有車両の通過直前になる候補がないのではないか。権利保有車両のBaseline Pと最後のbuyerのBaseline Aの差が1（**difference=1**、**P−A=1**、**差1**）にならないのではないか。**difference=1**候補が実装で**不当除外**されているのではないか（**実装ミス**）。
+
+#### 選択済み63取引でのdifference分布
+
+選択済み63取引について、次を計算した。
+
+difference = 権利保有車両のBaseline P − 選択候補の**最後のbuyer**のBaseline A
+
+- difference=2: 47取引
+- difference=4: 16取引
+- difference=1: 0取引
+- difference=3: 0取引
+
+#### 成立130取引全体でのdifference分布
+
+- difference=2: 103取引
+- difference=4: 17取引
+- difference=6: 10取引
+- difference=1: 0取引
+
+#### 疑問
+
+正式仕様では、Baseline Aが権利保有車両のBaseline Pより1 timestep以上前であればcandidate Visitになり得る。すなわち、**difference=1**は許容されるはずなのに、選択された成立取引には1件も現れなかった。
+
+#### 検討中に生じた誤説明と訂正
+
+**誤説明**: Baseline Aが2 timestep刻みだからdifference=1が発生しない可能性がある。
+
+**訂正**:
+
+- 東側交差点のVehicle departureは各方向とも毎timestepである
+- departure間隔だけではdifferenceが2・4に限定される理由を説明できない
+- この仮説は撤回した
+
+#### production原典: candidate Visit形成
+
+条件（権利保有車両のBaseline Pを `p` とする）:
+
+- `baseline_arrival_timestep <= p - 1`
+
+実装:
+
+```text
+if baseline_arrival_timestep > p - 1:
+    continue
+```
+
+したがって、**difference=1**のVisitは **candidate_visits** へ正式に入る。
+
+#### buyer候補形成契約（prefix・同一inlink・nonparticipating）
+
+- 権利保有車両とは**別inlink**がbuyer候補の対象
+- 各inlinkの物理先頭から連続するparticipating Visitをprefixとして扱う
+- **nonparticipating**が現れた位置で、そのinlinkのparticipating **prefix停止**
+- 空prefixから最大prefixまでの各prefix長を候補化する
+- 複数inlinkのprefixを組み合わせる
+- **difference=1**そのものを理由にbuyer候補から排除する条件はない
+
+#### candidate選択順
+
+1. economically feasibleな候補だけを残す
+2. surplus最大の候補を残す
+3. 同率ならbuyer数最大
+4. さらに同率なら固定局所乱数で選ぶ
+
+### 16.12 difference=1全候補診断
+
+**診断スクリプト**
+
+- `research_scripts/diagnose_tvt_mp_nonparticipating_20_boundary_difference_one_candidates.py`
+
+**出力directory**
+
+- `research_outputs/trial/tvt_mp_two_cross_intersections_downstream_spillback_extended_south_pulse_seed_1_nonparticipation_seed_3_boundary_difference_one_diagnostic/`
+
+**出力CSV**
+
+- `difference_one_candidate_audit.csv`
+
+**診断範囲**
+
+- decision T=0〜599、全対象Node
+- candidate Visitが存在したdecision=233
+- 成立・不成立を問わず、生成されたconcrete buyer candidateを追跡
+- candidate形成、FIFO、Candidate局所計算、経済評価、最終選択を対応付けた
+
+**段階別結果（difference=1・境界候補）**
+
+| 段階 | 件数 |
+|------|------|
+| candidate_visits内のdifference=1 Visit | 44 |
+| concrete buyer候補へ入った一意なdifference=1 Visit | 3 |
+| difference=1を含むconcrete candidate | 4 |
+| FIFO通過 | 4 |
+| Candidate局所計算resolved | 4 |
+| economic resultあり | 4 |
+| economically feasible | 0 |
+| maximum surplus候補 | 0 |
+| final selected | 0 |
+
+**4候補共通の不成立理由**
+
+- `total_buyer_value_below_required_compensation`
+- すなわち全4候補で **G < R**（**economically infeasible**）
+
+**44 Visitの内訳**
+
+- 40 Visit: 権利保有車両と**same inlink**（**同一inlink**）に属したため、buyer候補の対象外
+- 1 Visit: **nonparticipating**であり、その位置でparticipating prefixが停止
+- 3 Visit: 正式にbuyer候補へ入った
+
+保存済みparticipating prefixとconcrete buyer集合の不一致: 0。**不当なcandidate欠落**: 0。
+
+**重要な因果関係**
+
+difference=1 Visitが存在しなかったのではない。**candidate_visits内に44** Visit存在した。そのうち一意なdifference=1 buyer Visitは3であり、**4 concrete candidate**が生成された。4候補はFIFOと局所計算を通過して経済評価へ到達したが、申告VOTと予測時間短縮から得られるbuyer価値Gがseller必要補償Rを下回った（**G < R**）ため、経済条件不成立となった。結果だけでなく、この原因を本節の正式記録とする。
+
+### 16.13 3つの一意なVisitから4候補になる構造
+
+「一意なdifference=1 buyer Visitが3つなのに、difference=1を含む候補が4つある」という疑問（**3 Visitから4候補が生成される理由**）を、曖昧さなく記録する。
+
+異なるdecisionに属する3 Visitが相互に組み合わされたのではない。「3つのVisitがすべて別decisionに存在した」「バラバラの3 Visitから4候補が作られた」とは記録しない。
+
+#### T=12 east_intersection
+
+**権利保有車両**
+
+- `veh_es_1:1`、Baseline P=19
+
+同じdecisionにdifference=1のbuyer Visitが2台存在した。
+
+1. `veh_ee_1:1` — Baseline A=18、difference=1
+2. `veh_en_1:1` — Baseline A=18、difference=1
+
+この2台はそれぞれbuyer候補になり、複数inlinkの**buyer prefix**組合せにより次の3候補が生成された。
+
+**候補1** — buyers=`veh_ee_1:1`
+
+- G=1.0442185618892235、R=2.2003144786876243、surplus=−1.1560959167984008
+
+**候補2** — buyers=`veh_en_1:1`
+
+- G=2.136995013982228、R=3.2445330405768478、surplus=−1.1075380265946198
+
+**候補3** — buyers=`veh_ee_1:1`|`veh_en_1:1`
+
+- G=2.1127160688803377、R=4.400628957375249、surplus=−2.287912888494911
+
+#### T=227 west_intersection
+
+**権利保有車両**
+
+- `veh_ws_51:1`、Baseline P=235
+
+**difference=1のbuyer Visit**
+
+- `veh_wn_83:1` — Baseline A=234、difference=1
+
+**生成された候補4** — buyers=`veh_wn_83:1`
+
+- G=0.3075075394111136、R=0.41327156443610596、surplus=−0.10576402502499238
+
+#### 正確な関係の要約
+
+- **一意なdifference=1 buyer Visitは3**
+- T=12の同一decisionに2 Visit存在した
+- T=12では単独2候補と2 Visitを含む複数buyer候補1つを生成し、T=12で合計3候補
+- T=227で1 Visitから1候補
+- 全体で **4候補**
+
+### 16.14 限定付き結論と最新再開地点
+
+#### difference=1の限定付き結論
+
+今回のtrialでは、difference=1を**不当に排除する実装ミスは確認されなかった**。
+
+**根拠**
+
+- candidate Visit形成はdifference=1を許容する
+- difference=1 Visitはcandidate_visits内に44 Visit存在した
+- 3 Visitは正式なbuyer候補になった
+- それらを含む4 concrete candidateが生成された
+- 4候補すべてFIFOを通過した
+- 4候補すべてCandidate局所計算resolvedだった
+- 4候補すべて経済評価へ到達した
+- 4候補すべて **G < R** だった
+- 不成立理由は `total_buyer_value_below_required_compensation` だった
+- economically feasible候補が0だったため、surplus最大比較へ残らなかった
+- final selected候補は0だった
+
+したがって、成立130取引の最終選択候補にdifference=1が存在しなかった直接原因は、difference=1のbuyer候補が経済条件を満たさなかったことである。
+
+**限定**
+
+- 今回のnetwork、需要、seed、nonparticipating抽出、VOT実現値に対する結論である
+- 一般にdifference=1候補が常に経済条件不成立になるとは結論づけない
+- 他network、他seed、他VOT分布、他需要ではdifference=1候補が選択される可能性がある
+- 「difference=1は構造的に成立不可能」とは記録しない
+
+#### §16全体の記録完了状態
+
+§16へ記録済み:
+
+- trial設計
+- trial全体結果
+- 63取引抽出
+- nonparticipating 24件の順位保護
+- payment balance
+- review CSV
+- 人間レビュー28取引
+- 同一inlink追加条件
+- T=367
+- 全参加reference 5取引対1取引
+- difference=1境界反証
+- 3 Visitから4候補の構造
+- 限定付き結論
+
+この時点で、チャット上で完了した今回の技術調査は§16へ記録済みである。
+
+既存§16.6および§16.10末尾にある「後続追記予定」は、当時の分割記録状態として削除しない。ただし本§16.14において、現在はdifference=1を含む技術記録まで完了したことを明記する（進捗メモ `ORDER_EXCHANGE_PROGRESS_3.md` への要約追記は別作業・**未完了**）。
+
+#### 最新再開地点
+
+**完了**
+
+- nonparticipating約20％混入trial設計・実行
+- 機械的限定検査63取引・233行
+- nonparticipating順位保護24/24
+- payment balance 63/63
+- T順27取引の横並びレビュー
+- 同一inlink条件による全63取引抽出
+- T=367の追加横並びレビュー
+- 人間レビュー合計28取引
+- 全参加reference 5取引対nonparticipating条件1取引の比較
+- difference=1全候補反証
+
+**残る35取引**
+
+- 今回の同一inlink追加条件には該当しない
+- 現時点では追加の人間レビュー対象外
+- **未完了35取引とは位置づけない**
+- 新たな明確な疑問または条件が生じた場合にreview CSVから再抽出する
+
+**次の作業**
+
+1. §16の独立確認
+2. `ORDER_EXCHANGE_PROGRESS_3.md`へ短い再開用要約を別作業で追記
+3. 作業ツリーと検証状態の整理
+4. 文書・trial・診断を含む保存対象の確認
+5. `document`を含むコミット名の検討
+6. 文書保存後、複雑network検証へ進むか判断
+
+#### 2026-10-20後日完了注記
+
+- §16.1〜§16.14の全文通読と独立確認を完了した
+- 主要な数値関係を、既存のTerminal結果、review CSV、difference=1診断結果、詳細設計第4巻§15の全参加reference記録と照合した
+- 次の算術関係を確認した
+  - 150 buyer + 193 seller + 24 nonparticipating = 367 party
+  - Candidate PとActual Pの双方観測360 + Actual P未観測7 = 367 party
+  - 83 buyer + 126 seller + 24 nonparticipating = 233 party
+  - 44 buyer 1台取引 + 19複数buyer取引 = 63取引
+  - 40 same-inlink対象外 + 1 nonparticipating prefix停止 + 3正式buyer候補 = difference=1 Visit 44
+  - T=12の3候補 + T=227の1候補 = difference=1を含む4候補
+  - T順27取引 + T=367の追加1取引 = 人間レビュー28取引
+  - 63取引 - 28取引 = 今回の追加条件に該当しない35取引
+- §16に記録した主要数値、T=367のparty別情報、difference=1の因果関係、全参加reference 5取引対nonparticipating条件1取引の比較に、**独立確認上の矛盾は確認されなかった**
+- `ORDER_EXCHANGE_PROGRESS_3.md` 末尾への短い再開用要約の追記も完了した
+- 進捗メモ末尾の次の節が、現在の最新再開地点である
+
+  `# nonparticipating約20％混入trial・順位保護・difference=1境界反証・同一inlink複数buyer比較完了（2026-10-20）`
+
+§16.6、§16.10末尾、§16.14内にある「後続追記予定」「進捗メモ要約は未完了」「次の作業1・2」は、それぞれの作成時点における分割記録状態として削除しない。ただし、それらは現在の未完了事項ではなく、本後日完了注記によって完了済みへ更新された。
+
+**現在の次の作業**
+
+1. 作業ツリーと保存対象ファイルを確認する
+2. trial・診断スクリプトの検証状態を整理する
+3. 保存対象を確定する
+4. `document`を含むコミット名を検討する
+5. コミット結果と残存変更を確認する
+6. pushはコミット確認後の別指示で行う
+7. 文書保存後、複雑network検証へ進むか判断する
