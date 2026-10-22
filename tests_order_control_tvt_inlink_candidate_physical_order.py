@@ -104,7 +104,11 @@ def _register_b_visit(
     )
     if passage is not None:
         record = collector._visit_records_by_primary_key[(vehicle_name, visit_id)]
-        collector.apply_baseline_passage_timestep(record, passage)
+        collector.apply_baseline_passage_result(
+            record,
+            passage,
+            record.route_next_link_name,
+        )
 
 
 def _register_a_visit(
@@ -134,7 +138,11 @@ def _register_a_visit(
     )
     if passage is not None:
         record = collector._visit_records_by_primary_key[(vehicle_name, visit_id)]
-        collector.apply_baseline_passage_timestep(record, passage)
+        collector.apply_baseline_passage_result(
+            record,
+            passage,
+            record.route_next_link_name,
+        )
 
 
 def _fork_result(

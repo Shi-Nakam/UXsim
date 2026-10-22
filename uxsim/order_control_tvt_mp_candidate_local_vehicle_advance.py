@@ -13,9 +13,10 @@ does not end a trip or leave the outlink. A new arrival whose current visit is
 a binding visit of this target node receives that visit's outlink as
 ``route_next_link`` before the arrival is recorded. Any other new arrival keeps
 the route it already has. Vehicles already waiting in ``incoming_vehicles``
-stay there, including several from the same inlink. Vehicles that reach the
-target node during this advance are appended after that existing queue and are
-not sent back through node passage in the same virtual timestep.
+are not given a route here. Calculation initialization assigns their binding
+outlink once, before the first passage scan. Vehicles that reach the target
+node during this advance are appended after that existing queue and are not
+sent back through node passage in the same virtual timestep.
 """
 
 from __future__ import annotations
@@ -460,6 +461,102 @@ def _require_binding_outlink_of_target_node(target_node, local_world, route_name
             "the copied target Node."
         )
     return outlink
+
+
+def apply_initial_arrived_binding_routes(
+    candidate_local_state,
+    already_transferred_visit_keys,
+) -> None:
+    """
+    Assign binding outlinks to vehicles already waiting at local-calculation start.
+
+    A binding vehicle that is not yet in ``incoming_vehicles`` is left unchanged.
+    That vehicle receives the binding route when it arrives, through
+    ``_apply_current_target_binding_route``. Every selected vehicle is checked
+    before any ``route_next_link`` is written, so one bad route does not leave
+    another vehicle already rewritten.
+    """
+    target_node = candidate_local_state.target_node
+    local_world = candidate_local_state.local_world
+    node_name = candidate_local_state.target_node_name
+    incoming_vehicles = target_node.incoming_vehicles
+    transferred_visit_keys = set(already_transferred_visit_keys)
+    pending_assignments = []
+
+    for pair in candidate_local_state.binding_visit_local_vehicle_pairs:
+        binding_visit = pair.binding_visit
+        local_vehicle = pair.local_vehicle
+        visit_key = binding_visit.visit_key
+        if visit_key in transferred_visit_keys:
+            continue
+        if local_vehicle not in incoming_vehicles:
+            continue
+        _require_initial_arrived_binding_vehicle(
+            node_name=node_name,
+            target_node=target_node,
+            candidate_local_state=candidate_local_state,
+            binding_visit=binding_visit,
+            local_vehicle=local_vehicle,
+        )
+        outlink = _require_binding_outlink_of_target_node(
+            target_node,
+            local_world,
+            binding_visit.route_next_link_name,
+        )
+        pending_assignments.append((local_vehicle, outlink))
+
+    for local_vehicle, outlink in pending_assignments:
+        local_vehicle.route_next_link = outlink
+
+
+def _require_initial_arrived_binding_vehicle(
+    *,
+    node_name: str,
+    target_node,
+    candidate_local_state,
+    binding_visit,
+    local_vehicle,
+) -> None:
+    """Check one already-arrived binding vehicle before its route is written."""
+    visit_key = binding_visit.visit_key
+    current_visit = local_vehicle.order_control_current_visit
+    if not isinstance(current_visit, dict):
+        raise RuntimeError(
+            f"Node {node_name!r}: Vehicle {local_vehicle.name!r} is already "
+            "in incoming_vehicles but has no current order-control visit for "
+            f"binding VisitKey {visit_key!r}."
+        )
+    actual_visit_id = current_visit.get("visit_id")
+    if (local_vehicle.name, actual_visit_id) != visit_key:
+        raise RuntimeError(
+            f"Node {node_name!r}: Vehicle {local_vehicle.name!r} current "
+            f"visit_id is {actual_visit_id!r}, but binding VisitKey "
+            f"{visit_key!r} does not match."
+        )
+    if current_visit.get("node") is not target_node:
+        raise RuntimeError(
+            f"Node {node_name!r}: Vehicle {local_vehicle.name!r} current "
+            "visit node is not the copied target Node."
+        )
+
+    inlink = local_vehicle.link
+    on_target_inlink = False
+    for target_inlink in candidate_local_state.inlinks:
+        if inlink is target_inlink:
+            on_target_inlink = True
+            break
+    if not on_target_inlink:
+        inlink_name = getattr(inlink, "name", None)
+        raise RuntimeError(
+            f"Node {node_name!r}: Vehicle {local_vehicle.name!r} is in "
+            "incoming_vehicles but is not on a target inlink; "
+            f"link={inlink_name!r}."
+        )
+    if local_vehicle not in inlink.vehicles:
+        raise RuntimeError(
+            f"Node {node_name!r}: Vehicle {local_vehicle.name!r} is not "
+            f"listed on inlink {inlink.name!r}."
+        )
 
 
 def _apply_current_target_binding_route(candidate_local_state, vehicle) -> None:

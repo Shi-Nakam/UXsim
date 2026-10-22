@@ -6270,3 +6270,292 @@ seller `veh_ee_19:1`:
 
 **本小見出しが、TVT-MP実装・実験側の最新再開地点である。**
 
+# 4交差点複雑network全参加trial、600台版停止、baseline進路不一致設計確定（2026-10-22）
+
+## 1. 位置づけ
+
+本節は、**4交差点**・**複雑network**（2×2格子・12 Node・24 Link）におけるTVT-MP **全参加** trialの進捗を記録する。初回 **500台** 完走、需要・評価期間拡張後の **600台** 版における **baseline route mismatch**（**baseline進路不一致**）停止、原因整理、**到着時進路** と **通過時進路** の二field修正設計の確定までを含む。
+
+詳細設計の正本は `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_5.md` **§17** である。旧契約（12台trial付近の「到着時`route_next_link`で通過」「到着記録とlive outlink一致検査」）は当時の記録として残し、最新契約は§17を参照する。
+
+検索用: 4交差点、複雑network、baseline route mismatch、baseline進路不一致、route_next_link再選択、baseline_passage_route_next_link_name、600台、実装未完了。
+
+## 2. network・trialスクリプト
+
+- trial: `research_scripts/run_tvt_mp_four_cross_intersections_grid_medium_all_participating_trial.py`
+- 中央4交差点をTVT対象、外周8 OD、24 Link、200 m、単車線、signalなし、specified_routeなし、全参加
+- production `run_tvt_mp_driver` を使用（古いdriver複製ではない）
+
+## 3. 初回500台trial（完走）
+
+- 出力: `research_outputs/trial/tvt_mp_four_cross_intersections_grid_medium_all_participating_seed_1_initial`
+- 500台、評価T=0〜449、正常終了
+- 成立227取引、4 Nodeすべてで取引、CP=AP 603/603（双方観測603）、Visit ID 3が84件、内部Link最大38台、trip完了324/500、未完了176/500、実行約738秒
+- 未使用内部Link（最大Vehicle数0）: `northeast_intersection_to_northwest_intersection`、`southwest_intersection_to_northwest_intersection`
+- 主OD2種追加（各50台）の理由は§17および本trialスクリプトのstatic contractに記録
+
+## 4. 600台・評価900 timestep版（異常停止）
+
+- scenario: `tvt_mp_four_cross_intersections_grid_medium_all_participating_600_vehicle_eval_900_timestep_trial`
+- 出力: `research_outputs/trial/tvt_mp_four_cross_intersections_grid_medium_all_participating_600_vehicle_eval_900_timestep_seed_1_initial`
+- `py_compile`・static validation成功後に本体実行
+- 実World **T≈600** でbaseline fork内停止: Node `northwest_intersection`、Vehicle `veh_wn_se_base_042`、Visit ID 1、collector到着時経路 `northwest_intersection_to_southwest_intersection`
+- 停止: `order_control_tvt_mp_physical_transfer._copy_validated_baseline_rank_fields()`（到着時経路とlive outlink不一致）
+- **本runは正式trial結果としない**
+
+## 5. 原因・設計確定（要約）
+
+- Link終端待機中の `route_next_link_choice()` 再選択と、collectorの到着時経路の非更新が、未確定snapshot Visitの一致検査で物理通過前停止を招いた
+- 対策: `route_next_link_name`（到着時）と `baseline_passage_route_next_link_name`（通過時）の二field、`apply_baseline_passage_result` による同時保存
+- TVT検討可否は既存の `baseline_passage_timestep` 条件のみ（通過時進路を新条件にしない）
+- 拘束Visit・T−1先行Visit・非拘束後続の進路優先規則は§17に記録
+- **production実装・unit testは未着手**（本節記録時点）
+
+設計レビュー: 実装前に原因調査および2回の設計・反証レビューを完了（Grok 4.6経由の調査記録を含む）。
+
+## 6. 最新再開地点
+
+**最新状態**
+
+- 4交差点500台trialは完走
+- 600台・評価900 timestep版はT≈600でbaseline route不整合により停止
+- 原因調査完了
+- 設計・反証レビュー2回完了
+- 到着時進路とbaseline物理通過時進路を分離する設計確定
+- Visit区分別の進路優先規則確定
+- **production実装は未着手**
+- **unit test追加・更新は未着手**
+- **600台trial再実行は未実施**
+- **nonparticipating版4交差点trialは未着手**
+
+**次の作業**
+
+1. 確定設計（詳細設計第5巻§17）に基づくproductionとunit testの実装
+2. Cursorには **実装だけ** を行わせる
+3. `py_compile`、unit test、static validation、simulationは **ユーザーがTerminalで実行** する
+4. **Git操作はユーザーがTerminalで行う**
+
+**本節が、TVT-MP実装・実験側の最新再開地点である。**
+
+# baseline通過時進路実装、600台trial完走、全取引・全候補診断、および横並び監査準備（2026-10-22）
+
+詳細設計第5巻 **§18・§19** を正本とする要約。旧記録は削除しない。詳細は `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_5.md` §18・§19を参照。**production結果**と**診断validation**の問題を混同しない。
+
+## 1. production実装完了
+
+- baseline到着時進路 `route_next_link_name` とbaseline物理通過時進路 `baseline_passage_route_next_link_name` を分離
+- `apply_baseline_passage_result()` により通過時刻と通過時進路を同時保存
+- confirmed、unconfirmed、通常merge、generic fork、FCFS clearance、BATCHへ接続
+- Visit区分別の進路優先規則を実装
+- TVT検討可否の既存baseline passage timestep条件は変更していない
+- 関連unit test完了
+
+## 2. candidate局所仮想計算の修正完了
+
+- 開始時点で対象Nodeへ到着済みの拘束Vehicleへbinding進路が適用されていなかった問題を修正
+- 初期化時に全件検証後、candidate局所コピーWorldだけへbinding進路を適用
+- 未到着拘束Vehicleは従来どおり新規到着時に適用
+- 非拘束Vehicle、実World、baseline collector、rank ledgerは変更しない
+- binding進路とlive進路の通過直前一致検査は維持
+- candidate local virtual calculation: 90 tests passed
+- local virtual calculation set: 41 tests passed
+- candidate binding transfer: 21 tests passed
+
+## 3. 4交差点600台trial完走
+
+正式出力先:
+
+`research_outputs/trial/tvt_mp_four_cross_intersections_grid_medium_all_participating_600_vehicle_eval_900_timestep_seed_1_initial`
+
+主要結果:
+
+- World.T=900
+- 600台中600台trip完了
+- 成立取引307件
+- buyer Visit 361件
+- seller Visit 486件
+- Candidate PとActual Pの双方観測847件
+- 一致842件
+- 不一致5件
+- actual unobserved 0件
+- 全4対象Nodeでundetermined Visit 0
+- 最大Visit ID 8
+- 実行時間約2028秒
+
+route mismatchとpassage mismatchの関係は詳細設計第5巻§18を参照する。現時点では、不一致をproduction欠陥とは断定していない。
+
+## 4. 全取引・全候補診断
+
+新規診断:
+
+`research_scripts/diagnose_tvt_mp_four_cross_intersections_all_transactions_and_candidates.py`
+
+初回診断は正常完了し、次を取得した。
+
+- 成立取引307件
+- 全検討候補1251件
+- economically feasible 649件
+- economically infeasible 602件
+- selected 307件
+- feasible not selected 342件
+- multiple buyer取引48件
+- multiple seller取引152件
+- multiple buyerまたはsellerの重複除外185件
+- same inlink multiple buyer 1取引
+- same inlink multiple seller 3取引
+- special成立取引188件
+
+初回固定7ファイルを生成した。
+
+その後、同着順位監査のため、診断スクリプトへ次を追加した。
+
+- `baseline_arrival_tiebreaker`
+- `vehicle_id`
+
+横並び表示の正式形式:
+
+- 1行1Visit
+- 権利保有車両を含む取引当事者全員を縦軸
+- `baseline_local_rank` 昇順
+- 見出しに意思決定時点T、Node、candidate identity
+- 横軸に到着・通過・順位・進路・VOT・経済条件・支払補償・実績評価
+
+`baseline_local_rank` はcandidate visits全体の正式順位であり、trade scope外Visitによる欠番を圧縮しない。
+
+## 5. 更新版診断の現在地
+
+`baseline_arrival_tiebreaker` と `vehicle_id` を追加した更新版診断では、600台simulation本体は正常完了したが、終了後validationで停止した。
+
+停止原因:
+
+- `baseline_order_visit_keys` はcandidate visits全体
+- `transaction["parties"]` はtrade-scope当事者だけ
+- 診断が両者を同一集合として扱い、trade scope外Visitにparty rowを要求していた
+
+修正済み:
+
+- party rankの連続性要求を削除
+- trade scope外Visitによるrank欠番を許容
+- 各partyの保存済み `baseline_local_rank` がbaseline_order内の正式位置と一致することは検査
+- rankを再計算・圧縮・上書きしない
+- 修正後 py_compile成功
+- 修正後 static validation成功
+- 不完全出力ディレクトリは存在しない
+
+## 6. 最新再開地点
+
+**完了**
+
+- production実装
+- 関連unit test
+- 600台trial完走
+- 初回全取引・全候補診断
+- 横並び形式確定
+- tiebreaker・vehicle_id追加
+- baseline rank validation修正
+- 詳細設計第5巻§18・§19への記録と独立確認
+
+**未完了**
+
+- validation修正後の更新版600台診断simulation再実行
+- tiebreaker・vehicle_idを含む正式7ファイル生成
+- T=189、217、241、275の同一inlink取引の正式横並びレビュー
+- T=600、619、661の進路・時刻不一致取引の正式横並びレビュー
+- feasible not selected候補の抽出レビュー
+- nonparticipating版4交差点trial
+- Git commit・push
+
+**次の作業**
+
+1. 修正後の更新版診断simulationを1回実行する
+2. 正式7ファイルを確認する
+3. 横並びレビューを再開する
+4. レビュー結果を詳細設計第5巻§19と進捗メモへ追記する
+5. Git commit・push
+6. nonparticipating版4交差点trialへ進む
+
+**本節が、TVT-MP実装・4交差点検証・診断作業の最新再開地点である。**
+
+## 7. validation修正後の更新版診断正常完了
+
+診断スクリプト:
+
+`research_scripts/diagnose_tvt_mp_four_cross_intersections_all_transactions_and_candidates.py`
+
+validation修正後に更新版600台診断を再実行した。
+
+結果:
+
+- 600台simulation本体正常完了
+- diagnostic runtime validation正常通過
+- 正式出力ディレクトリ生成
+- 固定7ファイル生成
+
+正式出力先:
+
+`research_outputs/trial/tvt_mp_four_cross_intersections_grid_medium_all_participating_600_vehicle_eval_900_timestep_seed_1_all_transactions_and_candidates_diagnostic`
+
+今回の正常完了により、trade scope外Visitによる `baseline_local_rank` 欠番を正常に許容しながら、各partyの保存済み `baseline_local_rank` と `baseline_order_visit_keys` 内の正式位置との一致検査を維持できた。`baseline_local_rank` は再計算・圧縮・上書きしていない。
+
+**正式7ファイル**（すべて生成済み）
+
+1. `all_established_transactions_summary.csv`
+2. `all_established_transaction_parties.csv`
+3. `all_considered_candidates_summary.csv`
+4. `all_considered_candidate_parties.csv`
+5. `special_established_transaction_parties.csv`
+6. `diagnostic_summary.txt`
+7. `manifest.json`
+
+**party CSVの確認**
+
+| ファイル | 行数 | `baseline_arrival_tiebreaker` | `vehicle_id` |
+|----------|------|-------------------------------|--------------|
+| `all_established_transaction_parties.csv` | 847 | あり | あり |
+| `all_considered_candidate_parties.csv` | 3698 | あり | あり |
+| `special_established_transaction_parties.csv` | 609 | あり | あり |
+
+成立取引party 847行について: `baseline_arrival_tiebreaker` 欠損0件、`vehicle_id` 欠損0件。
+
+**T=189の同着順位監査**
+
+T=189、`northeast_intersection` の成立取引で、`baseline_arrival_timestep=199` のsellerが2 Visit存在した。
+
+- `veh_wn_en_base_012:2` — timestep 199、tiebreaker 0.1906589774700369、vehicle_id 118、`baseline_local_rank` 3
+- `veh_se_ne_base_025:2` — timestep 199、tiebreaker 0.6234657220942288、vehicle_id 245、`baseline_local_rank` 4
+
+`arrival_tiebreaker` が小さいVisitが先の `baseline_local_rank` となっており、この2 Visitの正式baseline順位を `arrival_tiebreaker` で説明できた。今回は `arrival_tiebreaker` が異なるため、`vehicle_id` による追加tie-breakは使用されていない。診断側で順位を再計算したのではなく、productionが保存した `baseline_local_rank` の根拠をsnapshot値で監査した結果である。詳細は詳細設計第5巻 **§19.15** を参照すること。
+
+### 最新再開地点（§7）
+
+**完了**
+
+- validation修正後の更新版600台診断正常完了
+- runtime validation正常通過
+- 正式7ファイル生成
+- `baseline_arrival_tiebreaker` と `vehicle_id` を含むparty CSV生成
+- 成立取引party 847行で両field欠損0件
+- T=189の同着seller 2 Visitの順位根拠確認
+- 詳細設計第5巻§19.15への記録と独立確認
+
+**未完了**
+
+- T=189取引全当事者の正式横並びレビュー
+- T=217、241、275の同一inlink取引の正式横並びレビュー
+- T=600、619、661の進路・時刻不一致取引の正式横並びレビュー
+- feasible not selected候補の抽出レビュー
+- nonparticipating版4交差点trial
+- Git commit・push
+
+**次の作業**
+
+1. T=189取引の全当事者を `baseline_local_rank` 昇順で横並び表示する
+2. T=217、241、275を同形式で確認する
+3. T=600、619、661を同形式で確認する
+4. 必要に応じて feasible not selected 候補を抽出する
+5. レビュー結果を詳細設計第5巻§19と進捗メモへ追記する
+6. Git commit・push
+7. nonparticipating版4交差点trialへ進む
+
+**本§7が、TVT-MP実装・4交差点検証・全取引全候補診断作業の最新再開地点である。**
+

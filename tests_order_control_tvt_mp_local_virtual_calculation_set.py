@@ -804,7 +804,11 @@ def _register_snapshot(collector, vehicle, *, route_name: str, node_name: str = 
         visit_id=visit["visit_id"],
         node_name=node_name,
     )
-    collector.apply_baseline_passage_timestep(passage_record, BASELINE_T)
+    collector.apply_baseline_passage_result(
+        passage_record,
+        BASELINE_T,
+        passage_record.route_next_link_name,
+    )
 
 
 def _place_buyer(world, vehicle, *, inlink_name: str, route_name: str) -> tuple:

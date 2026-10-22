@@ -1448,9 +1448,11 @@ class Node:
         def _finalize_service_queue_and_apply_pending_baseline_passages():
             _finalize_service_queue()
             if baseline_collector is not None:
-                for pending_record in pending_baseline_passage_records:
-                    baseline_collector.apply_baseline_passage_timestep(
-                        pending_record, s.W.T
+                for pending_record, pending_outlink_name in pending_baseline_passage_records:
+                    baseline_collector.apply_baseline_passage_result(
+                        pending_record,
+                        s.W.T,
+                        pending_outlink_name,
                     )
 
         def _clearance_satisfied(inlink):
@@ -1707,7 +1709,9 @@ class Node:
                 transferred_vehicle_count += 1
                 active_inlink = inlink
                 if pending_passage_record is not None:
-                    pending_baseline_passage_records.append(pending_passage_record)
+                    pending_baseline_passage_records.append(
+                        (pending_passage_record, outlink.name)
+                    )
 
         _finalize_service_queue_and_apply_pending_baseline_passages()
         return {
@@ -2150,8 +2154,10 @@ class Node:
                 s.last_order_control_entry_timestep = s.W.T
 
                 if baseline_collector is not None and pending_passage_record is not None:
-                    baseline_collector.apply_baseline_passage_timestep(
-                        pending_passage_record, s.W.T
+                    baseline_collector.apply_baseline_passage_result(
+                        pending_passage_record,
+                        s.W.T,
+                        outlink.name,
                     )
             else:
                 continue
@@ -2247,8 +2253,10 @@ class Node:
         s.incoming_vehicles.remove(vehicle)
 
         if baseline_collector is not None and pending_passage_record is not None:
-            baseline_collector.apply_baseline_passage_timestep(
-                pending_passage_record, s.W.T
+            baseline_collector.apply_baseline_passage_result(
+                pending_passage_record,
+                s.W.T,
+                outlink.name,
             )
 
     def _order_control_clearance_blocks_passage(s, vehicle, inlink):

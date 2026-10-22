@@ -5742,3 +5742,1043 @@ Terminalへ貼り付けた一時監査だけで終わらせず、再実行可能
 3. `document`を含むコミット名を検討する
 4. pushはコミット確認後の別指示で行う
 5. 保存後、複雑network検証へ進むか判断する
+
+## 17. 4交差点複雑network検証、baseline進路不一致（baseline route mismatch）、および到着時進路・通過時進路の二field設計（2026-10-22）
+
+### 17.1 本節の位置づけと旧契約との関係
+
+本節は、**4交差点**・**複雑network**（2×2格子の中央4十字路交差点＋外周8 OD）におけるTVT-MP全参加trialの結果、**600台**版実行時の **baseline進路不一致**（**baseline route mismatch**）、原因調査、および **実装未完了** の修正設計を記録する。
+
+検索用キーワード: 4交差点、複雑network、baseline route mismatch、baseline進路不一致、到着時進路、通過時進路、route_next_link再選択、baseline_passage_route_next_link_name、physical passage route、T−1以前のC順位確定済み先行Visit、過去formal route fallback、非拘束後続Vehicle、DETERMINISTIC_VIRTUAL_ROUTE、TVT検討不可、unresolved candidate passages、実装未完了。
+
+**旧契約（当時の設計記録として維持）**
+
+第5巻内の12台中央交差点trial記録（§17「candidate予測とactual結果」付近、行番号は版により変動）には、次の旧記述が残っている。
+
+- 同一baseline仮想計算の同一Visitでは、Node到着時に決まった`route_next_link`に従って通過する。
+- 到着記録の`route_next_link_name`と通過時のlive `route_next_link`の一致検査は、この同一Visit内の整合性検査である。
+
+上記は **当時の設計記録** である。本節では削除・書換えしない。
+
+**4交差点network検証による見直し**
+
+4交差点・長時間・多経路・長い終端待機条件下では、UXsim通常機能による **route_next_link再選択** が起こり、到着時にcollectorへ保存した進路と、物理通過直前のlive outlinkが一致しない事例が確認された。その結果、未確定かつsnapshot登録済みVisit向けの「到着時進路＝通過時進路」前提と、到着記録とlive outlinkの一致検査は、現行production契約と矛盾する。
+
+**最新契約の参照先**
+
+到着時進路と **baseline物理通過時進路**（**physical passage route**）を分離し、Visit区分別の進路優先規則を適用する設計の正本は **本節（§17）** である。旧記述は歴史的経緯の参照用とし、実装・再開時は本節を優先する。
+
+### 17.2 4交差点複雑networkの設計
+
+**topology**
+
+- 中央4つの十字路交差点を **2×2格子** に配置
+- 周囲に **8つの外周OD Node**
+- 合計 **12 Node**
+- 方向別 **24 Link**
+- **中央4 Node** のみTVT-MP対象（`order_control_type=time_value`）
+- 全Link **200 m**
+- 自由流速度 **60 km/h** 相当
+- **単車線**
+- **UXsim既定容量**
+- **signalなし**
+- **specified_routeなし**
+- **taxi modeなし**
+- TVT対象Nodeでの **trip-endなし**
+- network構造上のループは禁止しない
+- 同一Node再訪を今回の必須条件にはしない
+
+**trialスクリプト（ファイル名は変更せず維持）**
+
+- `research_scripts/run_tvt_mp_four_cross_intersections_grid_medium_all_participating_trial.py`
+- 新規trialは **現在のproduction** `run_tvt_mp_driver` を呼び出す。古いdriverのtrial側複製ではない。
+- spillback観測wrapperはbaseline fork中に無効化され、元のproduction driverとLink.updateへ戻る。wrapperが経路不整合の原因である証拠はない。
+
+**需要の経緯**
+
+- 初回は主OD **8種類**、基礎需要400台＋pulse100台＝ **500台**、評価 **T=0〜449**、internal TSIZE **480**、実World終了 **T=450**
+- 初回500台trialで、内部方向別8 Linkのうち次の2 Linkが **最大Vehicle数0**（未使用）だった。
+  - `northeast_intersection_to_northwest_intersection`
+  - `southwest_intersection_to_northwest_intersection`
+- 上記を直接利用する主ODを各50台追加した。
+  - `north_east_od` → `west_north_od`
+  - `south_west_od` → `north_west_od`
+- 既存8主ODとpulse需要（`west_north_od`→`east_north_od`、`north_west_od`→`south_west_od`、各50台、T=160..258 step 2）は維持
+
+**修正後需要・評価（600台版、trialスクリプト上の確定条件）**
+
+| 項目 | 値 |
+|------|-----|
+| 主OD数 | 10 |
+| 基礎需要 | 500台 |
+| pulse需要 | 100台 |
+| Vehicle総数 | 600台 |
+| 参加 | 全車 `participates_in_order_exchange=True` |
+| 評価期間 | T=0〜899 |
+| internal TSIZE | 930 |
+| 実World終了 | T=900 |
+| horizon | 30 |
+| clearance | 1 |
+| candidate上限 | 10 |
+| TRAFFIC_SEED | 0 |
+| VOT_SEED | 1 |
+
+**scenario・出力（600台版）**
+
+- scenario名: `tvt_mp_four_cross_intersections_grid_medium_all_participating_600_vehicle_eval_900_timestep_trial`
+- 出力directory: `research_outputs/trial/tvt_mp_four_cross_intersections_grid_medium_all_participating_600_vehicle_eval_900_timestep_seed_1_initial`
+- 500台版出力 `…_seed_1_initial`（評価449・500台）は上書きしない
+
+### 17.3 初回500台trial（評価T=0〜449）の結果
+
+初回500台・評価T=0〜449のtrialは **正常終了** した。主要結果は次のとおり（当該runの`run_summary.txt`等に基づく観察事実）。
+
+- 12 Node、24 Link、500台
+- 4対象Nodeすべてで取引成立
+- 成立 **227** 取引
+- Node別取引数: `northwest_intersection` 56、`northeast_intersection` 29、`southwest_intersection` 88、`southeast_intersection` 54
+- buyer延べ274、seller延べ336
+- Candidate PとActual Pの双方観測 **603**
+- Candidate P=Actual P **603**、不一致 **0**
+- Actual P未観測 **7**
+- Visit ID件数: Visit ID 1が463、Visit ID 2が396、Visit ID 3が **84**
+- 最大Visit ID **3**
+- 内部Link最大Vehicle数 **38**
+- trip完了 **324/500**、trip未完了 **176/500**
+- 実行時間約 **738秒**（約12分18秒）
+
+内部8方向Linkのうち、次の2方向は最大Vehicle数 **0** だった（取引当事者CSVとspillback要約の双方で未使用）。
+
+- `northeast_intersection_to_northwest_intersection`
+- `southwest_intersection_to_northwest_intersection`
+
+`north_east_od` → `west_south_od` について、**確認可能な取引当事者** は `northeast_intersection` → `southeast_intersection` → `southwest_intersection` の南回りを使用していた。これは全50台の完全経路監査ではなく、取引当事者に限定した確認である。全車両について断定した結果ではない。
+
+### 17.4 600台・評価900 timestep版の停止（正式結果としない）
+
+`py_compile` 成功、`--static-validate-only` 成功後、600台版の本体simulationを実行した。実Worldの **T≈600** でbaseline fork内に停止した。
+
+| 項目 | 値 |
+|------|-----|
+| Node | `northwest_intersection` |
+| Vehicle | `veh_wn_se_base_042` |
+| Visit ID | 1 |
+| collector到着時 `route_next_link_name` | `northwest_intersection_to_southwest_intersection` |
+| 停止箇所 | `uxsim/order_control_tvt_mp_physical_transfer.py` の `_copy_validated_baseline_rank_fields()` |
+| 例外 | `RuntimeError: Node northwest_intersection: vehicle veh_wn_se_base_042 visit_id 1 baseline field route_next_link_name is missing or inconsistent; got 'northwest_intersection_to_southwest_intersection'.` |
+
+例外メッセージには **live outlink名は含まれない**。例外時のlive outlinkが具体的にどのLinkだったかは **未確認** である。
+
+**本異常終了runは正式trial結果として扱わない。** 研究出力directoryは生成途中であっても、完走・検証済みのbaselineとして採用しない。
+
+### 17.5 原因（確認済み事実と推測）
+
+**確認済み事実（production原典に基づく）**
+
+- VehicleがLink終端（`x == link.length`）にいる場合、`Vehicle.update()` から `route_next_link_choice()` が呼ばれる
+- Nodeを通過できずLink終端で待機すると、後続timestepでも `route_next_link_choice()` が呼ばれ、**route_next_link再選択** が起こり得る
+- `hard_deterministic_mode=False` では、現在の `route_pref` に基づく確率選択である（研究条件として **Falseを維持**）
+- baseline collectorの既存 `route_next_link_name` は、snapshot時既到着ならsnapshot時点、snapshot後にbaseline内で到着したなら **到着時点** に一度保存される
+- 待機中の再選択では collector の `route_next_link_name` は **更新されない**
+- baseline物理通過成功時には `baseline_passage_timestep` だけが保存され、実際に通過に使用したoutlink名は **保存されない**
+- 未確定かつsnapshot登録済みVisitでは、到着時 `route_next_link_name` と現在のlive outlinkの **一致を要求** していた（`_copy_validated_baseline_rank_fields()`）
+- そのため、到着後の待機中に進路が変化すると、**物理通過前** に不一致として停止する（**baseline route mismatch**）
+- spillback観測wrapperが原因である証拠はない
+- 新規trialは現在のproduction TVT-MP driverを使用している
+
+**推測（断定しない）**
+
+- 500台・評価449版で同種の経路再選択が **一度も起きなかったとは断定しない**
+- 600台・評価900・複数経路・長時間spillback待機により、終端待機中の再選択が表面化した **可能性** がある。500台版で再選択がなかったことは確認していない
+
+### 17.6 OrderControlBaselineVisitRecordの二field設計
+
+**到着時進路（既存field）: `route_next_link_name`**
+
+- snapshot時既到着ならsnapshot時点の進路
+- snapshot後にbaseline仮想World内で到着したなら到着時点の進路
+- 到着済みVisitが最低限持つbaseline進路情報
+- **通過時進路で上書きしない**
+
+**baseline物理通過時進路（新規field候補）: `baseline_passage_route_next_link_name`**
+
+- baseline仮想Worldで当該Visitが対象Nodeを **物理通過** した際に使用した `outlink.name`
+- baseline horizon内に物理通過できたVisitだけが持つ
+- 未通過なら `None`
+- 途中の **route_next_link再選択** 履歴は保存しない
+- **物理通過成功後にだけ** 保存する
+
+`baseline_passage_timestep` と `baseline_passage_route_next_link_name` は、**同じ物理通過事実** に由来する値として **同時保存** する。
+
+**保存API（推奨）**
+
+既存の `apply_baseline_passage_timestep(record, baseline_passage_timestep)` を、次へ置き換える設計とする。
+
+```text
+apply_baseline_passage_result(
+    record,
+    baseline_passage_timestep,
+    baseline_passage_route_next_link_name,
+)
+```
+
+保証する性質:
+
+- 通過 **成功後** にだけ呼ぶ（prepareでは通過時進路を書かない）
+- skip、clearance stop、容量不足、入口空間不足では呼ばない
+- 到着時 `route_next_link_name` を上書きしない
+- 二重適用を拒否する
+- 通過時刻だけ、または通過時進路だけが存在する **部分記録** を重大不整合として拒否する
+
+成功経路は少なくとも次に到達させる: TVT-MP confirmed / unconfirmed（`_transfer_one_vehicle_between_links`）、FCFS clearance、BATCH service queue（pendingに移動時のoutlink名を保持し、成功分だけapply）。
+
+### 17.7 TVT検討可否（変更しない）
+
+今回の経路field追加によって、**TVT検討可否の既存条件は変更しない**。
+
+- candidate visits（最大trade scope候補に必要な全Visit）について `baseline_passage_timestep` が揃う → TVT候補検討へ進む
+- 必要な `baseline_passage_timestep` が揃わない → TVTを検討しない → candidate局所仮想計算を行わない → baseline順位でC順位を確定する（**TVT検討不可** / **unresolved candidate passages**）
+
+`baseline_passage_route_next_link_name` を、TVT検討可否の **新しい追加条件にしない**。
+
+ただし、`baseline_passage_timestep` があるのに通過時進路がない、またはその逆は、正常なunresolvedではなく **コード不整合** として停止する。情報完備の候補集合では、同じ成功applyから通過時進路も揃う構造にする。
+
+### 17.8 拘束Visitの進路優先規則（今回baselineの意思決定窓内）
+
+対象には次を含む。
+
+- trade scope内Visit
+- trade scope外の意思決定窓内Visit
+- 現在Tで既到着として先行確定されるVisit
+- 現在Tでleading nonparticipatingとして先行確定されるVisit
+
+進路優先順:
+
+1. 今回baselineの `baseline_passage_route_next_link_name`
+2. 通過時進路がなければ今回baselineの `route_next_link_name`
+
+両方なければ不整合として停止する。**DETERMINISTIC_VIRTUAL_ROUTEは使用しない。**
+
+現在Tで **新たにC順位と正式進路を確定** するVisitの `formal_route_next_link_name` も、同じ優先順（通過時進路があるのに到着時進路を正式進路として保存してはいけない）。
+
+### 17.9 T−1以前にC順位確定済みの先行Visit（局所仮想計算用）
+
+対象は **順位台帳の全履歴ではない**。次をすべて満たすVisitに限定する。
+
+- 検討時点Tで対象Nodeへのinlink上にいる
+- 対象Nodeをまだ実通過していない
+- T−1以前にC順位確定済み
+- 今回の局所順位列で、既到着先行確定Visitおよびleading nonparticipating先行確定Visitを含む意思決定窓内Visitより **前** に位置する
+
+局所仮想計算用進路の優先順:
+
+1. 今回baselineの通過時進路
+2. なければ今回baselineの到着時進路
+3. 今回baselineで両方得られなければ、rank ledgerに保存済みの過去の `formal_route_next_link_name`（**過去formal route fallback**）
+
+3番目は **rank ledgerへの更新ではない**。今回の局所仮想計算に必要な拘束進路を補う **読み取りfallback** である。別baselineのlive routeを過去進路へ拘束する意味でもない。
+
+**T−1以前のrank ledger entryは、今回baselineの結果で上書きしない。**
+
+実装上は、既存のpartition 1（`k_confirmed_before` prefix、collector snapshotが存在するVisitのみ）がこの集合に対応する。すでに実通過済みでinlink上にいない古いVisitは処理対象に含めない。
+
+### 17.10 FCFS処理される後続の非拘束Vehicle（専用3段階）
+
+**非拘束後続Vehicle** のみ、次の専用規則を用いる（意図した確定仕様）。
+
+1. `baseline_passage_route_next_link_name`
+2. なければ `route_next_link_name`（baseline到着時進路）
+3. 両方なければ既存の **DETERMINISTIC_VIRTUAL_ROUTE**（容量・入口空間を満たすoutlinkをID順に並べ、`real_vehicle_id % acceptable outlink数`）
+
+**DETERMINISTIC_VIRTUAL_ROUTE** の選択アルゴリズム自体は変更しない。拘束Vehicleには適用しない。
+
+### 17.11 実World・別baseline・局所仮想計算
+
+**実World**
+
+- formal routeへ拘束しない
+- UXsimのlive `route_next_link` を使用する
+- `hard_deterministic_mode=False` を維持する
+
+**各baseline仮想World**
+
+- そのWorld内でUXsimが進路選択・再選択する
+- 実World進路へ固定しない
+- 過去baseline進路へ固定しない
+- 到着後の待機中の再選択を許容する
+
+**続く局所仮想計算**
+
+- 今回baselineから優先規則で選ばれた進路を **拘束Vehicle** へ固定適用する
+- **非拘束後続Vehicle** だけは§17.10の3段階を用いる
+
+**過去から引き継ぐもの**: 確定 **C順位** のみ。過去baselineの進路を別baselineのlive `route_next_link` として引き継がない。
+
+### 17.12 不整合検査の移動（単なる削除ではない）
+
+- 未通過候補形成時に、到着時進路と現在のlive outlinkの **一致を要求しない**
+- live outlinkが対象Nodeの有効なoutlinkであること、VisitKey・Node・inlink・到着時刻・tiebreaker等の既存整合性検査は **維持** する
+- 通過成功時に、実際に使用した `outlink.name` を通過時進路として保存する
+- 局所仮想計算では、選択された正式進路とlive進路の整合性検査（binding transfer等）を **維持** する
+- rank ledger確定後のformal route上書きを **拒否** する（既存契約）
+
+### 17.13 名称・enum（設計上）
+
+| 名称 | 役割 |
+|------|------|
+| `route_next_link_name` | 到着時進路（上書きしない） |
+| `baseline_passage_route_next_link_name` | baseline物理通過時進路 |
+| `formal_route_next_link_name` | rank ledger上の確定時正式進路 |
+| `BASELINE_PHYSICAL_PASSAGE_ROUTE`（新規route origin候補） | 通過時fieldを採用したbinding/final rankの由来 |
+| `SNAPSHOT_ROUTE_ALREADY_DECIDED` | snapshot時既到着の到着時進路由来（維持） |
+| `BASELINE_TARGET_NODE_ARRIVAL_ROUTE` | baseline内到着の到着時進路由来（維持） |
+| `RANK_LEDGER_FORMAL_ROUTE` | T−1先行Visitの3段階fallbackの台帳読み取り（台帳更新ではない） |
+| `DETERMINISTIC_VIRTUAL_ROUTE` | 非拘束後続のみ、到着時進路も無い場合 |
+
+### 17.14 設計上のproduction変更対象と変更しない処理順
+
+**変更対象（報告済み）**
+
+- `uxsim/order_control_baseline_collector.py`
+- `uxsim/uxsim.py`
+- `uxsim/order_control_tvt_mp_physical_transfer.py`
+- `uxsim/order_control_tvt_arrived_undetermined_confirmation.py`
+- `uxsim/order_control_tvt_leading_nonparticipating_confirmation.py`
+- `uxsim/order_control_tvt_mp_local_binding_rank_sequence.py`
+- `uxsim/order_control_tvt_mp_final_rank.py`
+- `uxsim/order_control_tvt_mp_final_consistency_validation.py`
+- `uxsim/order_control_tvt_mp_candidate_unbound_fcfs_transfer.py`
+- 関連unit test
+
+**変更しない既存処理順（例）**
+
+到着済み確認 → inlink物理先頭確認 → clearance → clearance未充足時の当該Node処理終了 → 通常物理制約 → 一時スキップ → 次timestep再評価
+
+**変更しない意味**
+
+C順位、baseline passage timestep、candidate passage timestep、actual passage、payment、compensation、transaction selection、`hard_deterministic_mode`、`specified_route`、taxi、trip-end、BATCHの順位・形成契約
+
+### 17.15 未確定事項・実装後検証
+
+**未確定**
+
+- 600台trial例外時のlive outlink名は未確認
+- 500台trialで同種の経路再選択がなかったとは断定しない
+- research outputの `predicted_route_next_link_name`、`formal_route_next_link_name`、局所仮想計算で実際に拘束した進路の対応は、**実装時に原典確認** する
+- **production実装は未着手**（本節記録時点）
+- unit test追加・更新は未着手
+- 600台trial再実行は未実施
+- nonparticipating条件の4交差点trialは、全参加600台版が正常完了した後に行う
+
+**実装後の検証順（予定）**
+
+1. collectorの同時保存・部分記録拒否・到着時field非上書きのunit test
+2. 未確定候補が到着時/live不一致だけでは停止しないこと
+3. Visit区分別優先順・台帳非更新・非拘束3段階
+4. 既存関連回帰test
+5. 小規模integration
+6. 4交差点600台・T=0〜899の再実行
+
+#### 最新再開地点（4交差点baseline進路設計確定後）
+
+**完了**
+
+- 4交差点500台trial完走結果の記録
+- 600台版停止と原因の整理
+- 到着時進路と通過時進路の二field設計確定
+- Visit区分別進路優先規則・TVT検討可否非変更の確定
+- 設計・反証レビュー（実装前）
+
+**次の作業**
+
+1. 本節（§17）と `ORDER_EXCHANGE_PROGRESS_3.md` の進捗節を読む
+2. 確定設計に基づきproductionとunit testを実装する（Cursorには実装のみを依頼し、検証はTerminalで行う）
+3. `py_compile`、unit test、static validation、simulationはユーザーがTerminalで実行する
+4. Git操作はユーザーがTerminalで行う
+5. 600台trial再実行後、nonparticipating版4交差点trialを検討する
+
+**本節が、4交差点複雑networkにおけるbaseline進路契約の最新正本である。**
+
+## 18. baseline物理通過時進路のproduction実装、局所仮想計算の初期拘束進路修正、および4交差点600台trial完走（2026-10-22）
+
+本節は、§17で確定した到着時進路・通過時進路の二field設計について **production実装完了** 後の事実、関連 **unit test完了** 結果、**candidate local virtual calculation** における **initial arrived binding Vehicle** 修正、および **4交差点600台trial** の正式完走を記録する。
+
+全取引・全候補診断、横並び表示、`arrival_tiebreaker` 追加は本節では記録しない（別指示で §19 とする）。
+
+### 18.1 到着時進路と物理通過時進路の二field production実装
+
+`OrderControlBaselineVisitRecord` に次のfieldを追加した。
+
+- `baseline_passage_route_next_link_name: str | None`
+
+既存field `route_next_link_name` は **到着時進路**（baseline到着時進路）として維持する。
+
+新field `baseline_passage_route_next_link_name` は、そのbaseline仮想Worldで当該Visitが対象Nodeを **物理通過** する際に実際に使用した `outlink.name` である（**baseline physical passage route** / **通過時進路**）。
+
+設計上の区別:
+
+| field | 意味 |
+|-------|------|
+| `route_next_link_name` | baseline到着時進路（**到着時進路**） |
+| `baseline_passage_route_next_link_name` | baseline物理通過時進路（**通過時進路**） |
+
+- 到着時進路は通過時進路で上書きしない
+- 途中の `route_next_link` 再選択履歴は保存しない
+- 通過時進路は物理通過成功後にだけ保存する
+- 未通過Visitの通過時進路は `None`
+
+collectorのplain dict出力にも新fieldを含めた。対象:
+
+- `get_baseline_visit_snapshot()`
+- `export_node_baseline_visits()`
+- `_visit_record_to_plain_dict()`
+
+### 18.2 passage結果保存API（`apply_baseline_passage_result`）
+
+既存API `apply_baseline_passage_timestep()` を廃止し、次へ置き換えた。
+
+```text
+apply_baseline_passage_result(
+    record,
+    baseline_passage_timestep,
+    baseline_passage_route_next_link_name,
+)
+```
+
+このAPIは、通過時刻と通過時進路を、同じ物理通過事実に由来する値として **同時保存** する。**partial passage record**（片側だけの記録）は拒否する。
+
+拒否する例:
+
+- boolまたは無効なpassage timestep
+- 空文字列または非文字列の通過時進路
+- `baseline_passage_timestep` だけが存在する部分記録
+- `baseline_passage_route_next_link_name` だけが存在する部分記録
+- 二重apply
+
+到着時 `route_next_link_name` は変更しない。
+
+次の物理通過成功経路を新APIへ接続した。
+
+- TVT-MP confirmed passage
+- TVT-MP unconfirmed passage
+- 通常merge
+- generic baseline fork
+- FCFS clearance
+- BATCH
+
+BATCHでは、apply時に `vehicle.route_next_link` を読み直していない。物理移動へ実際に使用した `outlink.name` をpending recordとともに保持し、成功後に保存した。
+
+次の場合はpassage結果を保存しない。
+
+- 物理通過失敗
+- 一時skip
+- clearance stop
+- inlink物理先頭ではない
+- 容量不足
+- 入口空間不足
+
+baseline passage timestepの計算式と意味は変更していない。
+
+### 18.3 baseline到着時進路とlive進路の一致検査変更（baseline route mismatch / baseline進路不一致）
+
+未確定baseline Visitについて、次の完全一致要求を **削除** した。
+
+```text
+baseline到着時 route_next_link_name == 現在の live vehicle.route_next_link.name
+```
+
+削除理由:
+
+baseline仮想Worldでは、VehicleがNode終端で待機している間も、UXsim通常機能による `route_next_link` 再選択が起こり得る。到着時進路と、実際の物理通過時進路が異なることは正常に発生し得る。
+
+維持した整合性検査:
+
+- VisitKey
+- Node名
+- Vehicle名
+- `vehicle_id`
+- inlink
+- `baseline_arrival_timestep`
+- `arrival_tiebreaker`
+- 到着時 `route_next_link_name` が有効な非空文字列であること
+- live outlinkが `None` ではないこと
+- live outlinkが対象Nodeの登録outlinkであること
+
+物理通過には、そのtimestepのlive outlinkを使用する。通過成功後、その `outlink.name` を `baseline_passage_route_next_link_name` へ保存する。
+
+この変更は一致検査を単純に弱めたものではない。正式進路として使用する値の取得時点を、到着時から **実際の物理通過成功時** へ移したものである。
+
+### 18.4 Visit区分別の進路優先規則
+
+今回baselineで扱う意思決定窓内拘束Visit:
+
+- trade scope内Visit
+- trade scope外の意思決定窓内Visit
+- 現在Tで既到着として先行確定されるVisit
+- 現在Tでleading nonparticipatingとして先行確定されるVisit
+
+**局所仮想計算用進路** および **現在Tで新規確定するformal route** の優先順:
+
+1. `baseline_passage_route_next_link_name`（baseline通過時進路）
+2. それがなければ `route_next_link_name`（baseline到着時進路）
+
+両方なければ不整合として停止する。拘束Visitへ `DETERMINISTIC_VIRTUAL_ROUTE` は適用しない。
+
+**T−1以前にC順位確定済みの先行Visit**（partition 1対象に限定）の局所仮想計算用進路:
+
+1. 今回baselineの通過時進路
+2. 今回baselineの到着時進路
+3. 今回baselineで両方得られなければ、rank ledgerに保存済みの過去 `formal_route_next_link_name`
+
+3番目は、今回の局所仮想計算に必要な拘束進路を補う **読取りfallback** である。rank ledgerの更新・確定済みVisitの再確定・過去進路の `Vehicle.route_next_link` への代入・別baseline仮想Worldの進路拘束を意味しない。
+
+**FCFS処理される後続の非拘束Vehicle**（3段階）:
+
+1. baseline通過時進路
+2. baseline到着時進路
+3. 両方なければ既存 `DETERMINISTIC_VIRTUAL_ROUTE`
+
+新しいroute origin:
+
+- 拘束側: `OrderControlTvtMpLocalBindingRouteOrigin.BASELINE_PHYSICAL_PASSAGE_ROUTE`
+- 非拘束側: `OrderControlTvtMpUnboundRouteClassification.BASELINE_PHYSICAL_PASSAGE_ROUTE`
+
+### 18.5 TVT検討可否は変更していない
+
+`baseline_passage_route_next_link_name` の追加によって、TVT検討可否の既存条件は変更していない。
+
+引き続き、candidate visits（最大trade scope候補に必要な全Visit）について `baseline_passage_timestep` が揃う場合だけTVT候補検討へ進む。必要なbaseline passage timestepが揃わない場合は、TVTを検討せず、candidate局所仮想計算を行わず、baseline順位でC順位を確定する。
+
+`baseline_passage_route_next_link_name` は新しいunresolved条件ではない。ただし次の片側記録は正常なunresolvedではなく、production内部不整合として停止する。
+
+- `baseline_passage_timestep` あり、通過時進路なし
+- 通過時進路あり、`baseline_passage_timestep` なし
+
+### 18.6 実World・baseline・局所仮想計算の契約
+
+**実World**
+
+- UXsimのlive `route_next_link` を使用する
+- formal routeへ拘束しない
+- baseline通過時進路へ拘束しない
+- `hard_deterministic_mode=False` を維持する
+
+**各baseline仮想World**
+
+- そのWorld内の交通状態に基づきUXsimが進路を選択・再選択する
+- 実Worldの進路へ固定しない
+- 過去baselineの進路へ固定しない
+- Node終端待機中の再選択を許容する
+
+**続くcandidate局所仮想計算**
+
+- binding Visitに保存された正式進路を拘束Vehicleへ固定適用する
+- 非拘束後続Vehicleだけが専用3段階fallbackを使用する
+
+過去から引き継ぐものは確定C順位である。過去baselineの進路は、別baselineのlive進路として引き継がない。
+
+### 18.7 実装後の検証（unit test完了）
+
+**py_compile**: 変更productionおよび関連testについて成功。
+
+主なunit test（いずれも成功）:
+
+| 領域 | 結果 |
+|------|------|
+| baseline collector tests | 成功 |
+| baseline collector UXsim connection tests | 成功 |
+| TVT-MP physical transfer | 82 tests passed |
+| local binding rank sequence | 49 tests passed |
+| final rank | 50 tests passed |
+| unbound FCFS transfer | 28 tests passed |
+| candidate local virtual calculation | 二field実装後 85 tests passed → 初期拘束進路修正後 **90 tests passed** |
+| local virtual calculation set | 41 tests passed |
+| arrived undetermined confirmation | 40 tests passed |
+| leading nonparticipating confirmation | 33 tests passed |
+| final consistency validation | 57 tests passed |
+| candidate visit set | 22 tests passed |
+| inlink candidate physical order | 25 tests passed |
+| candidate binding transfer | 初期拘束進路修正後 21 tests passed |
+
+4交差点600台trialのstatic contract validationも成功した。
+
+検証中に、今回のproduction実装とは別の既存テスト問題を確認・修正した（productionは変更していない）。
+
+1. 古いBATCH単一Visit契約を期待したテストを、現在の複数Visit契約へ更新。登録済みVehicle名でも指定VisitKeyがsnapshot固定集合外なら `prepare_baseline_passage_recording()` は `None` を返し物理通過を許可し、collectorに保存済みの別Visitは変更しない。
+2. `order_control_batch_service_queue` は `deque` である。空確認を `queue == []` から `len(queue) == 0` に変更。
+3. 複数の物理通過テストで、Vehicleの正式Visit IDとsnapshot取得時Visit IDのfixture参照ミスを修正。
+4. 到着時進路とlive進路の不一致を `RuntimeError` として期待していた旧テストを、新契約に合わせて成功テストへ分離（到着時進路保持・live outlinkで物理通過・通過時進路へlive outlink名保存・passage timestep保存）。
+5. 新route origin追加に伴い、enum全件列挙テストへ `baseline_physical_passage_route` を追加。
+6. 到着時進路だけを前提とした旧エラーメッセージ期待を、「baseline passage route または arrival route の両方欠損」を表す新期待へ更新。
+
+### 18.8 2回目の600台trial停止（binding route mismatch）
+
+baseline通過時進路修正後に600台trialを再実行した。前回の **baseline route mismatch** は解消した。
+
+しかし実World T≈600の **candidate local virtual calculation** で次の例外が発生した。
+
+| 項目 | 値 |
+|------|-----|
+| Node | `northeast_intersection` |
+| Vehicle | `veh_ne_wn_base_032` |
+| 局所コピーVehicleのlive `route_next_link` | `northeast_intersection_to_northwest_intersection` |
+| binding route | `northeast_intersection_to_southeast_intersection` |
+
+例外（要旨）: live `route_next_link` が binding route と一致しない（**binding route mismatch**）。
+
+この異常終了runは正式trial結果としない。出力ディレクトリは履歴保存のため次へリネーム済み。
+
+`research_outputs/trial/tvt_mp_four_cross_intersections_grid_medium_all_participating_600_vehicle_eval_900_timestep_seed_1_failed_before_initial_binding_route_fix`
+
+### 18.9 candidate局所仮想計算の初期拘束進路適用漏れ（initial arrived binding Vehicle / stale live route）
+
+**原因**
+
+局所仮想計算中に新たに対象Nodeへ到着する拘束Vehicleには、既存の `_apply_current_target_binding_route()` によりbinding進路が適用されていた。
+
+一方、局所仮想計算 **開始時点** で既に `target_node.incoming_vehicles` に入っている拘束Vehicleにはbinding進路が適用されていなかった。処理順ではoffset 0でbinding passage scanがVehicle advanceより先に行われるため、開始時点で到着済みの拘束Vehicleはコピー元の **stale live route** を保持したままscanへ入り、binding routeとの一致検査で停止した。
+
+**修正**
+
+`initialize_tvt_mp_candidate_local_virtual_calculation_state()` で初期化検証完了後、stateを返す前に、開始時点で既に対象Nodeへ到着済みの拘束Vehicleへbinding進路を一度適用した（`apply_initial_arrived_binding_routes`）。
+
+対象条件:
+
+- `binding_visit_local_vehicle_pairs` に含まれる
+- current VisitKeyがbinding Visitと一致する
+- `target_node.incoming_vehicles` に存在する
+- 対象inlink上にいる
+- binding routeが対象Nodeのlocal World登録outlinkである
+- 局所計算で未通過
+
+複数Vehicleは全件検証後に明示的なループで進路を代入する。一件でも検証失敗した場合、他Vehicleへ部分適用しない。
+
+未到着拘束Vehicleは初期化時に変更せず、既存どおり新規到着時にbinding進路を適用する。非拘束Vehicleへbinding進路を適用しない。実World、baseline collector、rank ledgerは変更しない。
+
+binding transfer直前の一致検査（局所Vehicleのlive `route_next_link` == binding Visitから与えられた拘束進路）は **削除していない**。拘束進路適用後の適用漏れ・予期しない上書きを検出する重大不整合検査として維持する。
+
+追加unit test: initial arrived binding Vehicleがbinding outlinkを使用、初期化後の意図的route破損で一致検査拒否、未到着binding Vehicleの新規到着時適用、非拘束Vehicle非変更、複数Vehicle時の検証失敗で部分適用しない。
+
+### 18.10 4交差点600台trial正式完走
+
+初期拘束進路修正後、600台・評価T=0〜899版を再実行し、正常完了した。
+
+正式出力先:
+
+`research_outputs/trial/tvt_mp_four_cross_intersections_grid_medium_all_participating_600_vehicle_eval_900_timestep_seed_1_initial`
+
+主な結果:
+
+| 項目 | 値 |
+|------|-----|
+| World.T after simulation | 900 |
+| trip完了 | 600台中600台、incomplete 0 |
+| 成立取引 | 307件 |
+| northwest_intersection | 124 |
+| northeast_intersection | 48 |
+| southwest_intersection | 91 |
+| southeast_intersection | 44 |
+| buyer Visit | 361 |
+| seller Visit | 486 |
+| Candidate PとActual Pの双方観測 | 847 |
+| Candidate P=Actual P | 842 |
+| Candidate P!=Actual P | 5 |
+| actual unobserved | 0 |
+| 全4 Node undetermined Visit | 0 |
+| Visit ID 1〜8件数 | 600, 600, 162, 12, 6, 6, 1, 1（最大Visit ID 8） |
+| 内部Link最大Vehicle数 | 38 |
+| `northeast_intersection_to_northwest_intersection` | 最大38台、entrance blocked 370 timestep |
+| `northwest_intersection_to_southwest_intersection` | 最大34台、entrance blocked 107 timestep |
+| 実行時間 | 約2028秒（約33分48秒） |
+
+### 18.11 Candidate PとActual Pの不一致（Candidate P Actual P mismatch / route mismatch）
+
+**Vehicle単位847件**
+
+| 区分 | 件数 |
+|------|------|
+| route一致・passage一致 | 840 |
+| route一致・passage不一致 | 2 |
+| route不一致・passage一致 | 2 |
+| route不一致・passage不一致 | 3 |
+
+**取引単位307件**
+
+| 区分 | 取引数 |
+|------|--------|
+| route mismatchなし・passage mismatchなし | 302 |
+| route mismatchなし・passage mismatchあり | 0 |
+| route mismatchあり・passage mismatchなし | 2 |
+| route mismatchあり・passage mismatchあり | 3 |
+
+passage mismatchを含む3取引: T=600・T=619・T=661、いずれも `northeast_intersection`。3取引すべてで少なくとも1台のpredicted routeとactual routeが異なった。
+
+route mismatchがあってもpassage時刻が一致した取引が2件あるため、**route mismatchはpassage mismatchの十分条件ではない**。今回のtrialでは、passage mismatchがある全3取引にroute mismatchが含まれたが、直接因果は未確定である。
+
+assigned rank順序違反はこの3取引から確認されていない。実Worldはformal routeへ拘束されないため、candidate予測とactual実績が分岐した可能性がある。現時点ではproduction欠陥と断定しない。
+
+### 18.12 §18の最新状態（記録日: 2026-10-22）
+
+- baseline物理通過時進路の **production実装完了**
+- 関連 **unit test完了**
+- **initial arrived binding Vehicle** へのbinding進路適用（**stale live route** 対策）完了
+- 関連 **unit test完了**
+- **4交差点600台trial** 全参加・評価T=0〜899で正常完走
+- **Candidate P Actual P mismatch** 5 Visit・passage mismatch関連3取引を確認
+- 不一致は即座にproduction欠陥とは判断していない
+- 全取引・全候補診断は別の **§19** で記録予定
+- 横並び形式と同着順位監査も別の **§19** で記録予定
+- nonparticipating 4交差点trialは未着手
+- Git commit・pushは未実施
+
+## 19. 4交差点600台trialの全取引・全候補診断、横並び表示契約、および同着順位監査（2026-10-22）
+
+本節は、§18で正常完走した **4交差点600台trial** に対し、**all transactions** と **all candidates**（**considered candidates**）を1回のsimulationからread-only収集する診断、**横並び**表示の正式契約、**同着順位**監査用field追加、および **runtime validation** 停止と **validation修正完了** までを記録する。
+
+### 19.1 全取引・全候補診断を必要とした理由
+
+4交差点600台全参加trialは正常完了した。成立取引307件、buyer Visit 361件、seller Visit 486件について、production標準出力には baseline／candidate／actual passage、assigned rank、actual passage rank、formal／predicted／actual route、VOT、payment、compensation、realized value 等が保存されていた。
+
+一方、既存 `tvt_mp_visits.csv` には横並びレビューに必要な次が **保存されていなかった**。
+
+- **baseline arrival**（`baseline_arrival_timestep`）
+- **actual arrival**（`actual_arrival_timestep`）
+- **baseline_arrival_tiebreaker**
+- 同着順位監査用 **vehicle_id**
+
+baseline arrivalは各意思決定時点のbaseline collectorに存在する。actual arrivalは実World実行中に取得できる。simulation終了後の標準CSVだけから到着時刻を通過時刻等で **推測・逆算してはならない**。
+
+そこで、既存 selected transaction fundamentals 診断方式を4交差点600台trialへ移植し、simulation実行中に必要情報をread-only保存する診断を作成した。
+
+### 19.2 新規診断スクリプト
+
+| 項目 | 内容 |
+|------|------|
+| スクリプト | `research_scripts/diagnose_tvt_mp_four_cross_intersections_all_transactions_and_candidates.py` |
+| 目的 | 元trialと同じ600台simulationを **1回だけ** 実行し、通常処理中の正式objectをread-only保存（取引・候補ごとの再実行なし） |
+| 制約 | production・元trial・既存診断を変更しない。元trialの `main()` は呼ばない |
+| 出力先 | `research_outputs/trial/tvt_mp_four_cross_intersections_grid_medium_all_participating_600_vehicle_eval_900_timestep_seed_1_all_transactions_and_candidates_diagnostic` |
+| 既存dir | 存在時は上書き・削除・再利用せず停止 |
+
+### 19.3 情報捕捉方法
+
+成立取引および **considered candidates** の情報は、実Worldに対する `run_tvt_mp_driver()` の返却結果から保存する。元関数を一度呼び、その直後に正式driver結果をread-onlyで読む。
+
+保存対象の例: candidate visit set、baseline fork result、baseline collector、right-of-entry selection、concrete buyer candidate、local virtual calculation、general trade rank、economic evaluation、candidate selection、payment and compensation、final rank、predicted traffic observation。
+
+**baseline arrival**: 各意思決定時点のbaseline collector snapshotから取得。
+
+**actual arrival**: `Vehicle.record_order_control_node_arrival()` をread-only wrapper化。key `(node_name, vehicle_name, visit_id)`、値は実Worldで当該Visitが **最初に** 対象Nodeへ到着した `World.T`。`vehicle.W` と `GATE.real_world` のobject identityを確認。baseline fork・candidate局所Worldの到着は記録しない。元関数を先に一度だけ呼んでから観測値を保存。全hookは `try/finally` で復元。
+
+### 19.4 成立取引と全候補の保存範囲
+
+- **established transaction parties**: 全成立取引の取引内全party
+- **all candidates**: selected／not selected を問わず、driver結果に正式に存在する全候補（FIFO等で局所計算objectに無い候補は診断側で再構成しない）
+
+候補保存項目の例: buyers／sellers／nonparticipating、candidate評価順、candidate identity、baseline arrival、baseline／candidate passage、baseline／candidate順位、binding補助順位、predicted route、inlink、VOT、経済record、G/R/surplus、feasible／infeasible、**feasible not selected**、unresolved、selection reason。
+
+不成立候補について推測・新規計算しないもの: actual arrival、actual passage、actual rank、actual route、payment、compensation、仮想payment／compensation。未解決候補で candidate passage が `None` のとき、baseline passageで補完しない。
+
+### 19.5 固定出力ファイル（7ファイル）
+
+1. `all_established_transactions_summary.csv`（1成立取引1行）
+2. `all_established_transaction_parties.csv`（1party1行、全成立取引）
+3. `all_considered_candidates_summary.csv`（1候補1行、selected含む）
+4. `all_considered_candidate_parties.csv`（1候補1party1行、不成立含む）
+5. `special_established_transaction_parties.csv`（特殊成立取引の全party。元の全party CSVは削除・縮小しない）
+6. `diagnostic_summary.txt`
+7. `manifest.json`
+
+### 19.6 初回診断の成功結果
+
+- py_compile成功
+- `--static-validate-only` 成功
+- 600台simulation正常完了
+- 新規診断出力先へ固定7ファイルを書き出し
+
+**成立取引**
+
+| 項目 | 値 |
+|------|-----|
+| established transactions | 307 |
+| buyer visits | 361 |
+| seller visits | 486 |
+| nonparticipating visits | 0 |
+| multiple buyer | 48 |
+| multiple seller | 152 |
+| multiple buyer and seller | 15 |
+| multiple buyer or seller | 185 |
+| same inlink multiple buyer | 1 |
+| same inlink multiple seller | 3 |
+| same inlink multiple buyer and seller | 0 |
+| route mismatch | 5 |
+| passage mismatch | 3 |
+| route and passage mismatch | 3 |
+| special transactions | 188 |
+
+**全検討候補（considered candidates）**
+
+| 項目 | 値 |
+|------|-----|
+| considered candidates | 1251 |
+| resolved | 1251 |
+| unresolved | 0 |
+| economically feasible | 649 |
+| economically infeasible | 602 |
+| selected | 307 |
+| not selected | 944 |
+| feasible not selected | 342 |
+| multiple buyer（候補） | 502 |
+| multiple seller（候補） | 489 |
+| same inlink multiple buyer（候補） | 34 |
+| same inlink multiple seller（候補） | 5 |
+
+infeasibility reasons: `buyer_nonpositive_value` 118、`total_buyer_value_below_required_compensation` 506。
+
+selection reasons: `economically_infeasible` 602、`feasible_not_selected` 342、`selected` 307。
+
+**出力行数**
+
+| ファイル | 行数 |
+|----------|------|
+| all_established_transactions_summary.csv | 307 |
+| all_established_transaction_parties.csv | 847 |
+| all_considered_candidates_summary.csv | 1251 |
+| all_considered_candidate_parties.csv | 3698 |
+| special_established_transaction_parties.csv | 609 |
+| special成立取引 unique | 188 |
+| special CSVの `tvt_decision_timestep` 欠損 | 0 |
+
+### 19.7 特殊成立取引の抽出条件
+
+`special_established_transaction_parties.csv` は次のいずれかを満たす成立取引の **全party** を含める。
+
+- **multiple buyer**（2 Visit以上）
+- **multiple seller**（2 Visit以上）
+- **same inlink multiple buyer**
+- **same inlink multiple seller**
+- 取引内に predicted route mismatch と candidate／actual passage mismatch の **両方**
+
+初回: 複数buyerまたは複数seller 185取引、routeかつpassage mismatch 3取引、重複0、special 188取引。
+
+### 19.8 横並び表示の正式契約
+
+今後の **横並び** は次とする。
+
+- 表見出しに **tvt_decision_timestep**（TVT意思決定時点T）、対象Node、candidate identityを明記
+- **1行1Visit**、縦軸に取引当事者全員（権利保有車両含む）、横軸に各Visitの属性と結果
+- 当事者の一部だけを抜き出さない
+- **表示順は `baseline_local_rank` 昇順**
+
+横軸に含める項目（要旨）: role、VisitKey、inlink、right-of-entry；baseline／actual arrival と tiebreaker・vehicle_id；baseline／candidate／actual passage；baseline_local_rank、post_trade_local_rank、assigned C rank、actual passage rank、binding補助順位；formal／predicted／actual route；VOT、経済条件、payment、compensation、realized、satisfaction。
+
+項目を縦軸・Vehicleを横軸に置く形式は、今回の正式 **横並び** ではない。
+
+### 19.9 baseline順位とtrade scope外Visit（rank欠番）
+
+`baseline_local_rank` は成立取引partyだけで圧縮した順位 **ではない**。`candidate_visits` 全体の保存順における正式順位である。**trade scope外Visit** が含まれ得るため、成立取引partyだけを表示すると **rank欠番** が正常に生じる。
+
+例（candidate visits全体 1=trade scope外、2=seller、3=trade scope外、4=buyer、5=seller）→ 横並びpartyは rank 2・4・5。**2・4・5を1・2・3へ圧縮・再計算してはいけない**。trade scope外Visitを成立取引 **party row** へ追加しない。
+
+`baseline_order_visit_keys` は candidate_visits全体の順序。`transaction["parties"]` は trade-scope当事者のみ。両者を同一視しない（後述 **runtime validation** 修正の要点）。
+
+### 19.10 同着順位監査（baseline_arrival_tiebreaker・vehicle_id）
+
+初回party CSVには `baseline_arrival_timestep` はあったが、`baseline_arrival_tiebreaker` と `vehicle_id` が不足していた。例: T=189で `baseline_arrival_timestep=199` のsellerが2 Visit—到着時刻だけでは正式baseline順位の根拠を説明できない。
+
+追加field:
+
+| field | 正式取得元 |
+|-------|------------|
+| `baseline_arrival_tiebreaker` | 同意思決定のbaseline collector snapshotの `arrival_tiebreaker` |
+| `vehicle_id` | 同snapshotの `vehicle_id`（candidate traffic observationの `vehicle_id` と一致を検査） |
+
+同着順位監査用の組:
+
+`(baseline_arrival_timestep, baseline_arrival_tiebreaker, vehicle_id, baseline_local_rank)`
+
+表示順は引き続き `baseline_local_rank` 昇順。tiebreakerやvehicle_idで診断側が順位を **再計算・再ソートしない**（順位根拠の監査表示用）。
+
+追加対象: `all_established_transaction_parties.csv`、`all_considered_candidate_parties.csv`、`special_established_transaction_parties.csv`。
+
+更新後: py_compile成功、`--static-validate-only` 成功。初回診断出力は履歴としてリネーム:
+
+`..._all_transactions_and_candidates_diagnostic_before_tiebreaker_fields`
+
+### 19.11 更新版診断のruntime validation停止（診断停止・simulation本体正常完了）
+
+tiebreaker／vehicle_id追加後の更新版診断を再実行。**600台simulation本体は正常完了**した。停止したのはsimulation後の診断 **runtime validation**。
+
+```
+RuntimeError: T=46 southwest_intersection:
+baseline_order visit veh_nw_sw_base_002:2 has no party row.
+```
+
+停止箇所: `_validate_established_transaction_baseline_ranks(transaction)`。
+
+原因: validationが次の2集合を誤って同一視した。
+
+- **A** `transaction["baseline_order_visit_keys"]` — candidate_visits全体の保存順（**trade scope外Visit** を含み得る）
+- **B** `transaction["parties"]` — 成立取引のtrade-scope当事者のみ（trade scope外を含まない）
+
+誤った要求: partyの `baseline_local_rank` が1から連続；`baseline_order_visit_keys` の全Visitに **party row** が存在すること。
+
+T=46の `veh_nw_sw_base_002:2` は正常な **trade scope外Visit** の可能性が高い。**productionまたはsimulation本体の異常ではない**。
+
+### 19.12 runtime validation修正（validation修正完了）
+
+`_validate_established_transaction_baseline_ranks()` を修正。
+
+**削除した誤契約**
+
+- party rankが `1..len(parties)` で連続
+- `baseline_order_visit_keys` の全Visitにparty row必須
+
+**修正後の検査**
+
+1. `baseline_order_visit_keys` がtuple、重複なし
+2. party VisitKey重複なし
+3. 各party VisitKeyが `baseline_order_visit_keys` に存在
+4. party `baseline_local_rank` は正のint（bool拒否）
+5. `baseline_order_visit_keys` の1始まり正式位置と保存済みrankが一致
+6. partyを `baseline_local_rank` 昇順に並べたときrankが **厳密増加**（連続性は要求しない）
+7. trade scope外Visitにparty rowがないことをエラーにしない
+
+`baseline_local_rank` を再計算・圧縮・上書きしない。表示順・tiebreaker／vehicle_id保存契約は維持。候補当事者側に同種の連続性要求は **存在せず変更不要**。
+
+修正後: py_compile成功、`--static-validate-only` 成功。出力ディレクトリは NOT_FOUND（不完全出力なし）。**修正後の更新版600台診断simulation再実行は未開始**（**診断再実行未完了**）。
+
+### 19.13 初回抽出した同一inlink複数buyer・seller取引
+
+**same inlink multiple seller（3取引）**
+
+1. T=189、`northeast_intersection`、candidate index=1、buyer `veh_en_sw_base_032:1`、seller `veh_se_ne_base_024:2` と `veh_se_ne_base_025:2`
+2. T=217、同上パターン、buyer `veh_en_sw_base_034:1`、seller `veh_se_ne_base_032:2`・`033:2`
+3. T=241、buyer `veh_en_sw_base_036:1`、seller `038:2`・`039:2`・`040:2`
+
+**same inlink multiple buyer（1取引）**
+
+4. T=275、`northwest_intersection`、candidate index=4、buyer `veh_ne_wn_base_008:2` と `veh_ne_ws_base_008:2`（inlink `northeast_intersection_to_northwest_intersection`）
+
+T=189の正式横並びレビューは、tiebreaker／vehicle_idを含む更新版正式出力が未生成のため **未完了**。
+
+### 19.14 §19の最新状態（記録日: 2026-10-22）
+
+**完了**
+
+- 全成立取引・全検討候補を収集する診断スクリプト作成
+- 初回 py_compile／static validation／600台診断simulation正常完了／固定7出力生成
+- 成立307・全候補1251・special188を保存
+- same inlink multiple buyer 1・same inlink multiple seller 3を抽出
+- 横並び正式形式確定、`baseline_arrival_tiebreaker`・`vehicle_id` 追加
+- 更新後 py_compile／static validation成功、更新版 **simulation本体正常完了**
+- baseline rank **validation** 原因確定、trade scope外による **rank欠番** 許容修正、修正後 py_compile／static validation成功
+- 不完全出力ディレクトリなしを確認
+
+**未完了**
+
+- 修正後の更新版600台診断simulation **再実行**（正式7ファイル生成）
+- T=189・217・241・275、T=600・619・661の正式横並びレビュー
+- **feasible not selected** 候補の抽出レビュー
+- `ORDER_EXCHANGE_PROGRESS_3.md` への今回進捗反映
+- nonparticipating 4交差点trial
+- Git commit・push
+
+**次の作業**
+
+1. 修正後の更新版600台診断simulationを1回実行する
+2. tiebreaker／vehicle_idを含む正式出力を確認する
+3. T=189・217・241・275の横並びレビュー
+4. T=600・619・661の横並びレビュー
+5. 必要に応じて feasible not selected 候補を抽出する
+6. 検証結果を§19と進捗メモへ追記する
+7. Git commit・push
+8. nonparticipating 4交差点trialへ進む
+
+### 19.15 validation修正後の更新版診断正常完了と同着順位監査
+
+**validation修正後**、次の診断スクリプトを再実行した。
+
+`research_scripts/diagnose_tvt_mp_four_cross_intersections_all_transactions_and_candidates.py`
+
+600台simulation本体は正常完了した。終了後の **runtime validation正常通過** も確認した。**更新版診断正常完了** として、**正式7ファイル** を次の正式出力先へ生成した。
+
+`research_outputs/trial/tvt_mp_four_cross_intersections_grid_medium_all_participating_600_vehicle_eval_900_timestep_seed_1_all_transactions_and_candidates_diagnostic`
+
+今回の正常完了により、次を確認した。
+
+- **trade scope外Visit** による `baseline_local_rank` **rank欠番** を正常に許容できた
+- 各partyの保存済み `baseline_local_rank` と `baseline_order_visit_keys` 内の正式位置との一致検査は維持できた
+- `baseline_local_rank` を再計算・圧縮・上書きしていない
+- simulation本体と diagnostic runtime validation の双方が完了した
+- 不完全出力ではなく **正式7ファイル** を生成できた
+
+**固定7ファイル**（すべて存在）
+
+1. `all_established_transactions_summary.csv`
+2. `all_established_transaction_parties.csv`
+3. `all_considered_candidates_summary.csv`
+4. `all_considered_candidate_parties.csv`
+5. `special_established_transaction_parties.csv`
+6. `diagnostic_summary.txt`
+7. `manifest.json`
+
+**party CSVの行数と追加field**
+
+| ファイル | 行数 | `baseline_arrival_tiebreaker` | `vehicle_id` |
+|----------|------|-------------------------------|--------------|
+| `all_established_transaction_parties.csv` | 847 | あり | あり |
+| `all_considered_candidate_parties.csv` | 3698 | あり | あり |
+| `special_established_transaction_parties.csv` | 609 | あり | あり |
+
+成立取引party 847行について、`baseline_arrival_tiebreaker` 欠損 **0件**、`vehicle_id` 欠損 **0件**。全成立取引partyで **同着順位** 監査に必要な次の組を確認可能になった。
+
+`(baseline_arrival_timestep, baseline_arrival_tiebreaker, vehicle_id, baseline_local_rank)`
+
+**T=189の同着順位監査**
+
+T=189、`northeast_intersection` の成立取引で、`baseline_arrival_timestep=199` のsellerが2 Visit存在した。
+
+| Visit | baseline_arrival_timestep | baseline_arrival_tiebreaker | vehicle_id | baseline_local_rank |
+|-------|---------------------------|-----------------------------|------------|---------------------|
+| `veh_wn_en_base_012:2` | 199 | 0.1906589774700369 | 118 | **3** |
+| `veh_se_ne_base_025:2` | 199 | 0.6234657220942288 | 245 | **4** |
+
+両Visitはbaseline到着時刻が同じである。`arrival_tiebreaker` が小さい `veh_wn_en_base_012:2` が **baseline_local_rank 3**、`arrival_tiebreaker` が大きい `veh_se_ne_base_025:2` が **baseline_local_rank 4** となっている。したがって、この2 Visitの正式baseline順位は `arrival_tiebreaker` によって説明できる。
+
+今回の2 Visitでは `arrival_tiebreaker` が異なるため、`vehicle_id` による追加tie-breakは使用されていない。`vehicle_id` は `arrival_tiebreaker` まで同一の場合の追加順位根拠を監査できるよう、引き続き横並び表示へ保持する。
+
+診断側で `arrival_tiebreaker` または `vehicle_id` を使って順位を再計算したものではない。productionが保存した `baseline_local_rank` を表示し、その順位根拠をsnapshot値で監査した結果である。
+
+#### 最新状態（§19.15、記録日: 2026-10-22）
+
+**完了**
+
+- validation修正後の更新版600台診断simulation正常完了
+- diagnostic runtime validation正常通過
+- 正式7ファイル生成
+- party CSVへ `baseline_arrival_tiebreaker` と `vehicle_id` を保存
+- 成立取引party 847行で両fieldの欠損0
+- T=189の同着seller 2 Visitについて順位根拠を確認
+- trade scope外Visitによるrank欠番を許容しつつ、正式baseline位置との一致検査を維持
+
+**未完了**
+
+- T=189取引全当事者の正式 **横並びレビュー未完了**
+- T=217、241、275の同一inlink取引の正式横並びレビュー
+- T=600、619、661の進路・時刻不一致取引の正式横並びレビュー
+- feasible not selected候補の抽出レビュー
+- `ORDER_EXCHANGE_PROGRESS_3.md` への今回完了結果の反映
+- nonparticipating版4交差点trial
+- Git commit・push
+
+**次の作業**
+
+1. `ORDER_EXCHANGE_PROGRESS_3.md` へ今回の正常完了結果を反映する
+2. T=189から正式横並びレビューを再開する
+3. T=217、241、275を確認する
+4. T=600、619、661を確認する
+5. 必要に応じて feasible not selected 候補を抽出する
+6. レビュー結果を§19と進捗メモへ追記する
+7. Git commit・push
+8. nonparticipating版4交差点trialへ進む

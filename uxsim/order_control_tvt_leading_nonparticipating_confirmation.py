@@ -11,6 +11,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 
+from uxsim.order_control_baseline_collector import select_current_baseline_route
 from uxsim.order_control_tvt_arrived_undetermined_confirmation import (
     OrderControlTvtArrivedUndeterminedConfirmationResult,
     OrderControlTvtNodeArrivedUndeterminedConfirmationResult,
@@ -194,10 +195,11 @@ def _formal_route_pairs_from_collector(
     visit_keys: tuple[OrderControlTvtVisitKey, ...],
 ) -> tuple[OrderControlTvtVisitKeyWithFormalRoute, ...]:
     """
-    Pair each visit with the outlink recorded when it arrived at the target Node.
+    Pair each visit with this baseline's formal outlink.
 
-    ``route_next_link_name`` is the baseline arrival route, not the vehicle's
-    route at the end of the baseline and not a downstream choice.
+    A physical passage route is used when this baseline recorded one.
+    Otherwise the arrival route is used. The arrival route is not used
+    when a passage route exists.
     """
     if len(visit_keys) == 0:
         return ()
@@ -211,14 +213,18 @@ def _formal_route_pairs_from_collector(
                 f"Node {node_name!r}: baseline collector has no visit snapshot "
                 f"for VisitKey {visit_key!r}."
             )
-        route_next_link_name = snapshot["route_next_link_name"]
-        if not isinstance(route_next_link_name, str) or route_next_link_name == "":
+        route_name, _source = select_current_baseline_route(
+            snapshot,
+            context=(
+                f"Node {node_name!r} leading confirmation VisitKey {visit_key!r}"
+            ),
+        )
+        if route_name is None:
             raise ValueError(
-                f"Node {node_name!r}: VisitKey {visit_key!r} requires a non-empty "
-                "route_next_link_name from the target-Node arrival record; "
-                f"got {route_next_link_name!r}."
+                f"Node {node_name!r}: VisitKey {visit_key!r} requires a "
+                "baseline passage route or arrival route; got neither."
             )
-        formal_route_pairs.append((visit_key, route_next_link_name))
+        formal_route_pairs.append((visit_key, route_name))
     return tuple(formal_route_pairs)
 
 
@@ -235,8 +241,9 @@ def confirm_leading_nonparticipating_decision_window_visits(
     Walks ``fork_result.target_node_names`` in order, extracts resolved visits
     with ``T < baseline_arrival_timestep <= T + 6`` without re-sorting, validates
     ``participates_by_visit_key`` for every decision-window VisitKey, and confirms
-    the leading non-participating prefix once per Node together with each visit's
-    target-Node arrival route. Returns the formal decision-window order plus the
+    the leading non-participating prefix once per Node together with this
+    baseline's passage route when one was recorded, otherwise the arrival
+    route. Returns the formal decision-window order plus the
     remaining suffix. Requires ``configured_horizon_steps >= 6``. Does not modify
     the real World or rerun baseline fork, alignment, arrived confirmation, or
     collector export.

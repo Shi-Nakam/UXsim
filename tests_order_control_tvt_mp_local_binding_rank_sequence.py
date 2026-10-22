@@ -1273,6 +1273,7 @@ def test_route_origin_enum_has_no_vehicle_id_mode():
         "rank_ledger_formal_route",
         "snapshot_route_already_decided",
         "baseline_target_node_arrival_route",
+        "baseline_physical_passage_route",
     ]
 
 
@@ -1462,7 +1463,197 @@ def test_fork_baseline_timestep_T_negative_is_runtime_error():
     _assert_builder_error(RuntimeError, broken, candidate, rank_state, "baseline_timestep_T")
 
 
+def test_binding_uses_passage_route_before_arrival_and_ledger_fallback():
+    rank_state = OrderControlTvtNodeRankState("merge")
+    _confirm_formal(rank_state, ("gone", 1), "out")
+    _confirm_formal(rank_state, ("old", 1), "ledger_out")
+    _confirm_formal(rank_state, ("waiting", 1), "side")
+    _confirm_formal(rank_state, ("unarrived", 1), "ledger_out")
+    old = _record("old", 1, vehicle_id=1, route="snap", arrived=True)
+    old["baseline_passage_timestep"] = 12
+    old["baseline_passage_route_next_link_name"] = "out"
+    waiting = _record("waiting", 1, vehicle_id=2, route="snap", arrived=True)
+    unarrived = _record("unarrived", 1, vehicle_id=3, route=None, arrived=False)
+    buy = _record("buy", 1, vehicle_id=4, route="snap", arrived=False)
+    buy["baseline_passage_timestep"] = 14
+    buy["baseline_passage_route_next_link_name"] = "out"
+    sell = _record("sell", 1, vehicle_id=5, route="snap", arrived=True)
+    late = _record("late", 1, vehicle_id=6, route="side", arrived=False)
+    before = rank_state.export_state()
+    fifo_set, candidate, rank_state = _build_chain(
+        rank_state=rank_state,
+        collector=_Collector(
+            {
+                ("old", 1): old,
+                ("waiting", 1): waiting,
+                ("unarrived", 1): unarrived,
+                ("buy", 1): buy,
+                ("sell", 1): sell,
+                ("late", 1): late,
+            }
+        ),
+        arrived_keys=(),
+        leading_keys=(),
+        remaining_keys=(("buy", 1), ("sell", 1), ("late", 1)),
+        trade_rank_result=_trade_rank(),
+        k_confirmed_before=4,
+    )
+    result = build_tvt_mp_local_binding_rank_sequence(
+        fifo_set,
+        candidate,
+        rank_state,
+    )
+    by_key = {
+        visit.visit_key: visit for visit in result.confirmed_before_this_baseline_visits
+    }
+    assert ("gone", 1) not in by_key
+    assert by_key[("old", 1)].route_next_link_name == "out"
+    assert (
+        by_key[("old", 1)].route_origin
+        is OrderControlTvtMpLocalBindingRouteOrigin.BASELINE_PHYSICAL_PASSAGE_ROUTE
+    )
+    assert by_key[("waiting", 1)].route_next_link_name == "snap"
+    assert (
+        by_key[("waiting", 1)].route_origin
+        is OrderControlTvtMpLocalBindingRouteOrigin.SNAPSHOT_ROUTE_ALREADY_DECIDED
+    )
+    assert by_key[("unarrived", 1)].route_next_link_name == "ledger_out"
+    assert (
+        by_key[("unarrived", 1)].route_origin
+        is OrderControlTvtMpLocalBindingRouteOrigin.RANK_LEDGER_FORMAL_ROUTE
+    )
+    assert result.trade_scope_of_this_candidate_visits[0].route_next_link_name == "out"
+    assert (
+        result.trade_scope_of_this_candidate_visits[0].route_origin
+        is OrderControlTvtMpLocalBindingRouteOrigin.BASELINE_PHYSICAL_PASSAGE_ROUTE
+    )
+    assert result.trade_scope_of_this_candidate_visits[1].route_next_link_name == "snap"
+    assert (
+        result.trade_scope_of_this_candidate_visits[1].route_origin
+        is OrderControlTvtMpLocalBindingRouteOrigin.SNAPSHOT_ROUTE_ALREADY_DECIDED
+    )
+    outside = result.outside_trade_scope_inside_k_fixed_visits
+    assert outside[0].visit_key == ("late", 1)
+    assert outside[0].route_next_link_name == "side"
+    assert (
+        outside[0].route_origin
+        is OrderControlTvtMpLocalBindingRouteOrigin.BASELINE_TARGET_NODE_ARRIVAL_ROUTE
+    )
+    assert rank_state.formal_route_next_link_name(("old", 1)) == "ledger_out"
+    assert rank_state.formal_route_next_link_name(("waiting", 1)) == "side"
+    assert rank_state.export_state() == before
+
+
+def test_preconfirmed_visits_use_this_baseline_route_source():
+    rank_state = OrderControlTvtNodeRankState("merge")
+    _confirm_formal(rank_state, ("arr", 1), "out")
+    _confirm_formal(rank_state, ("lead", 1), "out")
+    arrived = _record("arr", 1, vehicle_id=2, route="out", arrived=True)
+    leading = _record("lead", 1, vehicle_id=3, route="side", arrived=False)
+    leading["baseline_passage_timestep"] = 16
+    leading["baseline_passage_route_next_link_name"] = "out"
+    before = rank_state.export_state()
+    fifo_set, candidate, rank_state = _build_chain(
+        rank_state=rank_state,
+        collector=_Collector(
+            {
+                ("arr", 1): arrived,
+                ("lead", 1): leading,
+                ("buy", 1): _record("buy", 1, vehicle_id=4, route="out", arrived=False),
+                ("sell", 1): _record("sell", 1, vehicle_id=5, route="side", arrived=False),
+            }
+        ),
+        arrived_keys=(("arr", 1),),
+        leading_keys=(("lead", 1),),
+        remaining_keys=(("buy", 1), ("sell", 1)),
+        trade_rank_result=_trade_rank(),
+        k_confirmed_before=0,
+    )
+    result = build_tvt_mp_local_binding_rank_sequence(
+        fifo_set,
+        candidate,
+        rank_state,
+    )
+    preconfirmed = result.preconfirmed_by_this_baseline_visits
+    assert preconfirmed[0].visit_key == ("arr", 1)
+    assert preconfirmed[0].route_next_link_name == "out"
+    assert (
+        preconfirmed[0].route_origin
+        is OrderControlTvtMpLocalBindingRouteOrigin.SNAPSHOT_ROUTE_ALREADY_DECIDED
+    )
+    assert preconfirmed[1].visit_key == ("lead", 1)
+    assert preconfirmed[1].route_next_link_name == "out"
+    assert (
+        preconfirmed[1].route_origin
+        is OrderControlTvtMpLocalBindingRouteOrigin.BASELINE_PHYSICAL_PASSAGE_ROUTE
+    )
+    assert rank_state.formal_route_next_link_name(("lead", 1)) == "out"
+    assert rank_state.export_state() == before
+
+    mismatched = OrderControlTvtNodeRankState("merge")
+    _confirm_formal(mismatched, ("arr", 1), "out")
+    _confirm_formal(mismatched, ("lead", 1), "side")
+    mismatched_before = mismatched.export_state()
+    mismatched_fifo, mismatched_candidate, mismatched = _build_chain(
+        rank_state=mismatched,
+        collector=_Collector(
+            {
+                ("arr", 1): arrived,
+                ("lead", 1): leading,
+                ("buy", 1): _record("buy", 1, vehicle_id=4, route="out", arrived=False),
+                ("sell", 1): _record("sell", 1, vehicle_id=5, route="side", arrived=False),
+            }
+        ),
+        arrived_keys=(("arr", 1),),
+        leading_keys=(("lead", 1),),
+        remaining_keys=(("buy", 1), ("sell", 1)),
+        trade_rank_result=_trade_rank(),
+        k_confirmed_before=0,
+    )
+    _assert_builder_error(
+        ValueError,
+        mismatched_fifo,
+        mismatched_candidate,
+        mismatched,
+        "formal_route_next_link_name",
+    )
+    assert mismatched.formal_route_next_link_name(("lead", 1)) == "side"
+    assert mismatched.export_state() == mismatched_before
+
+
+def test_binding_visit_without_either_baseline_route_does_not_use_virtual_route():
+    rank_state = OrderControlTvtNodeRankState("merge")
+    fifo_set, candidate, rank_state = _build_chain(
+        rank_state=rank_state,
+        collector=_Collector(
+            {
+                ("buy", 1): _record(
+                    "buy", 1, vehicle_id=4, route=None, arrived=False
+                ),
+                ("sell", 1): _record(
+                    "sell", 1, vehicle_id=5, route="side", arrived=False
+                ),
+            }
+        ),
+        arrived_keys=(),
+        leading_keys=(),
+        remaining_keys=(("buy", 1), ("sell", 1)),
+        trade_rank_result=_trade_rank(),
+        k_confirmed_before=0,
+    )
+    _assert_builder_error(
+        ValueError,
+        fifo_set,
+        candidate,
+        rank_state,
+        "DETERMINISTIC_VIRTUAL_ROUTE is not used",
+    )
+
+
 TESTS = (
+    test_binding_uses_passage_route_before_arrival_and_ledger_fallback,
+    test_preconfirmed_visits_use_this_baseline_route_source,
+    test_binding_visit_without_either_baseline_route_does_not_use_virtual_route,
     test_public_types_are_frozen_and_importable,
     test_four_partitions_orders_roles_and_k_values,
     test_partition_4_is_empty_when_last_buyer_covers_the_window,

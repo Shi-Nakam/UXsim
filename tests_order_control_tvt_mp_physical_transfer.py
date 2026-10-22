@@ -657,8 +657,9 @@ def test_skipped_past_confirmed_vehicle_is_excluded_from_ordinary_merge():
 
 def test_clearance_stop_skips_ordinary_group():
     world = _world("fork_clearance_stops_ordinary")
+    ordinary_visit_id = 2
     confirmed = _place(world, "confirmed_wait", "in_a", visit_id=1)
-    ordinary = _place(world, "ordinary_wait", "in_b", visit_id=2)
+    ordinary = _place(world, "ordinary_wait", "in_b", visit_id=ordinary_visit_id)
     _confirm(world, [confirmed])
     _register_only(world, [ordinary])
     collector = _as_fork(world)
@@ -687,6 +688,11 @@ def test_clearance_stop_skips_ordinary_group():
     assert seen == []
     assert confirmed.link.name == "in_a"
     assert ordinary.link.name == "in_b"
+    ordinary_snapshot = collector.get_baseline_visit_snapshot(
+        ordinary.name, ordinary_visit_id
+    )
+    assert ordinary_snapshot["baseline_passage_timestep"] is None
+    assert ordinary_snapshot["baseline_passage_route_next_link_name"] is None
 
 
 def test_unconfirmed_baseline_group_uses_arrival_order_not_merge_priority():
@@ -695,8 +701,10 @@ def test_unconfirmed_baseline_group_uses_arrival_order_not_merge_priority():
         hard_deterministic_mode=True,
         flow_capacity=1,
     )
-    early = _place(world, "early_arrival", "in_a", visit_id=1)
-    late = _place(world, "late_high_priority", "in_b", visit_id=2)
+    early_visit_id = 1
+    late_visit_id = 2
+    early = _place(world, "early_arrival", "in_a", visit_id=early_visit_id)
+    late = _place(world, "late_high_priority", "in_b", visit_id=late_visit_id)
     world.get_link("in_a").merge_priority = 1
     world.get_link("in_b").merge_priority = 5
     _register_only(world, [early, late])
@@ -716,6 +724,13 @@ def test_unconfirmed_baseline_group_uses_arrival_order_not_merge_priority():
     _junction(world).transfer()
     assert early.link.name == "out"
     assert late.link.name == "in_b"
+    early_snapshot = collector.get_baseline_visit_snapshot(early.name, early_visit_id)
+    late_snapshot = collector.get_baseline_visit_snapshot(late.name, late_visit_id)
+    assert early_snapshot["route_next_link_name"] == "out"
+    assert early_snapshot["baseline_passage_route_next_link_name"] == "out"
+    assert early_snapshot["baseline_passage_timestep"] == world.T
+    assert late_snapshot["baseline_passage_timestep"] is None
+    assert late_snapshot["baseline_passage_route_next_link_name"] is None
 
 
 def test_ordinary_group_sees_capacity_after_past_confirmed_passage():
@@ -898,9 +913,12 @@ def test_collector_prepare_and_apply_once_per_passage():
     _junction(world).transfer()
     snapshot = collector.get_baseline_visit_snapshot(vehicle.name, 1)
     assert snapshot["baseline_passage_timestep"] == world.T
+    assert snapshot["baseline_passage_route_next_link_name"] == "out"
+    assert snapshot["route_next_link_name"] == "out"
     _junction(world).transfer()
     again = collector.get_baseline_visit_snapshot(vehicle.name, 1)
     assert again["baseline_passage_timestep"] == world.T
+    assert again["baseline_passage_route_next_link_name"] == "out"
 
 
 def test_transfer_does_not_call_downstream_observer():
@@ -1066,6 +1084,8 @@ def test_generic_baseline_fork_uses_ordinary_merge_without_rank_ledger():
     assert vehicle.link.name == "out"
     snapshot = collector.get_baseline_visit_snapshot(vehicle.name, 1)
     assert snapshot["baseline_passage_timestep"] == world.T
+    assert snapshot["baseline_passage_route_next_link_name"] == "out"
+    assert snapshot["route_next_link_name"] == "out"
     assert junction.last_order_control_inlink is None
     assert junction.last_order_control_entry_timestep is None
     assert "junction" not in world.order_control_tvt_rank_states_by_node_name
@@ -2584,18 +2604,28 @@ def test_unconfirmed_baseline_missing_rank_facts_are_runtime_error():
     error = _expect_runtime_error(_junction(wrong_id).transfer)
     assert "vehicle_id" in str(error)
 
-    wrong_route = _world("wrong_route_name")
-    route_vehicle = _place(wrong_route, "wrong_route", "in_a", visit_id=1)
-    _register_only(wrong_route, [route_vehicle])
-    route_collector = _as_fork(wrong_route)
+
+def test_unconfirmed_baseline_route_reselection_records_live_passage_route():
+    visit_id = 1
+    world = _world("wrong_route_live_passage")
+    route_vehicle = _place(world, "wrong_route", "in_a", visit_id=visit_id)
+    _register_only(world, [route_vehicle])
+    route_collector = _as_fork(world)
     _register_unconfirmed_baseline_snapshot(
         route_collector,
         route_vehicle,
         route_next_link_name="side",
     )
-    error = _expect_runtime_error(_junction(wrong_route).transfer)
-    assert "route_next_link_name" in str(error)
-    assert route_vehicle.link.name == "in_a"
+    assert route_vehicle.route_next_link.name == "out"
+    _junction(world).transfer()
+    assert route_vehicle.link.name == "out"
+    assert route_vehicle not in world.get_link("in_a").vehicles
+    snapshot = route_collector.get_baseline_visit_snapshot(
+        route_vehicle.name, visit_id
+    )
+    assert snapshot["route_next_link_name"] == "side"
+    assert snapshot["baseline_passage_route_next_link_name"] == "out"
+    assert snapshot["baseline_passage_timestep"] == world.T
 
 
 def test_unconfirmed_baseline_arrival_outside_snapshot_set_uses_current_visit_order():
@@ -2748,6 +2778,12 @@ def test_unconfirmed_physical_skip_tries_the_later_arrival():
     _junction(head).transfer()
     assert early_blocked.link.name == "in_a"
     assert later.link.name == "out"
+    blocked_snapshot = head_collector.get_baseline_visit_snapshot(
+        early_blocked.name, 1
+    )
+    assert blocked_snapshot["baseline_passage_timestep"] is None
+    assert blocked_snapshot["baseline_passage_route_next_link_name"] is None
+    assert blocked_snapshot["route_next_link_name"] == "out"
 
     outflow = _world("skip_outflow", flow_capacity=2)
     early_out = _place(outflow, "outflow_early", "in_a", visit_id=1)
@@ -2764,6 +2800,9 @@ def test_unconfirmed_physical_skip_tries_the_later_arrival():
     _junction(outflow).transfer()
     assert early_out.link.name == "in_a"
     assert later_out.link.name == "out"
+    outflow_snapshot = outflow_collector.get_baseline_visit_snapshot(early_out.name, 1)
+    assert outflow_snapshot["baseline_passage_timestep"] is None
+    assert outflow_snapshot["baseline_passage_route_next_link_name"] is None
 
     inflow = _world("skip_inflow", flow_capacity=2)
     out_b = _add_junction_outlink(inflow, "out_b")
@@ -2785,14 +2824,29 @@ def test_unconfirmed_physical_skip_tries_the_later_arrival():
     _junction(inflow).transfer()
     assert early_in.link.name == "in_a"
     assert later_in.link.name == "out_b"
+    inflow_snapshot = inflow_collector.get_baseline_visit_snapshot(early_in.name, 1)
+    assert inflow_snapshot["baseline_passage_timestep"] is None
+    assert inflow_snapshot["baseline_passage_route_next_link_name"] is None
 
 
 def test_unconfirmed_node_flow_shortage_still_checks_the_later_visit():
     world = _world("node_flow_checks_later", flow_capacity=1)
     junction = _junction(world)
     junction.flow_capacity_remain = 0
-    early = _place(world, "flow_early", "in_a", visit_id=1)
-    late = _place(world, "flow_late", "in_b", visit_id=2)
+    early_visit_id = 1
+    late_visit_id = 2
+    early = _place(
+        world,
+        "flow_early",
+        "in_a",
+        visit_id=early_visit_id,
+    )
+    late = _place(
+        world,
+        "flow_late",
+        "in_b",
+        visit_id=late_visit_id,
+    )
     _register_only(world, [early, late])
     collector = _as_fork(world)
     _register_unconfirmed_baseline_snapshot(
@@ -2818,6 +2872,14 @@ def test_unconfirmed_node_flow_shortage_still_checks_the_later_visit():
     assert early.link.name == "in_a"
     assert late.link.name == "in_b"
     assert junction.last_order_control_inlink is None
+    for vehicle_name, visit_id in (
+        ("flow_early", early_visit_id),
+        ("flow_late", late_visit_id),
+    ):
+        held = collector.get_baseline_visit_snapshot(vehicle_name, visit_id)
+        assert held is not None
+        assert held["baseline_passage_timestep"] is None
+        assert held["baseline_passage_route_next_link_name"] is None
 
 
 def test_unconfirmed_clearance_of_earlier_arrival_blocks_later_same_outlink():
@@ -3299,6 +3361,46 @@ def test_unconfirmed_clearance_precedes_inlink_outflow_and_blocks_later_arrival(
     assert in_a.capacity_out_remain == 0
     assert junction.last_order_control_inlink is previous_inlink
     assert junction.last_order_control_entry_timestep == entry_timestep
+
+
+def test_unconfirmed_candidate_allows_live_outlink_to_differ_from_arrival_route():
+    class _Named:
+        def __init__(self, name):
+            self.name = name
+
+    node = _Named("northwest_intersection")
+    arrival_link = _Named("northwest_intersection_to_southwest_intersection")
+    live_link = _Named("northwest_intersection_to_northeast_intersection")
+    inlink = _Named("west_north_od_to_northwest_intersection")
+    node.outlinks = {live_link.name: live_link, arrival_link.name: arrival_link}
+    vehicle = _Named("veh_wn_se_base_042")
+    vehicle.id = 7
+    snapshot = {
+        "node_name": node.name,
+        "vehicle_name": vehicle.name,
+        "visit_id": 1,
+        "inlink_name": inlink.name,
+        "baseline_arrival_timestep": 40,
+        "arrival_tiebreaker": 0.2,
+        "vehicle_id": 7,
+        "route_next_link_name": arrival_link.name,
+    }
+    vehicle.route_next_link = live_link
+    arrival_timestep, tiebreaker, vehicle_id = (
+        physical_transfer._copy_validated_baseline_rank_fields(
+            node,
+            vehicle,
+            1,
+            inlink,
+            live_link,
+            snapshot,
+        )
+    )
+    assert arrival_timestep == 40
+    assert tiebreaker == 0.2
+    assert vehicle_id == 7
+    assert vehicle.route_next_link is live_link
+    assert snapshot["route_next_link_name"] == arrival_link.name
 
 
 def test_registry_matches_defined_functions():

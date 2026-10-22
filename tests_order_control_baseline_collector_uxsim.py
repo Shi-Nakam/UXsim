@@ -369,28 +369,31 @@ def test_batch_passage_records_after_service_queue_finalize():
 
     apply_calls = []
 
-    def _recording_apply(record, timestep):
+    def _recording_apply(record, timestep, route_name):
         apply_calls.append(
             {
                 "timestep": timestep,
+                "route_name": route_name,
                 "queue_len": len(merge.order_control_batch_service_queue),
             }
         )
-        OrderControlBaselineCollector.apply_baseline_passage_timestep(
-            collector, record, timestep
+        OrderControlBaselineCollector.apply_baseline_passage_result(
+            collector, record, timestep, route_name
         )
 
-    collector.apply_baseline_passage_timestep = _recording_apply
+    collector.apply_baseline_passage_result = _recording_apply
 
     W.T = 15
     count = merge.serve_order_control_batch_service_queue()
     assert count == 1
     assert len(apply_calls) == 1
     assert apply_calls[0]["timestep"] == 15
+    assert apply_calls[0]["route_name"] == out.name
     assert apply_calls[0]["queue_len"] == 0
 
     snapshot = collector.get_baseline_visit_snapshot(veh.name, visit_id)
     assert snapshot["baseline_passage_timestep"] == 15
+    assert snapshot["baseline_passage_route_next_link_name"] == out.name
     assert veh.link is out
 
 
@@ -619,8 +622,8 @@ def test_normal_transfer_passage_ignores_outside_fixed_set_vehicle():
     assert collector.get_baseline_visit_snapshot(veh.name, 1) is None
 
 
-def test_batch_passage_stops_before_physical_transfer_on_inconsistency():
-    W = _build_batch_world("collector_batch_inconsistency")
+def test_batch_passage_allows_later_visit_outside_snapshot_fixed_set():
+    W = _build_batch_world("collector_batch_later_visit_outside_fixed_set")
     collector = OrderControlBaselineCollector()
     W._order_control_baseline_collector = collector
     merge = W.get_node("merge")
@@ -628,11 +631,11 @@ def test_batch_passage_stops_before_physical_transfer_on_inconsistency():
     out = W.get_link("out")
     veh = W.addVehicle("orig1", "dest", 0, name="bad_batch")
 
-    registered_visit_id = 1
+    service_queue_visit_id = 1
     collector_visit_id = 2
-    veh.order_control_visit_id = registered_visit_id
+    veh.order_control_visit_id = service_queue_visit_id
     veh.order_control_current_visit = {
-        "visit_id": registered_visit_id,
+        "visit_id": service_queue_visit_id,
         "node": merge,
         "inlink": link1,
         "earliest_arrival_timestep": 0,
@@ -664,28 +667,26 @@ def test_batch_passage_stops_before_physical_transfer_on_inconsistency():
             "batch_id": 0,
             "inlink": link1,
             "vehicles": [veh],
-            "visit_ids": [registered_visit_id],
+            "visit_ids": [service_queue_visit_id],
         }
     )
     _boost_transfer_capacity(merge, link1, out)
 
-    try:
-        merge.serve_order_control_batch_service_queue()
-        raise AssertionError("Expected ValueError before physical BATCH transfer")
-    except ValueError as exc:
-        assert "visit_id mismatch" in str(exc)
+    W.T = 15
+    count = merge.serve_order_control_batch_service_queue()
+    assert count == 1
+    assert len(merge.order_control_batch_service_queue) == 0
 
-    assert veh.link is link1
-    assert veh in link1.vehicles
-    assert veh in merge.incoming_vehicles
-    assert veh.link is not out
-    assert collector.get_baseline_visit_snapshot(veh.name, collector_visit_id) is not None
-    assert (
-        collector.get_baseline_visit_snapshot(veh.name, collector_visit_id)[
-            "baseline_passage_timestep"
-        ]
-        is None
-    )
+    assert veh.link is out
+    assert veh not in link1.vehicles
+    assert veh in out.vehicles
+
+    assert collector.get_baseline_visit_snapshot(veh.name, service_queue_visit_id) is None
+
+    collector_visit = collector.get_baseline_visit_snapshot(veh.name, collector_visit_id)
+    assert collector_visit is not None
+    assert collector_visit["baseline_passage_timestep"] is None
+    assert collector_visit["baseline_passage_route_next_link_name"] is None
 
 
 def test_real_world_and_fork_collector_are_separated():
@@ -727,7 +728,7 @@ TESTS = [
     test_fcfs_clearance_passage_ignores_outside_fixed_set_vehicle,
     test_normal_transfer_passage_on_time_value_node,
     test_normal_transfer_passage_ignores_outside_fixed_set_vehicle,
-    test_batch_passage_stops_before_physical_transfer_on_inconsistency,
+    test_batch_passage_allows_later_visit_outside_snapshot_fixed_set,
     test_real_world_and_fork_collector_are_separated,
 ]
 

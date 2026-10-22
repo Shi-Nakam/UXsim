@@ -433,6 +433,9 @@ def scan_and_transfer_tvt_mp_binding_visits_at_current_timestep(
             local_world,
             binding_visit.route_next_link_name,
         )
+        # Already-waiting vehicles receive this outlink at calculation start.
+        # A new arrival receives it before being added to incoming_vehicles.
+        # This comparison stays a hard stop when that assignment was missed.
         route_next_link = getattr(local_vehicle, "route_next_link", None)
         if route_next_link is not None and route_next_link.name != outlink.name:
             raise RuntimeError(

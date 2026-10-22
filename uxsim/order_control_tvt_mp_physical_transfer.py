@@ -454,10 +454,11 @@ def _copy_validated_baseline_rank_fields(node, vehicle, visit_id, inlink, outlin
 
     Call this only when get_baseline_visit_snapshot returned a dict.
     None is not a broken record. The caller uses the current visit for a
-    visit outside the snapshot-fixed set. A partial collector record, or a
-    route that does not match the live outlink, is not repaired from the
-    current visit. Do not invent an order from merge priority or a random
-    draw.
+    visit outside the snapshot-fixed set. The arrival route is kept even
+    when the live outlink has changed while the vehicle waits. The live
+    outlink must still be one of this node's registered outlinks. This
+    check does not write the passage route. The passage route is saved
+    only after the physical move succeeds.
     """
     if not isinstance(snapshot, dict):
         _raise_baseline_rank_field_error(
@@ -532,9 +533,18 @@ def _copy_validated_baseline_rank_fields(node, vehicle, visit_id, inlink, outlin
         _raise_baseline_rank_field_error(
             node, vehicle, visit_id, "route_next_link_name", route_next_link_name
         )
-    if route_next_link_name != outlink.name:
+    if outlink is None:
         _raise_baseline_rank_field_error(
-            node, vehicle, visit_id, "route_next_link_name", route_next_link_name
+            node, vehicle, visit_id, "route_next_link", outlink
+        )
+    outlink_is_registered = False
+    for registered_outlink in node.outlinks.values():
+        if registered_outlink is outlink:
+            outlink_is_registered = True
+            break
+    if not outlink_is_registered:
+        _raise_baseline_rank_field_error(
+            node, vehicle, visit_id, "route_next_link", outlink
         )
 
     return baseline_arrival_timestep, arrival_tiebreaker, vehicle_id

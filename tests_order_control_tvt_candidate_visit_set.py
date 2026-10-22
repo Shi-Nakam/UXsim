@@ -101,7 +101,11 @@ def _register_b_visit(
     )
     if passage is not None:
         record = collector._visit_records_by_primary_key[(vehicle_name, visit_id)]
-        collector.apply_baseline_passage_timestep(record, passage)
+        collector.apply_baseline_passage_result(
+            record,
+            passage,
+            record.route_next_link_name,
+        )
 
 
 def _register_a_visit(
@@ -131,7 +135,11 @@ def _register_a_visit(
     )
     if passage is not None:
         record = collector._visit_records_by_primary_key[(vehicle_name, visit_id)]
-        collector.apply_baseline_passage_timestep(record, passage)
+        collector.apply_baseline_passage_result(
+            record,
+            passage,
+            record.route_next_link_name,
+        )
 
 
 def _fork_result(
@@ -937,7 +945,11 @@ def test_candidate_record_validation_and_missing_right_of_entry():
         route_next_link_name="out",
     )
     record_dup = collector2._visit_records_by_primary_key[("veh_dup", 9)]
-    collector2.apply_baseline_passage_timestep(record_dup, 15)
+    collector2.apply_baseline_passage_result(
+        record_dup,
+        15,
+        record_dup.route_next_link_name,
+    )
     selection_dup = _selection_result(
         collector=collector2,
         target_node_names=("merge",),

@@ -64,6 +64,7 @@ from uxsim.order_control_tvt_mp_local_binding_rank_sequence import (
     OrderControlTvtMpLocalBindingRouteOrigin,
     OrderControlTvtMpLocalBindingTradeRole,
 )
+from uxsim.order_control_tvt_node_rank_state import OrderControlTvtNodeRankState
 from uxsim.uxsim import World
 import uxsim.order_control_tvt_mp_candidate_local_virtual_calculation as orch_mod
 
@@ -190,7 +191,11 @@ def _register_snapshot(
             visit_id=visit["visit_id"],
             node_name="merge",
         )
-        collector.apply_baseline_passage_timestep(record, baseline_passage_timestep)
+        collector.apply_baseline_passage_result(
+            record,
+            baseline_passage_timestep,
+            record.route_next_link_name,
+        )
 
 
 def _outlink_boundary(name: str, terminal: str, active: int, transferred: int):
@@ -324,7 +329,7 @@ def _prepare_world_with_vehicles(vehicle_specs, buyers_sorted=None):
             visit = _binding_visit(
                 vehicle,
                 rank=len(binding_visits) + 1,
-                route_name=spec["route"],
+                route_name=spec.get("binding_route", spec["route"]),
                 inlink_name=spec["inlink"],
                 trade_role=role,
             )
@@ -3740,6 +3745,200 @@ def test_ready_head_passes_at_offset_0_and_clearance_follower_is_not_shifted():
         == (("follow_veh", 1),)
     )
     assert result.final_virtual_timestep == BASELINE_T + 2
+
+
+def test_initial_arrived_binding_vehicle_uses_binding_outlink_not_stale_live_route():
+    world, local_state, collector, visits = _prepare_world_with_vehicles(
+        [
+            {
+                "name": "buyer_veh",
+                "origin": "orig_a",
+                "dest": "dest",
+                "inlink": "in_a",
+                "route": "out",
+                "binding_route": "side",
+                "incoming": True,
+                "role": OrderControlTvtMpLocalBindingTradeRole.BUYER,
+            }
+        ]
+    )
+    real_vehicle = world.VEHICLES["buyer_veh"]
+    real_out = world.get_link("out")
+    assert real_vehicle.route_next_link is real_out
+    local_vehicle = _local_vehicle(local_state, "buyer_veh")
+    local_world = local_state.local_world
+    assert local_vehicle.route_next_link is local_world.get_link("out")
+    snapshot_before = collector.get_baseline_visit_snapshot("buyer_veh", 1)
+    sequence_route_before = visits[0].route_next_link_name
+    rank_state = OrderControlTvtNodeRankState("merge")
+    ledger_before = rank_state.export_state()
+
+    state = _init_state(local_state, collector, horizon=1)
+
+    binding_outlink = local_world.get_link("side")
+    assert local_vehicle.route_next_link is binding_outlink
+    assert real_vehicle.route_next_link is real_out
+    assert real_vehicle.link is world.get_link("in_a")
+    assert visits[0].route_next_link_name == sequence_route_before == "side"
+    assert collector.get_baseline_visit_snapshot("buyer_veh", 1) == snapshot_before
+    assert rank_state.export_state() == ledger_before
+
+    result = run_tvt_mp_candidate_local_virtual_calculation_one_timestep(state)
+    assert result.binding_transfer_result.transferred_binding_visit_keys == (
+        visits[0].visit_key,
+    )
+    assert local_vehicle.link is binding_outlink
+    assert local_vehicle not in local_world.get_link("in_a").vehicles
+    assert real_vehicle.route_next_link is real_out
+    assert real_vehicle.link is world.get_link("in_a")
+    assert collector.get_baseline_visit_snapshot("buyer_veh", 1) == snapshot_before
+    assert rank_state.export_state() == ledger_before
+
+
+def test_binding_scan_still_rejects_a_route_changed_after_initialization():
+    _world, local_state, collector, visits = _prepare_world_with_vehicles(
+        [
+            {
+                "name": "buyer_veh",
+                "origin": "orig_a",
+                "dest": "dest",
+                "inlink": "in_a",
+                "route": "out",
+                "binding_route": "side",
+                "incoming": True,
+            }
+        ]
+    )
+    state = _init_state(local_state, collector, horizon=1)
+    local_vehicle = _local_vehicle(local_state, "buyer_veh")
+    local_world = local_state.local_world
+    assert local_vehicle.route_next_link is local_world.get_link("side")
+    local_vehicle.route_next_link = local_world.get_link("out")
+    try:
+        orch_mod.scan_and_transfer_tvt_mp_binding_visits_at_current_timestep(
+            state.binding_transfer_state
+        )
+        raise AssertionError("expected binding route mismatch RuntimeError")
+    except RuntimeError as exc:
+        assert "does not match binding route" in str(exc)
+        assert "side" in str(exc)
+    assert local_vehicle.link is local_world.get_link("in_a")
+    assert local_vehicle in local_world.get_link("in_a").vehicles
+    assert state.binding_transfer_state.transferred_binding_visit_keys == ()
+    assert visits[0].route_next_link_name == "side"
+
+
+def test_unarrived_binding_vehicle_keeps_live_route_until_new_arrival():
+    world, local_state, collector, _visits = _prepare_world_with_vehicles(
+        [
+            {
+                "name": "buyer_veh",
+                "origin": "orig_a",
+                "dest": "dest",
+                "inlink": "in_a",
+                "route": "out",
+                "binding_route": "side",
+                "incoming": False,
+            }
+        ]
+    )
+    local_vehicle = _local_vehicle(local_state, "buyer_veh")
+    local_world = local_state.local_world
+    local_out = local_world.get_link("out")
+    local_side = local_world.get_link("side")
+    assert local_vehicle not in local_state.target_node.incoming_vehicles
+    assert local_vehicle.route_next_link is local_out
+
+    state = _init_state(local_state, collector, horizon=1)
+
+    assert local_vehicle.route_next_link is local_out
+    assert local_vehicle not in local_state.target_node.incoming_vehicles
+    assert world.VEHICLES["buyer_veh"].route_next_link is world.get_link("out")
+
+    run_tvt_mp_candidate_local_virtual_calculation_one_timestep(state)
+
+    assert local_vehicle.route_next_link is local_side
+    assert local_vehicle in local_state.target_node.incoming_vehicles
+    assert local_vehicle.link is local_world.get_link("in_a")
+    assert world.VEHICLES["buyer_veh"].route_next_link is world.get_link("out")
+
+
+def test_initial_binding_route_does_not_change_an_unbound_vehicle():
+    world, local_state, collector, _visits = _prepare_world_with_vehicles(
+        [
+            {
+                "name": "buyer_veh",
+                "origin": "orig_a",
+                "dest": "dest",
+                "inlink": "in_a",
+                "route": "out",
+                "binding_route": "side",
+                "incoming": True,
+                "role": OrderControlTvtMpLocalBindingTradeRole.BUYER,
+            },
+            {
+                "name": "free_veh",
+                "origin": "orig_b",
+                "dest": "dest",
+                "inlink": "in_b",
+                "route": "out",
+                "incoming": True,
+                "binding": False,
+            },
+        ]
+    )
+    _init_state(local_state, collector, horizon=1)
+    local_world = local_state.local_world
+    assert _local_vehicle(local_state, "buyer_veh").route_next_link is (
+        local_world.get_link("side")
+    )
+    assert _local_vehicle(local_state, "free_veh").route_next_link is (
+        local_world.get_link("out")
+    )
+    assert world.VEHICLES["free_veh"].route_next_link is world.get_link("out")
+    assert world.VEHICLES["buyer_veh"].route_next_link is world.get_link("out")
+
+
+def test_invalid_initial_binding_route_does_not_rewrite_other_arrived_vehicles():
+    world, local_state, collector, _visits = _prepare_world_with_vehicles(
+        [
+            {
+                "name": "buyer_veh",
+                "origin": "orig_a",
+                "dest": "dest",
+                "inlink": "in_a",
+                "route": "out",
+                "binding_route": "side",
+                "incoming": True,
+                "role": OrderControlTvtMpLocalBindingTradeRole.BUYER,
+            },
+            {
+                "name": "bad_seller",
+                "origin": "orig_b",
+                "dest": "dest_b",
+                "inlink": "in_b",
+                "route": "out",
+                "binding_route": "missing_link",
+                "incoming": True,
+                "role": OrderControlTvtMpLocalBindingTradeRole.SELLER,
+            },
+        ]
+    )
+    local_world = local_state.local_world
+    buyer = _local_vehicle(local_state, "buyer_veh")
+    seller = _local_vehicle(local_state, "bad_seller")
+    assert buyer.route_next_link is local_world.get_link("out")
+    assert seller.route_next_link is local_world.get_link("out")
+    try:
+        _init_state(local_state, collector, horizon=1)
+        raise AssertionError("expected an unregistered binding route to fail")
+    except RuntimeError as exc:
+        assert "missing_link" in str(exc)
+        assert "not an outlink" in str(exc)
+    assert buyer.route_next_link is local_world.get_link("out")
+    assert seller.route_next_link is local_world.get_link("out")
+    assert world.VEHICLES["buyer_veh"].route_next_link is world.get_link("out")
+    assert world.VEHICLES["bad_seller"].route_next_link is world.get_link("out")
 
 
 def test_tests_registry_matches_defined_functions():

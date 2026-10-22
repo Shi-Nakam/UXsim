@@ -1100,7 +1100,7 @@ def test_missing_route_leaves_leading_confirmation_unchanged():
             {"merge": rank_state},
             {("veh_n1", 1): False, ("veh_n2", 2): False},
         ),
-        "route_next_link_name",
+        "baseline passage route or arrival route",
     )
     assert rank_state.export_state() == before_export
     assert rank_state.undetermined_visit_keys() == frozenset({("veh_n1", 1), ("veh_n2", 2)})

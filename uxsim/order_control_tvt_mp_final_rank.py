@@ -15,6 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 
+from uxsim.order_control_baseline_collector import select_current_baseline_route
 from uxsim.order_control_tvt_candidate_visit_set import (
     OrderControlTvtCandidateVisitSetResult,
     OrderControlTvtCandidateVisitSetStatus,
@@ -1250,23 +1251,31 @@ def _build_baseline_fallback_node_result(
                 "repeated. Duplicates are not dropped."
             )
         seen_visit_keys.append(visit_key)
-        formal_route = _formal_route_from_collector(
+        formal_route, route_source = _formal_route_and_source_from_collector(
             collector=collector,
             node_name=node_name,
             visit_key=visit_key,
         )
-        # Fallback reads the saved baseline arrival route. It does not read
-        # a rank-ledger formal route or a snapshot-already-decided route.
+        if route_source == "physical_passage":
+            route_origin = (
+                OrderControlTvtMpLocalBindingRouteOrigin.BASELINE_PHYSICAL_PASSAGE_ROUTE
+            )
+        elif route_source == "snapshot_arrival":
+            route_origin = (
+                OrderControlTvtMpLocalBindingRouteOrigin.SNAPSHOT_ROUTE_ALREADY_DECIDED
+            )
+        else:
+            route_origin = (
+                OrderControlTvtMpLocalBindingRouteOrigin
+                .BASELINE_TARGET_NODE_ARRIVAL_ROUTE
+            )
         final_rank_visits.append(
             OrderControlTvtMpFinalRankVisitRecord(
                 visit_key=visit_key,
                 final_local_rank=next_local_rank,
                 formal_route_next_link_name=formal_route,
                 finalization_source=OrderControlTvtMpFinalizationSource.BASELINE,
-                route_origin=(
-                    OrderControlTvtMpLocalBindingRouteOrigin
-                    .BASELINE_TARGET_NODE_ARRIVAL_ROUTE
-                ),
+                route_origin=route_origin,
             )
         )
         next_local_rank = next_local_rank + 1
@@ -1290,7 +1299,22 @@ def _formal_route_from_collector(
     node_name: str,
     visit_key: OrderControlTvtVisitKey,
 ) -> str:
-    """Read the saved baseline arrival route. Do not search traffic objects."""
+    """Read this baseline's passage route, or the arrival route if none."""
+    route_name, _source = _formal_route_and_source_from_collector(
+        collector=collector,
+        node_name=node_name,
+        visit_key=visit_key,
+    )
+    return route_name
+
+
+def _formal_route_and_source_from_collector(
+    *,
+    collector: object,
+    node_name: str,
+    visit_key: OrderControlTvtVisitKey,
+) -> tuple[str, str]:
+    """Return (route_name, source). Do not search live traffic objects."""
     snapshot_reader = getattr(collector, "get_baseline_visit_snapshot", None)
     if not callable(snapshot_reader):
         raise RuntimeError(
@@ -1309,8 +1333,14 @@ def _formal_route_from_collector(
             f"Node {node_name!r}: baseline snapshot for VisitKey {visit_key!r} "
             f"must be a dict; got type {type(snapshot).__name__}."
         )
-    return _require_non_empty_route(
-        snapshot.get("route_next_link_name"),
-        node_name=node_name,
-        visit_key=visit_key,
+    route_name, source = select_current_baseline_route(
+        snapshot,
+        context=f"Node {node_name!r} final rank VisitKey {visit_key!r}",
     )
+    if route_name is None or source == "unavailable":
+        raise RuntimeError(
+            f"Node {node_name!r}: VisitKey {visit_key!r} has neither a "
+            "baseline passage route nor an arrival route. The formal route "
+            "is not guessed."
+        )
+    return route_name, source

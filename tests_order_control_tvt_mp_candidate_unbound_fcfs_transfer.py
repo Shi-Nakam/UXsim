@@ -1138,6 +1138,61 @@ def test_fcfs_third_key_uses_stored_real_vehicle_id():
     assert world.VEHICLES["second_real"].id == real_second
 
 
+def test_unbound_route_classification_prefers_passage_then_arrival_then_virtual():
+    from uxsim.order_control_tvt_mp_candidate_unbound_fcfs_transfer import (
+        _classify_route,
+    )
+
+    class _Node:
+        name = "merge"
+
+    node = _Node()
+    classification, route_name = _classify_route(
+        node,
+        {
+            "vehicle_name": "later",
+            "was_arrived_at_snapshot": False,
+            "route_next_link_name": "arrival_a",
+            "baseline_passage_timestep": 8,
+            "baseline_passage_route_next_link_name": "passage_b",
+        },
+    )
+    assert (
+        classification
+        is OrderControlTvtMpUnboundRouteClassification.BASELINE_PHYSICAL_PASSAGE_ROUTE
+    )
+    assert route_name == "passage_b"
+    classification, route_name = _classify_route(
+        node,
+        {
+            "vehicle_name": "later",
+            "was_arrived_at_snapshot": False,
+            "route_next_link_name": "arrival_a",
+            "baseline_passage_timestep": None,
+            "baseline_passage_route_next_link_name": None,
+        },
+    )
+    assert (
+        classification
+        is OrderControlTvtMpUnboundRouteClassification.BASELINE_ARRIVAL_ROUTE
+    )
+    assert route_name == "arrival_a"
+    classification, route_name = _classify_route(
+        node,
+        {
+            "vehicle_name": "later",
+            "was_arrived_at_snapshot": False,
+            "route_next_link_name": None,
+            "baseline_passage_timestep": None,
+        },
+    )
+    assert (
+        classification
+        is OrderControlTvtMpUnboundRouteClassification.DETERMINISTIC_VIRTUAL_ROUTE
+    )
+    assert route_name is None
+
+
 def _run_all() -> None:
     tests = [
         test_public_types_are_frozen_and_second_scan_is_rejected,
@@ -1167,6 +1222,7 @@ def _run_all() -> None:
         test_inlink_outflow_precedes_node_flow_when_both_are_short,
         test_outlink_inflow_precedes_entry_space_when_both_are_short,
         test_fcfs_third_key_uses_stored_real_vehicle_id,
+        test_unbound_route_classification_prefers_passage_then_arrival_then_virtual,
     ]
     for test in tests:
         test()

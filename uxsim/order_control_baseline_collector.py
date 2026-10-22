@@ -72,6 +72,7 @@ class OrderControlBaselineVisitRecord:
     arrival_tiebreaker: int | float | None
     route_next_link_name: str | None
     baseline_passage_timestep: int | None
+    baseline_passage_route_next_link_name: str | None
 
 
 class OrderControlBaselineCollector:
@@ -191,6 +192,7 @@ class OrderControlBaselineCollector:
             arrival_tiebreaker=arrival_tiebreaker,
             route_next_link_name=route_next_link_name,
             baseline_passage_timestep=None,
+            baseline_passage_route_next_link_name=None,
         )
 
         self._visit_records_by_primary_key[primary_key] = record
@@ -328,21 +330,56 @@ class OrderControlBaselineCollector:
                 f"Duplicate passage recording for "
                 f"(vehicle_name={vehicle_name!r}, visit_id={visit_id})."
             )
+        if record.baseline_passage_route_next_link_name is not None:
+            raise ValueError(
+                f"Partial baseline passage record for "
+                f"(vehicle_name={vehicle_name!r}, visit_id={visit_id}): "
+                "baseline_passage_route_next_link_name is set but "
+                "baseline_passage_timestep is missing."
+            )
 
         return record
 
-    def apply_baseline_passage_timestep(
+    def apply_baseline_passage_result(
         self,
         record: OrderControlBaselineVisitRecord,
         baseline_passage_timestep: int,
+        baseline_passage_route_next_link_name: str,
     ) -> None:
         """
-        Set baseline_passage_timestep on a visit validated by prepare_baseline_passage_recording.
+        Save one successful physical passage on a prepared snapshot visit.
+
+        Writes baseline_passage_timestep and baseline_passage_route_next_link_name
+        together. Does not change the arrival route_next_link_name. Rejects a
+        second call and a record that already has only one of the two fields.
         """
+        timestep_already_set = record.baseline_passage_timestep is not None
+        route_already_set = record.baseline_passage_route_next_link_name is not None
+        if timestep_already_set and route_already_set:
+            raise ValueError(
+                "Duplicate baseline passage result for "
+                f"(vehicle_name={record.vehicle_name!r}, visit_id={record.visit_id})."
+            )
+        if timestep_already_set or route_already_set:
+            raise ValueError(
+                "Partial baseline passage record for "
+                f"(vehicle_name={record.vehicle_name!r}, visit_id={record.visit_id}): "
+                f"baseline_passage_timestep={record.baseline_passage_timestep!r}, "
+                "baseline_passage_route_next_link_name="
+                f"{record.baseline_passage_route_next_link_name!r}."
+            )
+
         baseline_passage_timestep = _require_timestep(
             baseline_passage_timestep, "baseline_passage_timestep"
         )
+        baseline_passage_route_next_link_name = _require_route_next_link_name(
+            baseline_passage_route_next_link_name,
+            "baseline_passage_route_next_link_name",
+        )
         record.baseline_passage_timestep = baseline_passage_timestep
+        record.baseline_passage_route_next_link_name = (
+            baseline_passage_route_next_link_name
+        )
 
     def export_node_baseline_visits(self, node_name: str) -> list[dict]:
         """Return plain dict copies for one node. Order is not rank order."""
@@ -375,4 +412,78 @@ class OrderControlBaselineCollector:
             "arrival_tiebreaker": record.arrival_tiebreaker,
             "route_next_link_name": record.route_next_link_name,
             "baseline_passage_timestep": record.baseline_passage_timestep,
+            "baseline_passage_route_next_link_name": (
+                record.baseline_passage_route_next_link_name
+            ),
         }
+
+
+def read_consistent_baseline_passage_fields(
+    snapshot: dict,
+    *,
+    context: str,
+) -> tuple[int | None, str | None]:
+    """
+    Return the passage timestep and passage route, or (None, None).
+
+    A missing passage-route key is treated as None so older snapshot dicts
+    that only stored the arrival route stay readable. One field without the
+    other is a broken record.
+    """
+    timestep = snapshot.get("baseline_passage_timestep")
+    if "baseline_passage_route_next_link_name" in snapshot:
+        route_name = snapshot.get("baseline_passage_route_next_link_name")
+    else:
+        route_name = None
+
+    timestep_missing = timestep is None
+    route_missing = route_name is None
+    if timestep_missing and route_missing:
+        return None, None
+    if timestep_missing or route_missing:
+        raise ValueError(
+            f"{context}: partial baseline passage record; "
+            f"baseline_passage_timestep={timestep!r}, "
+            f"baseline_passage_route_next_link_name={route_name!r}."
+        )
+    if isinstance(timestep, bool) or not isinstance(timestep, int) or timestep < 0:
+        raise ValueError(
+            f"{context}: baseline_passage_timestep must be a non-negative int; "
+            f"got {timestep!r}."
+        )
+    if not isinstance(route_name, str) or route_name == "":
+        raise ValueError(
+            f"{context}: baseline_passage_route_next_link_name must be a "
+            f"non-empty str; got {route_name!r}."
+        )
+    return timestep, route_name
+
+
+def select_current_baseline_route(
+    snapshot: dict,
+    *,
+    context: str,
+) -> tuple[str | None, str]:
+    """
+    Choose the route this baseline can supply for one visit.
+
+    Returns (route_name, source). source is one of:
+    physical_passage, snapshot_arrival, baseline_arrival, unavailable.
+
+    Passage route wins over the arrival route. unavailable means this
+    baseline has neither route. Callers that may read the rank ledger do
+    that themselves. This function does not write the ledger.
+    """
+    _timestep, passage_route = read_consistent_baseline_passage_fields(
+        snapshot,
+        context=context,
+    )
+    if passage_route is not None:
+        return passage_route, "physical_passage"
+
+    arrival_route = snapshot.get("route_next_link_name")
+    if isinstance(arrival_route, str) and arrival_route != "":
+        if snapshot.get("was_arrived_at_snapshot") is True:
+            return arrival_route, "snapshot_arrival"
+        return arrival_route, "baseline_arrival"
+    return None, "unavailable"

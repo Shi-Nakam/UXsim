@@ -249,7 +249,7 @@ def test_prepare_baseline_passage_recording_rejects_duplicate_passage():
         visit_id=1,
         node_name="merge",
     )
-    collector.apply_baseline_passage_timestep(record, 60)
+    collector.apply_baseline_passage_result(record, 60, record.route_next_link_name)
     try:
         collector.prepare_baseline_passage_recording(
             vehicle_name="veh_a",
@@ -261,7 +261,7 @@ def test_prepare_baseline_passage_recording_rejects_duplicate_passage():
         assert "Duplicate passage recording" in str(exc)
 
 
-def test_apply_baseline_passage_timestep_sets_timestep():
+def test_apply_baseline_passage_result_sets_timestep_and_passage_route():
     collector = _new_collector()
     _register_arrived_a(collector)
     record = collector.prepare_baseline_passage_recording(
@@ -269,8 +269,11 @@ def test_apply_baseline_passage_timestep_sets_timestep():
         visit_id=1,
         node_name="merge",
     )
-    collector.apply_baseline_passage_timestep(record, 62)
+    arrival_route = record.route_next_link_name
+    collector.apply_baseline_passage_result(record, 62, "out_b")
     assert record.baseline_passage_timestep == 62
+    assert record.baseline_passage_route_next_link_name == "out_b"
+    assert record.route_next_link_name == arrival_route
 
 
 def test_export_node_baseline_visits_returns_plain_dict_copies():
@@ -292,6 +295,7 @@ def test_export_node_baseline_visits_returns_plain_dict_copies():
             "arrival_tiebreaker",
             "route_next_link_name",
             "baseline_passage_timestep",
+            "baseline_passage_route_next_link_name",
         }
     names = {item["vehicle_name"] for item in exported}
     assert names == {"veh_a", "veh_b"}
@@ -694,6 +698,43 @@ def test_prepare_baseline_passage_recording_returns_none_outside_fixed_set_witho
     assert result is None
 
 
+def test_passage_result_keeps_arrival_route_and_rejects_partial_or_duplicate():
+    collector = _new_collector()
+    _register_arrived_a(collector, route_next_link_name="arrival_a")
+    record = collector.prepare_baseline_passage_recording(
+        vehicle_name="veh_a",
+        visit_id=1,
+        node_name="merge",
+    )
+    assert record.baseline_passage_route_next_link_name is None
+    assert record.route_next_link_name == "arrival_a"
+    collector.apply_baseline_passage_result(record, 70, "passage_b")
+    assert record.route_next_link_name == "arrival_a"
+    assert record.baseline_passage_timestep == 70
+    assert record.baseline_passage_route_next_link_name == "passage_b"
+    snapshot = collector.get_baseline_visit_snapshot("veh_a", 1)
+    assert snapshot["route_next_link_name"] == "arrival_a"
+    assert snapshot["baseline_passage_route_next_link_name"] == "passage_b"
+    try:
+        collector.apply_baseline_passage_result(record, 71, "passage_b")
+        raise AssertionError("expected duplicate passage result to be rejected")
+    except ValueError as exc:
+        assert "Duplicate baseline passage result" in str(exc)
+    record.baseline_passage_timestep = None
+    try:
+        collector.apply_baseline_passage_result(record, 71, "passage_c")
+        raise AssertionError("expected a route-only partial record to be rejected")
+    except ValueError as exc:
+        assert "Partial baseline passage record" in str(exc)
+    record.baseline_passage_route_next_link_name = None
+    record.baseline_passage_timestep = 70
+    try:
+        collector.apply_baseline_passage_result(record, 71, "passage_c")
+        raise AssertionError("expected a timestep-only partial record to be rejected")
+    except ValueError as exc:
+        assert "Partial baseline passage record" in str(exc)
+
+
 TESTS = [
     test_register_arrived_snapshot_visit_a,
     test_register_not_arrived_snapshot_visit_b,
@@ -707,7 +748,8 @@ TESTS = [
     test_prepare_baseline_passage_recording_success_for_arrived_a,
     test_prepare_baseline_passage_recording_rejects_not_yet_arrived_b,
     test_prepare_baseline_passage_recording_rejects_duplicate_passage,
-    test_apply_baseline_passage_timestep_sets_timestep,
+    test_apply_baseline_passage_result_sets_timestep_and_passage_route,
+    test_passage_result_keeps_arrival_route_and_rejects_partial_or_duplicate,
     test_export_node_baseline_visits_returns_plain_dict_copies,
     test_get_baseline_visit_snapshot_returns_plain_dict_copy,
     test_read_results_do_not_mutate_collector_internal_state,

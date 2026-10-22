@@ -30,7 +30,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 
-from uxsim.order_control_baseline_collector import OrderControlBaselineCollector
+from uxsim.order_control_baseline_collector import (
+    OrderControlBaselineCollector,
+    select_current_baseline_route,
+)
 from uxsim.order_control_tvt_mp_candidate_binding_transfer import (
     OrderControlTvtMpBindingTransferStopReason,
     OrderControlTvtMpBindingTransferScanResult,
@@ -49,6 +52,7 @@ class OrderControlTvtMpUnboundRouteClassification(Enum):
 
     SNAPSHOT_FIXED_ROUTE = "snapshot_fixed_route"
     BASELINE_ARRIVAL_ROUTE = "baseline_arrival_route"
+    BASELINE_PHYSICAL_PASSAGE_ROUTE = "baseline_physical_passage_route"
     DETERMINISTIC_VIRTUAL_ROUTE = "deterministic_virtual_route"
 
 
@@ -335,32 +339,42 @@ def _collector_snapshot(baseline_collector, target_node, vehicle_name, visit_id)
 
 
 def _classify_route(target_node, snapshot):
+    """
+    Choose one unbound route.
+
+    A recorded baseline passage route is used first. An arrival route is
+    used when no passage route exists. DETERMINISTIC_VIRTUAL_ROUTE is used
+    only when this baseline has neither route and the visit was not already
+    arrived at the snapshot.
+    """
     was_arrived = snapshot.get("was_arrived_at_snapshot")
-    route_name = snapshot.get("route_next_link_name")
     if not isinstance(was_arrived, bool):
         raise RuntimeError(
             f"Node {target_node.name!r}: was_arrived_at_snapshot must be bool."
         )
-    route_missing = route_name is None or route_name == ""
-    if was_arrived and route_missing:
-        raise RuntimeError(
-            f"Node {target_node.name!r}: snapshot-arrived Visit "
-            f"{snapshot.get('vehicle_name')!r} has no route_next_link_name."
+    route_name, source = select_current_baseline_route(
+        snapshot,
+        context=f"Node {target_node.name!r} unbound Visit",
+    )
+    if source == "physical_passage":
+        return (
+            OrderControlTvtMpUnboundRouteClassification.BASELINE_PHYSICAL_PASSAGE_ROUTE,
+            route_name,
         )
-    if was_arrived:
+    if source == "snapshot_arrival":
         return (
             OrderControlTvtMpUnboundRouteClassification.SNAPSHOT_FIXED_ROUTE,
             route_name,
         )
-    if not route_missing:
-        if not isinstance(route_name, str):
-            raise RuntimeError(
-                f"Node {target_node.name!r}: route_next_link_name must be str "
-                f"or empty; got {route_name!r}."
-            )
+    if source == "baseline_arrival":
         return (
             OrderControlTvtMpUnboundRouteClassification.BASELINE_ARRIVAL_ROUTE,
             route_name,
+        )
+    if was_arrived:
+        raise RuntimeError(
+            f"Node {target_node.name!r}: snapshot-arrived Visit "
+            f"{snapshot.get('vehicle_name')!r} has no route_next_link_name."
         )
     return (
         OrderControlTvtMpUnboundRouteClassification.DETERMINISTIC_VIRTUAL_ROUTE,

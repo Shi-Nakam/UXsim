@@ -906,7 +906,8 @@ def test_fallback_route_origin_is_baseline_target_node_arrival_route():
         )
     fallback_source = inspect.getsource(_build_baseline_fallback_node_result)
     assert "BASELINE_TARGET_NODE_ARRIVAL_ROUTE" in fallback_source
-    assert "SNAPSHOT_ROUTE_ALREADY_DECIDED" not in fallback_source
+    assert "BASELINE_PHYSICAL_PASSAGE_ROUTE" in fallback_source
+    assert "SNAPSHOT_ROUTE_ALREADY_DECIDED" in fallback_source
     assert "RANK_LEDGER_FORMAL_ROUTE" not in fallback_source
 
 
@@ -1832,6 +1833,52 @@ def test_rejects_a_missing_upstream_node_result():
         raised = True
         assert "not a normal empty-Node outcome" in str(error)
     assert raised is True
+
+
+def test_fallback_formal_route_prefers_passage_route_and_keeps_arrival_when_unpassed():
+    from uxsim.order_control_tvt_mp_final_rank import (
+        _build_baseline_fallback_node_result,
+    )
+
+    class _SnapshotCollector:
+        def __init__(self, rows):
+            self.rows = rows
+
+        def get_baseline_visit_snapshot(self, vehicle_name, visit_id):
+            return self.rows.get((vehicle_name, visit_id))
+
+    passed = {
+        "route_next_link_name": "arrival_a",
+        "was_arrived_at_snapshot": False,
+        "baseline_passage_timestep": 20,
+        "baseline_passage_route_next_link_name": "passage_b",
+    }
+    waiting = {
+        "route_next_link_name": "arrival_a",
+        "was_arrived_at_snapshot": True,
+        "baseline_passage_timestep": None,
+        "baseline_passage_route_next_link_name": None,
+    }
+    result = _build_baseline_fallback_node_result(
+        node_name="merge",
+        build_status=COMPLETE,
+        remaining_decision_window_visit_keys=(("passed", 1), ("waiting", 1)),
+        confirmed_leading_visit_keys=(),
+        arrived_confirmed_visit_keys=(),
+        collector=_SnapshotCollector(
+            {("passed", 1): passed, ("waiting", 1): waiting}
+        ),
+    )
+    assert result.final_rank_visits[0].formal_route_next_link_name == "passage_b"
+    assert (
+        result.final_rank_visits[0].route_origin
+        is OrderControlTvtMpLocalBindingRouteOrigin.BASELINE_PHYSICAL_PASSAGE_ROUTE
+    )
+    assert result.final_rank_visits[1].formal_route_next_link_name == "arrival_a"
+    assert (
+        result.final_rank_visits[1].route_origin
+        is OrderControlTvtMpLocalBindingRouteOrigin.SNAPSHOT_ROUTE_ALREADY_DECIDED
+    )
 
 
 def test_tests_registry_matches_defined_functions():

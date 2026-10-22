@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from uxsim.order_control_baseline_collector import select_current_baseline_route
 from uxsim.order_control_tvt_baseline_fork_alignment import (
     OrderControlTvtBaselineForkAlignmentResult,
 )
@@ -1637,7 +1638,7 @@ def _formal_route_from_collector(
     node_name: str,
     visit_key: OrderControlTvtVisitKey,
 ) -> str:
-    """Read the saved snapshot route. Do not search live traffic objects."""
+    """Read the passage route when present, otherwise the arrival route."""
     snapshot_reader = getattr(collector, "get_baseline_visit_snapshot", None)
     if not callable(snapshot_reader):
         raise RuntimeError(
@@ -1656,11 +1657,20 @@ def _formal_route_from_collector(
             f"Node {node_name!r}: baseline snapshot for VisitKey {visit_key!r} "
             f"must be a dict; got type {type(snapshot).__name__}."
         )
+    route_name, source = select_current_baseline_route(
+        snapshot,
+        context=f"Node {node_name!r} consistency VisitKey {visit_key!r}",
+    )
+    if source == "unavailable":
+        raise RuntimeError(
+            f"Node {node_name!r}: VisitKey {visit_key!r} has neither a "
+            "baseline passage route nor an arrival route. The route is not guessed."
+        )
     return _require_non_empty_route(
-        snapshot.get("route_next_link_name"),
+        route_name,
         node_name=node_name,
         visit_key=visit_key,
-        source_label="collector snapshot",
+        source_label="collector baseline route",
     )
 
 

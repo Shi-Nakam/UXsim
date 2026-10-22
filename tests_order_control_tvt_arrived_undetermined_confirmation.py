@@ -1189,7 +1189,7 @@ def test_missing_arrival_route_leaves_arrived_confirmation_unchanged():
     before_export = rank_state.export_state()
     _expect_value_error(
         lambda: _confirm(alignment_fork_result, {"merge": rank_state}),
-        "route_next_link_name",
+        "baseline passage route or arrival route",
     )
     assert rank_state.k_confirmed() == 0
     assert rank_state.export_state() == before_export

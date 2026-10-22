@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 
+from uxsim.order_control_baseline_collector import select_current_baseline_route
 from uxsim.order_control_tvt_mp_concrete_buyer_candidate_set import (
     OrderControlTvtMpConcreteBuyerCandidateSet,
 )
@@ -43,6 +44,7 @@ class OrderControlTvtMpLocalBindingRouteOrigin(Enum):
     RANK_LEDGER_FORMAL_ROUTE = "rank_ledger_formal_route"
     SNAPSHOT_ROUTE_ALREADY_DECIDED = "snapshot_route_already_decided"
     BASELINE_TARGET_NODE_ARRIVAL_ROUTE = "baseline_target_node_arrival_route"
+    BASELINE_PHYSICAL_PASSAGE_ROUTE = "baseline_physical_passage_route"
 
 
 class OrderControlTvtMpLocalBindingTradeRole(Enum):
@@ -224,12 +226,17 @@ def _require_snapshot_int(snapshot: dict, field_name: str, visit_key: OrderContr
     return value
 
 
-def _snapshot_route_already_decided(snapshot: dict) -> bool:
-    route_next_link_name = snapshot.get("route_next_link_name")
-    return (
-        snapshot.get("was_arrived_at_snapshot") is True
-        and isinstance(route_next_link_name, str)
-        and route_next_link_name != ""
+def _binding_origin_for_baseline_source(source: str):
+    if source == "physical_passage":
+        return OrderControlTvtMpLocalBindingRouteOrigin.BASELINE_PHYSICAL_PASSAGE_ROUTE
+    if source == "snapshot_arrival":
+        return OrderControlTvtMpLocalBindingRouteOrigin.SNAPSHOT_ROUTE_ALREADY_DECIDED
+    if source == "baseline_arrival":
+        return (
+            OrderControlTvtMpLocalBindingRouteOrigin.BASELINE_TARGET_NODE_ARRIVAL_ROUTE
+        )
+    raise RuntimeError(
+        f"Baseline route source {source!r} is not an arrival or passage route."
     )
 
 
@@ -300,26 +307,30 @@ def _partition_1_visits(
         snapshot = _read_collector_snapshot(collector, node_name, visit_key)
         if snapshot is None:
             continue
-        if _snapshot_route_already_decided(snapshot):
-            route_next_link_name = _require_snapshot_text(
-                snapshot,
-                "route_next_link_name",
-                visit_key,
-            )
-            route_origin = (
-                OrderControlTvtMpLocalBindingRouteOrigin.SNAPSHOT_ROUTE_ALREADY_DECIDED
-            )
-        else:
-            route_next_link_name = rank_state.formal_route_next_link_name(visit_key)
-            if not isinstance(route_next_link_name, str) or route_next_link_name == "":
+        route_name, source = select_current_baseline_route(
+            snapshot,
+            context=(
+                f"Node {node_name!r} partition 1 VisitKey {visit_key!r}"
+            ),
+        )
+        if route_name is None:
+            if snapshot.get("was_arrived_at_snapshot") is True:
+                raise RuntimeError(
+                    f"Node {node_name!r}: VisitKey {visit_key!r} was already "
+                    "arrived at snapshot but has no arrival route."
+                )
+            route_name = rank_state.formal_route_next_link_name(visit_key)
+            if not isinstance(route_name, str) or route_name == "":
                 raise RuntimeError(
                     f"Node {node_name!r}: partition confirmed_before_this_baseline "
-                    f"VisitKey {visit_key!r} has no snapshot route and no formal "
+                    f"VisitKey {visit_key!r} has no baseline route and no formal "
                     "route on the rank ledger."
                 )
             route_origin = (
                 OrderControlTvtMpLocalBindingRouteOrigin.RANK_LEDGER_FORMAL_ROUTE
             )
+        else:
+            route_origin = _binding_origin_for_baseline_source(source)
         visits.append(
             _binding_visit_from_snapshot(
                 visit_key=visit_key,
@@ -327,7 +338,7 @@ def _partition_1_visits(
                 binding_partition=(
                     OrderControlTvtMpLocalBindingPartition.CONFIRMED_BEFORE_THIS_BASELINE
                 ),
-                route_next_link_name=route_next_link_name,
+                route_next_link_name=route_name,
                 route_origin=route_origin,
                 trade_role=OrderControlTvtMpLocalBindingTradeRole.OUTSIDE_TRADE_SCOPE,
             )
@@ -350,20 +361,29 @@ def _partition_2_visits(
     )
     visits: list[OrderControlTvtMpLocalBindingRankVisit] = []
     for visit_key in visit_keys:
-        formal_route_next_link_name = rank_state.formal_route_next_link_name(visit_key)
-        if (
-            not isinstance(formal_route_next_link_name, str)
-            or formal_route_next_link_name == ""
-        ):
-            raise ValueError(
-                f"Node {node_name!r}: preconfirmed VisitKey {visit_key!r} has no "
-                "formal_route_next_link_name on the rank ledger."
-            )
         snapshot = _read_collector_snapshot(collector, node_name, visit_key)
         if snapshot is None:
             raise ValueError(
                 f"Node {node_name!r}: preconfirmed VisitKey {visit_key!r} has no "
                 "baseline collector snapshot."
+            )
+        route_name, source = select_current_baseline_route(
+            snapshot,
+            context=(
+                f"Node {node_name!r} partition 2 VisitKey {visit_key!r}"
+            ),
+        )
+        if route_name is None:
+            raise ValueError(
+                f"Node {node_name!r}: preconfirmed VisitKey {visit_key!r} has "
+                "neither a baseline passage route nor an arrival route."
+            )
+        ledger_route = rank_state.formal_route_next_link_name(visit_key)
+        if ledger_route != route_name:
+            raise ValueError(
+                f"Node {node_name!r}: preconfirmed VisitKey {visit_key!r} "
+                f"formal_route_next_link_name {ledger_route!r} does not match "
+                f"this baseline route {route_name!r}."
             )
         visits.append(
             _binding_visit_from_snapshot(
@@ -372,10 +392,8 @@ def _partition_2_visits(
                 binding_partition=(
                     OrderControlTvtMpLocalBindingPartition.PRECONFIRMED_BY_THIS_BASELINE
                 ),
-                route_next_link_name=formal_route_next_link_name,
-                route_origin=(
-                    OrderControlTvtMpLocalBindingRouteOrigin.RANK_LEDGER_FORMAL_ROUTE
-                ),
+                route_next_link_name=route_name,
+                route_origin=_binding_origin_for_baseline_source(source),
                 trade_role=OrderControlTvtMpLocalBindingTradeRole.OUTSIDE_TRADE_SCOPE,
             )
         )
@@ -417,22 +435,20 @@ def _route_for_unconfirmed_binding_visit(
             f"Node {node_name!r}: binding VisitKey {visit_key!r} has no "
             "baseline collector snapshot."
         )
-    if _snapshot_route_already_decided(snapshot):
-        return (
-            snapshot,
-            _require_snapshot_text(snapshot, "route_next_link_name", visit_key),
-            OrderControlTvtMpLocalBindingRouteOrigin.SNAPSHOT_ROUTE_ALREADY_DECIDED,
-        )
-    route_next_link_name = snapshot.get("route_next_link_name")
-    if not isinstance(route_next_link_name, str) or route_next_link_name == "":
+    route_name, source = select_current_baseline_route(
+        snapshot,
+        context=f"Node {node_name!r} binding VisitKey {visit_key!r}",
+    )
+    if route_name is None:
         raise ValueError(
-            f"Node {node_name!r}: binding VisitKey {visit_key!r} has no "
-            "target-Node route from the snapshot or the baseline arrival."
+            f"Node {node_name!r}: binding VisitKey {visit_key!r} has neither "
+            "a baseline passage route nor an arrival route. "
+            "DETERMINISTIC_VIRTUAL_ROUTE is not used for a binding visit."
         )
     return (
         snapshot,
-        route_next_link_name,
-        OrderControlTvtMpLocalBindingRouteOrigin.BASELINE_TARGET_NODE_ARRIVAL_ROUTE,
+        route_name,
+        _binding_origin_for_baseline_source(source),
     )
 
 

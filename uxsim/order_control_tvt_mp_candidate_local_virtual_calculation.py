@@ -31,6 +31,7 @@ from uxsim.order_control_tvt_mp_candidate_local_vehicle_advance import (
     OrderControlTvtMpCandidateLocalVehicleAdvanceState,
     OrderControlTvtMpLocalVehicleAdvanceResult,
     advance_tvt_mp_candidate_local_vehicles_and_register_new_arrivals,
+    apply_initial_arrived_binding_routes,
     initialize_tvt_mp_candidate_local_vehicle_advance_state,
 )
 from uxsim.order_control_tvt_mp_candidate_outlink_boundary import (
@@ -483,7 +484,13 @@ def initialize_tvt_mp_candidate_local_virtual_calculation_state(
     downstream_boundary_node_result,
     configured_horizon_steps,
 ) -> OrderControlTvtMpCandidateLocalVirtualCalculationState:
-    """Create orchestrating state at T without moving traffic."""
+    """
+    Create orchestrating state at T without moving vehicles.
+
+    After the local state, collector, and boundary checks succeed, binding
+    vehicles that are already waiting at the target node receive that visit's
+    outlink. Vehicles that have not arrived yet are left unchanged.
+    """
     _require_candidate_local_state(candidate_local_state)
     _require_baseline_collector(baseline_collector)
     configured_horizon = _require_configured_horizon_steps(configured_horizon_steps)
@@ -562,6 +569,13 @@ def initialize_tvt_mp_candidate_local_virtual_calculation_state(
     outlink_boundary_state = initialize_tvt_mp_candidate_outlink_boundary_state(
         local_vehicle_advance_state,
         downstream_boundary_node_result,
+    )
+    # Offset 0 scans binding passage before any new arrival. Vehicles already
+    # waiting must already hold the binding outlink. Validate every selected
+    # vehicle first, then assign, so one bad route does not rewrite the others.
+    apply_initial_arrived_binding_routes(
+        candidate_local_state,
+        binding_transfer_state.transferred_binding_visit_keys,
     )
     return OrderControlTvtMpCandidateLocalVirtualCalculationState(
         candidate_local_state=candidate_local_state,
