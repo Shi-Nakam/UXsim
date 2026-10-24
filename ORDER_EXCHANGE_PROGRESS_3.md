@@ -6559,3 +6559,150 @@ T=189、`northeast_intersection` の成立取引で、`baseline_arrival_timestep
 
 **本§7が、TVT-MP実装・4交差点検証・全取引全候補診断作業の最新再開地点である。**
 
+## 8. Candidate／Actual passage差の原因分析と現行近似維持の判断
+
+**記録日: 2026-10-24。** 詳細な技術正本は `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_5.md` **§19.16**。本節は主要結論・完了・未完了・再開順を簡潔に記録する。**本§8を、当該2026-10-22節の最新状態として扱う。**
+
+### 8.1 全体集計（Candidate passage Actual passage 不一致）
+
+4交差点600台全参加trialの成立取引partyについて、**Candidate passage** と **Actual passage** の双方を観測できた件数は **847 Visit**。
+
+| 区分 | 件数 | 比率 |
+|------|------|------|
+| 一致 | **842一致** | 約99.41% |
+| **5不一致** | 5 Visit | 約0.59% |
+
+5 Visitは3成立取引に属する。成立取引307件に対する該当取引率は約0.98%。
+
+**Actual minus Candidate**
+
+```
+actual_minus_candidate_passage_timesteps
+    = actual_passage_timestep - candidate_passage_timestep
+```
+
+- 正: ActualがCandidateより遅い
+- 負: ActualがCandidateより早い
+- 0: 一致
+
+分布: **+1 timestep 4件**、**+4 timestep 1件**、負方向0 Visit、最大絶対差4 timestep。今回5件はすべてActualが遅い方向。件数が少なくselected成立取引partyのみの集計であり候補選択による選択バイアスもあり得るため、一般的な一方向バイアスとは断定しない。
+
+### 8.2 不一致5 Visit（一覧）
+
+| # | T | Visit | 役割 | C / A | Δ | route・満足度 |
+|---|-----|-------|------|-------|---|----------------|
+| 1 | 600 | `veh_wn_en_base_042:2` | seller | 608 / 609 | +1 | predicted＝actual、**unsatisfied** |
+| 2 | 600 | `veh_ne_wn_base_034:1` | buyer | 606 / 607 | +1 | predicted southeast / actual northwest、**satisfied** |
+| 3 | 619 | `veh_ne_wn_base_039:1` | seller | 625 / 629 | +4 | predicted northwest / actual southeast、**unsatisfied** |
+| 4 | 661 | `veh_ne_wn_base_042:3` | seller | 670 / 671 | +1 | predicted＝actual、**unsatisfied** |
+| 5 | 661 | `veh_ne_ws_base_047:1` | buyer | 668 / 669 | +1 | predicted southeast / actual northwest、**satisfied** |
+
+（いずれも `northeast_intersection`。）
+
+**T=619横並び確認済み:** 正式横並びレビューは既実施との作業記録がある。未確認へ戻さない。
+
+**T=661確認状況:** 詳細設計第5巻§19.1〜§19.15内ではT=661専用の横並びレビュー記録を特定できなかったのみである。**T=661横並びレビュー未実施・再確認必須・次の横並び対象**とは確定しない。別メモ・過去チャットを含む既存記録を先に確認し、実施済み記録が見つからない場合に限り横並び詳細確認を行う。
+
+### 8.3 T=600取引（横並び）
+
+- 意思決定 **T=600**、`northeast_intersection`
+- candidate: `T=600|northeast_intersection|index=1|veh_ne_wn_base_034:1`
+
+**buyer `veh_ne_wn_base_034:1`:** baseline passage 609、Candidate 606、Actual 607（baseline比短縮3／2 timestep）。assigned rank 208、actual passage rank 208。**satisfied**。
+
+**seller `veh_wn_en_base_042:2`:** baseline 607、Candidate 608、Actual 609（遅延1／2 timestep）。rank 209／209。1 timestep分の補償に対し実現遅延2 timestep。**unsatisfied**。
+
+buyerとsellerのC順位・A順位の相対順は一致。順位逆転の失敗ではなく、**Candidate予測誤差**としての **Candidate passage** と **Actual passage** の時刻差である。
+
+### 8.4 T=600原因（進路先取り・車列伝播）
+
+先行Visit **`veh_ne_wn_base_032:1`**。正式baseline snapshot（要約）:
+
+- baseline arrival: 595
+- **baseline到着時進路:** `northeast_intersection_to_northwest_intersection`
+- **baseline passage T=602**、**baseline物理通過時進路:** `northeast_intersection_to_southeast_intersection`
+
+baseline仮想World: T=600はnorthwest、T=601の **route choice** でsoutheastへ変更、T=602にsoutheast方向へ物理通過。
+
+Candidate局所計算: **baseline物理通過時進路** southeastを開始時から **binding進路**（**future route information**）として適用し、**Candidate passage T=601** に通過。
+
+実World: T=601通過走査時点はnorthwest。**entry space** 不足（入口 `veh_ne_ws_base_031`、`entry_open=False`）。T=601中にsoutheastへ変更、T=602に通過。
+
+**baseline passage T=602** とActual passage T=602は一致。Candidateだけが1 timestep早い（**進路先取り**）。**車列伝播**例:
+
+| Visit | Candidate | Actual |
+|-------|-----------|--------|
+| `veh_ne_wn_base_032:1` | 601 | 602 |
+| `veh_ne_ws_base_032:1` | 602 | 603 |
+| `veh_ne_wn_base_033:1` | 603 | 604 |
+| `veh_ne_ws_base_033:1` | 604 | 605 |
+| buyer `veh_ne_wn_base_034:1` | 606 | 607 |
+| seller `veh_wn_en_base_042:2` | 608 | 609 |
+
+buyer T=607通過後、sellerはT=608 **clearance** 未充足、T=609に通過。Candidate T=601をbaseline passage T=601とみなす中間解釈は誤り（§19.16で訂正済み）。
+
+### 8.5 診断
+
+1. **実World時系列:** `research_scripts/diagnose_tvt_mp_four_cross_intersections_t600_route_divergence_trace.py`
+2. **Candidate／Actual paired trace:** `research_scripts/diagnose_tvt_mp_four_cross_intersections_t600_candidate_actual_paired_trace.py`
+   - 正式出力: `..._t600_candidate_actual_paired_trace`
+   - phase修正前旧出力: `..._t600_candidate_actual_paired_trace_before_common_origin_phase_fix`
+   - 正式比較phase: **common origin**、**after_timestep**（**before_node_passage比較無効**）
+   - common origin: Vehicle 67、Node 1、Link 8、unexpected difference 0
+3. **baseline／Actual route choice:** `research_scripts/diagnose_tvt_mp_four_cross_intersections_t600_baseline_actual_route_choice_trace.py`
+   - 短時間mode `--stop-after-t600-baseline`、出力 `..._t600_baseline_route_choice_early_stop`
+   - ここから **baseline passage T=602** と物理通過時進路southeastを確認
+   - 完全実行modeの固定期待値601は診断validationの未整理（**production変更なし**・production影響なし）
+
+診断wrapper問題（`route_next_link` 未生成時参照等）はproduction異常と混同しない。
+
+### 8.6 設計判断（現行方式維持・production変更なし）
+
+- **productionを変更しない**
+- Candidate局所仮想計算の **現行方式維持**
+- baseline物理通過時進路をCandidate開始時から **binding進路** として適用する契約を維持
+- baseline内進路変更履歴の時刻同期再生は **進路変更履歴再生は実装しない**
+- 本現象を局所仮想計算に不可避の **Candidate予測誤差** の一つとして扱い、頻度・符号・差・後続波及・feasibility・支払・補償・満足度を研究結果として示す
+
+完全再現のための複雑化は別種の近似誤差を生み得る。誤差は早める・遅める両方向に作用し得る。5不一致のみから一方向バイアスとは断定しない。
+
+### 8.7 完了事項
+
+- T=189、217、241、275の横並びレビュー
+- T=275 `northwest_intersection` A順位1〜440連続、最終440＝実通過Visit数440
+- T=600取引横並びレビュー、実World時系列診断、paired trace、**common origin** phase修正・一致確認
+- T=600 baseline collector正式snapshot、**baseline到着時進路**と**baseline物理通過時進路**の区別、**進路先取り**原因特定
+- **847 Visit**／**842一致**／**5不一致** 集計、現行近似維持の設計判断
+- 詳細設計第5巻 **§19.16** への記録、§19.16のTerminal独立確認
+
+### 8.8 未完了事項
+
+- baseline／Actual route choice診断完全実行modeの誤った固定期待値601の整理（短時間mode正式snapshot取得は完了、production影響なし）
+- **feasible not selected未完了** — 候補抽出レビュー
+- Candidate／Actual passage差5件の分析整理
+- 今回追加診断スクリプトのGit対象判断
+- Git commit・push
+- **nonparticipating車両20%を含む4交差点ネットワークtrial** の仕様確認、実行準備、実行、診断（次の主作業）
+
+**T=661成立取引の扱い**（未完了作業ではない — 詳細設計第5巻§19.16.12と整合）
+
+- T=661の **追加横並び検証は行わない**（「追加検証しない」判断と「検証済み」を混同しない）
+- T=661を **検証済みとは扱わない**。T=661の差異原因は **未確定**
+- T=600の **進路先取り** 誤差をT=661へ **一般化しない**
+- **847 Visit** 中 **842一致**・**5不一致** の全体集計と **T=600** 原因分析をもって、全参加4交差点trialの検証を現時点で区切る
+- 将来、研究結果の解釈上必要になった場合に限りT=661へ戻る
+
+（production修正と進路変更履歴再生は実装しない確定方針のため未完了に含めない。）
+
+### 8.9 最新再開地点（§8）
+
+1. baseline／Actual route choice診断完全実行modeに残る誤った固定期待値601を整理する
+2. 今回追加した診断スクリプトのGit対象を整理する
+3. 必要な文書・診断修正を完了してGit commit・pushする
+4. nonparticipating車両20%を含む4交差点ネットワークtrialの既存仕様、スクリプト、出力要件を確認する
+5. 既存productionおよび全参加trialを変更せず、nonparticipating 20% trialの実行準備へ進む
+6. trial実行後、nonparticipatingを含む候補形成、取引成立、順位、Candidate／Actual passage、外部効果を診断する
+7. feasible not selected候補の抽出レビューとCandidate／Actual passage差5件の追加分析は、nonparticipating trialの検証優先度に合わせて再配置する
+
+**本§8が、Candidate／Actual passage差分析・T=600原因確定・現行近似維持判断の最新再開地点である。**
+
