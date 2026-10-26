@@ -7068,3 +7068,283 @@ T=619: §19.16.1のとおり、未確認へ戻さない。**T=661確認状況**:
 7. 既存のproductionと全参加trialを変更せず、nonparticipating 20% trialの実行準備へ進む
 8. trial実行後、nonparticipatingを含む候補形成、取引成立、順位、予測対実績、外部効果を診断する
 9. feasible not selected候補の抽出レビューとCandidate／Actual passage差5件の追加分析は、nonparticipating trialの検証優先度と合わせて再配置する
+
+## 23. 4交差点nonparticipating 20％ trial・T=382取引の初回到着訂正、物理一致、通過差、および順位確定源確認完了（2026-10-26）
+
+本節は、4つの十字路交差点を含む medium grid network の **nonparticipating 20% trial**（Vehicle 総数 600 台、participating 480 台、nonparticipating 120 台、nonparticipation seed 3）において、**T=382** の **northwest_intersection** で成立した **1 取引の 4 party** を対象に実施した一連の read-only 反証確認の **最新技術正本** である。production、既存 trial、全参加 trial は変更していない。診断スクリプトの追加と read-only hook による確認のみである。旧診断が報告していた Actual arrival 差は交通現象ではなく診断記録上の誤りであったこと、T=382 取引 4 party の Baseline 初回到着と Actual 初回到着の全件一致、nonparticipating Visit の Candidate／Actual passage 差 1 timestep の原因、後続 decision における新規 C 順位の正式確定源までを本節で確定する。
+
+**検索語（本節）:** T=382、northwest_intersection、4交差点、nonparticipating 20％、初回Actual arrival、Actual arrival上書き、再登録、record_order_control_node_arrival、arrival_time、Baseline arrival、Candidate passage、Actual passage、first divergence、物理一致、T=402、一時skip、entry space、clearance、C順位183、Actual通過順位177、selected=False、Baseline fallback、leading nonparticipating、順位確定源、旧診断訂正、完了、再開地点。
+
+### 23.1 対象 trial と対象取引
+
+- **trial script:** `research_scripts/run_tvt_mp_four_cross_intersections_grid_medium_nonparticipating_20_trial.py`
+- **scenario:** `tvt_mp_four_cross_intersections_grid_medium_nonparticipating_20_600_vehicle_eval_900`
+- **既存 trial 出力 directory:** `research_outputs/trial/tvt_mp_four_cross_intersections_grid_medium_nonparticipating_20_600_vehicle_eval_900_timestep_seed_1_nonparticipation_seed_3_initial`
+- **対象 decision:** T=382
+- **対象 Node:** `northwest_intersection`
+
+**対象 4 party:**
+
+| # | Visit | role | formal inlink | assigned C rank |
+|---:|---|---|---|---:|
+| 1 | `veh_sw_nw_base_037:2` | seller | `southwest_intersection_to_northwest_intersection` | 175 |
+| 2 | `veh_nw_sw_base_047:1` | seller | `north_west_od_to_northwest_intersection` | 177 |
+| 3 | `veh_wn_se_base_024:1` | nonparticipating | `west_north_od_to_northwest_intersection` | 176 |
+| 4 | `veh_en_sw_base_025:2` | buyer | `northeast_intersection_to_northwest_intersection` | 174 |
+
+**T=382 selected Candidate:**
+
+- selected=True
+- selected_candidate_evaluation_index=2
+- buyer=`veh_en_sw_base_025:2`
+
+**T=382 で新規確定した Node 連続 C 順位:**
+
+- `veh_en_sw_base_025:2` = C174
+- `veh_sw_nw_base_037:2` = C175
+- `veh_wn_se_base_024:1` = C176
+- `veh_nw_sw_base_047:1` = C177
+
+### 23.2 旧 Actual arrival 値の誤り
+
+**旧診断:** `research_scripts/diagnose_tvt_mp_four_cross_intersections_nonparticipating_20_t382_rank_and_passage_trace.py`
+
+旧診断が Actual arrival として表示していた値（**正式な初回 Actual arrival ではない**）:
+
+| Visit | 旧診断の Actual arrival 列 |
+|---|---:|
+| `veh_sw_nw_base_037:2` | T=395 |
+| `veh_nw_sw_base_047:1` | T=407 |
+| `veh_wn_se_base_024:1` | T=403 |
+| `veh_en_sw_base_025:2` | T=397 |
+
+**原因:** production の `Vehicle.record_order_control_node_arrival()` は、同一 Visit について `current_visit["arrival_time"]` が `None` のときだけ初回到着時刻を設定する。以降の再呼出しでは production の `arrival_time` は初回値を維持する。旧 `rank_and_passage_trace` の wrapper は production 呼出し後に `GATE.actual_arrivals[(vehicle.name, visit_id)] = vehicle.W.T` と **無条件上書き** していたため、初回到着ではなく **最後に** `record_order_control_node_arrival()` が再呼出しされた timestep が旧診断の Actual arrival 列に残った。これは production の到着記録欠陥ではなく、**旧診断の観測・保存方法の欠陥** である。
+
+旧診断スクリプトと旧出力は削除しない。上記 4 値を正式な Actual arrival として今後使用してはならない。
+
+### 23.3 正式な初回 Actual arrival
+
+新診断では、production 呼出し後の `current_visit["arrival_time"]` を読み、Node 名・Vehicle 名・Visit ID を key として **初回値だけ** を保存した。同一 Visit の後続再呼出しでは初回値を上書きせず、production の `arrival_time` が初回値を維持していることを検証した。
+
+| Visit | Baseline arrival | 正式な初回 Actual arrival | Actual−Baseline |
+|---|---:|---:|---:|
+| `veh_sw_nw_base_037:2` | 388 | 388 | 0 |
+| `veh_nw_sw_base_047:1` | 390 | 390 | 0 |
+| `veh_wn_se_base_024:1` | 392 | 392 | 0 |
+| `veh_en_sw_base_025:2` | 394 | 394 | 0 |
+
+**到着メソッド呼出し監査:**
+
+| Visit | 呼出し回数 | 初回記録 T | 後続再呼出し T |
+|---|---:|---:|---|
+| `veh_sw_nw_base_037:2` | 8 | 388 | 389〜395 |
+| `veh_nw_sw_base_047:1` | 18 | 390 | 391〜407 |
+| `veh_wn_se_base_024:1` | 12 | 392 | 393〜403 |
+| `veh_en_sw_base_025:2` | 4 | 394 | 395〜397 |
+
+全後続再呼出しで production `arrival_time` は初回値を維持した。旧診断で到着差とされた 7、17、11、3 timestep は **交通予測誤差ではない**。4 party すべてについて、T=382 baseline fork の Baseline arrival と Actual 実 World の正式な初回 arrival は一致した。
+
+### 23.4 Baseline と Actual の物理状態比較
+
+**比較した系列:**
+
+1. T=382 baseline fork
+2. Actual 実 World
+3. Actual T=382〜407 の `northwest_intersection` で selected された Candidate の正式結果
+
+**追跡 phase:** `common_origin`、`before_link_update`、`after_link_update`、`before_node_transfer`、`after_node_transfer`、`after_vehicle_update`、`after_timestep`
+
+**対象 4 Vehicle の主な field:** `current_link_name`、`physical_index`、`leader_vehicle_name`、`follower_vehicle_name`、`position_x`、`speed_v`、`move_remain`、`x_next`、`in_incoming`、`route_next_link_name`
+
+**対象 4 inlink の主な項目:** Vehicle 数、Vehicle 順、position 順、speed 順、cum departure、capacity out
+
+**結果:**
+
+- `t382_baseline_actual_first_differences.csv` はデータ行 0 件
+- `t382_baseline_actual_front_vehicles.csv` はデータ行 0 件
+- 対象 4 Vehicle について first divergence なし
+- 対象 4 inlink についても比較可能範囲で差なし
+
+**first divergence の定義:** 同一 timestep・同一 phase の Baseline と Actual について、対象 Vehicle または対象 inlink の物理状態が **最初に** 異なった時点と field。今回は first divergence は存在しなかった。
+
+**結論:** T=382 から各対象 Visit の正式な初回 Node 到着まで、対象 Vehicle の inlink 上の物理進展について Baseline fork と Actual 実 World の差は確認されなかった。
+
+### 23.5 T=392 後続 selected decision の位置付け
+
+T=392 に `northwest_intersection` で別の selected Candidate が成立した。
+
+- selected=True
+- selected_candidate_evaluation_index=5
+- buyers: `veh_wn_en_base_025:1`、`veh_nw_sw_base_048:1`、`veh_wn_se_base_025:1`
+
+**T=392 で新規確定した C 順位:**
+
+- `veh_wn_en_base_025:1` = C179
+- `veh_nw_sw_base_048:1` = C180
+- `veh_wn_se_base_025:1` = C181
+- `veh_en_sw_base_026:2` = C182
+- `veh_sw_nw_base_039:2` = C183
+- `veh_sw_nw_base_040:2` = C184
+
+処理順上、T=392 driver は T=392 の Link・Node・Vehicle 更新より **前** に実行される。対象 nonparticipating Visit `veh_wn_se_base_024:1` は、その後の T=392 内の走行処理で正式到着した。したがって **T=392 の後続 decision は、同 Visit の T=392 初回到着時刻を変えた原因ではない**。一方、T=392 decision で確定した C182〜C184 等は、その後の Node 通過走査へ影響し得る。この区別を維持する。
+
+### 23.6 T=402〜404 の nonparticipating 通過差
+
+**対象 nonparticipating Visit:** `veh_wn_se_base_024:1`（assigned C rank=176）
+
+**正式時刻:**
+
+- Baseline arrival=T=392
+- Actual first arrival=T=392
+- Baseline passage=T=404
+- Candidate passage=T=403
+- Actual passage=T=404
+
+Candidate T=403 対 Actual T=404 の 1 timestep 差は、**到着予測差ではない**。
+
+**T=402 の正式な C 順位走査:**
+
+- **C176**（対象 nonparticipating Visit）: 到着済み、clearance 充足、outlink 入口空間不足、一時 skip
+- **C177**: outlink 入口空間不足、一時 skip
+- **C178**: T=400 に通過済み
+- **C179〜C181**: T=402 時点の incoming snapshot に不在（未到着、物理通過走査対象外）
+- **C182**: outlink 入口空間不足、一時 skip
+- **C183** `veh_sw_nw_base_039:2`: 別 inlink から通過可能、T=402 に通過
+
+**T=403:** 対象 nonparticipating Visit の entry space は利用可能だが clearance 未充足。TVT-MP 拘束順位列走査契約により、その時刻の対象 Node 通過処理を終了。対象 Visit は通過しない。
+
+**T=404:** clearance 充足。対象 Visit が Actual 通過順位 178 で通過。
+
+**結論:** Candidate／Actual passage 差 1 timestep は、到着誤差ではなく、T=402 の入口空間不足による一時 skip、別 inlink の C183 Visit 通過、その後の T=403 clearance 未充足によって発生した。
+
+### 23.7 C 順位と Actual 通過順位の区別
+
+**`veh_sw_nw_base_039:2`:**
+
+- T=392 で新規確定
+- assigned Node 連続 C 順位=**183**
+- Actual Node 連続通過順位=**177**
+- Actual passage=T=402
+
+C 順位 183 と Actual 通過順位 177 は **異なる概念** である。C 順位は rank ledger 上で確認された拘束順位。Actual 通過順位は実 World で対象 Node を物理通過した順序。診断の `wrapped_move()` が通過時に保存した `assigned_rank` は Actual 通過順位ではなく、通過時点の rank ledger 上の C 順位である。`KNOWN_LATER_CONFIRMATIONS` では `veh_sw_nw_base_039:2` の `assigned_rank` を 177 ではなく **183** とする。
+
+**`veh_wn_en_base_025:1`:**
+
+- T=392 で新規確定
+- assigned C 順位=179
+- Actual passage=T=406
+
+この Visit では C 順位と Actual 通過順位が偶然ともに 179 だが、**概念は同一ではない**。
+
+### 23.8 selected=False の新規 C 順位確定源
+
+T=382〜407 の `northwest_intersection` decision は **26 件**。selected Candidate が成立したのは T=382 と T=392 のみ。それ以外は selected=False。ただし **selected=False は「順位を何も確定しない」という意味ではない**。selected=False は、取引による順位変更案が採用されなかったことを意味する。
+
+正式な診断により、次の 3 件の確定源を確認した。
+
+| decision | Visit | 参加属性 | selected | assigned C | confirmation source | final_rank_status | finalization_source |
+|---:|---|---|---|---:|---|---|---|
+| T=390 | `veh_sw_nw_base_038:2` | participating | False | 178 | `baseline_fallback_final_rank` | `baseline_fallback_ranks` | `baseline` |
+| T=404 | `veh_sw_nw_base_041:2` | participating | False | 185 | `baseline_fallback_final_rank` | `baseline_fallback_ranks` | `baseline` |
+| T=406 | `veh_nw_sw_base_049:1` | nonparticipating | False | 186 | `leading_nonparticipating_confirmation` | （leading 列） | （leading 列） |
+
+1〜2 は非技術的には、取引案は採用されなかったが Baseline 予測順で順位を確定した。3 は意思決定窓の先頭 nonparticipating Visit として先行確定された。T=390、T=404、T=406 のいずれも production の正式な順位確定経路と整合した。**既確定 Visit へ新しい C 順位を再付与した事例ではない**。
+
+### 23.9 診断スクリプトと正式出力
+
+**1.** `research_scripts/diagnose_tvt_mp_four_cross_intersections_nonparticipating_20_t382_baseline_actual_inlink_arrival_divergence.py`
+
+- 主目的: T=382 baseline fork と Actual 実 World の物理比較、Actual 初回 arrival 記録、arrival 再登録監査、T=382〜407 selected Candidate 記録、driver 前後 rank ledger 差、first divergence、前方 Vehicle、新規 C 順位
+
+**正式出力 directory:** `research_outputs/trial/tvt_mp_four_cross_intersections_grid_medium_nonparticipating_20_600_vehicle_eval_900_timestep_seed_1_nonparticipation_seed_3_t382_baseline_actual_inlink_arrival_divergence`
+
+**出力ファイル:** `t382_actual_arrival_registration_calls.csv`、`t382_baseline_actual_arrival_divergence_summary.txt`、`t382_baseline_actual_first_differences.csv`、`t382_baseline_actual_front_vehicles.csv`、`t382_baseline_actual_target_inlink_snapshots.csv`、`t382_baseline_actual_target_inlink_vehicle_snapshots.csv`、`t382_baseline_actual_target_vehicle_snapshots.csv`、`t382_to_t407_newly_confirmed_ranks.csv`、`t382_to_t407_selected_candidate_parties.csv`、`t382_to_t407_selected_decisions.csv`、`manifest.json`
+
+**主要行数:** arrival registration calls=42、first differences=0、front vehicles=0、target inlink snapshots=944、target inlink Vehicle snapshots=25,840、target Vehicle snapshots=944、newly confirmed ranks=13、selected Candidate parties=24、selected decisions=26
+
+**2.** `research_scripts/diagnose_tvt_mp_four_cross_intersections_nonparticipating_20_rank_confirmation_sources.py`
+
+- 主目的: selected=False で新規 C 順位を得た 3 Visit について、正式 upstream result object から確定源を判定
+
+**正式出力 directory:** `research_outputs/trial/tvt_mp_four_cross_intersections_grid_medium_nonparticipating_20_600_vehicle_eval_900_timestep_seed_1_nonparticipation_seed_3_rank_confirmation_sources`
+
+**出力:** `rank_confirmation_sources.csv`、`rank_confirmation_sources_summary.txt`、`manifest.json`
+
+T=406 driver 完了後、対象 3 Visit を全件記録して早期終了した。
+
+### 23.10 診断実装中に発見・修正した事項
+
+production の問題と診断実装の問題を混同しない。今回、診断側で発見・修正した事項:
+
+- selected party 全件保存の間接呼出しを static validation が認識しなかった
+- `current_visit.get("arrival_time")` を Subscript 形式だけの static validation が認識しなかった
+- `GATE.actual_arrivals` 等の `ast.Attribute` を `ast.Name` だけで検査していた
+- dynamic arrival 情報 `GATE.party_arrival_by_vehicle` を `ast.Name` だけで検査していた
+- C 順位 183 と Actual 通過順位 177 を混同した期待値
+- `World.VEHICLES` 辞書を直接反復して Vehicle object と誤認した
+- built-in `getattr` を `ast.Attribute` として検査した static validation 誤判定
+- `wrapped_driver` 内の original driver 呼出しをコード上 1 か所へ統合
+
+上記は新規診断または static validation の問題であり、production の交通処理異常ではない。
+
+### 23.11 production 評価
+
+今回の確認範囲で、production について次を確認した。
+
+- Visit 単位の初回 `arrival_time` を正しく保存する
+- 同一 Visit の再登録呼出しで `arrival_time` を変更しない
+- T=382 baseline fork の arrival 予測が対象 4 Visit すべてで Actual 初回 arrival と一致
+- selected Candidate による C 順位確定
+- selected=False 時の Baseline fallback 順位確定
+- leading nonparticipating 先行確定
+- 既確定 C 順位を後続 decision で上書きしない
+- 通常物理制約で一時 skip し、後続 Visit を試す
+- clearance 未充足時にその timestep の Node 走査を終了する
+- C 順位と Actual 通過順位を別管理する
+
+今回の範囲では、production 変更が必要な欠陥は確認されなかった。
+
+### 23.12 今回維持される取引評価
+
+| Visit | role | Baseline passage | Candidate passage | Actual passage |
+|---|---|---:|---:|---:|
+| `veh_en_sw_base_025:2` | buyer | 408 | 398 | 398 |
+| `veh_sw_nw_base_037:2` | seller | 396 | 396 | 396 |
+| `veh_wn_se_base_024:1` | nonparticipating | 404 | 403 | 404 |
+| `veh_nw_sw_base_047:1` | seller | 398 | 408 | 408 |
+
+**解釈:** buyer は予測どおり 10 timestep 短縮。seller `veh_sw_nw_base_037:2` は遅延なし。seller `veh_nw_sw_base_047:1` は予測どおり 10 timestep 遅延。buyer と seller の Candidate passage は Actual passage と一致。buyer と seller は全員 satisfied。nonparticipating だけ Candidate T=403 に対して Actual T=404。nonparticipating の 1 timestep 差は到着差ではなく、到着後の物理通過過程による。既存の支払・補償・満足度評価は変更しない。
+
+### 23.13 完了判断
+
+今回の T=382 取引について、次を完了とする。
+
+- 4 party 初回 arrival の正式確認
+- 旧到着差の誤記録原因特定
+- Baseline／Actual 物理比較
+- first divergence 確認
+- selected Candidate 記録
+- 新規 C 順位記録
+- T=402〜404 の nonparticipating 通過差確認
+- C 順位と Actual 通過順位の区別
+- selected=False での新規順位確定源確認
+- production と診断問題の切り分け
+- production 変更不要判断
+
+今回の T=382 取引周辺の一連の確認は、現時点で **完了** とする。
+
+### 23.14 未完了事項と次の作業
+
+今回の T=382 取引確認そのものには未完了の技術確認を残さない。研究全体として次は別作業として残る。
+
+- 旧 `rank_and_passage_trace.py` を Git 上で修正するか、歴史的診断として残し最新正本参照を付けるかの整理
+- 今回追加した 2 診断スクリプトと正式出力の Git 対象判断
+- 詳細設計メモと新しい進捗第 4 巻の保存
+- commit・push
+- 4 交差点 nonparticipating 20% trial に関する次の研究分析へ進むかの判断
+
+進捗メモについては、`ORDER_EXCHANGE_PROGRESS_3.md` が 6,708 行に達しており、今回の確認完了を境界として `ORDER_EXCHANGE_PROGRESS_4.md` を新規作成する予定である。本作業では `ORDER_EXCHANGE_PROGRESS_3.md` も `ORDER_EXCHANGE_PROGRESS_4.md` も編集しない。
+
+### 23.15 最新参照先と古い記録の扱い
+
+第 5 巻内に、旧診断の T=395、T=407、T=403、T=397 を正式な Actual arrival として記載した箇所が **将来** 存在する場合は、古い本文を削除せず、当時の診断結果であること、同一 Visit 再登録時の無条件上書きによる値であり初回 Actual arrival ではなかったこと、最新正本として **本 §23** を参照することを追記する。本追記時点（2026-10-26）では、第 5 巻本文に上記 4 値を正式 arrival として記載した箇所は見当たらなかったため、既存節への個別訂正注記は追加していない。今回の追記以外の古い節を大規模に書換えない。

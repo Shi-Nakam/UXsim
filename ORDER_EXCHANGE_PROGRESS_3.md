@@ -6706,3 +6706,64 @@ buyer T=607通過後、sellerはT=608 **clearance** 未充足、T=609に通過�
 
 **本§8が、Candidate／Actual passage差分析・T=600原因確定・現行近似維持判断の最新再開地点である。**
 
+# 進捗第3巻終了・第4巻への移行（2026-10-26）
+
+**検索語:** 進捗第3巻終了、第4巻移行、ORDER_EXCHANGE_PROGRESS_4、T=382、初回Actual arrival、Actual arrival上書き、再登録、Baseline arrival一致、first divergenceなし、T=402、一時skip、clearance、C順位183、Actual通過順位177、selected=False、baseline fallback、leading nonparticipating、順位確定源、完了、最新再開地点。
+
+## 1. 第3巻をここで区切る理由
+
+- `ORDER_EXCHANGE_PROGRESS_3.md` は 6,708 行に達した
+- 過去の複数の再開地点と完了記録が蓄積している
+- 今回、4交差点 nonparticipating 20% trial の T=382 成立取引に関する反証確認が完了した
+- この完了を明確な作業境界として、今後の最新進捗は `ORDER_EXCHANGE_PROGRESS_4.md` へ記録する
+- 第3巻の古い記録は履歴として残し、削除・再構成しない
+
+## 2. 移行時点で完了した確認
+
+- T=382 取引 4 party の Baseline arrival と正式な初回 Actual arrival は全件一致（正式到着は **388、390、392、394**）
+- 旧診断の **395、407、403、397** は、同一 Visit の到着登録再呼出しによる診断値の無条件上書きであり、**初回 Actual arrival ではなかった**
+- 旧値による到着差 7、17、11、3 timestep は交通予測誤差ではなかった
+- 対象 4 Vehicle と対象 4 inlink について、比較可能範囲で Baseline／Actual の first divergence は確認されなかった
+- nonparticipating Visit `veh_wn_se_base_024:1` の Candidate T=403 対 Actual T=404 の差は、到着差ではなく到着後の物理通過過程による
+- T=402 の入口空間不足による一時 skip、別 inlink の C183 Visit 通過、T=403 の clearance 未充足、T=404 通過という流れを確認した
+- C 順位 183 と Actual 通過順位 177 を区別した
+- selected=False での新規 C 順位確定源を確認した
+  - T=390 C178: baseline fallback
+  - T=404 C185: baseline fallback
+  - T=406 C186: leading nonparticipating 先行確定
+- 今回の確認範囲では production 変更が必要な欠陥は確認されなかった
+- 今回の T=382 取引周辺の一連の確認は **完了** とする
+
+詳細数値・原因・診断実装上の訂正事項は本巻へ重複記載しすぎない。**詳細設計第5巻 §23** を正本として参照する。
+
+## 3. 技術的正本
+
+**技術的正本:** `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_5.md`
+
+**参照節:** §23「4交差点nonparticipating 20％ trial・T=382取引の初回到着訂正、物理一致、通過差、および順位確定源確認完了（2026-10-26）」
+
+旧 Actual arrival 値、正式初回 arrival、物理比較、T=402〜404 の通過差、C 順位と Actual 通過順位、selected=False 時の順位確定源、診断スクリプト、正式出力、production 評価は §23 を参照する。
+
+## 4. 第4巻へ引き継ぐ事項
+
+`ORDER_EXCHANGE_PROGRESS_4.md` は、この後の別作業で新規作成する。
+
+**第4巻へ引き継ぐ未完了事項:**
+
+- 旧 `diagnose_tvt_mp_four_cross_intersections_nonparticipating_20_t382_rank_and_passage_trace.py` を修正対象にするか、歴史的診断として残して最新正本参照を付けるか整理する
+- 今回追加した 2 診断スクリプトの Git 対象を決める
+- 今回生成した正式 diagnostic output の Git 対象を決める
+- 詳細設計第5巻 §23、進捗第3巻移行記録、進捗第4巻を保存する
+- 必要な Git 対象を確認した後、commit・push する
+- 次の研究分析へ進む前に、4交差点 nonparticipating 20% trial について、今回の T=382 取引確認以外に新たな必須確認が残るかを整理する
+
+旧 `rank_and_passage_trace` の誤った Actual arrival 値（395、407、403、397）を、正式値として再利用しない。
+
+## 5. 第3巻の扱い
+
+- 本節を `ORDER_EXCHANGE_PROGRESS_3.md` の **最終接続記録** とする
+- 以後の新しい進捗記録は `ORDER_EXCHANGE_PROGRESS_4.md` へ追加する
+- 第3巻内の以前の「最新再開地点」は当時の記録として残す
+- 第3巻内の古い未完了記述を、現在の未完了事項として自動的に再採用しない
+- 現在地は、詳細設計第5巻 §23 と、今後作成する進捗第4巻を参照する
+
