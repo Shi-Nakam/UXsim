@@ -7348,3 +7348,450 @@ production の問題と診断実装の問題を混同しない。今回、診断
 ### 23.15 最新参照先と古い記録の扱い
 
 第 5 巻内に、旧診断の T=395、T=407、T=403、T=397 を正式な Actual arrival として記載した箇所が **将来** 存在する場合は、古い本文を削除せず、当時の診断結果であること、同一 Visit 再登録時の無条件上書きによる値であり初回 Actual arrival ではなかったこと、最新正本として **本 §23** を参照することを追記する。本追記時点（2026-10-26）では、第 5 巻本文に上記 4 値を正式 arrival として記載した箇所は見当たらなかったため、既存節への個別訂正注記は追加していない。今回の追記以外の古い節を大規模に書換えない。
+
+旧 `rank_and_passage_trace.py` の扱い、eval_1000 延長、成立取引全体の inlink・最大当事者・nonparticipating 構成、T=392 最大取引監査、T=392 buyer 到着差、T=457 の C 順位と Actual 通過順の逆転については、**§23.14 に列挙した未完了のうち該当する事項の後続状態を本 §24 に記録する**。§23.14 の文言は歴史的記録として残し、最新参照先は **本 §24**（とくに §24.2、§24.15、§24.17）とする。
+
+## 24. 4交差点nonparticipating 20％ trialの成立取引構成、最大当事者取引、同一inlink、および物理通過順監査（2026-10-27）
+
+### 24.1 検証目的と対象trial
+
+- 対象は 4 交差点 nonparticipating 20% trial
+- Vehicle 600 台
+- participating 480 台
+- nonparticipating 120 台
+- 評価期間 T=0..899
+- internal TSIZE=930
+- traffic seed 0
+- VOT seed 1
+- nonparticipation seed 3
+- 成立取引 228 件
+- buyer Visit 263
+- seller Visit 324
+- nonparticipating Visit 39
+- 成立取引 party 合計 626
+- 今回の検証は production を変更せず、read-only 診断で実施した
+
+今回の目的は、個別 T=382 取引だけでなく、成立取引全体の構成、正式 inlink、最大当事者取引、nonparticipating を含む特殊構成、および **C 順位**（assigned rank）と **Actual 通過順位**（actual node passage rank）の関係を確認することである。
+
+### 24.2 旧T=382 rank-and-passage診断の修正
+
+対象: `research_scripts/diagnose_tvt_mp_four_cross_intersections_nonparticipating_20_t382_rank_and_passage_trace.py`
+
+- 旧診断は同一 Visit の arrival 再登録ごとに `World.T` で `GATE.actual_arrivals` を上書きしていた
+- 修正版は production が保存した `current_visit["arrival_time"]` を **original method 呼出し後**に読む
+- key 未登録時だけ初回値を保存
+- 再登録時は上書きせず、production `arrival_time` が初回値を維持していることを照合
+- T=382 対象 4 party の正式初回 Actual arrival:
+  - `veh_sw_nw_base_037:2` = 388
+  - `veh_nw_sw_base_047:1` = 390
+  - `veh_wn_se_base_024:1` = 392
+  - `veh_en_sw_base_025:2` = 394
+- 旧値 395、407、403、397 は正式初回 arrival ではない
+- static validation が `current_visit.get("arrival_time")` を誤認識した問題も修正した
+- **runtime の `wrapped_arrival` 本体**と **static validation** を区別して記録する（到着記録の正本は runtime 修正、AST 検査の正本は static 修正）
+
+### 24.3 eval_1000延長診断と全600台trip完了
+
+- 元 trial の production や正式 trial は変更していない
+- 診断専用 World だけを 100 timestep 延長
+- diagnostic evaluation T=0..999
+- internal TSIZE=1030
+- simulation 後 World.T=1000
+- 詳細な T=382 周辺 trace は T=382..408 のまま
+- `completed_trip_count`=600
+- `incomplete_vehicle_count`=0
+- `incomplete_vehicle_names`=[]
+- 元の eval_900 終了時に未完了だった 3 台も完走した
+- 延長後も成立取引数等は eval_900 と同じだった:
+  - transaction 228
+  - buyer Visit 263
+  - seller Visit 324
+  - nonparticipating Visit 39
+  - Candidate と Actual の両方を観測 626
+  - passage 一致 611
+  - passage 不一致 15
+  - Actual passage 未観測 0
+- T=900..999 に新しい成立取引は増えなかった
+- 出力 directory 名を eval_1000 として eval_900 結果と区別した
+
+対象出力 directory: `research_outputs/trial/tvt_mp_four_cross_intersections_grid_medium_nonparticipating_20_600_vehicle_eval_1000_timestep_seed_1_nonparticipation_seed_3_t382_rank_and_passage_trace`
+
+### 24.4 成立取引228件の正式inlink全件診断
+
+対象診断: `research_scripts/diagnose_tvt_mp_four_cross_intersections_nonparticipating_20_established_party_inlinks.py`
+
+正式 inlink 取得元:
+
+- selected Candidate の保存済み traffic observation record の `inlink_name`
+- binding visit の `inlink_name`
+- Vehicle 名、OD 名、現在 Link、終端状態から推測していない
+
+確認値:
+
+- 成立取引 228
+- party 626
+- buyer 263
+- seller 324
+- nonparticipating 39
+- 複数 buyer 取引 32
+- 複数 seller 取引 83
+- nonparticipating 含有取引 37
+- 最大当事者数 6
+- 最大 6 当事者取引 1 件
+
+同一 inlink 分類:
+
+- 同一 inlink に複数 buyer がいる成立取引は 1 件
+- 同一 inlink に複数 seller がいる成立取引は 2 件
+- 重複を除く該当取引は T=226 と T=392 の 2 件
+- buyer または seller と nonparticipating が同一 inlink にいる成立取引は 0 件
+- buyer と nonparticipating 同一 inlink は 0 件
+- seller と nonparticipating 同一 inlink は 0 件
+
+正式出力 directory: `research_outputs/trial/tvt_mp_four_cross_intersections_grid_medium_nonparticipating_20_600_vehicle_eval_900_timestep_seed_1_nonparticipation_seed_3_established_party_inlinks`
+
+### 24.5 最大6当事者取引T=392の構造
+
+- T=392
+- `northwest_intersection`
+- selected Candidate evaluation index 5
+- buyer 3
+- seller 3
+- nonparticipating 0
+- trade scope 6
+
+Baseline 局所順位順:
+
+1. `veh_en_sw_base_026:2` seller
+2. `veh_sw_nw_base_039:2` seller
+3. `veh_sw_nw_base_040:2` seller
+4. `veh_wn_en_base_025:1` buyer
+5. `veh_nw_sw_base_048:1` buyer
+6. `veh_wn_se_base_025:1` buyer
+
+Candidate 局所順位順:
+
+1. `veh_wn_en_base_025:1` buyer
+2. `veh_nw_sw_base_048:1` buyer
+3. `veh_wn_se_base_025:1` buyer
+4. `veh_en_sw_base_026:2` seller
+5. `veh_sw_nw_base_039:2` seller
+6. `veh_sw_nw_base_040:2` seller
+
+同一 inlink:
+
+- seller `veh_sw_nw_base_039:2` と `veh_sw_nw_base_040:2`: `southwest_intersection_to_northwest_intersection`
+- buyer `veh_wn_en_base_025:1` と `veh_wn_se_base_025:1`: `west_north_od_to_northwest_intersection`
+
+Vehicle 名中の `wn_en` 等は OD 組合せを表し、走行中の正式 inlink を表すものではない。正式 inlink は selected Candidate の保存済み `inlink_name` を使う。
+
+### 24.6 T=392最大取引の交通・順位横並び正本
+
+| Visit | role | formal inlink | Baseline arrival | Actual first arrival | Baseline passage | Candidate passage | Actual passage | Baseline local rank | Candidate local rank | assigned C rank | Actual node passage rank |
+|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| `veh_en_sw_base_026:2` | seller | northeast_intersection_to_northwest_intersection | 398 | 398 | 412 | 420 | 420 | 1 | 4 | 182 | 186 |
+| `veh_sw_nw_base_039:2` | seller | southwest_intersection_to_northwest_intersection | 400 | 400 | 402 | 402 | 402 | 2 | 5 | 183 | 177 |
+| `veh_sw_nw_base_040:2` | seller | southwest_intersection_to_northwest_intersection | 402 | 402 | 406 | 410 | 410 | 3 | 6 | 184 | 181 |
+| `veh_wn_en_base_025:1` | buyer | west_north_od_to_northwest_intersection | 404 | 404 | 410 | 406 | 406 | 4 | 1 | 179 | 179 |
+| `veh_nw_sw_base_048:1` | buyer | north_west_od_to_northwest_intersection | 408 | 408 | 416 | 412 | 412 | 5 | 2 | 180 | 182 |
+| `veh_wn_se_base_025:1` | buyer | west_north_od_to_northwest_intersection | 410 | 406 | 420 | 416 | 416 | 6 | 3 | 181 | 184 |
+
+- Candidate passage と Actual passage は 6 台全件一致
+- **C 順位**（assigned rank）と **Actual 通過順位**（actual node passage rank）は別概念
+- C 順位差合計（rank difference total）は 0
+- C 順位と Actual 通過順位の個別不一致だけで production 欠陥と判断しない
+
+### 24.7 T=392最大取引の経済条件
+
+| Visit | role | declared VOT | G_b / R_s | payment / compensation | realized gain | satisfaction |
+|---|---|---:|---:|---:|---:|---|
+| `veh_wn_en_base_025:1` | buyer | 0.18457821807591362 | G_b=0.7383128723036545 | payment=0.5223440098669386 | 0.21596886243671587 | satisfied |
+| `veh_nw_sw_base_048:1` | buyer | 0.4697501221448203 | G_b=1.8790004885792813 | payment=1.3293614219186634 | 0.5496390666606179 | satisfied |
+| `veh_wn_se_base_025:1` | buyer | 0.5177082253347336 | G_b=2.0708329013389344 | payment=1.4650796458075128 | 0.6057532555314216 | satisfied |
+| `veh_en_sw_base_026:2` | seller | 0.18888373867285319 | R_s=1.5110699093828255 | compensation=1.5110699093828255 | 0 | satisfied |
+| `veh_sw_nw_base_039:2` | seller | 1.7810814861898907 | R_s=0 | compensation=0 | 0 | satisfied |
+| `veh_sw_nw_base_040:2` | seller | 0.45142879205257236 | R_s=1.8057151682102894 | compensation=1.8057151682102894 | 0 | satisfied |
+
+取引全体:
+
+- total_G=4.688146262221871
+- total_R=3.316785077593115
+- surplus=1.3713611846287557
+- total official payment=3.3167850775931145
+- total official compensation=3.316785077593115
+- balance difference=-4.440892098500626e-16
+- buyer satisfied 3、unsatisfied 0
+- seller satisfied 3、unsatisfied 0
+- buyer realized gain total=1.3713611846287552
+- seller realized gain total=0
+
+seller `veh_sw_nw_base_039:2` の R_s=0 は、申告 VOT が 0 だからではない。Baseline passage と Candidate passage がともに T=402 で、予測遅延が 0 timestep であるため R_s=0 である。nonparticipating の VOT 欄が空であることと混同しない。
+
+保存済み正式値の範囲で矛盾は確認されなかった。production 全体の完全な正当性証明ではない。
+
+対象診断: `research_scripts/diagnose_tvt_mp_four_cross_intersections_nonparticipating_20_t392_maximum_party_transaction_review.py`
+
+### 24.8 T=392 buyer到着差の原因
+
+対象: `veh_wn_se_base_025:1`
+
+- Baseline arrival=410
+- Actual first arrival=406
+- Actual−Baseline=−4
+- Baseline passage=420
+- Candidate passage=416
+- Actual passage=416
+
+記録:
+
+- Actual 406 は production `arrival_time` の初回値から取得したものであり、診断辞書の上書き値ではない
+- Baseline 410 は T=392 collector snapshot と Baseline fork 内の到着観測の双方に基づく
+- T=392 common origin で対象 Vehicle と対象 inlink `west_north_od_to_northwest_intersection` の物理状態は一致
+- 最初の単純 field 差は assigned_rank だったが、これは物理状態差ではない
+- Actual 実 World には選択された T=392 取引の C 順位 C179〜C184 が登録される
+- 取引判断用 Baseline fork には、その取引結果を遡って登録しない
+- T=392 時点では位置、速度、physical index（inlink の先頭は physical index 0、先頭から 2 台目は physical index 1）、leader、follower、車列順は一致
+- 最初の確認済み物理差は T=406 の `after_node_transfer` phase
+
+直接確認した時系列:
+
+- 同一 inlink 前方 buyer `veh_wn_en_base_025:1`:
+  - Baseline local rank 4、Candidate local rank 1
+  - Baseline passage 410、Candidate passage 406、Actual passage 406
+- Actual では前方 buyer が T=406 に通過
+- 後続の `veh_wn_se_base_025:1` がその inlink の先頭（physical index 0）になり、T=406 に正式到着
+- Baseline では前方 buyer が T=410 まで残るため、対象 buyer の arrival は T=410
+- したがって、arrival 差は診断エラーではなく、同一 inlink 前方 buyer の取引による早期通過が後続 buyer の先頭化を早めた物理的効果である
+- production arrival 記録欠陥ではない
+- この確認範囲では production 変更不要
+
+対象診断: `research_scripts/diagnose_tvt_mp_four_cross_intersections_nonparticipating_20_t392_veh_wn_se_base_025_arrival_divergence.py`
+
+### 24.9 nonparticipatingを含む成立取引37件の構成監査
+
+- nonparticipating を含む成立取引=37
+- buyer または seller が欠ける成立取引=0
+- buyer 0・seller あり・nonparticipating あり=0
+- seller 0・buyer あり・nonparticipating あり=0
+- buyer 0・seller 0・nonparticipating のみ=0
+- 全 37 件で buyer 1 件以上かつ seller 1 件以上
+- buyer と seller は必ずセットで存在する正式候補条件を全件で満たした
+- production 候補形成のこの契約に矛盾なし
+
+### 24.10 nonparticipating含有取引の最大当事者数
+
+- nonparticipating を含む 37 件に限定した最大 trade scope=4
+- 最大 4 当事者取引=13 件
+
+構成別:
+
+- B1・S2・N1 = 9 件
+- B2・S1・N1 = 2 件（T=172 `northwest_intersection`、T=232 `northwest_intersection`）
+- B1・S1・N2 = 2 件（T=150 `northwest_intersection`、T=457 `northwest_intersection`）
+
+| T | Node | buyer数 | seller数 | nonparticipating数 |
+|---:|---|---:|---:|---:|
+| 64 | northeast_intersection | 1 | 2 | 1 |
+| 64 | northwest_intersection | 1 | 2 | 1 |
+| 124 | northeast_intersection | 1 | 2 | 1 |
+| 133 | northwest_intersection | 1 | 2 | 1 |
+| 150 | northwest_intersection | 1 | 1 | 2 |
+| 172 | northwest_intersection | 2 | 1 | 1 |
+| 183 | northeast_intersection | 1 | 2 | 1 |
+| 232 | northwest_intersection | 2 | 1 | 1 |
+| 364 | northwest_intersection | 1 | 2 | 1 |
+| 382 | northwest_intersection | 1 | 2 | 1 |
+| 420 | northwest_intersection | 1 | 2 | 1 |
+| 457 | northwest_intersection | 1 | 1 | 2 |
+| 683 | northwest_intersection | 1 | 2 | 1 |
+
+### 24.11 B1・S1・N2のT=150取引
+
+| Visit | role | formal inlink | Baseline passage | Candidate passage | Actual passage | Baseline local rank | Candidate local rank | assigned C rank | Actual node passage rank | 経済（該当時） |
+|---|---|---|---:|---:|---:|---:|---:|---:|---:|---|
+| `veh_wn_en_base_010:1` | seller | west_north_od_to_northwest_intersection | 164 | 169 | 169 | 1 | 4 | 73 | 73 | declared VOT 0.03636473732976284; R_s=0.1818236866488142; compensation 同額; satisfied |
+| `veh_sw_nw_base_014:2` | nonparticipating | southwest_intersection_to_northwest_intersection | 166 | 165 | 165 | 2 | 2 | 71 | 71 | — |
+| `veh_en_sw_base_010:2` | nonparticipating | northeast_intersection_to_northwest_intersection | 168 | 167 | 167 | 3 | 3 | 72 | 72 | — |
+| `veh_nw_sw_base_022:1` | buyer | north_west_od_to_northwest_intersection | 170 | 163 | 163 | 4 | 1 | 70 | 70 | declared VOT 0.25825455928608954; G_b=1.8077819150026269; payment=0.1818236866488142; realized gain=1.6259582283538125; satisfied |
+
+取引全体: Candidate／Actual passage 全 4 件一致。2 nonparticipating の局所順位維持。C 順位と Actual 順位全 4 件一致。payment と compensation 一致。buyer、seller とも satisfied。rank difference total=0。
+
+### 24.12 B1・S1・N2のT=457取引
+
+| Visit | role | formal inlink | Baseline passage | Candidate passage | Actual passage | Baseline local rank | Candidate local rank | assigned C rank | Actual node passage rank | 経済（該当時） |
+|---|---|---|---:|---:|---:|---:|---:|---:|---:|---|
+| `veh_wn_se_base_029:1` | seller | west_north_od_to_northwest_intersection | 471 | 477 | 477 | 1 | 4 | 215 | 215 | R_s=1.3473322342780971; satisfied |
+| `veh_nw_sw_pulse_004:1` | nonparticipating | north_west_od_to_northwest_intersection | 475 | 475 | 475 | 2 | 2 | 213 | 214 | — |
+| `veh_sw_nw_base_050:2` | nonparticipating | southwest_intersection_to_northwest_intersection | 473 | 472 | 472 | 3 | 3 | 214 | 213 | — |
+| `veh_ne_ws_base_012:2` | buyer | northeast_intersection_to_northwest_intersection | 477 | 470 | 470 | 4 | 1 | 212 | 212 | G_b=8.06619113354825; payment=1.3473322342780971; realized gain=6.718858899270153; satisfied |
+
+取引全体: Candidate／Actual passage 全 4 件一致。2 nonparticipating の取引内局所順位は維持。2 nonparticipating の Actual 通過順だけが C 順位と逆（C213 が Actual 214、C214 が Actual 213）。rank difference は +1 と −1 で相殺し rank difference total=0。payment と compensation 一致。buyer、seller とも satisfied。
+
+### 24.13 T=457のC213／C214通過順逆転の正式理由
+
+対象診断: `research_scripts/diagnose_tvt_mp_four_cross_intersections_nonparticipating_20_t457_nonparticipating_passage_order_trace.py`
+
+対象 nonparticipating:
+
+- C213 `veh_nw_sw_pulse_004:1`（assigned C rank 213、Actual node passage rank 214、Candidate／Actual passage T=475）
+- C214 `veh_sw_nw_base_050:2`（assigned C rank 214、Actual node passage rank 213、Candidate／Actual passage T=472）
+
+正式時系列（timestep を省略して理由を混同しない）:
+
+**T=472**
+
+- C213 を先に判定
+- Candidate 判定=`outlink_entry_space_unavailable`（進路先 Link 入口空間不足／outlink entry space unavailable）
+- Actual 判定=`outlink_entry_space_unavailable`
+- clearance 未充足ではない。通常物理制約による一時 skip
+- Node 走査は終了しない
+- 後続 C214 へ走査継続
+- C214 は Candidate／Actual 双方で passed
+- C214 が T=472 に通過。Actual node passage rank=213
+
+**T=473**
+
+- C213 は Candidate／Actual 双方で `clearance_not_satisfied`
+- この T=473 の Node 走査は終了する
+- **T=472 の通過順逆転を発生させた理由ではない**（T=472 では clearance 未充足ではなく入口空間不足の一時 skip だった）
+
+**T=474**
+
+- C213 は Candidate／Actual 双方で `outlink_entry_space_unavailable`（通常物理制約による一時 skip）
+
+**T=475**
+
+- C213 は Candidate／Actual 双方で passed
+- C213 が T=475 に通過。Actual node passage rank=214
+
+重要な解釈:
+
+- **C 順位**は拘束された走査優先順位である
+- **Actual node passage rank**は実際の物理通過順である
+- C 順位は、通常物理制約を無視して強制通過させる順位ではない
+- C213 は先に判定されたが、T=472 に進路先 Link 入口空間不足（outlink entry space unavailable）で一時 skip された
+- C214 は通過可能だったため後続試行で先に通過した
+- Candidate 局所仮想計算と Actual 実 World が T=472〜475 の各時刻で同じ正式判定となった
+- そのため C 順位と Actual 通過順位は逆転した一方、Candidate passage と Actual passage は全 4 party で一致した
+- 設計どおりの挙動であり、今回の確認範囲では production 欠陥は確認されなかった
+- ある条件を外した場合の反実仮想は未証明
+
+### 24.14 production評価
+
+今回の全確認をまとめる。
+
+確認済み:
+
+- 初回 Actual arrival 保存
+- 再登録時の上書き防止
+- eval_1000 で全 600 台完走
+- 成立取引 228 件・party 626 件の正式 inlink 取得
+- 正式 candidate 形成で buyer と seller が全成立取引に存在
+- nonparticipating 含有 37 件でも buyer と seller の必須条件を全件充足
+- selected Candidate の最大 6 当事者取引
+- 同一 inlink 複数 buyer／seller
+- buyer／seller と nonparticipating の同一 inlink 共存 0 件
+- C 順位と Actual 通過順位の区別
+- 通常物理制約で一時 skip し後続 Visit を試す契約
+- clearance 未充足で当該 timestep の Node 走査終了
+- Candidate 局所仮想計算と Actual 実 World の判定一致事例（T=457 等）
+- 支払・補償の収支一致
+- buyer／seller 満足度
+
+今回の確認範囲では production 変更が必要な欠陥は確認されなかった。
+
+ただし:
+
+- 全 production の完全な正当性証明ではない
+- 反実仮想を実行していない因果は断定しない
+- 保存済み正式値と診断範囲に基づく評価である
+
+### 24.15 新規・修正診断
+
+| # | スクリプト | 目的 | 実行確認 |
+|---:|---|---|---|
+| 1 | `research_scripts/diagnose_tvt_mp_four_cross_intersections_nonparticipating_20_t382_rank_and_passage_trace.py` | 初回 Actual arrival 修正、eval_1000 延長、全 600 台完走、T=382 rank／passage trace | py_compile 成功、static contract ok、simulation 正常完了、output directory 作成成功 |
+| 2 | `research_scripts/diagnose_tvt_mp_four_cross_intersections_nonparticipating_20_established_party_inlinks.py` | 成立取引 228 件・party 626 件の正式 inlink と same-inlink 分類 | 同左 |
+| 3 | `research_scripts/diagnose_tvt_mp_four_cross_intersections_nonparticipating_20_t392_maximum_party_transaction_review.py` | 最大 6 当事者取引の交通・順位・経済横並び監査 | 同左 |
+| 4 | `research_scripts/diagnose_tvt_mp_four_cross_intersections_nonparticipating_20_t392_veh_wn_se_base_025_arrival_divergence.py` | T=392 buyer の Baseline arrival 410／Actual arrival 406 の物理原因追跡 | 同左 |
+| 5 | `research_scripts/diagnose_tvt_mp_four_cross_intersections_nonparticipating_20_t457_nonparticipating_passage_order_trace.py` | T=457 の C213／C214 通過順逆転と Candidate／Actual 判定一致の正式確認 | 同左 |
+
+### 24.16 Git対象と未完了事項
+
+現時点で確定していること:
+
+- 上記 5 診断は今回作業に直接関係する未追跡ファイル
+- research_outputs は Git 管理済みファイルが 0 件という既存確認がある
+- diagnostic output は再生成可能であり、現時点では Git 対象外候補
+- `diagnostics/order_control.zip` は既存未追跡で今回対象外
+- single intersection／two intersections 関連未追跡スクリプトは今回対象外
+- Git の最終採否、stage、commit、push はまだ行っていない
+- Git 操作は利用者が Terminal で実行する
+- メモを含む commit 名には `document` を含める
+
+完了済み（文書・検証の一部）:
+
+- `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_5.md` への §24 追記完了
+- `ORDER_EXCHANGE_PROGRESS_4.md` への §7〜§9 追記完了
+- 今回対象 5 診断の py_compile 一括再確認: 完了（すべて成功）
+- 今回対象 5 診断の static validation 一括再確認: 完了（5 本すべて `static contract ok`）
+- 2 メモの記載内容の独立確認および発見事項の修正: 完了
+  - 詳細設計第 5 巻 §24 と進捗第 4 巻 §7〜§9 を Terminal で独立確認
+  - §24.10 の T=382 構成を B1・S2・N1 へ訂正
+  - §24.16 の古い状態記述と重複項目を修正
+  - 進捗第 4 巻の診断本数と Git 候補を今回の 5 診断＋2 メモへ訂正
+  - T=472 の入口空間不足と T=473 の clearance 未充足が明確に区別されていることを確認
+
+未完了:
+
+- 5 診断の最終 Git 採否
+- research_outputs を Git 対象外とする最終確認
+- Git 差分と status の確認
+- 対象 7 ファイルだけの stage（5 診断＋2 メモ）
+- staged diff の確認
+- commit
+- commit 後の status と最新 commit 確認
+- 別指示で push
+- push 後の status と最新 commit 確認
+
+### 24.17 最新参照先と古い記録
+
+- T=382 初回 arrival の最新正本は §23 と本 §24.2
+- 成立取引全体の正式 inlink・最大当事者・nonparticipating 構成の最新正本は本 §24
+- T=392 arrival 差の最新正本は §24.8
+- T=457 C 順位／Actual 順位逆転の最新正本は §24.13
+- 古い出力や旧診断の値を削除せず、必要に応じて当時の診断結果であることと最新参照先を追記する
+- Vehicle 名中の `wn_en` 等は OD 組合せを表し、走行中の正式 inlink を表すものではない
+- 正式 inlink は selected Candidate の保存済み `inlink_name` を使う
+
+### 24.18 完了判断と次の作業
+
+完了とする技術確認:
+
+- T=382 旧診断の初回 arrival 修正
+- eval_1000 全車完走
+- 成立取引全件の inlink 分類
+- 最大 6 当事者取引監査
+- T=392 arrival 差原因
+- nonparticipating 含有取引の buyer／seller 必須条件
+- 同一 inlink participant＋nonparticipating 0 件
+- nonparticipating 含有最大 4 当事者取引 13 件
+- T=150／T=457 の B1・S1・N2 確認
+- T=457 通過順逆転原因
+
+次作業:
+
+1. `git status` と差分を確認する
+2. research_outputs を Git 対象外とする最終確認を行う
+3. 今回対象 7 ファイルだけを Git 対象として選別する（5 診断＋2 メモ）
+4. `research_outputs`、`diagnostics/order_control.zip`、single intersection／two intersections 関連未追跡ファイルを stage しない
+5. 対象 7 ファイルだけを stage する
+6. `git diff --cached` で staged 内容を確認する
+7. `document` を含む commit 名を確定する
+8. commit する
+9. commit 後の status と最新 commit を確認する
+10. 別指示で push する
+11. push 後の status と最新 commit を確認する
+12. その後、次の研究分析テーマを決める
+
+研究分析上の次テーマは、上記 Git 完了後に決める。今回完了した確認を、明確な新証拠なしに未完了へ戻さない。

@@ -169,3 +169,229 @@ T=382 取引確認そのものは完了している。次の研究分析へ進�
 9. その後、次の研究分析へ進む
 
 **本節が、進捗第4巻開始時点の最新再開地点である。**
+
+本節は第4巻開始時点の再開地点である。追加検証後の最新再開地点は **§9** を参照する。
+
+---
+
+## 7. 第4巻開始後に完了した追加検証
+
+**技術的正本:** `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_5.md` **§24**（時系列・表・診断出力の詳細は §24 を参照。本節は再開用の要点のみ）。
+
+### 7.1 旧rank-and-passage診断の修正とeval_1000再実行
+
+**対象:** `research_scripts/diagnose_tvt_mp_four_cross_intersections_nonparticipating_20_t382_rank_and_passage_trace.py`
+
+**完了事項:**
+
+- Actual arrival を `World.T` で再登録ごとに上書きする旧診断処理を修正した
+- production の `current_visit["arrival_time"]` を original method 呼出し後に読み、正式初回値を取得する
+- key 未登録時だけ保存し、再登録時は上書きせず production 値が初回値を維持することを照合する
+- T=382 対象 4 party の正式初回 Actual arrival:
+  - `veh_sw_nw_base_037:2` = 388
+  - `veh_nw_sw_base_047:1` = 390
+  - `veh_wn_se_base_024:1` = 392
+  - `veh_en_sw_base_025:2` = 394
+- 旧値 395、407、403、397 は正式初回 arrival ではない
+- static validation が `current_visit.get("arrival_time")` を誤認識した問題を修正した（runtime の `wrapped_arrival` と static validation は別件として §24.2 に記録）
+- 診断専用 World を 100 timestep 延長（eval_1000: evaluation T=0..999、TSIZE=1030、simulation 後 World.T=1000）。正式 trial・production は変更していない
+- `completed_trip_count`=600、`incomplete_vehicle_count`=0。eval_900 終了時未完了 3 台も完走
+- 延長後の集計は eval_900 と同値（成立 228、passage 一致 611／不一致 15 等）。T=900..999 に新規成立取引なし
+
+**出力 directory（eval_1000 区別）:** `research_outputs/trial/tvt_mp_four_cross_intersections_grid_medium_nonparticipating_20_600_vehicle_eval_1000_timestep_seed_1_nonparticipation_seed_3_t382_rank_and_passage_trace`
+
+**§5.1 の未完了だった「旧診断の扱い」は、本修正により「修正済み・最新正本は §23／§24」へ更新した。**
+
+### 7.2 成立取引228件の正式inlink全件診断
+
+**対象:** `research_scripts/diagnose_tvt_mp_four_cross_intersections_nonparticipating_20_established_party_inlinks.py`
+
+**完了事項:**
+
+- 成立取引 228、party 626、buyer 263、seller 324、nonparticipating 39 を確認
+- 正式 inlink は selected Candidate の保存済み `inlink_name` から取得（Vehicle 名・OD 名・終端 Link から推測していない）
+- 複数 buyer 取引 32、複数 seller 取引 83、nonparticipating 含有 37、最大当事者 6・該当取引 1 件
+- buyer／seller と nonparticipating の同一 inlink 共存は **0 件**（buyer+NP、seller+NP とも 0）
+
+**出力 directory:** `research_outputs/trial/tvt_mp_four_cross_intersections_grid_medium_nonparticipating_20_600_vehicle_eval_900_timestep_seed_1_nonparticipation_seed_3_established_party_inlinks`
+
+### 7.3 最大6当事者取引T=392の交通・順位・経済監査
+
+**対象:** `research_scripts/diagnose_tvt_mp_four_cross_intersections_nonparticipating_20_t392_maximum_party_transaction_review.py`
+
+**完了事項:**
+
+- T=392 `northwest_intersection`、evaluation index 5、buyer 3・seller 3・nonparticipating 0、trade scope 6
+- Candidate passage と Actual passage は 6 台全件一致
+- C 順位と Actual node passage rank は別概念（個別不一致のみで production 欠陥としない）
+- 経済・支払・補償・満足度は保存済み正式値の範囲で矛盾なし（完全正当性証明ではない）
+
+**出力 directory:** `research_outputs/trial/tvt_mp_four_cross_intersections_grid_medium_nonparticipating_20_600_vehicle_eval_900_timestep_seed_1_nonparticipation_seed_3_t392_maximum_party_transaction_review`
+
+### 7.4 T=392 buyer到着差の原因確認
+
+**対象:** `research_scripts/diagnose_tvt_mp_four_cross_intersections_nonparticipating_20_t392_veh_wn_se_base_025_arrival_divergence.py`
+
+**対象 Visit:** `veh_wn_se_base_025:1`（Baseline arrival 410、Actual first arrival 406、passage 420／416／416）
+
+**完了事項:**
+
+- Actual 406 は production 初回 `arrival_time` 由来であり、診断上書きではない
+- T=392 common origin では対象 inlink の物理状態一致。最初の確認済み物理差は T=406 `after_node_transfer`
+- 同一 inlink 前方 buyer の早期通過により後続が inlink 先頭（physical index 0）化し、Actual 到着が早まった物理効果。production arrival 記録欠陥ではない
+
+### 7.5 nonparticipating含有取引の構成とB1・S1・N2確認
+
+**完了事項（集計・§24.9〜24.12）:**
+
+- nonparticipating 含有成立取引 37 件はすべて buyer≥1 かつ seller≥1（候補形成契約に矛盾なし）
+- nonparticipating 含有の最大 trade scope=4、該当 **13 件**（B1・S2・N1 が 9、B2・S1・N1 が 2、**B1・S1・N2 が 2**: T=150・T=457 `northwest_intersection`）
+- T=150・T=457 の 4 party 取引で Candidate／Actual passage 全件一致。T=150 は C 順位と Actual 通過順も一致。T=457 は 2 nonparticipating の Actual 通過順のみ C 順位と逆（rank difference total=0）
+
+### 7.6 T=457のC213／C214通過順逆転の正式確認
+
+**対象:** `research_scripts/diagnose_tvt_mp_four_cross_intersections_nonparticipating_20_t457_nonparticipating_passage_order_trace.py`
+
+**対象 nonparticipating:**
+
+- C213 `veh_nw_sw_pulse_004:1`（C 順位 213、Actual passage rank 214、passage T=475）
+- C214 `veh_sw_nw_base_050:2`（C 順位 214、Actual passage rank 213、passage T=472）
+
+**完了事項（§24.13）:**
+
+- **T=472:** C213 先判定 → Candidate／Actual とも `outlink_entry_space_unavailable`（進路先 Link 入口空間不足）。clearance 未充足ではない。一時 skip のうえ走査継続 → C214 が T=472 で通過
+- **T=473:** C213 は `clearance_not_satisfied` で当該 timestep の Node 走査終了（**T=472 逆転の原因ではない**）
+- **T=474:** C213 は再び入口空間不足で一時 skip
+- **T=475:** C213 が通過
+- Candidate 局所仮想計算と Actual 実 World の判定が一致し、取引 4 party の Candidate／Actual passage は一致。設計どおりの挙動であり、本確認範囲で production 欠陥は確認されなかった
+
+**出力 directory:** `research_outputs/trial/tvt_mp_four_cross_intersections_grid_medium_nonparticipating_20_600_vehicle_eval_900_timestep_seed_1_nonparticipation_seed_3_t457_nonparticipating_passage_order_trace`
+
+### 7.7 診断実行と詳細設計メモ§24
+
+今回の **5 診断**（小節との対応）:
+
+| 小節 | スクリプト |
+|---|---|
+| §7.1 | `research_scripts/diagnose_tvt_mp_four_cross_intersections_nonparticipating_20_t382_rank_and_passage_trace.py` |
+| §7.2 | `research_scripts/diagnose_tvt_mp_four_cross_intersections_nonparticipating_20_established_party_inlinks.py` |
+| §7.3 | `research_scripts/diagnose_tvt_mp_four_cross_intersections_nonparticipating_20_t392_maximum_party_transaction_review.py` |
+| §7.4 | `research_scripts/diagnose_tvt_mp_four_cross_intersections_nonparticipating_20_t392_veh_wn_se_base_025_arrival_divergence.py` |
+| §7.6 | `research_scripts/diagnose_tvt_mp_four_cross_intersections_nonparticipating_20_t457_nonparticipating_passage_order_trace.py` |
+
+**§7.5** は、上記診断および標準 research output を用いた構成集計・横並び確認であり、**6 本目の診断スクリプトではない**。
+
+上記 5 診断について、個別実行時に次を確認済み: **py_compile 成功、static contract ok、simulation 正常完了、output directory 作成成功**（§24.15 にも記録）。**py_compile の一括再確認も成功済み**。**static validation の一括再確認は未完了**。
+
+**文書:** `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_5.md` に **§24** を追記済み（本進捗 §7 と対応）。
+
+---
+
+## 8. 現在の未完了事項
+
+§5〜§6 は第4巻**開始時点**の未完了記録である。以下は **2026-10-27 時点** の未完了である。
+
+### 8.1 Git とファイル採否
+
+今回の **Git 対象候補は次の 7 ファイルに限定**する（一括追加禁止）。
+
+**メモ 2 本:**
+
+1. `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_5.md`
+2. `ORDER_EXCHANGE_PROGRESS_4.md`（本ファイル）
+
+**診断 5 本:**
+
+3. `research_scripts/diagnose_tvt_mp_four_cross_intersections_nonparticipating_20_t382_rank_and_passage_trace.py`
+4. `research_scripts/diagnose_tvt_mp_four_cross_intersections_nonparticipating_20_established_party_inlinks.py`
+5. `research_scripts/diagnose_tvt_mp_four_cross_intersections_nonparticipating_20_t392_maximum_party_transaction_review.py`
+6. `research_scripts/diagnose_tvt_mp_four_cross_intersections_nonparticipating_20_t392_veh_wn_se_base_025_arrival_divergence.py`
+7. `research_scripts/diagnose_tvt_mp_four_cross_intersections_nonparticipating_20_t457_nonparticipating_passage_order_trace.py`
+
+第4巻開始時の次の 2 診断は **§4 の技術的参照として残す**が、今回の git status では未追跡／変更済みとして出ていないため、**今回の commit 採否対象に含めない**。
+
+- `research_scripts/diagnose_tvt_mp_four_cross_intersections_nonparticipating_20_t382_baseline_actual_inlink_arrival_divergence.py`
+- `research_scripts/diagnose_tvt_mp_four_cross_intersections_nonparticipating_20_rank_confirmation_sources.py`
+
+- diagnostic **output directory** は再生成可能であり、今回の Git 対象外候補（`research_outputs` に Git 管理済み 0 件という既存確認）
+- `diagnostics/order_control.zip`、single／two intersections 関連未追跡は今回対象外
+- **commit・push は利用者が Terminal で実行**（Cursor は実行しない）。メモを含む commit 名には **document** を含める
+
+### 8.2 検証と文書
+
+**完了済み:**
+
+- 5 診断の個別 py_compile
+- 5 診断の個別 static validation
+- 5 診断の simulation
+- 5 診断の output directory 作成
+- 5 診断の py_compile 一括再確認
+- 5 診断の static validation 一括再確認: 完了（5 本すべて `static contract ok`）
+- 2 メモの `git diff --check`
+- 詳細設計第 5 巻 §24 と進捗第 4 巻 §7〜§9 の独立内容確認: 完了
+- 独立確認で発見した記載事項の修正: 完了
+  - 詳細設計第 5 巻 §24.10 の T=382 構成を B1・S2・N1 へ訂正
+  - 詳細設計第 5 巻 §24.16 の古い進捗状態と重複項目を修正
+  - 進捗第 4 巻 §7.7 の 5 診断対応を訂正
+  - §7.5 は 6 本目の診断ではなく、標準 research output 等を使った構成集計・横並び確認であると整理
+  - Git 候補を今回の 5 診断＋2 メモの 7 ファイルへ限定
+  - 第4巻開始時の 2 診断は技術的参照として残すが、今回の commit 候補から除外
+  - T=472 の入口空間不足と T=473 の clearance 未充足が明確に区別されていることを確認
+- Terminal 確認により、`Baseline localrank` 等の指摘表記誤りは §24.11・§24.12 の表に実在しなかった（追加の表記修正は不要）
+
+**未完了:**
+
+- 5 診断の最終 Git 採否
+- research_outputs を Git 対象外とする最終確認
+- Git 差分と status の最終確認
+- 対象 7 ファイルだけの stage
+- staged diff の確認
+- commit
+- commit 後の status と最新 commit 確認
+- 別指示で push
+- push 後の status と最新 commit 確認
+
+### 8.3 研究分析
+
+- 文書保存と Git 完了後に、4 交差点 nonparticipating 20% trial の**次の研究テーマ**を決める
+- §3・§7 で完了した確認を、明確な新証拠なしに未完了へ戻さない
+
+---
+
+## 9. 最新再開地点
+
+**技術的正本:** `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_5.md` **§23**（T=382 周辺・順位確定源）と **§24**（成立取引全体・T=392／T=457 追加検証）。
+
+**現在地:** 第4巻開始時点（§1〜§6）の T=382 確認に加え、§7 の追加検証まで完了。production 変更は不要と判断（§24.14）。**完了済み:** 5 診断の py_compile 一括再確認、5 診断の static validation 一括再確認、2 メモの独立内容確認、独立確認で発見した記載誤りと古い状態記述の修正、詳細設計第 5 巻 §24 と進捗第 4 巻 §7〜§9 の内容整合。**残作業:** 下記 Git 手順（7 ファイル）。
+
+**対象ファイル（Git 候補・7 ファイルのみ）:**
+
+| # | 種別 | パス |
+|---:|---|---|
+| 1 | 詳細設計 | `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_5.md`（§24 含む） |
+| 2 | 進捗 | `ORDER_EXCHANGE_PROGRESS_4.md`（本ファイル） |
+| 3 | 診断（修正） | `research_scripts/diagnose_tvt_mp_four_cross_intersections_nonparticipating_20_t382_rank_and_passage_trace.py` |
+| 4 | 診断（新規） | `research_scripts/diagnose_tvt_mp_four_cross_intersections_nonparticipating_20_established_party_inlinks.py` |
+| 5 | 診断（新規） | `research_scripts/diagnose_tvt_mp_four_cross_intersections_nonparticipating_20_t392_maximum_party_transaction_review.py` |
+| 6 | 診断（新規） | `research_scripts/diagnose_tvt_mp_four_cross_intersections_nonparticipating_20_t392_veh_wn_se_base_025_arrival_divergence.py` |
+| 7 | 診断（新規） | `research_scripts/diagnose_tvt_mp_four_cross_intersections_nonparticipating_20_t457_nonparticipating_passage_order_trace.py` |
+
+第4巻開始時の 2 診断（§4）は技術参照として残るが、上表の Git 候補には含めない。
+
+**次に利用者が Terminal で行う確認（推奨順）:**
+
+1. `git status` と今回対象 7 ファイルの差分を確認する
+2. `research_outputs` に Git 管理済みファイルがないことを最終確認する
+3. 今回対象 **7 ファイルだけ**を stage する
+4. `research_outputs`、`diagnostics/order_control.zip`、single intersection／two intersections 関連未追跡ファイルを stage しない
+5. `git diff --cached` で staged 内容を確認する
+6. `document` を含む commit 名を確定する
+7. commit する
+8. commit 後に `git status` と最新 commit を確認する
+9. 別の Terminal 指示で push する
+10. push 後に `git status` と最新 commit を確認する
+11. その後、次の研究分析テーマを決める
+
+Git 対象は今回の **5 診断＋2 メモの 7 ファイルに限定**する。第4巻開始時 2 診断、output directory、その他の未追跡ファイルを含めない。
+
+**本節が、進捗第4巻の最新再開地点である（2026-10-27）。**
