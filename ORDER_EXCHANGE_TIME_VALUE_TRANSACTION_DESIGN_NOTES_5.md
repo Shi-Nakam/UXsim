@@ -7795,3 +7795,250 @@ seller `veh_sw_nw_base_039:2` の R_s=0 は、申告 VOT が 0 だからでは�
 12. その後、次の研究分析テーマを決める
 
 研究分析上の次テーマは、上記 Git 完了後に決める。今回完了した確認を、明確な新証拠なしに未完了へ戻さない。
+
+## 25. N=5 Candidate Visit数上限trialの実作動検証、T=392取引差、C184／C185連続性、および対象inlink未進入Visitの扱い（2026-10-28）
+
+本節は、**Candidate Visit数上限**を **N=10** から **N=5**（**trade_scope上限**）へ切り替えた独立 **N=5** trial について、正式object・正式CSV・診断出力に基づく技術正本を記す。推測と診断実装の修正は区別する。**production** および既存 **N=10** trial・既存出力は変更していない。**research_outputs** は再生成可能な診断出力であり、現時点の Git 対象とは確定していない。診断スクリプトの Git 採否も未確定である。
+
+### 25.1 検証目的と変更範囲
+
+- 既存 production、既存 N=10 trial、既存 N=10 出力を変更せず、同じ 600 台、同じ network、同じ seed、同じ nonparticipation seed、同じ評価条件で **Candidate Visit数上限** だけを **N=5** へ変更した独立 trial を作成した。
+- 目的は、N=10 の T=392 **最大6当事者取引** が N=5 で消えるか、全成立取引が 5 当事者以下になるか、**N=5** 境界事例、**上限外Visit** の後続順位処理、buyer・seller 必須条件、C 順位連続性を確認することだった。
+- N=5 包括 trial は既に全 600 台完走済みであり、今回の追加診断は T=392、T=401、T=404、T=407 周辺の因果関係を深掘りした。
+- **production 変更は行っていない。**
+
+### 25.2 N=5 trialの独立性と基本条件
+
+| 項目 | 値 |
+|------|-----|
+| scenario | `tvt_mp_four_cross_intersections_grid_medium_nonparticipating_20_candidate_limit_5_600_vehicle_eval_900` |
+| 車両数 | 600 |
+| simulation duration | 930 |
+| evaluation end | 899 |
+| max Candidate Visit count | **N=5** |
+| nonparticipating | 20% |
+| seed | 1 |
+| nonparticipation seed | 3 |
+
+- 既存 **N=10** trial との差は **Candidate Visit数上限** のみである。
+- N=5 trial の production 相当出力は既存の T=900 正式 CSV として保存済みである（正式object）。
+- 専用診断の simulation 終了時刻（診断ごとに別 output directory、既存出力は上書きしない）:
+  - T=392 最大当事者取引レビュー: T=430 まで
+  - C184／C185 順位ギャップ: T=404 まで
+  - T=392／T=401 物理順（C184）: T=401 まで
+  - `veh_sw_nw_base_041` 実World所在: T=407 まで（Actual northwest **arrival** 観測のため）
+
+### 25.3 T=392におけるP−1上限前6 Visits
+
+**P−1適格列**（Baseline local rank 順）の上限前 6 件。`candidate_visits` は先頭 5 件のみ。**6 件目は正式に Candidate外（上限）。**
+
+| # | VisitKey | formal inlink | Baseline arrival | Baseline passage | N=5 Candidate | selected role | Cand. local rank | Cand. passage | Actual arrival | Actual passage | Node C rank | C rank 確定 |
+|---|----------|---------------|------------------|------------------|---------------|---------------|------------------|---------------|----------------|----------------|-------------|-------------|
+| 1 | veh_en_sw_base_026:2 | northeast_intersection_to_northwest_intersection | 398 | 412 | 内 | seller | 2 | 416 | 398 | 416 | 180 | T=392 selected Candidate |
+| 2 | veh_sw_nw_base_039:2 | southwest_intersection_to_northwest_intersection | 400 | 402 | 内 | seller | 3 | 402 | 400 | 402 | 181 | T=392 selected Candidate |
+| 3 | veh_sw_nw_base_040:2 | southwest_intersection_to_northwest_intersection | 402 | 406 | 内 | seller | 4 | 406 | 402 | 406 | 182 | T=392 selected Candidate |
+| 4 | veh_wn_en_base_025:1 | west_north_od_to_northwest_intersection | 404 | 410 | 内 | seller | 5 | 410 | 404 | 410 | 183 | T=392 selected Candidate |
+| 5 | veh_nw_sw_base_048:1 | north_west_od_to_northwest_intersection | 408 | 416 | 内 | buyer | 1 | 412 | 408 | 412 | 179 | T=392 selected Candidate |
+| 6 | veh_wn_se_base_025:1 | west_north_od_to_northwest_intersection | 410 | 420 | **上限外** | Candidate対象外 | 対象外 | 対象外 | 410 | 420 | T=392 なし → **185** | T=404 初回、source **baseline** / **baseline_fallback_ranks** |
+
+- 上限前 P−1 適格件数は **6 件**。
+- N=5 **selected trade scope** は buyer 1、seller 4、nonparticipating 0 の 5 当事者。
+- buyer・seller 双方が存在する正式 Candidate である。
+
+### 25.4 N=10とN=5のselected取引比較
+
+**N=10** T=392 selected 取引（§24 正本、正式 CSV）:
+
+- evaluation index **5**、**6 当事者**
+- buyer: veh_wn_en_base_025:1, veh_nw_sw_base_048:1, veh_wn_se_base_025:1
+- seller: veh_en_sw_base_026:2, veh_sw_nw_base_039:2, veh_sw_nw_base_040:2
+- Candidate 順位: 1 veh_wn_en_base_025:1, 2 veh_nw_sw_base_048:1, 3 veh_wn_se_base_025:1, 4 veh_en_sw_base_026:2, 5 veh_sw_nw_base_039:2, 6 veh_sw_nw_base_040:2
+- total_G = 4.6881462622218702, total_R = 3.3167850775931149, surplus = 1.3713611846287553
+
+**N=5** T=392 selected 取引（正式 CSV）:
+
+- evaluation index **2**、**5 当事者**
+- buyer: veh_nw_sw_base_048:1
+- seller: veh_en_sw_base_026:2, veh_sw_nw_base_039:2, veh_sw_nw_base_040:2, veh_wn_en_base_025:1
+- Candidate 順位: 1 veh_nw_sw_base_048:1, 2 veh_en_sw_base_026:2, 3 veh_sw_nw_base_039:2, 4 veh_sw_nw_base_040:2, 5 veh_wn_en_base_025:1
+- total_G = 1.8790004885792813, total_R = 0.7555349546914127, surplus = 1.1234655338878686
+
+差:
+
+- N=10 surplus − N=5 surplus = **0.2478956507408867**
+- N=10 surplus / N=5 surplus ≈ **1.2206526531**（N=10 の余剰は N=5 より約 **22.1%** 大きい）
+- N=5 でも正の余剰を持つ **別の 5 当事者取引** が成立した。
+
+`veh_sw_nw_base_039:2` と `veh_sw_nw_base_040:2` は **N=5 でも N=10 でも seller**（buyer ではない）。N=5 では両車の Candidate passage は Baseline passage と同じ（039: 402→402、040: 406→406）。
+
+### 25.5 N=5 selected取引の経済評価
+
+**buyer** veh_nw_sw_base_048:1: Baseline passage 416, Candidate passage 412, predicted saving 4 timestep, declared VOT/s 0.4697501221448203, **G_b = 1.8790004885792813**
+
+**seller** veh_en_sw_base_026:2: 412→416, delay 4, VOT/s 0.18888373867285319, **R_s = 0.7555349546914127**
+
+**seller** veh_sw_nw_base_039:2: 402→402, delay 0, **R_s = 0.0**
+
+**seller** veh_sw_nw_base_040:2: 406→406, delay 0, **R_s = 0.0**
+
+**seller** veh_wn_en_base_025:1: 410→410, delay 0, **R_s = 0.0**
+
+selected 取引: total_G = 1.8790004885792813, total_R = 0.7555349546914127, surplus = **1.1234655338878686**（payment balance 満足）。Actual 観測済み当事者 5 件。selected Candidate の C 順位は **C179〜C183**。
+
+### 25.6 N=5 considered Candidatesとselected Candidateの最大余剰
+
+- T=392、northwest_intersection の N=5 **considered Candidate** は **11 件**（診断・正式object）。
+- selected Candidate は evaluation index **2**、余剰 **1.1234655338878685** 前後。
+- 経済的に feasible な別 Candidate（index **3**）の余剰は約 **0.0560632380**。
+- selected index 2 は **feasible Candidate 中で厳密に最大** の余剰。
+- ただし「全不成立 Candidate より余剰が厳密に大きい」は成立しない: index 6、10、11 にも同程度の余剰 **1.1234655338878685** 前後があるが、**buyer_nonpositive_value** 等により **feasible ではない**。
+- 正確な結論: **selected Candidate は feasible Candidate の中で一意に最大余剰**（全 Candidate 中の最大余剰値への「並び」はあるが feasible ではない）。
+
+不成立例（診断正本）:
+
+- **A** index 1: buyer のみ veh_wn_en_base_025:1、seller 3、total_G = 0.7383128723036545, total_R = 1.8057151682102894, surplus = **-1.0674022959066349**、reason **total_buyer_value_below_required_compensation**（seller veh_sw_nw_base_040:2 の遅延が大きい）。
+- **B** index 8: buyer 2（veh_sw_nw_base_039:2, veh_sw_nw_base_040:2）、seller 1、順位上前進するが passage 同じ、G_b = 0、R_s = 0、**buyer_nonpositive_value** で不成立。
+
+### 25.7 上限外Visit veh_wn_se_base_025:1 の後続順位確定
+
+当初仮説（推測）: T=393 以降 **selected Candidate buyer** となり **C184** を譲り **C185** になった。
+
+**正式検証結果（反証）:**
+
+- T=393〜404 に **selected Candidate buyer ではない**（診断: rank gap / maximum party review）。
+- **`veh_wn_se_base_025:1` は T=393〜404 に selected Candidate の当事者でもなかった**（buyer に限らない）。
+- **selected role は観測されていない**。
+- この Visit が **seller** または **nonparticipating** として selected Candidate へ参加した事実もない。
+- したがって、後続 **selected 取引** の当事者として順位を譲ったという説明は成立しない。
+- T=404 に **right-of-entry**、**selected Candidate なし**、**baseline fallback** で **C185**。
+- **C184** と **C185** は同一 decision ではない。
+
+当初仮説が反証された理由は、T=404 まで **buyer ではなかった**ことに加え、**selected Candidate 当事者自体でなかった**こと（seller／nonparticipating としての selected 参加もない）まで含む。C184 は別 Visit（§25.8）が別 decision で取得したものであり、本 Visit が selected 取引の当事者として順位を後続へ譲った因果はない。
+
+**C185** veh_wn_se_base_025:1: 初回 T=404、official source **baseline_fallback**、finalization_source **baseline**、final_rank_status **baseline_fallback_ranks**、T=404 final local rank 1、formal route next link northwest_intersection_to_southwest_intersection（baseline_physical_passage_route）、T=404 Baseline arrival 410 / passage 420、formal inlink west_north_od_to_northwest_intersection。
+
+### 25.8 C184取得Visitの特定
+
+- **C184** 取得 Visit: **veh_sw_nw_base_041:2**、初回 **T=401**、source **baseline_fallback**、finalization_source **baseline**、final_rank_status **baseline_fallback_ranks**。
+- **C185** は **T=404**（別 decision）。Node 単位の C 順位に欠番なし。
+
+T=401 Candidate Visits 正式順: 1 veh_sw_nw_base_041:2, 2 veh_wn_se_base_025:1, 3 veh_nw_sw_base_049:1。
+
+T=401: **right-of-entry** = veh_sw_nw_base_041:2、selected Candidate なし、driver 前 undetermined → driver 後 **C184**；veh_wn_se_base_025:1 は T=401 終了後も未確定（**baseline fallback** で ROE 側のみ確定）。
+
+### 25.9 veh_sw_nw_base_041:2のT=392実World所在
+
+**T=392 driver 直前実World**（診断 `..._veh_sw_nw_base_041_real_world_location` 正本）:
+
+- Vehicle veh_sw_nw_base_041、vehicle ID **407**
+- current Link: **south_west_od_to_southwest_intersection**（start **south_west_od**、end **southwest_intersection**）
+- physical index **1**、vehicle count **20**、x **195.0**、speed **0.0**
+- leader veh_sw_es_base_041、follower veh_sw_es_base_042
+- current Visit Node **southwest_intersection**、Visit ID **1**（**Northwest 向けではない**）
+- current Visit inlink: south_west_od_to_southwest_intersection、earliest arrival **282**
+- Northwest rank ledger: **absent**、C 順位なし
+- link_position_class: **B_upstream_to_target_inlink_start**（対象 inlink へ正式接続可能）
+
+**T=392 formal snapshot**（fork_result / collector）:
+
+- Visit **veh_sw_nw_base_041:2** は Vehicle 上未登録
+- collector に Vehicle 名なし、VisitKey なし、inlink physical order なし、**candidate_visits** なし
+- **Candidate外** 直接理由: **not_in_snapshot_fixed_visit_set**（**snapshot固定Visit集合** 外）
+
+T=392 対象 inlink `southwest_intersection_to_northwest_intersection` の physical order（正式）: veh_sw_nw_base_037:2, veh_sw_nw_base_038:2, veh_sw_nw_base_039:2, veh_sw_nw_base_040:2。**041:2 は未存在**のため、T=392 で 039／040 の「後方」は断定しない。
+
+**Link 遷移**: T=397 driver 前に対象 inlink 上で初確認。before south_west_od_to_southwest_intersection → after southwest_intersection_to_northwest_intersection、continuous **True**、進入時 Visit Node **northwest_intersection**、Visit ID **2**。
+
+**T=401 formal**: inlink 上記、physical index **2**、前方 039:2・040:2、Baseline arrival **407**、passage **414**、ROE **True**、Cand. local rank **1**、driver 後 **C184**。
+
+**Actual arrival T=407**（hook 正本）、current Link 対象 inlink、Visit northwest ID 2。**T=401 Baseline arrival 407 と一致。**
+
+**因果（正式objectの整合）:**
+
+- T=392 は Southwest 向け Visit 1 の途中で **Northwest 向け Visit 2 未登録** → **snapshot固定Visit集合**・Baseline 予測対象外（予測の見落としではない）。
+- T=397 までに対象 inlink 進入・Visit 2 登録。
+- T=401 Baseline arrival **407**、B（veh_wn_se_base_025:1）Baseline **410** より早く **right-of-entry** → **C184**；B は T=404 に **C185**。
+
+### 25.10 対象inlink未進入将来VisitをCandidateへ含めない理由
+
+研究上の位置付け（利用者確定、**production 変更なし**）:
+
+- 意思決定時点で **対象inlink未進入** の **将来Visit** を Candidate 形成に含めない。
+- 将来その inlink へ進入するとは限らず、進路は対象 Node 到達まで未確定の場合がある。TVT・他 Node 順位で進入時刻も変わり得る。
+- 未進入 **将来Visit** を候補化すると、未確定進路・進入時刻に依存した順位取引となり、局所仮想計算の不確実性と計算量が増える。
+- **snapshot固定Visit集合** に載り、対象 inlink 物理順へ登録可能な Visit だけを対象とする現行方式を維持する（コード欠陥ではなく局所化）。
+- このため T=392 未登録の A が後続 decision で B より先に C 順位を得ることはあり得る。Node 単位 C 順位は decision をまたいで連続する。
+
+### 25.11 N=5検証のproduction評価
+
+- **Candidate Visit数上限 N=5** は実作動した（6 件目は **Candidate外**、先頭 5 件のみ `candidate_visits`）。
+- **上限外Visit** は消失せず後続で評価・確定（例: veh_wn_se_base_025:1 → **C185**）。
+- C179〜C183 の後 **C184**（veh_sw_nw_base_041:2）、**C185**（上限外 Visit）。上書き・重複・欠番なし。
+- buyer≥1、seller≥1 の正式 Candidate 維持。buyer のみ seller なしの成立 Candidate は確認されず。成立取引は最大 5 当事者。
+- **production 変更は不要。N=5 trial は上限 N の実作動検証として成功。**
+
+### 25.12 新規診断と診断実装上の修正事項
+
+| スクリプト | 役割 |
+|-----------|------|
+| `research_scripts/run_tvt_mp_four_cross_intersections_grid_medium_nonparticipating_20_candidate_limit_5_trial.py` | N=5 包括 trial |
+| `research_scripts/diagnose_tvt_mp_four_cross_intersections_nonparticipating_20_candidate_limit_5_t392_maximum_party_transaction_review.py` | T=392 最大当事者・considered / selected・T=430 |
+| `research_scripts/diagnose_tvt_mp_four_cross_intersections_nonparticipating_20_candidate_limit_5_t404_c184_c185_rank_gap.py` | C184／C185 イベント・source 分類・T=404 |
+| `research_scripts/diagnose_tvt_mp_four_cross_intersections_nonparticipating_20_candidate_limit_5_t392_t401_c184_physical_order.py` | T=392／T=401 inlink 物理順・P−1・仮説 |
+| `research_scripts/diagnose_tvt_mp_four_cross_intersections_nonparticipating_20_candidate_limit_5_t392_veh_sw_nw_base_041_real_world_location.py` | T=392 実World・Link 遷移・T=407 Actual arrival |
+
+診断側修正（**production 欠陥ではない**）:
+
+- driver **後** rank state で P−1 列を復元 → T=392 確定 5 件除外の誤り → **driver 前** rank membership snapshot
+- T=430 停止と research output API 非呼出し → 既存 T=900 正式 CSV との read-only 結合
+- 正式 CSV の role 別空欄を None 扱い
+- C184/C185: BASELINE + selected_candidate_ranks vs **baseline_fallback_ranks** 区別
+- 物理順診断: mutable rank state 廃止、pre/post plain snapshot；T=392 A が **snapshot** 外は formal inlink 空欄を正式結果
+- Baseline World **再帰上限**引上げ
+- current Visit: **`node` object → `node.name`**（`node_name` キーは無い）
+- Link 遷移: **前 Link の end_node** 保存（start 誤保存の修正）
+- 実World所在: sim **T=407**（Actual **arrival**）
+- static validation: helper 委譲・`current_visit` 偽 field・pre snapshot getattr を AST で正しく検査
+- 重要箇所は Cursor 報告を鵜呑みにせず Terminal で独立確認
+
+### 25.13 完了判断
+
+完了として記録する技術確認:
+
+- N=5 全 600 台完走、成立取引≤5 当事者
+- T=392 で N=10 最大 6 当事者取引消失、N=5 で別 5 当事者取引成立
+- N=10 余剰 > N=5 余剰、N=5 selected は **feasible 中最大余剰**
+- P−1 上限前 6・先頭 5 適用、**上限外Visit** 後続確定
+- **C184**／**C185** 取得者・時刻・**baseline fallback**、C 連続性
+- veh_sw_nw_base_041:2 の T=392 実World・Visit 2 未登録・T=397 inlink 進入・T=401 Baseline 407・T=407 Actual 407・A が B より先に **C184**
+- **対象inlink未進入将来Visit** を Candidate に含めない研究理由
+- **production 変更不要**
+
+**以上をもって、N=5 Candidate Visit数上限trialの実作動検証は成就した。**
+
+### 25.14 未完了事項と次のdeparture plus 1 trial
+
+**A. 偶数到着時刻**
+
+- 対象周辺の Baseline／Actual arrival・passage が **偶数** に集中（N=10 でも確認）。Arrival hook で raw arrival_time が 398, 400, 402… の整数偶数であることは確認済み（診断丸めではない）。
+- 出発位相 vs 2 timestep 周期（車両更新・Link・Node）は **未確定**。
+
+**B. departure plus 1 trial（未作成・未実行）**
+
+推奨: `research_scripts/run_tvt_mp_four_cross_intersections_grid_medium_nonparticipating_20_candidate_limit_5_departure_plus_1_trial.py`
+変更は全 600 台 **departure time +1 timestep** のみ。固定: 車両数・OD・進路・VOT・participation・seed・nonparticipation seed・**N=5**・network・TVT・需要間隔の相対関係。比較: 旧 T=392 ↔ 新 T=393 の Visit 集合・roles・Candidate 順・経済値・arrival/passage +1・C 順位・奇偶。読み方: 全 +1 で奇数化→出発位相主因；+1 でも偶数→2 timestep 周期；混在→相互作用。**現時点では未作成・未実行。**
+
+**C. Git（未完了）**
+
+- N=5 trial・診断・本メモの Git 採否未確定、**research_outputs** 採否未確定、stage/commit/push 未実施（利用者が Terminal で実行、commit 名に **document**）。
+
+### 25.15 最新参照先と古い記録の扱い
+
+- **N=5 Candidate Visit数上限** 検証の最新正本: **本 §25**
+- N=10 T=392 **最大6当事者取引**: §24.5〜§24.8
+- N=5 T=392 selected 比較: 本 §25.3〜§25.6
+- **C184**／**C185**: 本 §25.7〜§25.9
+- **対象inlink未進入**・**将来Visit**: 本 §25.10
+- **次作業**・**departure plus 1**: 本 §25.14
+- §24.18 の「次作業」は当時の記録；最新は **§25.13〜§25.15**
+- 古い §24 記述は削除せず歴史として残す

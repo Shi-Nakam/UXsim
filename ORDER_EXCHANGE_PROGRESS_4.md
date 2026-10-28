@@ -395,3 +395,231 @@ T=382 取引確認そのものは完了している。次の研究分析へ進�
 Git 対象は今回の **5 診断＋2 メモの 7 ファイルに限定**する。第4巻開始時 2 診断、output directory、その他の未追跡ファイルを含めない。
 
 **本節が、進捗第4巻の最新再開地点である（2026-10-27）。**
+
+---
+
+## 10. N=5 Candidate Visit数上限trialの検証完了
+
+**Candidate Visit数上限**（**trade_scope上限**）を **N=10** から **N=5** に切り替えた独立 trial について、実作動検証を完了した。技術的正本は `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_5.md` **§25**（本節は進捗要約）。
+
+### 10.1 検証目的
+
+- 既存 production、既存 **N=10** trial、既存出力を変更せず、同じ 600 台・同じ seed・同じ条件で **Candidate Visit数上限** だけを **N=5** とした独立 trial を検証した。
+- 目的は、**N=10** の **T=392** 最大 6 当事者取引が消えるか、全成立取引が 5 当事者以下になるか、**上限外Visit** の後続処理、buyer／seller 必須条件、Node 単位 C 順位連続性を確認することだった。
+- 詳細な技術正本は詳細設計第 5 巻 **§25** である。
+
+### 10.2 Candidate Visit数上限N=5の実作動
+
+- **N=5** 包括 trial は全 600 台完走済み。
+- 全成立取引は 5 当事者以下。
+- **T=392** では **P−1適格列** 上の適格 Visit が **6 件**あった。
+- `candidate_visits` には Baseline 順位先頭 **5 件**だけが入った。
+- 6 件目 `veh_wn_se_base_025:1` は同 decision の Candidate 形成から正式に除外された。
+- **上限外Visit** は消失せず、後続 decision で評価された。
+- **N=10** の **T=392** 最大 6 当事者取引は **N=5** では成立しなかった。
+- **N=5** では buyer 1、seller 4 の別の 5 当事者取引が成立した。
+- buyer 1 件以上、seller 1 件以上の正式 Candidate 条件は維持された。
+- buyer あり seller なしの正式成立 Candidate は確認されなかった。
+- **production変更不要**と判断した。
+
+### 10.3 N=10とN=5のT=392 selected取引差
+
+**N=10:**
+
+- 6 当事者
+- buyer 3、seller 3
+- surplus = **1.3713611846287553**
+
+**N=5:**
+
+- 5 当事者
+- buyer: veh_nw_sw_base_048:1
+- seller: veh_en_sw_base_026:2, veh_sw_nw_base_039:2, veh_sw_nw_base_040:2, veh_wn_en_base_025:1
+- surplus = **1.1234655338878686**
+
+比較:
+
+- **N=10** surplus − **N=5** surplus = **0.2478956507408867**
+- **N=10** の余剰は **N=5** より約 22.1% 大きい
+- **N=5** selected Candidate は feasible Candidate 中で一意に最大余剰
+- 全不成立 Candidate より余剰が厳密に大きいわけではなく、同じ余剰値を持つ不成立 Candidate がある
+- 同値の不成立 Candidate は **buyer_nonpositive_value** 等の個別成立条件を満たさない
+
+- `veh_sw_nw_base_039:2` と `veh_sw_nw_base_040:2` は **N=5** でも **N=10** でも **seller**（buyer ではない）。
+- **N=5** では両車の Candidate passage は Baseline passage と同じ（039: 402→402、040: 406→406）。
+
+### 10.4 上限外VisitとC184／C185の連続性
+
+**T=392** selected Candidate: **C179〜C183** を付与。
+
+**C184:**
+
+- VisitKey: **veh_sw_nw_base_041:2**
+- 初回付与: **T=401**
+- source: **baseline fallback**
+- finalization_source: baseline
+- final_rank_status: baseline_fallback_ranks
+
+**C185:**
+
+- VisitKey: **veh_wn_se_base_025:1**
+- 初回付与: **T=404**
+- source: **baseline fallback**
+- finalization_source: baseline
+- final_rank_status: baseline_fallback_ranks
+
+- **C184** と **C185** は別 decision で付与された。
+- Node 単位の C 順位に欠番、重複、上書きは確認されなかった。
+- `veh_wn_se_base_025:1` が後続 selected 取引で buyer／権利保有車両となって **C184** を譲ったという当初仮説は**反証**された。
+- 同 Visit は T=393〜404 に selected Candidate buyer ではなく、**selected Candidate 当事者自体でもなかった**。
+- seller または nonparticipating として selected Candidate に参加した事実もない。
+- T=404 に right-of-entry となったが selected Candidate はなく、**baseline fallback** で **C185** を得た。
+
+### 10.5 veh_sw_nw_base_041:2がT=392 Candidate外だった理由
+
+**T=392** driver 直前:
+
+- Vehicle は `veh_sw_nw_base_041`
+- current Link: `south_west_od_to_southwest_intersection`
+- current Visit Node: `southwest_intersection`
+- Visit ID: **1**（Northwest 向けではない）
+- 対象 inlink `southwest_intersection_to_northwest_intersection` には**対象inlink未進入**
+- Northwest 向け Visit 2 は未登録
+- Northwest 用 **snapshot固定Visit集合**、collector export、inlink physical order、`candidate_visits` に存在しなかった
+- Candidate 外理由: `not_in_snapshot_fixed_visit_set`
+
+その後:
+
+- **T=397** driver 前までに対象 inlink へ進入、進入時 Northwest 向け Visit ID **2**
+- T=401 正式 snapshot で同 inlink の physical index 2、前方 `veh_sw_nw_base_039:2`・`veh_sw_nw_base_040:2`
+- **Baseline arrival 407**、Baseline passage 414、right-of-entry、driver 後 **C184**
+- 比較対象 B（`veh_wn_se_base_025:1`）の Baseline arrival は **410**
+- Actual northwest **arrival** は **T=407**；T=401 の Baseline arrival **407** と Actual arrival **407** は一致
+
+因果関係:
+
+- T=392 の Baseline が T=407 到着を見落としたのではない。
+- T=392 時点では Northwest 向け Visit 2 がまだ存在しなかったため、Northwest 用 **snapshot固定Visit集合**の対象外だった。
+- Visit 2 登録後の T=401 Baseline では到着 **407** を正しく予測した。
+- **407** は B の **410** より早いため、A が B より先に right-of-entry となり **C184** を得た。
+
+### 10.6 対象inlink未進入将来VisitをCandidateへ含めない方針
+
+- 意思決定時点で **対象inlink未進入** の **将来Visit** は Candidate 形成へ含めない。
+- 将来その対象 inlink へ進入するとは限らない。将来進路は未確定の場合がある。
+- TVT 取引や他 Node の順位制御により対象 inlink への進入時刻も変わり得る。
+- 未進入 Visit まで含めると、不確定な進路と進入時刻に依存する順位取引になる。局所仮想計算の不確実性と計算量も増える。
+- **snapshot固定Visit集合**に載り、対象 inlink 物理順へ登録可能な Visit だけを Candidate 対象とする現行方式を維持する（コード欠陥ではなく研究上やむを得ない局所化）。
+- production は変更しない。
+
+### 10.7 今回のtrial・診断・独立確認
+
+- `research_scripts/run_tvt_mp_four_cross_intersections_grid_medium_nonparticipating_20_candidate_limit_5_trial.py`
+- `research_scripts/diagnose_tvt_mp_four_cross_intersections_nonparticipating_20_candidate_limit_5_t392_maximum_party_transaction_review.py`
+- `research_scripts/diagnose_tvt_mp_four_cross_intersections_nonparticipating_20_candidate_limit_5_t404_c184_c185_rank_gap.py`
+- `research_scripts/diagnose_tvt_mp_four_cross_intersections_nonparticipating_20_candidate_limit_5_t392_t401_c184_physical_order.py`
+- `research_scripts/diagnose_tvt_mp_four_cross_intersections_nonparticipating_20_candidate_limit_5_t392_veh_sw_nw_base_041_real_world_location.py`
+
+- 診断実装中に、driver 前／後時点、mutable rank state、正式 CSV role 別空欄、current Visit 正式 dict、Link 終端 Node、再帰上限、完走専用 API、static validation 等の**診断側**問題を修正した（production 欠陥ではない）。
+- 重要箇所は Cursor 報告だけに依存せず、Terminal で原典と出力を独立確認した。
+- 詳細は設計メモ第 5 巻 **§25.12** を参照する。
+
+### 10.8 完了判断
+
+- **N=5 Candidate Visit数上限** trial の実作動検証は**成就した**。
+- **N=5** 上限、成立取引当事者数、経済条件、**上限外Visit**、C 順位連続性、**対象inlink未進入** Visit の扱いまで確認済み。
+- **production変更不要**。
+- これらを明確な新証拠なしに未完了へ戻さない。
+- 技術的正本は `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_5.md` **§25**。
+
+---
+
+## 11. 現在の未完了事項
+
+### 11.1 偶数到着時刻
+
+- **T=392** 周辺の Baseline／Actual arrival と passage が**偶数到着時刻**へ集中している。
+- Arrival hook により、確認対象では raw `arrival_time` 自体が整数偶数であり、診断の丸めによるものではない。
+- **N=10** でも偶数時刻が確認されている。
+- 出発時刻の位相が原因か、車両更新・Link 移動・Node 処理等の実質的 2 timestep 周期が原因かは**未確定**。
+
+### 11.2 departure plus 1 trial
+
+推奨新規ファイル:
+
+`research_scripts/run_tvt_mp_four_cross_intersections_grid_medium_nonparticipating_20_candidate_limit_5_departure_plus_1_trial.py`
+
+方針:
+
+- 既存 production、**N=10** trial、**N=5** trial、既存出力を変更しない。
+- 全 600 台の departure time だけを一律 **出発時刻1 timestep遅延**（**departure plus 1**）。
+- 車両数、OD、進路、VOT、participation、seed、nonparticipation seed、**N=5**、network、TVT 設定、需要間隔の相対関係は固定。
+- 旧 **T=392** と新 T=393 を比較（Visit 集合、roles、Candidate 順位、経済値、arrival／passage、C 順位、奇偶）。
+- 全時刻 +1 で奇数化→出発位相主因；+1 後も偶数→2 timestep 周期；混在→交通相互作用。
+- 現時点では**未作成**・**未実行**。
+
+### 11.3 Gitとファイル採否
+
+- **N=5** trial、4 診断、2 メモの Git 採否は**未確定**。
+- `research_outputs` の Git 採否は**未確定**。
+- stage、commit、push は**未実施**。
+- Git 操作は利用者が Terminal で行う。メモを含む commit 名には `document` を含める。実装前仕様の文書化を表す commit 名では `complete` を使用しない。
+- 既存 §8・§9 の旧 7 ファイル Git 候補は当時の記録である。最新の Git 候補は **§12** で改めて整理し、古い記録を削除しない。
+
+---
+
+## 12. 最新再開地点
+
+**技術的正本:**
+
+- `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_5.md` **§25**（**N=5 Candidate Visit数上限**・**T=392**・**C184**／**C185**）
+- 過去の **N=10** 最大 6 当事者取引は同メモ **§24**
+
+**現在地:**
+
+- **N=5** **Candidate Visit数上限** trial の実作動検証は成就済み
+- **production変更不要**
+- 次の研究作業は **departure plus 1** trial（**未作成**・**未実行**）
+- 出発時刻 +1 以外の変更を加えない
+
+**次に実施する作業:**
+
+1. 既存 **N=5** trial の車両 departure time 生成・設定箇所を read-only で確認する
+2. 既存 **N=5** trial を変更せず、**departure plus 1** 専用 trial を新規作成する
+3. 全 600 台の departure time だけを +1 timestep する
+4. static validation で差分が departure time だけであることを検査する
+5. 新 trial を完走させる
+6. 旧 **T=392** と新 T=393 を比較する専用診断を作成する
+7. Visit 集合、roles、Candidate 順位、経済値、arrival／passage、C 順位、奇偶を比較する
+8. **偶数到着時刻**集中の原因を判定する
+9. 結果を詳細設計メモと進捗メモへ反映する
+10. その後に Git 採否、stage、commit、push へ進む
+
+**最新の Git 候補（最終確定前）:**
+
+メモ:
+
+- `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_5.md`
+- `ORDER_EXCHANGE_PROGRESS_4.md`
+
+**N=5** trial・診断:
+
+- `research_scripts/run_tvt_mp_four_cross_intersections_grid_medium_nonparticipating_20_candidate_limit_5_trial.py`
+- `research_scripts/diagnose_tvt_mp_four_cross_intersections_nonparticipating_20_candidate_limit_5_t392_maximum_party_transaction_review.py`
+- `research_scripts/diagnose_tvt_mp_four_cross_intersections_nonparticipating_20_candidate_limit_5_t404_c184_c185_rank_gap.py`
+- `research_scripts/diagnose_tvt_mp_four_cross_intersections_nonparticipating_20_candidate_limit_5_t392_t401_c184_physical_order.py`
+- `research_scripts/diagnose_tvt_mp_four_cross_intersections_nonparticipating_20_candidate_limit_5_t392_veh_sw_nw_base_041_real_world_location.py`
+
+**N=5** 包括 trial 作成時または検証途中に作成・修正した **N=5** 関連ファイルが他にも存在する可能性があるため、上記を最終 Git 対象と**まだ断定しない**。Git 作業前に、利用者が Terminal で `git status` と差分を確認し、今回対象を最終確定する必要がある。
+
+`research_outputs`、`diagnostics/order_control.zip`、今回と無関係な未追跡ファイルは自動的に stage しない。
+
+**再開時の注意:**
+
+- Cursor には必要な調査・編集だけを行わせる
+- py_compile、static validation、simulation、grep、Git 操作は Terminal で実行する
+- Cursor 報告を重要節目で鵜呑みにせず、原典・出力を Terminal で独立確認する
+- Cursor 処理を未完了状態のまま別作業へ移さない
+- **departure plus 1** trial 以外の設計変更を同時に入れない
+
+**本§12が、進捗第4巻の最新再開地点である（2026-10-28）。**
