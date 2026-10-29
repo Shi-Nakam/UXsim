@@ -8023,10 +8023,12 @@ T=392 対象 inlink `southwest_intersection_to_northwest_intersection` の physi
 - 対象周辺の Baseline／Actual arrival・passage が **偶数** に集中（N=10 でも確認）。Arrival hook で raw arrival_time が 398, 400, 402… の整数偶数であることは確認済み（診断丸めではない）。
 - 出発位相 vs 2 timestep 周期（車両更新・Link・Node）は **未確定**。
 
-**B. departure plus 1 trial（未作成・未実行）**
+**B. departure plus 1 trial（当時の記録: 未作成・未実行）**
 
 推奨: `research_scripts/run_tvt_mp_four_cross_intersections_grid_medium_nonparticipating_20_candidate_limit_5_departure_plus_1_trial.py`
-変更は全 600 台 **departure time +1 timestep** のみ。固定: 車両数・OD・進路・VOT・participation・seed・nonparticipation seed・**N=5**・network・TVT・需要間隔の相対関係。比較: 旧 T=392 ↔ 新 T=393 の Visit 集合・roles・Candidate 順・経済値・arrival/passage +1・C 順位・奇偶。読み方: 全 +1 で奇数化→出発位相主因；+1 でも偶数→2 timestep 周期；混在→相互作用。**現時点では未作成・未実行。**
+変更は全 600 台 **departure time +1 timestep** のみ。固定: 車両数・OD・進路・VOT・participation・seed・nonparticipation seed・**N=5**・network・TVT・需要間隔の相対関係。比較: 旧 T=392 ↔ 新 T=393 の Visit 集合・roles・Candidate 順・経済値・arrival/passage +1・C 順位・奇偶。読み方: 全 +1 で奇数化→出発位相主因；+1 でも偶数→2 timestep 周期；混在→相互作用。**本 §25 執筆時点では未作成・未実行。**
+
+本 B は当時の履歴である。その後、予備 **departure plus 1** trial と aligned **departure shift** 0〜3 trial を作成・実行し、shift 0／3 の最初の成立取引分岐を **arrival tiebreaker** 割当て変化まで確認した。**最新正本は §26。** 予備 plus 1 は evaluation end 899／TSIZE 930 のままなので、全期間比較の最終正本には使わない。
 
 **C. Git（未完了）**
 
@@ -8039,6 +8041,1084 @@ T=392 対象 inlink `southwest_intersection_to_northwest_intersection` の physi
 - N=5 T=392 selected 比較: 本 §25.3〜§25.6
 - **C184**／**C185**: 本 §25.7〜§25.9
 - **対象inlink未進入**・**将来Visit**: 本 §25.10
-- **次作業**・**departure plus 1**: 本 §25.14
-- §24.18 の「次作業」は当時の記録；最新は **§25.13〜§25.15**
+- **次作業**・**departure plus 1**: 本 §25.14 は当時の記録。最新の **departure shift** 0〜3 検証、**arrival tiebreaker** 原因、**production変更未採用**、研究運用は **§26**
+- §24.18 の「次作業」は当時の記録；N=5 上限検証の完了判断は **§25.13〜§25.15**
+- **departure shift 0〜3**・**arrival tiebreaker**・**同着順位**・**時間平行移動**: **§26**
+- **production据置き**と研究運用（**T=0開始**、signalized UXsim／FCFS／BATCH／TVT-MP、複数 seed）: **§26.14〜§26.17**
+- 最新再開地点: 進捗第4巻の新しい最新節（§15）
 - 古い §24 記述は削除せず歴史として残す
+- 本 §25 の古い未完了記述は削除せず、最新参照先を §26 とする
+
+---
+
+## 26. departure shift 0〜3平行移動trial、成立取引差、arrival tiebreaker割当て変化、および方式比較上の扱い（2026-10-29）
+
+本 §26 は、**departure shift** 0〜3 の **時間平行移動** trial、aligned 成立取引差、**arrival tiebreaker** による **同着順位** 反転、FCFS／BATCH／TVT-MP への影響範囲、**production変更未採用**、および研究運用方針に関する**最新の技術的正本**である。
+
+§25.14 の「**departure plus 1** trial は未作成・未実行」は当時の履歴である。本節がその後の作成・実行・原因分析を上書きする。古い記述は削除しない。N=5 Candidate Visit数上限の実作動検証そのものの正本は引き続き **§25**。最新再開地点は進捗第4巻 **§15**。
+
+**検索語:** arrival tiebreaker、fixed tiebreaker、同着順位、departure shift、時間平行移動、T=0開始、偶数時刻、偶奇依存、FCFS、BATCH、TVT-MP、signalized UXsim、乱数消費順、W.rng、order_control_rng、common random numbers、決定論的tiebreaker、乱数源分離、production変更未採用、未完了、最新再開地点。
+
+本節では、**正式確認**、**推測**、**利用者確定方針**、**未確定**を区別する。推測を正式確認として扱わない。
+
+### 26.1 実験目的と維持条件
+
+既存 **N=5** Candidate Visit数上限 trial を **departure shift** 0 とした。全 600 台の departure timestep だけを一律に +1、+2、+3 した trial を作成・実行した。
+
+維持した条件:
+
+- Vehicle 名
+- Vehicle 順序
+- OD
+- VOT
+- participation
+- nonparticipating 120 台
+- seed
+- network
+- Candidate Visit数上限 **N=5**
+- clearance
+- baseline horizon
+
+aligned 比較のため、evaluation end、internal TSIZE、expected World.T も shift 分だけ後方へ移動した。
+
+目的:
+
+- 旧 T=392 周辺で Baseline／Actual arrival・passage が **偶数時刻** へ集中していた原因の検証
+- **時間平行移動** に対する simulation 結果の不変性の検証
+
+**production は変更していない。**
+
+### 26.2 shift別条件とaligned timestep
+
+| shift | departure shift | evaluation end | internal TSIZE | World.T |
+|------:|----------------:|---------------:|---------------:|--------:|
+| 0 | 0 | 899 | 930 | 900 |
+| 1 | 1 | 900 | 931 | 901 |
+| 2 | 2 | 901 | 932 | 902 |
+| 3 | 3 | 902 | 933 | 903 |
+
+**aligned timestep の定義:**
+
+aligned timestep = actual timestep − departure shift
+
+旧 T=0..899 は、shift s の actual T=s..(899+s) に対応する。比較キーは aligned timestep である。
+
+### 26.3 trialスクリプトと実行結果
+
+**予備 shift 1 trial:**
+
+`research_scripts/run_tvt_mp_four_cross_intersections_grid_medium_nonparticipating_20_candidate_limit_5_departure_plus_1_trial.py`
+
+予備 shift 1 は evaluation end **899**、TSIZE **930** のままだった。評価窓を shift と一緒に動かしていないため、**全期間比較の最終正本には使わない。**
+
+**aligned shift 1／2／3 共通 trial:**
+
+`research_scripts/run_tvt_mp_four_cross_intersections_grid_medium_nonparticipating_20_candidate_limit_5_departure_shift_trial.py`
+
+CLI `--shift 1|2|3`。shift 0 は既存 N=5 trial を用いる。shift 0 を本共通スクリプトへ渡すことは拒否する。出力名に aligned を含め、予備 plus 1 出力と衝突させない。
+
+**aligned trial の実行結果（正式確認）:**
+
+| shift | 成立取引数 | 完走 | 未完走 |
+|------:|----------:|-----:|-------:|
+| 0 | 226 | 600 | 0 |
+| 1 | 230 | 598 | 2 |
+| 2 | 226 | 600 | 0 |
+| 3 | 228 | 600 | 0 |
+
+未完走台数は、**正式評価終了時点の trip completion** である。shift 1 の未完走 2 台を、TVT 順位未確定や内部 Link 残存と**断定しない**。原因は本節では未確定である。
+
+### 26.4 shift 0／2の完全一致
+
+正式 CSV の aligned 比較 T=0〜899 で、shift 0 と shift 2 について次が完全一致した（**正式確認**）。
+
+- 成立取引数 226 件
+- aligned decision timestep
+- Node
+- buyers_sorted
+- buyer count
+- seller count
+- nonparticipating count
+- trade scope count
+- buyer official payment total
+- seller official compensation total
+
+総数だけでなく、**226 件の transaction signature が完全一致した。**
+
+ただし、shift 0 と shift 2 の一致が次のどちらかは **未確定** である。
+
+- 実質的な 2 timestep 周期または乱数消費順の構造的一致
+- 今回の条件における偶然的一致
+
+**shift 0／3 の原因分析だけから、shift 0／2 一致を周期と断定しない。**
+
+### 26.5 T=0固有説と単純偶奇説の反証
+
+マクロ比較結果（正式確認）:
+
+- shift 0 = shift 2
+- shift 0 ≠ shift 1
+- shift 0 ≠ shift 3
+- shift 1 ≠ shift 2
+- shift 1 ≠ shift 3
+- shift 2 ≠ shift 3
+
+最初の aligned 成立取引分岐:
+
+| 比較 | 最初の aligned 分岐 |
+|------|---------------------|
+| shift 0 対 shift 1 | aligned T=621 |
+| shift 0 対 shift 2 | 分岐なし |
+| shift 0 対 shift 3 | aligned T=602 |
+| shift 1 対 shift 2 | aligned T=621 |
+| shift 1 対 shift 3 | aligned T=602 |
+| shift 2 対 shift 3 | aligned T=602 |
+
+したがって:
+
+- shift 0 だけが特殊で、shift 1／2／3 が一致するという「**T=0固有説**」は**成立しなかった**。
+- shift 0＝shift 2、shift 1＝shift 3 となる「単純な絶対時刻**偶奇依存**説」も**成立しなかった**。
+- shift 量によって別の有効な **arrival tiebreaker** 実現が発生し得る。
+
+### 26.6 旧T=392対shifted T=392+shift
+
+少なくとも shift 0 の T=392 と shift 1 の T=393 について、次が完全一致した（**正式確認**）。
+
+- Node
+- Candidate Visit集合
+- buyer／seller role
+- trade scope
+- C 順位
+- Actual passage rank
+- payment／compensation
+- Baseline／Candidate／Actual passage は全 5 Visits で +1
+- 旧偶数 passage は新 trial で奇数へ反転
+
+この局所結果から、時刻が常に **偶数時刻** へ強制される仕組みではないことは確認された。
+
+ただし、全期間では **arrival tiebreaker** 割当て差によって成立取引が変わったため、「全 simulation が単純な +1 **時間平行移動**」とは**結論しない**。
+
+### 26.7 shift 0／3最初の分岐診断
+
+診断:
+
+`research_scripts/diagnose_tvt_mp_four_cross_intersections_nonparticipating_20_candidate_limit_5_departure_shift_0_3_first_divergence_t602_t605.py`
+
+対象:
+
+- shift 0 actual T=602
+- shift 3 actual T=605
+- aligned T=602
+- `northeast_intersection`
+
+最初の成立取引差（**正式確認**）:
+
+**shift 0:**
+
+- selected Candidate なし
+- selection status: `no_economically_feasible_candidate`
+
+**shift 3:**
+
+- selected Candidate あり
+- buyer: `veh_wn_en_base_041:2`
+- seller: `veh_ne_ws_base_031:1`
+- buyer 1
+- seller 1
+- nonparticipating 0
+- trade scope 2
+- total_G = 5.7009177956295645
+- total_R = 0.0
+- surplus = 5.7009177956295645
+
+**公式支払・公式補償 0.0 と Candidate economic evaluation の total_G／total_R／surplus は別の値である。** 診断途中で両者を混同して total_G 等へ 0.0 を要求した runtime 期待値は、**診断側バグとして修正済み**であり、**production 欠陥ではない**。
+
+### 26.8 Candidate Visit集合と順位
+
+両 shift で Candidate Visit集合は同一だった。
+
+- `veh_wn_en_base_041:2`
+- `veh_ne_ws_base_031:1`
+
+両 Visit の aligned Baseline arrival は **608** だった（**同着**）。
+
+しかし正式順は反転した。
+
+**shift 0:**
+
+1. `veh_wn_en_base_041:2`
+2. `veh_ne_ws_base_031:1`
+
+**shift 3:**
+
+1. `veh_ne_ws_base_031:1`
+2. `veh_wn_en_base_041:2`
+
+right-of-entry も反転した。
+
+- shift 0: `veh_wn_en_base_041:2`
+- shift 3: `veh_ne_ws_base_031:1`
+
+最初の分岐層: `candidate_visit_order_divergence`
+
+詳細原因: `arrival_tiebreaker_assignment_divergence`
+
+### 26.9 正式Baseline alignment sort key
+
+production 原典で、resolved Visit は次の key で sort される。
+
+```
+(
+    baseline_arrival_timestep,
+    arrival_tiebreaker,
+    vehicle_id,
+)
+```
+
+原典: `uxsim/order_control_tvt_baseline_alignment.py`
+
+- `_resolved_visit_sort_key()`
+- `resolved_visits.sort(key=_resolved_visit_sort_key)`
+
+aligned 比較では arrival だけを shift 補正する。内部比較用 tuple は次である。
+
+```
+(
+    aligned_sort_arrival_timestep,
+    arrival_tiebreaker,
+    vehicle_id,
+)
+```
+
+`aligned_sort_arrival_timestep` = `baseline_arrival_timestep` − shift。値は collector snapshot の正式 field から取得し、Vehicle 名から推測しない。
+
+各 shift の正式 Candidate 順は、この sort key で再構築した順と一致した。
+
+- `formal_candidate_order_matches_sort_key` = True
+
+したがって、Candidate Visit 順位形成が sort key 契約に反した事実はない。**同着順位** の反転は、sort 実装欠陥ではなく、入力となる **arrival tiebreaker** の大小反転で説明できる。
+
+### 26.10 tiebreaker実値
+
+**shift 0:**
+
+`veh_wn_en_base_041:2`
+
+- aligned arrival 608
+- arrival_tiebreaker 0.15385491114815542
+- vehicle_id 408
+- sort key: `(608, 0.15385491114815542, 408)`
+
+`veh_ne_ws_base_031:1`
+
+- aligned arrival 608
+- arrival_tiebreaker 0.3309686535605816
+- vehicle_id 303
+- sort key: `(608, 0.3309686535605816, 303)`
+
+よって shift 0 では:
+
+`veh_wn_en_base_041:2` < `veh_ne_ws_base_031:1`
+
+**shift 3:**
+
+`veh_wn_en_base_041:2`
+
+- aligned arrival 608
+- arrival_tiebreaker 0.4920934727576123
+- vehicle_id 408
+- sort key: `(608, 0.4920934727576123, 408)`
+
+`veh_ne_ws_base_031:1`
+
+- aligned arrival 608
+- arrival_tiebreaker 0.12907910374092646
+- vehicle_id 303
+- sort key: `(608, 0.12907910374092646, 303)`
+
+よって shift 3 では:
+
+`veh_ne_ws_base_031:1` < `veh_wn_en_base_041:2`
+
+**正式確認:**
+
+- aligned arrival は同一
+- Vehicle ID は shift 間で同一
+- **arrival tiebreaker** の値が shift 間で変化
+- tiebreaker の大小関係が反転
+- Vehicle ID 比較まで到達していない
+- 正式 sort key に従って Candidate 順が反転した
+- Candidate 順実装が sort key に反したのではない
+- 別 simulation 間で **arrival tiebreaker** の乱数割当てが **時間平行移動** 不変でないことが直接原因
+
+### 26.11 fixed tiebreakerの意味
+
+**fixed tiebreaker** は、同一 simulation 内の同一 Visit について一度付与後に固定され、上書きされないという意味である。別 simulation 間で、同じ Vehicle・Node・Visit へ同じ乱数値が保証されるという意味ではない。
+
+生成源:
+
+- 初回 Node 訪問: `W.rng.random()`
+- 再訪: `W.order_control_rng.random()`
+
+**departure shift** によって到着イベントと乱数消費先の対応が変化し、別の有効な tiebreaker 実現が発生し得る。
+
+今回の直接原因は、正式 snapshot 値で確認した tiebreaker 大小反転である。**乱数消費順** のどのイベント差が最初に割当てをずらしたかまでは、今回の診断では追跡していない（**未確定**）。乱数消費順の推測だけで結論づけない。
+
+### 26.12 FCFS／BATCH／TVTへの影響範囲
+
+**arrival tiebreaker** は TVT 専用ではない。少なくとも次で利用される。
+
+**FCFS:**
+
+- `Vehicle.get_order_control_fcfs_rank_key()`
+- key: `(arrival_time, arrival_tiebreaker, vehicle_id)`
+
+**BATCH:**
+
+- `Vehicle.get_order_control_batch_trigger_rank_key()`
+- key: `(arrival_time, arrival_tiebreaker, vehicle_id)`
+- Level 2 mimic World へ arrival tiebreaker を複製する処理あり
+
+**TVT:**
+
+- Baseline alignment
+- Candidate Visit 形成
+- Candidate local FCFS transfer
+- snapshot／collector
+- local binding rank sequence
+- physical transfer
+- Candidate local World への状態と `order_control_rng` state の保存・復元
+
+保存・複製先:
+
+- `order_control_current_visit`
+- legacy `order_control_node_arrival_tiebreakers`
+- baseline snapshot
+- baseline collector
+- Candidate local state
+- Level 2 reference／mimic Vehicle
+
+したがって、tiebreaker 生成の変更は TVT-MP 局所の問題ではなく、FCFS／BATCH／TVT 全体の **同着順位** 契約に波及する。
+
+### 26.13 W.rng共有による追加影響
+
+初回 **arrival tiebreaker** は共通の `W.rng` を消費する。`W.rng` は tiebreaker 以外にも少なくとも次で使用される。
+
+- Vehicle color
+- route／outlink choice
+- outlink shuffle
+- merge 時の Vehicle 選択
+- OD 生成補助
+- analyzer 抽出・描画補助
+
+したがって、制御方式や経路の違いによって **arrival tiebreaker** の生成回数・順序が変わると、後続の `W.rng` 位置も変化する可能性がある（**推測として記録。今回は未実測**）。
+
+これにより、FCFS／BATCH／TVT-MP 間で、方式そのものの効果と **乱数消費順** 差が混在する可能性がある。
+
+ただし、今回の診断で**直接確認したのは arrival tiebreaker の大小反転まで**であり、後続 route choice 等への波及を実測したわけではない。推測と正式確認を混同しない。
+
+### 26.14 production変更の判断（利用者確定）
+
+**利用者確定事項:**
+
+- 現時点では production を変更しない（**production変更未採用**）。
+- **決定論的tiebreaker** 化または **乱数源分離** は未採用・未実装。
+- 安全に変更する場合、FCFS、BATCH、TVT、再訪 Visit、snapshot、collector、仮想 World、Level 2、乱数列互換性、既存実験再現性を一括検証する必要がある。
+- 単純な局所置換ではなく、中規模以上の独立設計変更・回帰検証課題として扱う。
+- 初回 tiebreaker 用の `W.rng.random()` 呼出しを単純に削除すると、後続の共通 `W.rng` 列をずらす可能性がある。
+
+現時点では、これらのために production 変更へ進まない。
+
+### 26.15 研究運用方針（利用者確定）
+
+主たる比較対象:
+
+- **signalized UXsim**
+- **FCFS**
+- **BATCH**
+- **TVT-MP**
+
+すべてで次を統一する。
+
+- simulation 開始 **T=0開始**
+- 同一 departure schedule
+- 同一 Vehicle 生成順
+- 同一 OD
+- 同一 VOT
+- 同一 participation 設定
+- 同一 network
+- 同一 seed 条件
+- 同一評価期間
+
+**T=0開始** は departure 位相の不要な差を避けるために採用する。
+
+ただし、方式間で交通状態、経路、Node 到着イベント順が変われば、tiebreaker の乱数割当てと `W.rng` **乱数消費順** が変わる可能性は残る。したがって、T=0 統一は必要な実験統制だが、方式間乱数対応を完全に保証するものではない。
+
+### 26.16 研究価値と統計評価
+
+**利用者確定方針:**
+
+- **決定論的tiebreaker** 化または **乱数源分離** を行わなくても、平均的な方式性能を評価する研究価値は維持できる。
+- ただし、単一 seed での小さな数値差や個別順位・個別取引の差を、方式固有の決定論的効果として厳密に解釈する力は弱くなる。
+- 主結論は複数 seed でも安定する集計指標を中心とする。
+- 複数 seed で平均、分散、方式間差の不確実性を評価する。
+- 同じ seed 番号を方式間で使っても、**乱数消費順** が方式間でずれ得るため、厳密な **common random numbers** の対応が保証されたとは扱わない。
+- paired 分析を使う場合は、乱数ストリーム対応が別途確認されていることを条件とする。
+- 対応が確認できない間は、方式ごとの独立反復に近い解釈を採用する。
+- 個別順位・個別取引の因果分析では **arrival tiebreaker** 依存を明示する。
+
+「必要 seed 数が必ず減る」「何 seed あれば十分」等は現時点で確定していないため、固定数を正本として記載しない。
+
+### 26.17 shift trialの研究上の位置付け
+
+- **departure shift** trial は signalized UXsim／FCFS／BATCH／TVT-MP の**主性能比較には使用しない**。
+- **時間平行移動**、**偶数時刻** 集中、**arrival tiebreaker** 割当て依存を調べた感度・反証試験として扱う。
+- shift 0、1、2、3 はいずれも、それぞれの simulation 内では正式 sort key に従う**有効な simulation 結果**である。
+- 異なる shift の結果差は、直ちに一方が誤りであることを意味しない。
+- ただし、departure 位相以外の交通条件を比較したい trial へ tiebreaker 実現差が混入するため、主性能比較には適さない。
+
+### 26.18 未確定事項
+
+**未確定:**
+
+- shift 0 と shift 2 の完全一致が偶然か、2 timestep 構造によるものか
+- **arrival tiebreaker** の乱数割当てが最初にずれた正確なイベント
+- FCFS／BATCH／TVT 間で、tiebreaker 用乱数消費差が route choice 等へ与える実測影響
+- **決定論的tiebreaker** 化の具体設計
+- tiebreaker 専用乱数源への **乱数源分離** 設計
+- 既存実験との後方互換方針
+- paired 統計を可能にする **common random numbers** 設計
+- production 変更の採否と実施時期
+
+これらは現在の研究を停止する必須作業ではない。現時点では、これらのために production 変更へ進まない。
+
+### 26.19 診断実装上の修正
+
+今回の診断における修正履歴（いずれも **production 欠陥ではなく診断側の修正**）:
+
+- seller raw passage を shift 補正せず比較していた問題を修正し、aligned seller passage を追加
+- target buyer Candidate 件数差を selection 差と誤分類する問題を修正し、candidate local calculation 差へ分類
+- Candidate 対応を evaluation index ではなく buyers_sorted＋trade_scope で対応
+- 公式支払 0 と Candidate 経済値 0 を混同した runtime 期待値を修正
+- Baseline alignment 正式 sort key を snapshot の arrival、tiebreaker、vehicle_id から再構築
+- 正式 Candidate 順との一致を独立確認
+- static validation の文字列全文検索を AST 検査へ変更
+- 既存診断出力は削除せず、`_before_tiebreaker_sort_key_review` の suffix を付けて退避
+- 重要確認は Terminal 原典・正式 CSV・正式 snapshot により独立確認した
+
+### 26.20 旧§25記録への最新参照
+
+- N=5 Candidate Visit数上限検証: **§25**（変更しない）
+- §25.14 の「**departure plus 1** trial は未作成・未実行」: 当時の履歴。最新は本 **§26**
+- **departure shift** 0〜3 検証: 本 **§26**
+- **arrival tiebreaker** 原因: 本 **§26.8〜§26.11**
+- **production据置き**と研究運用: 本 **§26.14〜§26.17**
+- **未完了**: 本 **§26.18**
+- 最新再開地点: 進捗第4巻 **§15**
+
+### 26.21 将来のarrival tiebreaker改修候補の目的と非採用状態
+
+本 §26.21〜§26.34 は、将来 **arrival tiebreaker** の **決定論的tiebreaker** 化または **乱数源分離** を再検討するときの技術的叩き台である。影響範囲、設計候補、未決事項、**回帰試験**、**移行手順**、採用判断条件を、後日そのまま設計検討を再開できる詳細度で記録する。
+
+**これは production 変更の採用決定ではない。**
+
+明記する状態:
+
+- **未採用**
+- **未実装**
+- **production変更未採用**
+- production 変更へ進む承認ではない
+- 推奨案も現時点では最終確定ではない
+- 実装前に改めて production 原典、既存試験、方式間比較条件を再調査する
+- 現在の研究を停止する必須作業ではない
+- 利用者の明示判断なしに実装へ進まない
+
+本節は仕様確定ではなく、将来設計再開用の**候補記録**である。既存 §26.14〜§26.18 の production 据置き、研究運用、未確定事項を覆さない。§26.19 の診断修正履歴も維持する。
+
+**目的（改修を将来検討する場合の狙い。現時点では未達）:**
+
+- 同じ Vehicle・Node・Visit に対し、比較対象 simulation 間で対応可能な **arrival tiebreaker** を与える
+- arrival tiebreaker 用の乱数消費が、**route choice**、**merge**、outlink shuffle 等の一般交通乱数列をずらすことを防ぐ
+- **FCFS**／**BATCH**／**TVT-MP** 間の同着順位比較をより解釈可能にする
+- **departure shift** や制御方式差による乱数消費順変化を、方式性能差から可能な範囲で分離する
+- paired 分析または **common random numbers** を将来利用できる基盤候補を作る
+
+**検索語:** arrival tiebreaker、deterministic tiebreaker、決定論的tiebreaker、dedicated RNG、乱数源分離、legacy mode、deterministic Visit key mode、stable Vehicle identity、Visit ID、Node identity、common random numbers、FCFS、BATCH、TVT-MP、Level 2 mimic、Candidate local World、World copy、W.rng、order_control_rng、route choice、merge、backward compatibility、後方互換、regression test、回帰試験、migration、移行手順、未採用、未実装、production変更未採用、最新再開地点。
+
+本節では **候補**、**必要条件**、**未決事項**、**採用条件**、**推測** を区別する。候補を採用決定として扱わない。
+
+### 26.22 現行契約と改修対象
+
+現行 production の正式契約（§26.9〜§26.13 の確認結果を含む）:
+
+**arrival 順位 key:**
+
+```
+(
+    arrival_time または baseline_arrival_timestep,
+    arrival_tiebreaker,
+    vehicle_id,
+)
+```
+
+**初回 Node 訪問:**
+
+`arrival_tiebreaker = W.rng.random()`
+
+**再訪:**
+
+`arrival_tiebreaker = W.order_control_rng.random()`
+
+**fixed の意味:**
+
+- 同一 simulation 内の同一 Visit で、付与後に上書きしない
+- 別 simulation 間で同一値を保証しない
+
+**利用箇所:**
+
+- **FCFS**
+- **BATCH** trigger
+- TVT Baseline alignment
+- TVT Candidate Visit 形成
+- TVT Candidate local FCFS 処理
+
+**保存・複製先:**
+
+- `order_control_current_visit`
+- legacy `order_control_node_arrival_tiebreakers`
+- baseline snapshot
+- baseline collector
+- local binding rank sequence
+- Candidate local state
+- **Level 2 mimic** Vehicle
+- **World copy**
+- `order_control_rng` state 保存・復元
+
+現行結果の再現性は、この契約と乱数消費順に依存する。改修は上記の生成・保存・複製・利用すべてを対象候補とする。部分置換だけでは **後方互換** と方式間整合を保証できない。
+
+### 26.23 改修案A：Visit単位の決定論的tiebreaker
+
+**候補**（未採用・未確定）。**deterministic Visit key mode** の中核。
+
+**候補入力:**
+
+- order-control tiebreaker 用の基準 seed
+- Vehicle の安定した識別子（**stable Vehicle identity**）
+- Node の安定した識別子（**Node identity**）
+- **Visit ID**
+- 必要なら scenario namespace または network namespace
+
+**概念的な入力 tuple:**
+
+```
+(
+    tiebreaker_seed,
+    stable_vehicle_id,
+    stable_node_id_or_name,
+    visit_id,
+)
+```
+
+この tuple から安定したハッシュを生成し、0 以上 1 未満の数へ変換する。
+
+Python 組込み `hash()` は、プロセス間で値が変わり得るため**使用しない**。
+
+**候補ハッシュ:** 標準ライブラリ `hashlib` の SHA-256 または BLAKE2b。どちらを採用するかは **未決事項**。
+
+**実装候補例（概念。アルゴリズム・digest 長・byte order・直列化形式は未確定）:**
+
+1. 各入力を型と境界が曖昧にならない形で UTF-8 bytes へ直列化
+2. 安定ハッシュを計算
+3. digest の先頭 8 bytes 等を unsigned integer へ変換
+4. `2**64` 等で除算して 0 以上 1 未満へ正規化
+
+入力が衝突しない直列化契約が**必要条件**である。悪い例は、単純な文字列連結で区切りが曖昧になるもの（例: `"12"+"3"` と `"1"+"23"`）。
+
+**必要条件:**
+
+- 同一入力なら別 process・別 World・別方式でも同一値
+- 異なる Visit ID なら別入力
+- Node 再訪を Visit ID で区別
+- simulation timestep を入力へ含めない
+- departure time を入力へ含めない
+- FCFS／BATCH／TVT-MP で同じ Visit identity を使う場合は同じ値
+- 値は有限数
+- 0 以上 1 未満
+- bool を数値として受け入れない
+
+**stable Vehicle identity:**
+
+- 現在の `Vehicle.id` を使用できるのは、方式間で Vehicle 生成順が同一に固定される場合に限る
+- Vehicle 生成順が変わり得る研究へ拡張する場合は、安定した Vehicle 名または明示的 research vehicle key を検討する
+- Vehicle 名を使う場合は、重複名の自動 rename や名称変更の影響を調査する必要がある
+
+**Node identity:**
+
+- Node 名を使う場合は、方式間・network 間で名称契約を固定する必要がある
+
+**この案の利点:**
+
+- Visit ごとの値が乱数消費順に依存しない
+- 同一 Visit の方式間対応を作りやすい
+- 未使用 Visit の tiebreaker を生成しても、他 Visit の値へ影響しない
+- departure shift で値が変わらない
+- **common random numbers** の設計に適する
+
+**欠点・リスク:**
+
+- 既存全結果と同着順位が変わり得る（**後方互換** ではない）
+- ハッシュ仕様が新しい研究契約になる
+- Vehicle／Node／Visit identity の安定性を保証する必要がある
+- legacy 結果との完全互換ではない
+- 決定論化により、同じ Visit が常に同じ優先傾向を持つ
+- seed 反復時の分散を得るには tiebreaker seed を seed ごとに変える必要がある
+
+### 26.24 改修案B：tiebreaker専用順次RNGへの乱数源分離
+
+**候補**（未採用・未確定）。**dedicated RNG** による **乱数源分離**。
+
+- `W.rng` から arrival tiebreaker 生成を分離
+- `W.order_control_rng` とは別に、arrival_tiebreaker 専用 RNG を追加
+- 例: `W.order_control_arrival_tiebreaker_rng`
+- seed は World `random_seed` から `SeedSequence.spawn` 等で独立生成する案
+
+**利点:**
+
+- tiebreaker 消費が **route choice** 等の `W.rng` へ波及しない
+- 現行の一様乱数値という性質を維持しやすい
+- 実装は決定論的 Visit hash より単純な可能性がある
+
+**重大な限界:**
+
+- 順次 RNG なので、方式間で Visit 到着イベントの順序・件数が変われば、同一 Visit へ割り当てられる値は変わる
+- departure shift 問題のうち、`W.rng` 後続列への波及は抑えられるが、方式間の同一 Visit tiebreaker 対応は保証できない
+- strict **common random numbers** には不十分
+
+したがって、この案は「一般交通乱数列からの分離」には有効だが、「同一 Visit への同一 tiebreaker 保証」には**不十分**である。案 A の代替ではなく、用途が異なる候補として扱う。
+
+### 26.25 改修案C：方式・用途別乱数ストリーム分離
+
+**候補**（未採用・未確定）。UXsim 全体の用途別 **乱数源分離**。
+
+少なくとも次の乱数ストリームを分ける案:
+
+- Vehicle 外観・描画用
+- **route**／outlink **choice** 用
+- **merge** selection 用
+- arrival tiebreaker 用
+- order-control 再訪用
+- OD 生成補助用
+- analyzer 抽出・描画用
+
+既存 UXsim 全体へ大きく影響するため、今回の TVT-MP 研究内で直ちに実施する案ではない。
+
+**利点:**
+
+- 一用途の乱数消費差が他用途へ伝播しにくくなる
+- 方式差の因果解釈を改善できる
+
+**欠点:**
+
+- UXsim 全体の再現性契約が変わる
+- seed API、**World copy**、serialization、diagnostic、既存 test へ広範な変更が必要
+- upstream UXsim との互換性や保守負担が増える
+- 全用途を完全に分離しないと、残った共有 stream から波及する可能性がある
+
+案 C は案 A／B より広い **migration** 課題である。TVT-MP 局所の決定論的 Visit key より先に実施しない。
+
+### 26.26 legacy互換モードと新モードの切替案
+
+将来の移行候補として、モード切替を記録する。名称は **未確定**。
+
+**例:**
+
+- `arrival_tiebreaker_mode="legacy_sequential"`（**legacy mode**）
+- `arrival_tiebreaker_mode="dedicated_rng"`（**dedicated RNG**）
+- `arrival_tiebreaker_mode="deterministic_visit_key"`（**deterministic Visit key mode**）
+
+**legacy mode:**
+
+- 初回は `W.rng.random()`
+- 再訪は `W.order_control_rng.random()`
+- 既存結果との互換性を優先
+
+**dedicated RNG mode:**
+
+- 専用順次 RNG
+- `W.rng` への波及を防ぐ
+- Visit 対応は保証しない
+
+**deterministic Visit key mode:**
+
+- seed＋stable Vehicle＋Node＋Visit ID
+- 同一 Visit 対応を優先
+
+**必要な互換条件（必要条件。採用時の契約候補）:**
+
+- default 変更を直ちに行わない
+- 既存研究出力には使用 mode を manifest へ保存
+- World object に mode と seed 契約を保持
+- 仮想 World と real World で mode を一致させる
+- **World copy** 後に mode が失われない
+- **legacy mode** の回帰結果を既存正式結果と比較する
+- mode の異なる run を同一条件として混在させない
+
+### 26.27 初回Visit・再訪Visit・仮想Worldの統一契約
+
+設計課題（**未決事項** を含む）:
+
+- 初回 Visit だけ決定論化し、再訪を順次 RNG のまま残すと、Visit 種別で比較契約が異なる
+- 原則として初回・再訪を同じ Visit identity 契約で扱う方が一貫性が高い（候補方針。最終確定ではない）
+- Visit ID は Node 訪問の開始時点で確定している必要がある
+- tiebreaker 生成時点で Vehicle ID、Node、Visit ID が利用可能かを production 原典で再確認する
+- `current_visit` 生成と arrival 記録の順序を確認する
+- baseline 仮想 World で既存 Visit の tiebreaker を再生成してはならない
+- real World snapshot からコピー済みの Visit は正式値を継承する
+- **Candidate local World** 内で新しく到着する Visit について、real World と同じ決定論的関数を使うか、仮想専用 namespace を使うかは **未確定**
+- Candidate ごとに仮想到着順が違っても、同じ Vehicle・Node・Visit identity なら同じ tiebreaker を与える方が Candidate 比較の乱数差を減らせる
+- ただし、仮想 World の Visit ID が real World 将来 Visit とどう対応するかを検証する必要がある
+
+### 26.28 FCFS／BATCH／TVT-MP共通契約
+
+改修する場合、方式ごとに別 tiebreaker を使う案ではなく、原則として共通 Visit tiebreaker 契約を検討する（候補方針。最終確定ではない）。
+
+**理由:**
+
+- FCFS 対 BATCH 対 TVT-MP の比較で、同じ Visit の同着順位を対応させるため
+- TVT だけ決定論化すると、公平な方式比較が損なわれる可能性があるため
+
+**共通確認対象:**
+
+**FCFS:**
+
+- `incoming_vehicles` の候補 sort
+- `get_order_control_fcfs_rank_key()`
+
+**BATCH:**
+
+- trigger candidate sort
+- `get_order_control_batch_trigger_rank_key()`
+- Level 0／1／2
+- **Level 2 mimic** Vehicle への複製
+- batch 固定後の順位契約
+
+**TVT-MP:**
+
+- Baseline alignment
+- Candidate Visit set
+- Candidate local unbound FCFS transfer
+- local binding rank sequence
+- physical transfer
+- final rank
+- actual passage observation
+- snapshot／collector
+- real World／baseline World／**Candidate local World**
+
+**signalized UXsim:**
+
+- arrival tiebreaker を直接使わない場合でも、共通 `W.rng` 消費の変化による **route choice** 等への影響を確認する
+- signalized 方式との比較時に需要・Vehicle 属性・seed 契約を揃える
+
+### 26.29 common random numbersと方式間比較
+
+現行では、同じ seed 番号でも方式間の乱数消費順が異なるため、厳密な **common random numbers** 対応を保証しない（§26.16 の利用者確定方針と一致）。
+
+**決定論的tiebreaker** を採用した場合、同じ Visit identity には同じ tiebreaker を与えられる。ただし、方式により経路が変わり、その Visit 自体が存在しない場合は対応対象も存在しない。
+
+**common random numbers** 成立には、tiebreaker 以外にも少なくとも次の対応が必要になり得る。
+
+- **route choice** random variate
+- **merge** selection random variate
+- OD generation
+- participation assignment
+- VOT assignment
+- signal timing に乱数がある場合はその乱数
+
+tiebreaker だけを決定論化しても、simulation 全体の **common random numbers** が完成するわけではない。
+
+paired 分析を採用する場合は、どの確率変数が方式間で対応しているかを明示する。
+
+### 26.30 実装影響範囲と変更候補箇所
+
+ファイル名と機能単位で、少なくとも次を将来調査対象として記録する。これは**完全な影響範囲一覧ではない**。実装前に再度 grep と原典確認を行う。
+
+`uxsim/uxsim.py`
+
+- World RNG 初期化
+- Vehicle current Visit 生成
+- arrival 記録
+- 初回／再訪 tiebreaker 生成
+- FCFS rank key
+- BATCH trigger rank key
+- **World copy** または scenario copy に関係する処理
+
+`uxsim/order_control_baseline_snapshot.py`
+
+- arrived／not-yet-arrived Visit の snapshot
+- `arrival_tiebreaker` field
+- current Visit との整合性
+
+`uxsim/order_control_baseline_collector.py`
+
+- Visit 登録
+- baseline arrival 記録
+- passage 前の tiebreaker 存在検査
+- plain snapshot export
+
+`uxsim/order_control_tvt_baseline_alignment.py`
+
+- resolved Visit sort key
+- unresolved／unregistered Visit 処理
+
+`uxsim/order_control_tvt_candidate_visit_set.py`
+
+- Candidate Visit への tiebreaker 転送
+- P−1 人口形成
+- Candidate 正式順
+
+`uxsim/order_control_tvt_mp_candidate_local_vehicle_advance.py`
+
+- **Candidate local World** の current Visit
+- tiebreaker 複製
+- `order_control_rng` state 保存・復元
+- 仮想新規到着
+
+`uxsim/order_control_tvt_mp_candidate_unbound_fcfs_transfer.py`
+
+- Candidate local FCFS sort key
+
+`uxsim/order_control_tvt_mp_local_binding_rank_sequence.py`
+
+- collector snapshot からの tiebreaker 読取り
+
+`uxsim/order_control_tvt_mp_physical_transfer.py`
+
+- `arrival_tiebreaker` 検証
+- physical transfer key
+
+`uxsim/order_control_batch_level_2_reference.py`
+
+- **Level 2 mimic** Vehicle への legacy arrival 辞書／current Visit 複製
+- Level 2 仮想 World の順位再現
+
+関連 test、trial、diagnostic、manifest、設計メモも対象とする。
+
+### 26.31 回帰試験・反証試験・受入条件
+
+将来改修時に必要な **回帰試験**（**regression test**）と受入条件。mode により期待条件を分ける。
+
+**A. 単体試験:**
+
+- 同じ入力 tuple から常に同じ決定論的値
+- process 再起動後も同じ
+- 入力要素が 1 つ違えば別値となること
+- 値域 0 以上 1 未満
+- bool、None、不正 Visit ID を拒否
+- collision が検出可能な test 範囲で重複しない
+- mode 設定の型・値検査
+
+**B. Visit 契約試験:**
+
+- 初回 Visit
+- 再訪 Visit
+- 同一 Node 再訪
+- trip-end 除外条件
+- not-yet-arrived Visit
+- snapshot 済み Visit
+- 仮想 World で新規到着する Visit
+- **World copy** 前後
+
+**C. FCFS 試験:**
+
+- 同着 2 台
+- tiebreaker 順
+- tiebreaker 完全同値時の Vehicle ID fallback
+- mode 別の既知順位
+
+**D. BATCH 試験:**
+
+- trigger 候補同着
+- batch 固定前後
+- Level 0／1／2
+- mimic World と real World の対応
+- Level 2 unresolved 時の fallback
+
+**E. TVT-MP 試験:**
+
+- Baseline alignment
+- Candidate Visit 集合
+- Candidate Visit 順
+- right-of-entry
+- Candidate local FCFS
+- selected Candidate
+- final C rank
+- Actual passage
+- nonparticipating あり／なし
+- Candidate 上限 N=5／N=10
+
+**F. 時間平行移動試験:**
+
+- departure shift 0／1／2／3
+- aligned arrival
+- 同一 Visit tiebreaker
+- aligned Candidate 順
+- aligned transaction signature
+- 評価窓も shift 分後方移動
+- 終了境界を除いた共通範囲比較
+
+**legacy mode の期待:**
+
+- 現行正式結果を可能な範囲で維持
+- shift 間で同一 tiebreaker を要求しない
+
+**deterministic Visit mode の期待:**
+
+- 同一 Visit identity の tiebreaker が shift 間で一致
+- aligned arrival が同一なら同着順位が一致
+- Candidate 順と right-of-entry が shift 間で一致
+- 少なくとも今回の shift 0／3 T=602 事例で順位反転が消える
+
+**G. 方式間比較試験:**
+
+- signalized UXsim
+- FCFS
+- BATCH
+- TVT-MP
+- 同じ Vehicle・Node・Visit identity が存在する場合の tiebreaker 一致
+- 経路が変わり Visit が存在しない場合は対応対象外
+- mode と seed を manifest へ保存
+
+**H. RNG 非干渉試験:**
+
+- deterministic Visit mode で tiebreaker 生成が `W.rng` state を変えない
+- dedicated RNG mode で `W.rng` state を変えない
+- legacy mode では現行どおりの消費を確認
+- **route choice**、**merge**、outlink shuffle 等の `W.rng` state 差を検査
+- analyzer／描画の乱数消費を simulation 結果乱数から分離するかは別設計判断
+
+**I. 再現性試験:**
+
+- 同一 seed・同一 mode・同一 scenario の再実行一致
+- manifest から mode と seed 契約を復元可能
+- old output と new output を混同しない
+
+### 26.32 移行手順と段階的実装案
+
+将来採用する場合の段階案（**migration**／**移行手順**）。一度に全てを変更せず、段階ごとに commit、検証、メモ更新を行う。
+
+**調査段階:**
+
+1. 現行生成・保存・複製・利用箇所を再 grep
+2. Visit ID 確定時点を原典確認
+3. **World copy**、baseline World、**Candidate local World**、**Level 2 mimic** を確認
+4. 既存 test と正式 trial の再現基準を固定
+5. 変更前の複数 seed baseline を保存
+
+**設計段階:**
+
+6. mode API を決定
+7. **stable Vehicle identity** を決定
+8. seed・hash・直列化仕様を決定
+9. **legacy mode** 互換方針（**後方互換**）を決定
+10. manifest 記録仕様を決定
+11. **common random numbers** の対象範囲を決定
+
+**実装段階:**
+
+12. 純粋な tiebreaker 生成 helper
+13. World 設定と seed 保持
+14. current Visit への適用
+15. snapshot／collector
+16. FCFS／BATCH
+17. TVT-MP
+18. Level 2／仮想 World
+19. manifest／diagnostic
+
+**検証段階:**
+
+20. 単体試験
+21. **legacy mode** 回帰
+22. deterministic mode shift trial
+23. FCFS／BATCH／TVT-MP 比較
+24. 複数 seed
+25. 性能・再現性・後方互換評価
+
+**採用判断:**
+
+26. 既存正式結果を legacy として維持するか
+27. 新しい研究結果だけ新 mode を使うか
+28. default を変更するか
+29. 論文上で mode 差をどう説明するか
+
+### 26.33 設計上の未決事項と採用判断条件
+
+**未決事項:**
+
+- **stable Vehicle identity**
+- **Node identity**
+- Visit ID の方式間対応
+- hash アルゴリズム
+- byte 直列化
+- seed namespace
+- first visit と revisit の統一
+- virtual Visit の namespace
+- mode の default
+- **legacy mode** の維持期間
+- manifest schema
+- **route choice** 等の乱数源分離範囲
+- upstream UXsim との互換性
+- performance cost
+- collision リスクと検査
+- old trial の再実行要否
+- 論文の実験条件を途中で変更する可否
+
+**採用条件候補**（すべて満たすまで production 変更しない）:
+
+- FCFS／BATCH／TVT-MP で共通契約を実装できる
+- **legacy mode** で既存研究を再現できる、または再現不能差を説明できる
+- deterministic mode で今回の shift 0／3 順位反転が解消する
+- tiebreaker 生成が `W.rng` の後続交通乱数列を変えない
+- 仮想 World と real World で整合する
+- **Level 2 mimic** で整合する
+- 複数 seed 結果が安定する
+- 実装・保守コストに対して研究上の改善が十分大きい
+- 利用者が production 変更を明示決定する
+
+### 26.34 将来再開時の調査手順
+
+将来、改修検討を再開するときの検索・確認手順。
+
+**検索語:**
+
+- `arrival_tiebreaker`
+- `order_control_node_arrival_tiebreakers`
+- `order_control_rng`
+- `W.rng.random`
+- `get_order_control_fcfs_rank_key`
+- `get_order_control_batch_trigger_rank_key`
+- `_resolved_visit_sort_key`
+- `record_order_control_node_arrival`
+- `baseline_visit_snapshot`
+- `get_baseline_visit_snapshot`
+- Candidate local World
+- Level 2 mimic
+- deterministic tiebreaker
+- random stream separation
+- common random numbers
+
+**再開手順:**
+
+1. 本 §26.21〜§26.34 を読む
+2. §26.8〜§26.13 の正式原因を再確認
+3. 進捗第4巻 §15 の現在地を確認
+4. production と test の最新状態を grep・原典確認
+5. 現在の branch と既存変更を確認
+6. legacy 結果の再現基準を固定
+7. 改修を採用するか利用者判断
+8. 採用後にのみ詳細仕様を確定
+9. 実装前に詳細設計メモと進捗メモを更新
+10. Cursor には編集・実装に必要な調査だけを行わせる
+11. py_compile、static validation、simulation、Git は Terminal で実行
+12. production 変更へ自動的に進まない
+
+**最新再開地点** は進捗第4巻 **§15** のままである。本 §26.21〜§26.34 は将来改修の叩き台であり、現在の必須作業ではない。

@@ -536,6 +536,8 @@ Git 対象は今回の **5 診断＋2 メモの 7 ファイルに限定**する�
 
 ## 11. 現在の未完了事項
 
+本 §11 は当時の未完了記録である。**偶数到着時刻** の局所反証、**departure shift** 0〜3、**arrival tiebreaker** 原因は **§13** で完了として記録した。残る未完了は **§14**。最新再開地点は **§15**。本節は削除しない。
+
 ### 11.1 偶数到着時刻
 
 - **T=392** 周辺の Baseline／Actual arrival と passage が**偶数到着時刻**へ集中している。
@@ -558,13 +560,15 @@ Git 対象は今回の **5 診断＋2 メモの 7 ファイルに限定**する�
 - 全時刻 +1 で奇数化→出発位相主因；+1 後も偶数→2 timestep 周期；混在→交通相互作用。
 - 現時点では**未作成**・**未実行**。
 
+本 §11.2 は当時の履歴である。その後、予備 **departure plus 1** trial と aligned **departure shift** 0〜3 trial を作成・実行し、shift 0／3 の最初の成立取引分岐を **arrival tiebreaker** 割当て変化まで確認した。最新状態は **§13〜§15**、技術的正本は詳細設計第5巻 **§26**。予備 plus 1 は evaluation end 899／TSIZE 930 のままなので、全期間比較の最終正本には使わない。
+
 ### 11.3 Gitとファイル採否
 
 - **N=5** trial、4 診断、2 メモの Git 採否は**未確定**。
 - `research_outputs` の Git 採否は**未確定**。
 - stage、commit、push は**未実施**。
 - Git 操作は利用者が Terminal で行う。メモを含む commit 名には `document` を含める。実装前仕様の文書化を表す commit 名では `complete` を使用しない。
-- 既存 §8・§9 の旧 7 ファイル Git 候補は当時の記録である。最新の Git 候補は **§12** で改めて整理し、古い記録を削除しない。
+- 既存 §8・§9 の旧 7 ファイル Git 候補は当時の記録である。本 §11.3 執筆時点の最新 Git 候補は **§12** であった。その後の候補整理は **§15**。古い記録を削除しない。
 
 ---
 
@@ -622,4 +626,154 @@ Git 対象は今回の **5 診断＋2 メモの 7 ファイルに限定**する�
 - Cursor 処理を未完了状態のまま別作業へ移さない
 - **departure plus 1** trial 以外の設計変更を同時に入れない
 
-**本§12が、進捗第4巻の最新再開地点である（2026-10-28）。**
+**本§12は、進捗第4巻の当時の再開地点である（2026-10-28）。** 当時の次作業は **departure plus 1** trial（未作成・未実行）であった。その後の **departure shift** 0〜3 検証と **arrival tiebreaker** 原因分析は完了した。最新状態は **§13〜§15**、技術的正本は詳細設計第5巻 **§26**、最新再開地点は **§15**。本 §12 は削除せず履歴として残す。
+
+---
+
+## 13. departure shift 0〜3 trialとarrival tiebreaker原因分析の完了
+
+**技術的正本:** `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_5.md` **§26**
+
+§11〜§12 の「**departure plus 1** trial は未作成・未実行」「次作業は departure plus 1」は当時の記録である。本 §13 以降が最新状態である。古い節は削除しない。
+
+### 13.1 trial条件
+
+- 既存 **N=5** trial を **departure shift** 0 とした
+- 全 600 台の departure timestep だけを一律 +1／+2／+3
+- Vehicle 名、順序、OD、VOT、participation、nonparticipating 120 台、seed、network、N=5、clearance、baseline horizon は維持
+- aligned 比較のため evaluation end、internal TSIZE、expected World.T も shift 分だけ後方へ移動
+- aligned timestep = actual timestep − departure shift
+- production は変更していない
+
+予備スクリプト:
+
+`research_scripts/run_tvt_mp_four_cross_intersections_grid_medium_nonparticipating_20_candidate_limit_5_departure_plus_1_trial.py`
+
+aligned 共通スクリプト:
+
+`research_scripts/run_tvt_mp_four_cross_intersections_grid_medium_nonparticipating_20_candidate_limit_5_departure_shift_trial.py`
+
+予備 plus 1 は evaluation end 899／TSIZE 930 のままなので、全期間比較の最終正本には使わない。
+
+### 13.2 shift別成立取引数
+
+| shift | evaluation end | TSIZE | World.T | 成立取引 | 完走 | 未完走 |
+|------:|---------------:|------:|--------:|--------:|-----:|-------:|
+| 0 | 899 | 930 | 900 | 226 | 600 | 0 |
+| 1 | 900 | 931 | 901 | 230 | 598 | 2 |
+| 2 | 901 | 932 | 902 | 226 | 600 | 0 |
+| 3 | 902 | 933 | 903 | 228 | 600 | 0 |
+
+未完走は正式評価終了時点の trip completion である。shift 1 の 2 台を TVT 順位未確定や内部 Link 残存と断定しない。
+
+### 13.3 マクロ比較と反証
+
+- shift 0／2 は aligned T=0〜899 で成立取引 **226 件の transaction signature が完全一致**
+- shift 1／3 は不一致
+- shift 0 ≠ shift 1、shift 0 ≠ shift 3、shift 1 ≠ shift 2、shift 1 ≠ shift 3、shift 2 ≠ shift 3
+- 最初の aligned 成立取引分岐: 0対1 は T=621、0対2 は分岐なし、0対3／1対3／2対3 は T=602、1対2 は T=621
+- 「**T=0固有説**」（shift 0 だけ特殊で 1／2／3 が一致）は成立しなかった
+- 「単純な絶対時刻**偶奇依存**説」（0＝2 かつ 1＝3）も成立しなかった
+- shift 0／2 完全一致が偶然か 2 timestep 構造かは **未確定**。shift 0／3 原因から周期と断定しない
+
+旧 T=392 と shift 1 の T=393 では、局所的に Node、Candidate 集合、role、scope、C 順位、Actual passage rank、payment／compensation が一致し、passage は全 5 Visits で +1、旧偶数は奇数へ反転した。時刻が常に **偶数時刻** へ強制される仕組みではない。ただし全期間が単純な +1 **時間平行移動**とは結論しない。
+
+### 13.4 shift 0／3最初の分岐
+
+診断:
+
+`research_scripts/diagnose_tvt_mp_four_cross_intersections_nonparticipating_20_candidate_limit_5_departure_shift_0_3_first_divergence_t602_t605.py`
+
+- shift 0 actual T=602、shift 3 actual T=605、aligned T=602、`northeast_intersection`
+- Candidate Visit集合は同一: `veh_wn_en_base_041:2`、`veh_ne_ws_base_031:1`
+- aligned Baseline arrival は両 Visit とも **608**（**同着**）
+- 正式順は反転。shift 0 は 041:2 → 031:1、shift 3 は 031:1 → 041:2
+- right-of-entry も反転
+- shift 0 は selected なし（`no_economically_feasible_candidate`）
+- shift 3 は selected あり（buyer `veh_wn_en_base_041:2`、seller `veh_ne_ws_base_031:1`、buyer 1、seller 1、NP 0、scope 2、total_G 5.7009177956295645、total_R 0.0、surplus 5.7009177956295645）
+- 公式支払 0.0 と Candidate 経済値は別。診断側で混同した runtime 期待値は修正済み（production 欠陥ではない）
+
+### 13.5 arrival tiebreaker原因
+
+- vehicle_id は shift 間で同一（408 と 303）
+- **arrival tiebreaker** が変化し、大小関係が反転
+- shift 0: 041:2 の 0.15385491114815542 < 031:1 の 0.3309686535605816
+- shift 3: 031:1 の 0.12907910374092646 < 041:2 の 0.4920934727576123
+- Vehicle ID 比較まで到達していない
+- 正式 Baseline alignment sort key `(aligned arrival, arrival_tiebreaker, vehicle_id)` で再構築した順は正式 Candidate 順と一致（`formal_candidate_order_matches_sort_key` = True）
+- `first_divergence_layer` = `candidate_visit_order_divergence`
+- `detail_cause` = `arrival_tiebreaker_assignment_divergence`
+- Candidate 順実装が sort key 契約に反した事実はない
+- **fixed tiebreaker** は同一 simulation 内で一度付与後に固定される意味であり、別 simulation 間の同一乱数値保証ではない
+- 初回は `W.rng.random()`、再訪は `W.order_control_rng.random()`
+- 直接原因は正式 snapshot の tiebreaker 大小反転。最初に割当てをずらしたイベントは未追跡
+- **production変更なし**
+
+詳細正本は詳細設計 **§26**。
+
+---
+
+## 14. 研究運用方針と未完了事項
+
+### 14.1 確定方針（利用者確定）
+
+- 主たる比較対象は **signalized UXsim**／**FCFS**／**BATCH**／**TVT-MP**
+- すべて **T=0開始**、同一 departure schedule、同一 Vehicle 生成順、同一 OD、同一 VOT、同一 participation、同一 network、同一 seed 条件、同一評価期間へ統一する
+- **T=0開始** は departure 位相の不要な差を避ける実験統制である。方式間の交通状態・経路・到着イベント順が変われば **arrival tiebreaker** 割当てと `W.rng` **乱数消費順** はなおずれ得る
+- **departure shift** trial は主性能比較に使用しない。**時間平行移動**・**偶数時刻**・tiebreaker 割当て依存の感度・反証試験として扱う
+- production の tiebreaker 生成は現時点で変更しない（**production変更未採用**）。**決定論的tiebreaker** 化および **乱数源分離** は未採用・未実装
+- 複数 seed の平均・分散を中心に方式性能を評価する。単一 seed の小さな数値差や個別順位・個別取引を方式固有の決定論的効果として厳密に解釈しない
+- 同じ seed 番号でも方式間の厳密な **common random numbers** 対応は保証されない。paired 分析は乱数ストリーム対応が別途確認されている場合に限る
+- 個別順位・個別取引の因果解釈には **arrival tiebreaker** 依存の留保を置く
+
+### 14.2 未完了
+
+- **決定論的tiebreaker** 化の具体設計
+- **乱数源分離**
+- FCFS／BATCH／TVT 全体への影響評価（route choice 等への実測波及を含む）
+- **common random numbers** 設計
+- shift 0／2 完全一致の原因（偶然か 2 timestep 構造か）
+- production 変更の採否と実施時期
+- 既存実験との後方互換方針
+
+将来の **決定論的tiebreaker** 化、**乱数源分離**、**legacy mode**、**common random numbers**、**回帰試験**、**移行手順** の技術的叩き台は、詳細設計第5巻 **§26.21〜§26.34** を参照する。**未採用**・**未実装**である。現在の研究を停止する必須作業ではない。利用者の明示判断なしに production 改修へ進まない。
+
+ただし、これらは現在の研究を停止する必須作業ではない。**決定論的tiebreaker** 実装へ自動的に進まない。
+
+---
+
+## 15. 最新再開地点
+
+**技術的正本:** `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_5.md` **§26**。将来の arrival tiebreaker 改修候補はとくに **§26.21〜§26.34**（**未採用**・**未実装**。production 変更の承認ではない）。
+
+N=5 Candidate Visit数上限検証の正本は同メモ **§25**。本 §15 が進捗第4巻の**最新再開地点**である。§12 は当時の再開地点として残す。
+
+**現在地:**
+
+- **N=5 Candidate Visit数上限** 検証完了
+- **departure shift** 0〜3 検証完了
+- **arrival tiebreaker** による最初の **同着順位** 分岐原因確認完了
+- **production変更なし**（**production変更未採用**）
+- 将来の **決定論的tiebreaker**／**乱数源分離** 叩き台は詳細設計 **§26.21〜§26.34** に記録。**未採用**・**未実装**
+- 詳細正本は詳細設計第5巻 **§26**
+
+次の研究作業については、今回のメモ追記後に利用者と決定する。**決定論的tiebreaker** 実装へ自動的に進まない。
+
+**Git候補は未確定**として記録する。少なくとも今回新規・修正した次を候補として列挙する。
+
+- `research_scripts/run_tvt_mp_four_cross_intersections_grid_medium_nonparticipating_20_candidate_limit_5_departure_plus_1_trial.py`
+- `research_scripts/run_tvt_mp_four_cross_intersections_grid_medium_nonparticipating_20_candidate_limit_5_departure_shift_trial.py`
+- `research_scripts/diagnose_tvt_mp_four_cross_intersections_nonparticipating_20_candidate_limit_5_departure_shift_0_3_first_divergence_t602_t605.py`
+- `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_5.md`
+- `ORDER_EXCHANGE_PROGRESS_4.md`
+
+ただし、関連ファイルが他にも存在する可能性があるため、Git 対象を最終確定しない。`research_outputs` は採否未確定。既存未追跡ファイルを自動 stage しない。
+
+**再開時の注意:**
+
+- Cursor には必要な調査・編集だけを行わせる
+- py_compile、static validation、simulation、grep、Git 操作は Terminal で実行する
+- Cursor 報告を重要節目で鵜呑みにせず、原典・出力を Terminal で独立確認する
+- **決定論的tiebreaker** 実装や production 変更へ、利用者決定なしに進まない
+
+**本§15が、進捗第4巻の最新再開地点である（2026-10-29）。**
