@@ -1,0 +1,48 @@
+TVT-MP 6x6 grid 5000-vehicle early scaling benchmark
+This is not a formal performance comparison.
+scenario: tvt_mp_6x6_grid_5000_vehicle_eval_600_timestep_early_scaling_benchmark_candidate_limit_10_seed_0_vot_seed_1
+purpose: Early scaling benchmark before a future 5000-vehicle formal 6x6 TVT-MP trial. Confirms 5000-vehicle World build, dill World copy at recursion limit 50000, TVT-MP on 36 internal nodes through T=599 (departure T=0..500 plus post-demand observation), research output, and runtime versus the 1000-vehicle short benchmark reference. Not a formal performance comparison.
+internal grid nodes: 36 (g_0_0..g_5_5)
+external OD nodes: 24
+TVT-MP nodes: 36
+vehicles: 5000
+departure: T=0..500
+evaluation: T=0..599
+post-demand observation: Integer timesteps strictly after the last departure timestep (500): timesteps 501 through 599 inclusive, count = 99.
+TSIZE: 630
+World.T after simulation: 600
+candidate visit limit N: 10
+vehicle state counts: {'end': 576, 'run': 3339, 'wait': 1085}
+completed: 576
+not completed: 4424
+scheduled_departure_reached_count: 5000
+scheduled_departure_not_reached_count: 0
+scheduled_departure_reached_count meaning: Count of vehicles whose planned departure_time (vehicle plan) is less than or equal to evaluation_end_timestep (599). Classification uses departure_time <= EVALUATION_END_TIMESTEP only; it does not directly mean the vehicle entered the network.
+scheduled_departure counts vs actual state: For actual evaluation-end state, use vehicle_state_counts, vehicles_on_network_count, completed_count, and link_vehicle_counts_at_evaluation_end.
+vehicles on network (run/wait): 4424
+Full trip completion is not required for this benchmark.
+exec_simulation seconds: 79685.76344854198
+seconds per evaluation timestep: 132.80960574756998
+reference seconds per evaluation timestep: 7.6201273321670016
+per-timestep runtime ratio vs 1000-vehicle benchmark: 17.428790879509066
+runtime ratio note: Evaluation range and traffic state differ between benchmarks. per_timestep_runtime_ratio is an approximate comparison, not a strict vehicle-count scaling law. Do not extrapolate total runtime for a future 5000-vehicle formal trial by simple proportion.
+interval timing available: False
+transactions: 2381
+transactions by node: {'g_0_0': 49, 'g_0_1': 106, 'g_0_2': 96, 'g_0_3': 83, 'g_0_4': 85, 'g_0_5': 80, 'g_1_0': 83, 'g_1_1': 11, 'g_1_2': 1, 'g_1_3': 14, 'g_1_4': 52, 'g_1_5': 43, 'g_2_0': 77, 'g_2_1': 52, 'g_2_2': 13, 'g_2_3': 90, 'g_2_4': 93, 'g_2_5': 97, 'g_3_0': 75, 'g_3_1': 104, 'g_3_2': 18, 'g_3_3': 26, 'g_3_4': 39, 'g_3_5': 75, 'g_4_0': 72, 'g_4_1': 48, 'g_4_2': 17, 'g_4_3': 106, 'g_4_4': 130, 'g_4_5': 78, 'g_5_0': 107, 'g_5_1': 99, 'g_5_2': 58, 'g_5_3': 63, 'g_5_4': 50, 'g_5_5': 91}
+internal grid link vehicles at evaluation end: 2101
+OD connector vehicles at evaluation end: 1238
+world_build seconds: 0.04779633297584951
+finalize seconds: 14.231834042002447
+research_output_build seconds: 0.7617381659802049
+research_csv_write seconds: 0.13154325005598366
+vehicle_vot_csv_write seconds: 0.014456833014264703
+pre_manifest_script_total seconds: 79700.977070542
+manifest_write seconds: 0.0035105420975014567
+run_summary_write seconds: appended on the last line after this file is closed; not included in pre_manifest_script_total.
+output directory bytes after manifest.json: 4624481
+output directory: /Users/nishinarilab/Documents/UXsim_GitHub_original/UXsim/research_outputs/trial/tvt_mp_6x6_grid_5000_vehicle_eval_600_timestep_early_scaling_benchmark_candidate_limit_10_seed_0_vot_seed_1
+Directory byte total excludes run_summary.txt itself. The console prints the final directory total after run_summary.txt.
+Per-timestep spillback rows are not saved.
+Production code was not modified.
+A write failure can leave a partial output directory.
+run_summary_write seconds: 0.0001347920624539256

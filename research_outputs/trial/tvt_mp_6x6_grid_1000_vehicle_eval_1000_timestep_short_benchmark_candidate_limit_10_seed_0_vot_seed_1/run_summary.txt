@@ -1,0 +1,50 @@
+TVT-MP 6x6 grid 1000-vehicle short benchmark
+This is not a formal performance comparison.
+scenario: tvt_mp_6x6_grid_1000_vehicle_eval_1000_timestep_short_benchmark_candidate_limit_10_seed_0_vot_seed_1
+purpose: Short benchmark before a future 5000/10000-vehicle 6x6 TVT-MP trial. Confirms network construction, 1000-vehicle generation, TVT-MP on the 36 internal nodes only, a run through T=999, research output, and runtime. Not a formal performance comparison.
+internal grid nodes: 36 (g_0_0..g_5_5)
+external OD nodes: 24
+TVT-MP nodes: 36
+vehicles: 1000
+participating: 1000
+nonparticipating: 0
+evaluation: T=0..999
+TSIZE: 1030
+World.T after simulation: 1000
+candidate visit limit N: 10
+baseline horizon: 30
+clearance: 1
+free route choice: True
+specified_route: False
+vehicle plan count: 1000
+first departure: 0.0
+last departure: 500.0
+manhattan min/avg/max: 5 / 6.73 / 10
+origin count: 24
+destination count: 24
+vehicle plan sha256: 5cc8272a8f3cafb8f694b34fd05cf07277999e06adfd7711b927cf89a65c34bb
+transactions: 1078
+transactions per evaluation timestep: 1.078
+transactions per TVT node: 29.944444444444443
+transactions by node: {'g_0_0': 13, 'g_0_1': 23, 'g_0_2': 46, 'g_0_3': 69, 'g_0_4': 37, 'g_0_5': 12, 'g_1_0': 27, 'g_1_1': 3, 'g_1_2': 5, 'g_1_3': 108, 'g_1_4': 13, 'g_1_5': 4, 'g_2_0': 9, 'g_2_1': 3, 'g_2_2': 55, 'g_2_3': 112, 'g_2_4': 11, 'g_2_5': 11, 'g_3_0': 13, 'g_3_1': 9, 'g_3_2': 146, 'g_3_3': 17, 'g_3_4': 4, 'g_3_5': 12, 'g_4_0': 47, 'g_4_1': 51, 'g_4_2': 102, 'g_4_3': 6, 'g_4_4': 2, 'g_4_5': 12, 'g_5_0': 8, 'g_5_1': 3, 'g_5_2': 35, 'g_5_3': 18, 'g_5_4': 23, 'g_5_5': 9}
+completed: 1000
+incomplete: 0
+Full completion is not required for this short benchmark.
+internal grid link vehicles at evaluation end: 0
+OD connector vehicles at evaluation end: 0
+exec_simulation seconds: 7620.127332167001
+seconds per evaluation timestep: 7.6201273321670016
+world_build seconds: 0.005631375010125339
+finalize seconds: 14.604526625014842
+research_output_build seconds: 0.2123505410272628
+research_csv_write seconds: 0.05452012497698888
+vehicle_vot_csv_write seconds: 0.00319912499981001
+pre_manifest_script_total seconds: 7635.015931000002
+manifest_write seconds: 0.000578042003326118
+run_summary_write seconds: appended on the last line after this file is closed; not included in pre_manifest_script_total.
+output directory bytes after manifest.json: 1747191
+Directory byte total excludes run_summary.txt itself. The console prints the final directory total after run_summary.txt.
+Per-timestep spillback rows are not saved.
+Production code was not modified.
+A write failure can leave a partial output directory.
+run_summary_write seconds: 0.00024924997705966234

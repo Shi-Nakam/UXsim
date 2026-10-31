@@ -1,0 +1,33 @@
+FCFS 6x6 grid 5000-vehicle eval-600 comparison trial
+Not a formal FCFS versus TVT-MP performance comparison.
+scenario: fcfs_6x6_grid_5000_vehicle_eval_600_timestep_clearance_1_comparison
+purpose: Aggregate comparison of vehicle state, link occupancy, and runtime under FCFS(clearance=1) on the same 6x6 network and 5000-vehicle demand as the TVT-MP 5000-vehicle early scaling benchmark. Not a formal method-performance trial. Vehicle-level paired comparison is not claimed because control mode can change random-number consumption order even with the same seed.
+vehicles: 5000
+departure: T=0..500
+simulation: T=0..599 (World.T after sim=600)
+FCFS internal nodes: 36
+FCFS clearance timesteps: 1
+vehicle state counts: {'end': 513, 'run': 3285, 'wait': 1202}
+completed: 513
+not completed: 4487
+internal link vehicles: 2009 (aggregate occupancy 0.209271)
+external->internal connector vehicles: 1258 (aggregate occupancy 0.873611)
+internal->external connector vehicles: 18 (aggregate occupancy 0.012500)
+links at or above 90% occupancy (all links): 20
+FCFS seconds per evaluation timestep: 0.005687972083299731
+TVT-MP / FCFS runtime ratio: 23349.201402993505
+vehicle_plan_generation seconds: 0.010060167056508362
+world_build seconds: 0.04529612499754876
+finalize seconds: 14.852459417073987
+exec_simulation seconds: 3.4127832499798387
+result_collection seconds: 0.006453750072978437
+pre_manifest_output_write seconds: 0.001283292076550424
+pre_manifest_script_total seconds: 18.329434458049946
+seconds per evaluation timestep: 0.005687972083299731
+timing scope note: pre_manifest_script_total_seconds ends after link_occupancy_at_t599.csv, vehicle_state_summary.csv, and vehicle_plan_audit.json are written. manifest.json write time and run_summary.txt write time are not included in manifest timing fields.
+manifest_write seconds: 0.0005662089679390192
+run_summary timing scope note: run_summary.txt write time is not included in the timing lines above. run_summary_write_seconds is appended on the last line after the file is closed.
+output directory: /Users/nishinarilab/Documents/UXsim_GitHub_original/UXsim/research_outputs/trial/fcfs_6x6_grid_5000_vehicle_eval_600_timestep_clearance_1_comparison
+Differences compare FCFS measured aggregates to fixed TVT-MP benchmark reference values. This is not a vehicle-level paired comparison.
+Production code and existing reference files were not modified.
+run_summary_write seconds: 0.00016029097605496645

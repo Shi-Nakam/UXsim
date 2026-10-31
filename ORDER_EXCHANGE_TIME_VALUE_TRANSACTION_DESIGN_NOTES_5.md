@@ -9122,3 +9122,392 @@ paired 分析を採用する場合は、どの確率変数が方式間で対応�
 12. production 変更へ自動的に進まない
 
 **最新再開地点** は進捗第4巻 **§15** のままである。本 §26.21〜§26.34 は将来改修の叩き台であり、現在の必須作業ではない。
+
+## 27. 6×6 grid高需要TVT-MPスケーリング検証・FCFS対照分析（2026-10-31）
+
+本節は、既存 §26 の arrival tiebreaker 検討とは独立した論点として、6×6 grid 高需要条件下での TVT-MP 実行可能性・交通状態・計算量の事前検証、および同一 network・需要・評価期間における FCFS 対照 trial の結果を正式に記録する。§26 本文は変更していない。
+
+### 27.1 作業範囲
+
+本節で記録する対象は次のとおりである。
+
+- 1,000 台 TVT-MP 短期 benchmark
+- 5,000 台 TVT-MP early scaling benchmark
+- 同一 network・需要・評価期間の 5,000 台 FCFS 対照 trial
+- Link 理論収容力と T=599 時点の局所的飽和
+- 最大当事者数取引
+- 計算時間上の制約
+- 現時点の研究判断
+- 未完了事項（§27.16）
+- 将来の再開手順（§27.17）
+
+### 27.2 この節の位置づけ
+
+- これは**正式な方式性能比較ではない**。
+- 1,000 台と 5,000 台について、実行可能性・交通状態・計算量を確認する**事前検証**である。
+- 5,000 台 FCFS trial は、入口目詰まりが network・需要条件に由来するかを**集計的に**確認する対照 trial である。
+- 同じ seed 番号でも制御方式により乱数消費順が変わり得るため、FCFS と TVT-MP の **Vehicle 単位 paired 比較ではない**。
+- **production は変更していない**。
+- **5,000 台全車完走 TVT-MP trial** と **10,000 台 TVT-MP trial** は**実行していない**。
+
+### 27.3 実行した新規スクリプト
+
+いずれも既存 production および既存 trial を変更せず、**新規別スクリプト**として作成・実行した。
+
+1. `research_scripts/run_tvt_mp_6x6_grid_high_demand_1000_vehicle_short_benchmark.py`
+2. `research_scripts/run_tvt_mp_6x6_grid_high_demand_5000_vehicle_early_scaling_benchmark.py`
+3. `research_scripts/run_fcfs_6x6_grid_high_demand_5000_vehicle_eval_600_comparison_trial.py`
+
+正式出力は `research_outputs/trial/` 配下の各 scenario 名 directory に保存した。本節では数値と解釈のみを記録し、出力ファイル本文はここへ転載しない。
+
+### 27.4 共通 network・需要条件
+
+- 6×6 内部 grid
+- 内部 Node 36
+- 外部 OD Node 24
+- 総 Node 60
+- 内部 directed Link 120
+- OD connector directed Link 48
+- 総 Link 168
+- 単車線（`number_of_lanes = 1`）
+- merge priority 1
+- 内部 Link 長 400 m
+- OD connector 長 300 m
+- free-flow speed 20 m/s
+- jam density 0.2 台/m
+- traffic / random seed 0
+- demand generation seed 42
+- VOT seed 1（**TVT-MP のみ**）
+- 最小 OD Manhattan distance 5
+- free route choice
+- `specified_route` 不使用
+- departure T=0〜500
+- 全参加（TVT-MP）
+- TVT-MP clearance 1
+- FCFS clearance 1（内部 36 Node のみ FCFS）
+- TVT-MP baseline horizon 30
+- TVT-MP Candidate Visit 数上限 **N=10** を trial 側で明示設定
+
+**N=10** は production の暗黙 default に依存せず、研究標準設定として各 TVT-MP trial スクリプトが明示した。
+
+### 27.5 Link 理論収容力
+
+production 原典（UXsim `Link` / `addLink`）から確認した事実:
+
+- UXsim Link の既定 jam density は 0.2 台/m
+- 単車線、`DELTAN = 1`
+- `delta = 1 / jam density = 5` m/台
+- 内部 Link 400 m の理論収容台数は **80 台**
+- connector 300 m の理論収容台数は **60 台**
+- 内部 120 Link 合計の理論収容は **9,600 台**
+- connector 48 Link 合計の理論収容は **2,880 台**
+- 全 168 Link 合計の理論収容台数は **12,480 台**
+
+したがって、5,000 台という総台数そのものは全 Link 理論収容 12,480 台を**超えていない**。
+
+ただしこれは全 Link が均等に jam density まで埋まることを前提とする理論値であり、経路偏在、入口交差点処理能力、下流空間不足、局所的 spillback とは**区別する**。
+
+### 27.6 1,000 台 TVT-MP 短期 benchmark
+
+**条件:**
+
+- Vehicle 1,000 台
+- departure T=0〜500
+- evaluation T=0〜999
+- evaluation end 999
+- internal TSIZE 1030
+- World.T after simulation 1000
+- TVT-MP Node 36
+- N=10
+- baseline horizon 30
+- clearance 1
+- recursion limit 50,000
+
+**結果:**
+
+- completed 1,000 / incomplete 0
+- 成立取引 1,078 件
+- `exec_simulation_seconds = 7620.127332167001`
+- `seconds_per_evaluation_timestep = 7.6201273321670016`
+- final output total bytes = 1,749,859
+- transaction CSV 1,078 行と manifest transaction 数 1,078 件が一致
+- Node 別取引数合計 1,078 件
+- vehicle CSV 1,000 行と manifest Vehicle 数 1,000 台が一致
+
+6×6 grid、36 TVT-MP Node、1,000 台、N=10 で production 例外なく完了し、**全車完走**と正式 research output 生成が確認された。
+
+### 27.7 1,000 台 trial の最大当事者取引
+
+- 最大 trade scope Visit 数は **4**
+- 最大 4 当事者取引は **28 件**
+- 構成は buyer 1＋seller 3、buyer 2＋seller 2、buyer 3＋seller 1
+- 全参加 trial のため nonparticipating は 0
+- N=10 上限には到達していない
+
+**代表例**（最大 4 当事者取引のうち buyer 実現価値合計が最大）:
+
+- decision T=421、Node `g_2_3`、buyer 2、seller 2
+
+当事者:
+
+| 役割 | Visit |
+|------|-------|
+| buyer | `veh_709:4`, `veh_364:7` |
+| seller | `veh_547:5`, `veh_696:4` |
+
+Baseline passage: `veh_547:5` T=431、`veh_696:4` T=433、`veh_709:4` T=435、`veh_364:7` T=437。
+
+Candidate・Actual passage: C197 `veh_709:4` buyer T=431、C198 `veh_364:7` buyer T=433、C199 `veh_547:5` seller T=435、C200 `veh_696:4` seller T=437。
+
+経済値: buyer 実現時間短縮価値合計 = 28.5218776672919、seller 必要補償合計 = 0.6592801312154991、buyer 公式支払合計 = 0.6592801312154991、seller 公式補償合計 = 0.6592801312154991、buyer 実現利得合計 = 27.8625975360764、seller 実現利得合計 = 0。
+
+全 4 当事者 satisfied。Candidate passage と Actual passage、assigned rank と Actual passage rank、predicted route・actual route・formal route が一致した。
+
+**predicted route** は「Candidate 仮想 World が自由に新規決定した進路」と単純化せず、**Candidate 評価で使用された予測上の進路**であり、原則として baseline 物理通過時に得られた進路を Candidate 計算へ適用する（現在時点 T より前に順位確定済みの Visit 等は別扱い）という現行契約に沿う。
+
+### 27.8 5,000 台 TVT-MP early scaling benchmark
+
+**条件:**
+
+- Vehicle 5,000 台
+- departure T=0〜500
+- evaluation T=0〜599（evaluation end 599）
+- internal TSIZE 630
+- World.T after simulation 600
+- TVT-MP Node 36、N=10、baseline horizon 30、clearance 1
+- recursion limit 50,000
+- T=501〜599 の 99 timestep を、最後の予定 departure T=500 より後の**観測期間**とした
+- **全車完走は要求しない** early scaling benchmark
+
+**結果（Vehicle state）:**
+
+- completed / end = 576
+- run = 3,339
+- wait = 1,085
+- not completed = 4,424
+- `scheduled_departure_reached_count = 5,000`
+- `scheduled_departure_not_reached_count = 0`
+
+`scheduled_departure_reached_count` は予定 departure time が evaluation end 以下である Vehicle 数であり、**実際に network へ進入したことの直接指標ではない**。
+
+**成立取引:**
+
+- 2,381 件
+- transaction CSV 2,381 行、manifest transactions 2,381 件、Node 別取引数合計 2,381 件が一致
+
+**出力・時間:**
+
+- `exec_simulation_seconds = 79685.76344854198`
+- `seconds_per_evaluation_timestep = 132.80960574756998`
+- output total bytes = 4,628,323
+
+1,000 台 benchmark の 7.6201273321670016 秒/timestep に対し、保存済み wall-time 値では **17.428790879509066 倍/timestep** であった。evaluation 範囲と交通状態が異なるため、この倍率を厳密な Vehicle 台数スケーリング則とは扱わない。
+
+### 27.9 5,000 台 TVT-MP 実行時間の注意
+
+実行時間について、次を明記する（断定を避ける）。
+
+- 実行開始後、Mac が複数回ログイン画面になった。
+- 途中確認時に Python process は `R+`、CPU 約 99%、累積 CPU 時間が増加しており、**計算自体は継続**していた。
+- 途中から `caffeinate -i -w <PID>` を適用し、以後のアイドルスリープを防止した。
+- スクリプト保存値の `exec_simulation_seconds` は **79685.76344854198**。
+- UXsim 進行表示の最終 computation time は約 **114,362 秒**だった。
+- スクリプトの `perf_counter` 値、UXsim 側 computation time、Mac の sleep／screen lock の関係は**今回検証していない**。
+- 79685.763 秒を**純粋な CPU 時間**と断定しない。
+- FCFS との保存値比（約 **23,349 倍**）を、再現可能な**純粋 CPU 計算量比**として採用しない。
+- ただし **TVT-MP が FCFS より桁違いに重い**という定性的結論は維持する。
+
+今後 Mac で長時間 trial を実行するときは、**実行開始時から** `caffeinate` を併用してアイドルスリープを防止する運用とする。
+
+### 27.10 5,000 台 trial の最大当事者取引
+
+- 最大 trade scope Visit 数は **7**
+- 該当取引は **2 件**
+- N=10 上限には到達していない
+
+**取引 1**（T=301、Node `g_4_5`、buyer 1、seller 6、`ex_post_feasible`、buyer・seller 全 7 Visit の Actual passage 観測済み）:
+
+- buyer `veh_962:2`: VOT 0.7496440206182547、Baseline T=326、Candidate/Actual T=319、7 秒短縮、realized time value 5.247508144327783、official payment 4.57848957698266、realized gain 0.6690185673451232、satisfied
+- seller `veh_1423:1`: 3 秒遅延、realized delay loss 2.3319674423068752、compensation 2.3319674423068752、realized gain 0
+- seller `veh_841:4`: 1 秒遅延、realized delay loss 2.2465221346757844、compensation 2.2465221346757844、realized gain 0
+- seller `veh_824:6`、`veh_444:5`、`veh_100:7`: Baseline と Actual 同一、actual delay 0、`trivially_satisfied_nonpositive_actual_delay`
+- seller `veh_350:7`: Baseline T=322、Candidate/Actual T=321、seller だが Actual では 1 秒早く通過、official compensation 0、realized gain 0.31359974220990344、`trivially_satisfied_nonpositive_actual_delay`
+
+取引全体: buyer actual declared time saving value total 5.247508144327783、seller actual required compensation total 4.57848957698266、buyer official payment total 4.57848957698266、seller official compensation total 4.57848957698266、buyer realized gain total 0.6690185673451232、seller realized gain total 0.31359974220990344、**全 7 当事者 satisfied**。
+
+全 7 Visit で Candidate passage timestep と Actual passage timestep は一致。一方 assigned rank と Actual node passage rank は完全一致ではなく、**moved earlier 4、rank exact 1、moved later 2、rank difference total 4**。各当事者の通過時刻予測が一致していても、当事者外 Visit を含む Node 全体順位では挿入・前後関係差が生じ得る。
+
+**取引 2**（T=598、Node `g_2_1`、buyer 6、seller 1、`evaluation_unavailable`）:
+
+- buyer 6 Visit、seller 1 Visit の全 7 Visit が evaluation end まで Actual passage 未観測
+- actual 経済値、Actual 順位、実現利得は評価不能
+- 公式支払・補償は 0
+- Candidate 予測上の取引として成立しているが、**実現効果の評価には使用できない**
+
+### 27.11 5,000 台 TVT-MP の Link 収容状態（T=599）
+
+**内部 Link（120 本、理論収容 9,600 台）:** Vehicle 2,101 台、aggregate occupancy 0.21885416666666666、100%以上 0、90%以上 6、75%以上 18、50%以上 26。
+
+**外部→内部 connector（24 本、理論収容 1,440 台）:** Vehicle 1,224 台、aggregate occupancy **0.85**、100%以上 0、90%以上 **13**、75%以上 22、50%以上 22。
+
+**内部→外部 connector（24 本）:** Vehicle 14 台、aggregate occupancy 0.009722222222222222、50%以上 0。
+
+**全 Link:** Vehicle 3,339 台、aggregate occupancy 0.2675480769230769、100%以上 0、90%以上 19、75%以上 40、50%以上 48。
+
+代表的な高収容流入 connector: `bottom_4_to_g_5_4` 58/60、`right_0_to_g_0_5` 57/60、`left_0_to_g_0_0` 56/60、`left_5_to_g_5_0` 56/60、`top_0_to_g_0_0` 56/60。
+
+ネットワーク全体が満杯なのではなく、**外部→内部 connector** とその直後の一部内部 Link が**局所的に**高収容となった。
+
+### 27.12 FCFS 同条件対照 trial
+
+**条件:** Vehicle 5,000 台、departure T=0〜500、simulation T=0〜599、`TMAX = 600`、内部 36 Node を FCFS、clearance 1。その他 network・需要は TVT-MP 5,000 台 benchmark と同じ。**正式な方式性能比較ではない。Vehicle 単位 paired 比較ではない。**
+
+**Vehicle state:** end = 513、run = 3,285、wait = 1,202、not completed = 4,487。
+
+**Link 収容:**
+
+| 区分 | Vehicle 数 | aggregate occupancy | 90%以上 Link |
+|------|------------|---------------------|--------------|
+| 内部 Link | 2,009 | 0.20927083333333332 | 8 |
+| 外部→内部 connector | 1,258 | 0.8736111111111111 | 12 |
+| 内部→外部 connector | 18 | 0.0125 | — |
+| 全 Link | 3,285 | 0.26322115384615385 | 20 |
+
+**timing（保存値）:** finalize 14.852459417073987 秒、`exec_simulation` 3.4127832499798387 秒、seconds per evaluation timestep 0.005687972083299731、`pre_manifest_script_total` 18.329434458049946 秒、final script total 18.330203082994558 秒。
+
+### 27.13 TVT-MP と FCFS の集計比較
+
+**FCFS − TVT-MP（reference）:**
+
+- completed = **−63**
+- run = **−54**
+- wait = **+117**
+- 外部→内部 connector aggregate occupancy = **+0.023611111111111138**
+- 外部→内部 connector の 90%以上 Link 数 = **−1**
+- 内部 Link aggregate occupancy = **−0.009583333333333333**
+
+**解釈:**
+
+- FCFS でも外部→内部 connector が **87.36%** まで埋まり、wait **1,202 台**が発生した。
+- 入口 connector 高収容と大量 wait は **TVT-MP 固有ではない**。
+- 主因は、5,000 台を T=0〜500 へ投入した**高需要条件**と、単車線 6×6 network の入口・交差点処理能力である可能性が高い。
+- TVT-MP は FCFS より completed **63 台多く**、wait **117 台少なく**、外部→内部 connector 上が **34 台少なく**、内部 Link 上が **92 台多かった**。
+- 短期集計では TVT-MP が入口目詰まりを**特に悪化させた証拠はない**。むしろ TVT-MP が入口から内部へやや多く送り込んだように見える。
+- 乱数消費順と route choice が方式間で変わり得るため、**TVT-MP の正式な性能優位とは結論しない**。
+
+### 27.14 計算量に関する暫定原因
+
+FCFS では同じ 5,000 台・600 timestep の traffic update が約 **3.41 秒**で完了した。TVT-MP の長時間化を**交通渋滞そのものだけ**では説明できない。
+
+TVT-MP では 36 Node で反復的に次を行う: full World の Baseline 複製、baseline horizon 30 の仮想計算、Candidate Visit 集合形成、最大 N=10 の Candidate 検討、Candidate 局所仮想計算、経済評価と順位確定。
+
+現時点ではこれらの反復が極端な計算量の**主因である可能性が高い**。詳細 profile は**未実施**であり、特定関数や処理を正式なボトルネックと断定しない。**production の最適化や近似化は未採用・未実装**である。
+
+### 27.15 現時点の設計判断
+
+- **production は変更しない**。
+- **5,000 台全車完走 TVT-MP trial** へ直進しない。
+- **10,000 台 TVT-MP trial** へ進まない。
+- 5,000 台条件は、入口側を強く過飽和にする**高需要ストレス条件**としては有用である。
+- 通常需要の方式性能を代表する条件としては**過大な可能性**がある。
+- 5,000 台という総台数より、**T=0〜500 への集中投入**が重要な要因である。
+- 同じ 5,000 台でも departure 期間を延長すれば、入口飽和を緩和できる可能性がある。
+- **1,000 台 trial と同じ平均投入強度**（vehicles per timestep）を保った条件設計を、将来の方式比較前に検討する。
+- 1,000 台 trial は departure T=0〜500 であり、平均投入強度は**概ね 2 台/timestep** である。
+- 5,000 台を同じ平均投入強度 2 台/timestep へ揃えるなら、departure 期間は**概ね 2,500 timestep** となる（算術上の換算。実行済み条件ではない）。
+- 上記は**将来条件の候補**であり、departure 期間延長 trial は**未作成・未実行**である。
+- **次の優先対象は未決定**である。候補は次のとおり（いずれかへ自動的に進まない）。
+  - 台数を調整した中間規模 trial
+  - 5,000 台の departure 期間延長 trial
+  - TVT-MP 計算量 profile
+- **利用者判断前に**、上記候補のいずれかへ自動的に進まない。
+- arrival tiebreaker 等の production 改修（§26）は、本節のスケーリング結論と**独立**して扱う。
+
+### 27.16 未完了事項
+
+**区別（現時点の確定事項）:**
+
+- **profiling は未実施**である。
+- **ボトルネックは未確定**である。
+- **production 最適化は未採用・未実装**である。
+- **5,000 台全車完走 trial** と **10,000 台 trial** へ**直進しない**（§27.15 の設計判断）。
+
+**既存の未完了項目（維持）:**
+
+- 5,000 台・**全車完走**を要求する正式 TVT-MP trial
+- 10,000 台 TVT-MP trial（既存 FCFS 高需要 test 想定条件）
+- TVT-MP 内部処理の詳細 **profiling** とボトルネック特定
+- `perf_counter`、UXsim computation time、Mac sleep／lock の関係の独立検証
+- FCFS と TVT-MP の**正式な方式性能比較**（common random numbers、paired 設計を含む）
+- 5,000 台条件の**需要緩和版**（departure window 延長等）での再 benchmark
+- 保存済み 79685 秒を再現可能なベンチマーク CPU 時間として登録すること
+
+**追加の未完了項目:**
+
+- 台数を調整した中間規模 trial
+- 複数 seed による確認
+- signalized UXsim の同一短期条件対照
+- BATCH の同一短期条件対照
+- full World copy の実行回数と所要時間
+- Baseline 計算の実行回数と所要時間
+- Candidate 形成数
+- Candidate 局所仮想計算の実行回数と所要時間
+- Node 別計算負荷
+- timestep 別計算負荷
+- 交通状態と計算負荷の関係
+- 計算量改善方針
+- production 最適化の採否
+- 通常需要条件と高需要ストレス条件の正式な区別
+- 論文での実験条件の位置づけ
+
+### 27.17 将来の再開手順
+
+1. 本 **§27** を読む。
+2. 進捗第4巻の最新再開地点 **§16** を読む。**§16 は次工程で追記予定**であり、**未追記の間は §27 本節と各 trial 出力を正本として扱う**。
+3. 1,000 台 TVT-MP、5,000 台 TVT-MP、5,000 台 FCFS の `manifest.json` と `run_summary.txt` を確認する。
+4. execution time の**時計差**（`perf_counter`、UXsim computation time 等）と **Mac sleep 条件**を再確認する（§27.9）。
+5. 次の対象を、**台数調整**、**departure 期間延長**、**計算量 profile** から**利用者が決定**する（§27.15。未決定のまま自動進行しない）。
+6. **production 変更を前提にしない**。
+7. 計算量 profile を行う場合は、最初に **read-only な診断計画**を作る（production 改修を含めない）。
+8. 長時間 trial は **Terminal** で実行し、**開始時から**アイドルスリープ防止を行う。標準例:
+
+   ```text
+   caffeinate -i python <trial_script.py>
+   ```
+
+   **既に実行中の process へ後付け**する場合**だけ**、次を用いる（開始時標準と混同しない）:
+
+   ```text
+   caffeinate -i -w <PID>
+   ```
+
+9. Cursor には、編集・実装に**不可欠な調査だけ**を行わせる。
+10. **py_compile**、**static validation**、**simulation**、**grep**、**Git 操作**は Cursor に任せず **Terminal** で行う。
+11. 詳細設計正本と進捗メモの**双方への反映要否**を、節目ごとに確認する。
+12. §26（arrival tiebreaker）と本節（スケーリング）の論点を混同しない。
+13. production・既存 trial を変更せず、必要なら **新規 research_scripts** を追加する。
+14. 結果を本設計正本 §27 または進捗メモへ追記する際、本節の「非 paired 比較」「非正式性能比較」の位置づけを維持する。
+
+**検索語（本 §27 へ到達するための目安）:**
+
+- 6×6 grid
+- high demand
+- 5000 vehicles
+- 1000 vehicles
+- scaling benchmark
+- entry connector saturation
+- external to internal connector
+- wait vehicles
+- FCFS comparison
+- TVT-MP runtime
+- World copy
+- Baseline computation
+- Candidate local computation
+- over-saturated demand
+- departure 0 500
+- 計算量
+- 入口目詰まり
+- 外部リンク渋滞
+- 高需要ストレス条件
+- 未完了
+- production変更なし

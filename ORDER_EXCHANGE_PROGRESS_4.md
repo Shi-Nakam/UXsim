@@ -777,3 +777,180 @@ N=5 Candidate Visit数上限検証の正本は同メモ **§25**。本 §15 が�
 - **決定論的tiebreaker** 実装や production 変更へ、利用者決定なしに進まない
 
 **本§15が、進捗第4巻の最新再開地点である（2026-10-29）。**
+
+---
+
+## 16. 6×6 grid高需要スケーリング事前検証と最新再開地点（2026-10-31）
+
+**記録日:** 2026-10-31。
+
+**本 §16 を進捗第4巻の新しい最新再開地点とする。** 既存 **§15** は、arrival tiebreaker 検討完了時点の**当時の**最新再開地点として残す。
+
+**詳細技術正本:** `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_5.md` **§27**。
+
+arrival tiebreaker および乱数源分離の将来設計は引き続き同メモ **§26** であり、§27 のスケーリング検証とは**別論点**である。
+
+### 16.1 位置づけ
+
+- 6×6 grid における TVT-MP の**作動可能性**、交通状態、入口 connector 飽和、計算量を調べる**事前検証**である。
+- **正式な方式性能比較ではない**。
+- FCFS 対照は、入口目詰まりが network・需要条件に由来するかを**集計的に**確認するために行った。
+- 同じ seed 番号でも方式により乱数消費順が変わり得るため、**Vehicle 単位 paired 比較ではない**。
+- **production は変更していない**。
+- **5,000 台全車完走 TVT-MP trial** と **10,000 台 TVT-MP trial** は**実行していない**。
+
+### 16.2 今回追加したスクリプト
+
+既存 production、既存 trial、既存 test を**変更せず**、新規別スクリプトとして追加した。
+
+- `research_scripts/run_tvt_mp_6x6_grid_high_demand_1000_vehicle_short_benchmark.py`
+- `research_scripts/run_tvt_mp_6x6_grid_high_demand_5000_vehicle_early_scaling_benchmark.py`
+- `research_scripts/run_fcfs_6x6_grid_high_demand_5000_vehicle_eval_600_comparison_trial.py`
+
+### 16.3 1,000 台 TVT-MP 短期 benchmark
+
+**条件:** 6×6 内部 grid、内部 Node 36、外部 OD Node 24、Link 168、Vehicle 1,000 台、departure T=0〜500、evaluation T=0〜999、internal TSIZE 1030、World.T 1000、全参加、clearance 1、baseline horizon 30、Candidate Visit 数上限 N=10、recursion limit 50,000。
+
+**結果（保存済み観測値）:**
+
+- completed 1,000 / incomplete 0
+- 成立取引 1,078 件
+- `exec_simulation_seconds = 7620.127332167001`
+- `seconds_per_evaluation_timestep = 7.6201273321670016`
+- output total bytes = 1,749,859
+- transaction CSV、manifest、Node 別取引数合計が 1,078 で一致
+- vehicle CSV と manifest Vehicle 数が 1,000 で一致
+- production 例外なく完了し、正式 research output を生成した
+
+**最大当事者数:** 最大 trade scope Visit 数 4、該当 28 取引、N=10 上限には未到達。
+
+**代表取引（T=421、Node `g_2_3`、buyer 2、seller 2）:** buyer `veh_709:4`、`veh_364:7`；seller `veh_547:5`、`veh_696:4`。buyer 実現時間短縮価値合計 28.5218776672919、seller 必要補償合計 0.6592801312154991、buyer 公式支払合計 0.6592801312154991、seller 公式補償合計 0.6592801312154991、buyer 実現利得合計 27.8625975360764、seller 実現利得合計 0。Candidate passage と Actual passage が全 4 Visit で一致、assigned rank と Actual passage rank も一致、全 4 当事者 satisfied。
+
+詳細は設計正本 **§27.6〜§27.7**。
+
+### 16.4 5,000 台 TVT-MP early scaling benchmark
+
+**条件:** Vehicle 5,000 台、departure T=0〜500、evaluation T=0〜599、internal TSIZE 630、World.T 600、全参加、clearance 1、baseline horizon 30、N=10、recursion limit 50,000。**全車完走を要求しない** early scaling benchmark。
+
+**結果（保存済み観測値）:**
+
+- end/completed 576、run 3,339、wait 1,085、not completed 4,424
+- 成立取引 2,381 件（transaction CSV、manifest、Node 別合計が 2,381 で一致）
+- `exec_simulation_seconds = 79685.76344854198`
+- `seconds_per_evaluation_timestep = 132.80960574756998`
+- output total bytes = 4,628,323
+
+1,000 台 benchmark 保存値に対する per-timestep runtime ratio は **17.428790879509066**。**解釈:** evaluation 範囲と交通状態が異なるため、厳密な台数スケーリング則とは扱わない。
+
+**実行条件の留保:** 実行中に Mac の sleep／screen lock 条件が一定でなく、途中から `caffeinate` を適用した。スクリプトの `perf_counter` 値、UXsim 進行表示の computation time、Mac sleep の関係は**未検証**。保存済み 79,685.763 秒を**純粋 CPU 時間と断定しない**。
+
+### 16.5 5,000 台 trial の最大当事者取引
+
+- 最大 trade scope Visit 数 **7**、該当 **2** 取引、N=10 上限には未到達。
+
+**評価可能（T=301、Node `g_4_5`、buyer 1、seller 6、`ex_post_feasible`、全 7 Visit Actual passage 観測済み）:** buyer `veh_962:2` Baseline T=326、Candidate/Actual T=319、7 秒短縮、realized time value 5.247508144327783、official payment 4.57848957698266、realized gain 0.6690185673451232。seller 実績は設計正本記載どおり（`veh_1423:1` 3 秒遅延、`veh_841:4` 1 秒遅延、他 trivially satisfied 等）。全 7 当事者 satisfied。全 7 Visit で Candidate/Actual passage timestep 一致。**assigned rank と Actual node passage rank は完全一致ではない**。
+
+**評価不能（T=598、Node `g_2_1`、buyer 6、seller 1、`evaluation_unavailable`）:** 全 7 Visit が evaluation end まで Actual passage 未観測。actual 経済値、Actual 順位、実現利得は評価不能。公式支払・補償 0。
+
+詳細は設計正本 **§27.10**。
+
+### 16.6 Link 理論収容力と TVT-MP 交通状態（T=599）
+
+**理論収容（production 原典）:** jam density 0.2 台/m、単車線、`DELTAN=1`、内部 Link 400 m で 80 台、connector 300 m で 60 台、内部 120 Link で 9,600 台、connector 48 Link で 2,880 台、全 168 Link で **12,480 台**。5,000 台は 12,480 台を**超えない**。理論収容は全 Link 均等分散の仮定であり、**局所的入口飽和とは区別**する。
+
+**TVT-MP 観測:** 内部 Link Vehicle 2,101 台、aggregate occupancy 0.21885416666666666、90%以上 6 本。外部→内部 connector Vehicle 1,224 台、aggregate occupancy **0.85**、90%以上 **13** 本、75%以上 22 本。内部→外部 connector Vehicle 14 台、aggregate occupancy 0.009722222222222222。ネットワーク全体満杯ではなく、**外部→内部 connector** とその直後の一部内部 Link が局所的に高収容となった。
+
+### 16.7 FCFS 同条件対照
+
+**条件:** Vehicle 5,000 台、departure T=0〜500、simulation T=0〜599、`TMAX` 600、内部 36 Node FCFS、clearance 1、network・需要は 5,000 台 TVT-MP benchmark と同条件。**正式な方式性能比較ではない。Vehicle 単位 paired 比較ではない。**
+
+**結果:** end 513、run 3,285、wait 1,202、not completed 4,487。内部 Link 2,009 台、occupancy 0.20927083333333332、90%以上 8 本。外部→内部 connector 1,258 台、occupancy 0.8736111111111111、90%以上 12 本。内部→外部 connector 18 台、occupancy 0.0125。`exec_simulation` 3.4127832499798387 秒、seconds per evaluation timestep 0.005687972083299731、final script total 18.330203082994558 秒。
+
+### 16.8 集計比較と原因判断
+
+**FCFS − TVT-MP:** completed −63、run −54、wait +117、外部→内部 connector aggregate occupancy +0.023611111111111138、外部→内部 90%以上 Link 数 −1、内部 Link aggregate occupancy −0.009583333333333333。
+
+**確定した整理（解釈）:**
+
+- FCFS でも入口 connector 高収容と大量 wait が再現した。**入口目詰まりは TVT-MP 固有ではない**。
+- 主因は、5,000 台を T=0〜500 へ集中投入した**高需要条件**と、単車線 6×6 network の入口・交差点処理能力である**可能性が高い**。
+- 短期集計では TVT-MP が入口目詰まりを**特に悪化させた証拠はない**。
+- TVT-MP は FCFS より completed **63 台多く**、wait **117 台少なかった**。
+- 乱数消費順と route choice が方式間で変わり得るため、**TVT-MP の正式な性能優位とは結論しない**。
+
+### 16.9 計算量に関する現在地
+
+FCFS は同じ 5,000 台・600 timestep の simulation を約 **3.41 秒**で完了。**TVT-MP の長時間化を交通渋滞そのものだけでは説明できない**。
+
+TVT-MP では full World Baseline 複製、baseline horizon 30 仮想計算、Candidate Visit 集合形成、最大 N=10 Candidate 検討、Candidate 局所仮想計算、経済評価と順位確定を反復する。**これらが計算量の主因である可能性が高い**。**profiling は未実施**、正式な**ボトルネックは未確定**。**production 最適化・近似化は未採用・未実装**。
+
+FCFS との保存値比 **23,349 倍**を**純粋 CPU 性能倍率として採用しない**。**TVT-MP が FCFS より桁違いに重い**という定性的結論のみ維持する。
+
+### 16.10 現時点の判断
+
+- **production は変更しない**。
+- **5,000 台全車完走 TVT-MP trial** へ直進しない。
+- **10,000 台 TVT-MP trial** へ進まない。
+- 5,000 台条件は**高需要ストレス条件**として有用。通常需要を代表する条件としては**過大な可能性**。
+- 5,000 台という総台数より **T=0〜500 への集中投入**が重要。
+- 1,000 台 trial は平均**約 2 台/timestep**。5,000 台を同じ平均投入強度へ揃えるなら departure 期間は**概ね 2,500 timestep**。
+- departure 期間延長 trial は**未作成・未実行**。**次の優先対象は未決定**（候補: 中間規模 trial、5,000 台 departure 期間延長 trial、TVT-MP 計算量 profile）。**利用者判断前にいずれかへ自動的に進まない**。
+
+### 16.11 未完了事項
+
+詳細正本 **§27.16** を参照。主要項目:
+
+- 中間規模 trial
+- 5,000 台 departure 期間延長 trial
+- 5,000 台全車完走 trial
+- 10,000 台 trial
+- 複数 seed
+- signalized UXsim 同一短期条件対照
+- BATCH 同一短期条件対照
+- TVT-MP profiling
+- World copy 回数・時間
+- Baseline 回数・時間
+- Candidate 形成数
+- Candidate 局所仮想計算回数・時間
+- Node 別・timestep 別負荷
+- 計算量改善方針
+- production 最適化の採否
+- 通常需要条件と高需要ストレス条件の区別
+- 論文上の位置づけ
+
+### 16.12 最新再開地点（本節）
+
+**本 §16 が進捗第4巻の最新再開地点である（2026-10-31）。**
+
+| 論点 | 正本 |
+|------|------|
+| 6×6 高需要スケーリング・FCFS 対照 | 詳細設計 **§27** |
+| arrival tiebreaker・乱数源分離（将来） | 詳細設計 **§26** |
+
+**次の研究作業は未決定。**
+
+**再開時:**
+
+1. 詳細正本 **§27** を読む。
+2. 本進捗 **§16** を読む。
+3. 1,000 台 TVT-MP、5,000 台 TVT-MP、5,000 台 FCFS の manifest と run_summary を確認する。
+4. 次の対象を、**台数調整**、**departure 期間延長**、**計算量 profile** から**利用者が決定**する。
+5. **production 変更を前提にしない**。
+6. profiling を行う場合は最初に **read-only 診断計画**を作る。
+7. 長時間 trial は**開始時から** `caffeinate -i python <trial_script.py>` を用いる。**実行中 process への後付けのみ** `caffeinate -i -w <PID>`。
+8. Cursor には編集・実装に**不可欠な調査だけ**を行わせる。
+9. **py_compile**、**static validation**、**simulation**、**grep**、**Git 操作**は **Terminal** で行う。
+10. 詳細設計正本と進捗メモの**双方への反映要否**を節目ごとに確認する。
+11. **production 変更**や **arrival tiebreaker 実装**へ**自動的に進まない**。
+
+### 16.13 Git 候補（未確定）
+
+**Git 対象は未確定**として記録する。少なくとも今回の候補:
+
+- `research_scripts/run_tvt_mp_6x6_grid_high_demand_1000_vehicle_short_benchmark.py`
+- `research_scripts/run_tvt_mp_6x6_grid_high_demand_5000_vehicle_early_scaling_benchmark.py`
+- `research_scripts/run_fcfs_6x6_grid_high_demand_5000_vehicle_eval_600_comparison_trial.py`
+- `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_5.md`
+- `ORDER_EXCHANGE_PROGRESS_4.md`
+
+`research_outputs` の採否は**未決定**。既存未追跡ファイルを**自動 stage しない**。関連ファイルが他にも存在する可能性があるため、**Git 対象を最終確定しない**。

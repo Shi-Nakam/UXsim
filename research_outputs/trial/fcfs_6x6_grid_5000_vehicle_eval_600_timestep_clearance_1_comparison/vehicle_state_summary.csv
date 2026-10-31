@@ -1,0 +1,13 @@
+metric,value
+evaluation_end_timestep,599
+vehicle_total_count,5000
+state_count_end,513
+state_count_run,3285
+state_count_wait,1202
+completed_count,513
+not_completed_count,4487
+vehicles_on_network_count,4487
+run_count,3285
+wait_count,1202
+scheduled_departure_reached_count,5000
+scheduled_departure_not_reached_count,0
