@@ -1,0 +1,68 @@
+TVT-MP 6x6 grid 3000-vehicle shared-serialization production validation
+Same research conditions as pre-optimization short benchmark (evaluation T=0..299).
+Normal exec_simulation after production optimization; not profiling (no cProfile).
+Not a formal performance comparison trial.
+scenario: tvt_mp_6x6_grid_3000_vehicle_200m_60kph_eval_300_timestep_shared_serialization_validation_candidate_limit_10_seed_0_vot_seed_1
+purpose: Post shared-serialization production optimization validation for 3000 vehicles with the same research conditions as the pre-optimization short benchmark (departure T=0..999, evaluation T=0..299). Confirms structured research aggregates match saved pre-optimization reference values and records exec_simulation wall-clock versus that reference. Not profiling and not a formal performance comparison trial. Full trip completion is not required.
+reference pre-optimization scenario: tvt_mp_6x6_grid_3000_vehicle_200m_60kph_eval_300_timestep_short_benchmark_candidate_limit_10_seed_0_vot_seed_1
+internal grid nodes: 36 (g_0_0..g_5_5)
+external OD nodes: 24
+TVT-MP nodes: 36
+vehicles: 3000
+departure: T=0..999
+evaluation: T=0..299
+demand_injection_completed_before_evaluation_end: False
+Planned departure continues through T=999, but the real World stops at evaluation end T=299. Demand injection is not complete at evaluation end.
+Evaluation T=0..299 covers the traffic ramp-up period only. It does not represent the strong congestion state near the last planned departure at T=999.
+Vehicles with planned departure_time > 299 are unevaluated in the real World for this benchmark.
+With departure_time evenly spaced from 0 to 999 for 3000 vehicles, the nominal average injection rate is 3 vehicles per timestep. If all 3000 trips were split evenly across the 24 external OD nodes, the nominal average would be 0.125 vehicles per timestep per node; actual OD pairs are random samples and are not evenly distributed.
+all links: length 200 m, free-flow 60 km/h, jam density 0.2
+capacity_in and capacity_out are not passed to world.addLink(); UXsim automatic defaults apply. No additional 1500 veh/h boundary capacity is set.
+internal TSIZE: 330
+baseline horizon steps: 30
+World.T after simulation: 300
+candidate visit limit N: 10
+vehicle state counts: {'end': 318, 'home': 2099, 'run': 580, 'wait': 3}
+completed: 318
+not completed: 2682
+scheduled_departure_reached_count: 898
+scheduled_departure_not_reached_count: 2102
+scheduled_departure_reached_count meaning: Count of vehicles whose planned departure_time (vehicle plan) is less than or equal to evaluation_end_timestep (299). Classification uses departure_time <= EVALUATION_END_TIMESTEP only; it does not directly mean the vehicle entered the network.
+scheduled_departure counts vs actual state: For actual evaluation-end state, use vehicle_state_counts, vehicles_on_network_count, completed_count, and link_vehicle_counts_at_evaluation_end.
+vehicles on network (run/wait): 583
+Full trip completion is not required for this validation trial.
+Research aggregates must match pre-optimization reference (transaction_count 816).
+pre-optimization reference exec_simulation seconds: 6295.571890000021
+current exec_simulation seconds: 1637.9535257919924
+speedup_ratio_reference_over_current: 3.8435595338127504
+seconds_saved_vs_reference: 4657.618364208029
+percent_runtime_reduction: 73.9824506111392
+current seconds per evaluation timestep: 5.459845085973308
+reference seconds per evaluation timestep: 20.985239633333403
+research result equality checks passed: True
+transaction_count matches reference 816: True
+vehicle state counts match reference: True
+vehicle_plan_sha256 matches reference: True
+internal grid link vehicles at evaluation end: 517 (reference 517)
+OD connector vehicles at evaluation end: 63 (reference 63)
+vehicle plan sha256: 0b1fc2d2b084c3c5ce94d0ec0c476de4b2c60d40543f58f789dd644d1e3d71d9
+interval timing available: False
+Interval timing unavailable: no within-T=0..299 first/second-half wall-clock split is measured.
+console progress show_progress_deltat: 600
+UXsim console progress uses show_progress_deltat=600 (600 timestep interval with DELTAT=1). For evaluation T=0..299 this usually prints at T=0 and at simulation end only, reducing console volume versus show_progress_deltat=100. Displayed computation time is cumulative UXsim information only. Formal interval timing remains unavailable; do not treat progress lines as saved interval timing.
+transactions: 816
+transactions by node: {'g_0_0': 13, 'g_0_1': 25, 'g_0_2': 54, 'g_0_3': 14, 'g_0_4': 6, 'g_0_5': 14, 'g_1_0': 17, 'g_1_1': 14, 'g_1_2': 53, 'g_1_3': 39, 'g_1_4': 48, 'g_1_5': 40, 'g_2_0': 10, 'g_2_1': 20, 'g_2_2': 2, 'g_2_3': 3, 'g_2_4': 4, 'g_2_5': 2, 'g_3_0': 5, 'g_3_1': 38, 'g_3_2': 49, 'g_3_3': 27, 'g_3_4': 57, 'g_3_5': 31, 'g_4_0': 12, 'g_4_1': 34, 'g_4_2': 14, 'g_4_3': 12, 'g_4_4': 10, 'g_4_5': 11, 'g_5_0': 12, 'g_5_1': 45, 'g_5_2': 41, 'g_5_3': 16, 'g_5_4': 17, 'g_5_5': 7}
+world_build seconds: 0.03562145889736712
+finalize seconds: 14.084858707967214
+research_output_build seconds: 0.13712095795199275
+research_csv_write seconds: 0.046938917017541826
+vehicle_vot_csv_write seconds: 0.009747458971105516
+pre_manifest_script_total seconds: 1652.2852249579737
+manifest_write seconds: 0.0
+run_summary_write seconds: appended on the last line after this file is closed; not included in pre_manifest_script_total.
+output directory bytes before manifest.json: 1643364
+output directory: /Users/nishinarilab/Documents/UXsim_GitHub_original/UXsim/research_outputs/trial/tvt_mp_6x6_grid_3000_vehicle_200m_60kph_eval_300_timestep_shared_serialization_validation_candidate_limit_10_seed_0_vot_seed_1
+Directory byte total is before manifest.json is written. The console prints the final directory total after all output files.
+Production optimization validated: shared serialization in candidate local virtual calculation set (this script does not modify production).
+A write failure can leave a partial output directory.
+run_summary_write seconds: 0.0002377079799771309

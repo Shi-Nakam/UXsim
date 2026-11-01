@@ -13,6 +13,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
 
+import dill as pickle
+
 from uxsim.order_control_tvt_mp_local_binding_rank_sequence import (
     OrderControlTvtMpLocalBindingRankSequence,
     OrderControlTvtMpLocalBindingRankVisit,
@@ -658,18 +660,11 @@ def _real_and_local_vehicle_name_maps(
     )
 
 
-def build_tvt_mp_candidate_local_state(
+def _validated_real_world_and_sequence(
     real_W: World,
     binding_rank_sequence: OrderControlTvtMpLocalBindingRankSequence,
-) -> OrderControlTvtMpCandidateLocalState:
-    """
-    Copy the real World at baseline timestep T and name the local targets.
-
-    One call makes one new copy. Another candidate, or another call for the
-    same candidate, gets another copy. Traffic is not moved, capacity is not
-    changed, and objects outside the target inlinks, outlinks, and incoming
-    list are left in the copy but omitted from the local sets.
-    """
+):
+    """Check inputs before any copy or pickle.loads."""
     real_world = _require_real_world(real_W)
     sequence = _require_binding_rank_sequence(binding_rank_sequence)
     real_world_timestep_T = _require_timestep_matches_baseline(
@@ -681,7 +676,10 @@ def build_tvt_mp_candidate_local_state(
             "binding_rank_sequence.node_name must be a non-empty str; "
             f"got {sequence.node_name!r}."
         )
-    local_world = real_world.copy()
+    return real_world, sequence, real_world_timestep_T
+
+
+def _require_independent_local_world(local_world: object, real_world: World) -> World:
     if local_world is real_world:
         raise RuntimeError("Copied World is the real World object.")
     if not isinstance(local_world, World):
@@ -689,7 +687,16 @@ def build_tvt_mp_candidate_local_state(
             "Copied World must be a World; got "
             f"type {type(local_world).__name__}."
         )
+    return local_world
 
+
+def _build_candidate_local_state_from_local_world(
+    real_world: World,
+    sequence: OrderControlTvtMpLocalBindingRankSequence,
+    real_world_timestep_T: int,
+    local_world: World,
+) -> OrderControlTvtMpCandidateLocalState:
+    """Name local targets on a World that was already copied or restored."""
     target_node_name = sequence.node_name
     target_node = _copied_target_node(local_world, target_node_name)
     inlink_map = _require_link_map(
@@ -773,4 +780,78 @@ def build_tvt_mp_candidate_local_state(
         _real_vehicle_id_by_real_vehicle_name=MappingProxyType(
             real_vehicle_id_by_real_vehicle_name
         ),
+    )
+
+
+def serialize_tvt_mp_candidate_real_world_snapshot(real_W: World) -> bytes:
+    """Serialize real_W once for one TVT-MP decision's candidate set.
+
+    Uses the same dill implementation as World.copy. The bytes are not stored
+    on the World and are not kept in a module global. The caller must drop
+    them when that decision finishes. real_W is not modified.
+    """
+    real_world = _require_real_world(real_W)
+    serialized = pickle.dumps(real_world)
+    if type(serialized) is not bytes:
+        raise RuntimeError(
+            "Serialized real World must be bytes; got "
+            f"type {type(serialized).__name__}."
+        )
+    return serialized
+
+
+def build_tvt_mp_candidate_local_state_from_serialized_world(
+    real_W: World,
+    binding_rank_sequence: OrderControlTvtMpLocalBindingRankSequence,
+    serialized_real_world: bytes,
+) -> OrderControlTvtMpCandidateLocalState:
+    """Build one candidate local state from a shared serialized snapshot.
+
+    The bytes may be reused for every FIFO True candidate in one call of
+    evaluate_tvt_mp_candidate_local_virtual_calculations. Each call loads a
+    new World. Candidates must not share that World, its nodes, links, or
+    vehicles. Input checks run before pickle.loads.
+    """
+    real_world, sequence, real_world_timestep_T = _validated_real_world_and_sequence(
+        real_W,
+        binding_rank_sequence,
+    )
+    if type(serialized_real_world) is not bytes:
+        raise ValueError(
+            "serialized_real_world must be bytes; got "
+            f"type {type(serialized_real_world).__name__}."
+        )
+    local_world = pickle.loads(serialized_real_world)
+    local_world = _require_independent_local_world(local_world, real_world)
+    return _build_candidate_local_state_from_local_world(
+        real_world,
+        sequence,
+        real_world_timestep_T,
+        local_world,
+    )
+
+
+def build_tvt_mp_candidate_local_state(
+    real_W: World,
+    binding_rank_sequence: OrderControlTvtMpLocalBindingRankSequence,
+) -> OrderControlTvtMpCandidateLocalState:
+    """
+    Copy the real World at baseline timestep T and name the local targets.
+
+    One call makes one new copy. Another candidate, or another call for the
+    same candidate, gets another copy. Traffic is not moved, capacity is not
+    changed, and objects outside the target inlinks, outlinks, and incoming
+    list are left in the copy but omitted from the local sets.
+    """
+    real_world, sequence, real_world_timestep_T = _validated_real_world_and_sequence(
+        real_W,
+        binding_rank_sequence,
+    )
+    local_world = real_world.copy()
+    local_world = _require_independent_local_world(local_world, real_world)
+    return _build_candidate_local_state_from_local_world(
+        real_world,
+        sequence,
+        real_world_timestep_T,
+        local_world,
     )

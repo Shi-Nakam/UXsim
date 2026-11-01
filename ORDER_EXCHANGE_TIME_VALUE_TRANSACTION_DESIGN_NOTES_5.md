@@ -9785,3 +9785,424 @@ departure_time = DEPARTURE_START + (
 **次の作業:** 3,000 台 TVT-MP 本体へ **直進しない**。先に **計算量 profile** か **短期 benchmark** かを **利用者判断**する。判断材料: FCFS **最終完走 T=2,296**、T=999 時 **run 1,940 台**、内部 Link **59 本**が **臨界密度**以上、全 Link **90% 以上 5 本**、§27 の **1,000 台 TVT-MP 1,000 timestep 約 7,620 s**、**5,000 台 TVT-MP T=599 約 79,685 s**。**production 最適化・arrival tiebreaker 改修・乱数源分離へ自動進行しない**。
 
 **利用者へ明示する判断:** profiling 先行か／短期 benchmark の evaluation end／正式 TVT-MP evaluation end／internal TSIZE／全車完走 trial か限定 benchmark か／baseline horizon 30 を含む余裕／複数 seed のタイミング。
+
+**歴史的注記（§28 執筆時点の未完了記述との関係）:** 上記 §28.11・§28.15 は **2026-11-01 前半**（FCFS 需要選定完了時点）の記録である。**その後**、§28 で採用候補とした 3,000 台・departure T=0〜999・全 Link 200 m・60 km/h・capacity_in/out 未指定条件について、3,000 台 **TVT-MP** の短期 benchmark、profiling、Candidate **共有直列化** production 最適化、最適化前後 **完全一致**再検証まで実施した。**最新の設計正本は §29**（本 §28 の過去記録は削除・改番しない）。
+
+---
+
+## 29. 3,000台TVT-MP計算量診断とCandidate共有直列化production最適化（2026-11-01）
+
+**検索語（本 §29 へ到達するための目安）:** 3,000台TVT-MP、短期benchmark、T=0〜299、profiling、T=96、World.copy、dill、pickle、直列化、復元、Candidate局所仮想計算、FIFO True候補、共有直列化、Candidate独立性、RNG不変、production最適化、完全一致、CSV完全一致、3.84倍、73.98%削減、816取引、200m Link、60km/h、N=10、baseline horizon 30、計算時間短縮、ボトルネック、Python可読性。
+
+### 29.1 作業の目的と位置づけ
+
+- §28 で採用候補とした **3,000 台**、departure **T=0〜999**、全 Link **200 m**、**60 km/h**、**capacity_in/out 未指定**の条件について、3,000 台 **TVT-MP 本体**（長期 evaluation）へ **直進せず**、通常実行の **短期 benchmark** を先行した。
+- **profiling** とは「**なぜ重いか**を調べる診断」、**短期 benchmark** とは「**どの程度重いか**を通常 `exec_simulation` で測る trial」と区別した。
+- 最初に **通常実行**で計算規模を測り、重いことが確認された場合 **だけ**、最短範囲の profiling へ進む方針を採用した。
+- 今回の系列は **研究評価（TVT-MP の優劣断定）** ではなく、長時間 trial を **現実的な wall-clock** で実行できるようにするための **計算量診断・production 最適化**である。
+- 既存 production を **推測で**最適化せず、**通常 benchmark → 単一 timestep profiling → 共有直列化 A/B 診断 → production 実装 → 関連 test → T=0〜299 全体再検証 → CSV 独立比較**の順で進めた。
+- **Python 初心者**が後から **処理順**（入力検証 → 直列化 → 復元 → 局所状態構築 → 局所仮想計算）を追える **可読性**を必須条件とし、高度で巧妙な短縮実装や **暗黙的 cache**（global cache、World 属性 cache、timestep またぎ cache）は採用しなかった。
+
+### 29.2 最適化前T=0〜299短期benchmark
+
+**スクリプト:** `research_scripts/run_tvt_mp_6x6_grid_3000_vehicle_200m_60kph_eval_300_timestep_short_benchmark.py`
+
+**scenario / 出力 directory:** `tvt_mp_6x6_grid_3000_vehicle_200m_60kph_eval_300_timestep_short_benchmark_candidate_limit_10_seed_0_vot_seed_1`（`research_outputs/trial/` 配下）
+
+**条件（§28 採用候補道路・需要に TVT-MP 制御・VOT を付与）:**
+
+| 項目 | 値 |
+|------|-----|
+| Vehicle 数 | 3,000 台 |
+| departure | T=0〜999（名目 **3 台/timestep**） |
+| demand generation seed | 42 |
+| traffic seed | 0 |
+| VOT seed | 1 |
+| 全車参加 | はい |
+| true VOT = declared VOT | はい |
+| evaluation | **T=0〜299** |
+| simulated evaluation timestep 数 | **300** |
+| baseline horizon steps | **30** |
+| internal TSIZE | **330** |
+| simulation 後 World.T | **300** |
+| Link | 全 **168** 本 **200 m** |
+| free-flow speed | **60 km/h**（16.666… m/s） |
+| jam density | **0.2 台/m** |
+| reaction time | **1 s** |
+| capacity_in / capacity_out | **未指定** |
+| TVT-MP 対象 | 内部 **36 Node** のみ |
+| clearance | **1** |
+| Candidate Visit 数上限 **N** | **10** |
+| 経路 | free route choice、specified_route 不使用 |
+| Python recursion limit | **50,000** |
+| profiling | **なし** |
+| `world.exec_simulation()` | **1 回** |
+| 全車完走 | **要求しない** |
+| transaction_count ≥ 1 | **一般契約として要求しない** |
+
+**結果（構造化集計・manifest 正本）:**
+
+- **transactions:** **816** 件
+- **Vehicle state:** end **318** / home **2,099** / run **580** / wait **3**（合計 **3,000**）
+- **completed:** 318 / **not completed:** 2,682
+- **scheduled departure reached:** **898** / **not reached:** **2,102**
+- **vehicles on network（run/wait）:** **583**
+- **internal Link 上 Vehicle:** **517** / **OD connector 上 Vehicle:** **63**
+- **Link 上 Vehicle 合計 517+63=580** は **run** 数と一致（wait **3** は Link 上に載らない）
+- **exec_simulation_seconds:** **6295.571890000021**
+- **seconds_per_evaluation_timestep:** **20.985239633333403**
+- **final_script_total_seconds:** **6310.222256791894**
+- **output directory total bytes:** **1,613,662**
+- **wall-clock 目安:** T=0〜299 のみで約 **1 時間 44 分 56 秒**
+- 既存 **1,000 台** TVT-MP benchmark の 1 timestep 当たり時間に対し **per_timestep_runtime_ratio ≈ 2.7539**（参考比較。厳密なスケーリング法則ではない）
+
+**Vehicle plan digest（SHA-256）:** `0b1fc2d2b084c3c5ce94d0ec0c476de4b2c60d40543f58f789dd644d1e3d71d9`
+
+- **FCFS** T=999 pretrial / TMAX=5000 completion check（§28.10）と **完全一致**した。
+- Vehicle 数、departure time、OD 生成順序、Origin、Destination、demand seed、生成式が同一である。
+- FCFS 出力には **VOT がない**ため、FCFS との比較は **Vehicle plan digest** に限定する。
+
+**解釈（条件→結果→判断）:**
+
+- T=0〜299 は departure T=999 までの **交通立ち上がり期間**であり、T=999 付近の **強混雑**を代表 **しない**（§28.7 の T=999 snapshot とは別段階）。
+- それでも約 **1 時間 45 分**を要したため、T=599、T=999、T=2,296 以上へ **直進**するのは **高リスク**と判断した。
+- **単純比例**による長期実行時間の断定は **禁止**した（§27・§28.12 と整合）。
+
+### 29.3 progress表示の留保
+
+- 初回 benchmark では **`show_progress_deltat=100`** を設定した。
+- UXsim の progress 設定は **実 World** だけでなく、Baseline / Candidate 用に **複製された仮想 World** にも引き継がれ、同じ **T=100、T=200、T=300** の表示が **多数**出た。
+- これは **実 World** が同一時刻で停止したことを意味 **せず**、**複数の仮想 World** が同じ表示時刻へ到達したためである（表示回数 ≈ 実 World 1 回 + 当該 timestep の Baseline/Candidate 複製数に比例しうる）。
+- 表示された **computation time** は UXsim 内部の累積情報であり、**正式な区間別 timing** ではない。
+- 後の **再検証 trial**（§29.10）では **`show_progress_deltat=600`** へ戻した（evaluation T=0〜299 では通常 **T=0** と **終了時**のみの表示）。**交通・TVT-MP 条件は同一**で、**進捗表示量だけ**の変更である。
+- **`INTERVAL_TIMING_AVAILABLE=False`** を維持した。
+- **`exec_simulation` 分割**、**user_function**、**hook**、**per-timestep timing CSV** は **追加していない**。
+
+### 29.4 departure分類898台と実状態901台の差
+
+**現象:**
+
+- **`scheduled_departure_reached_count`** は Vehicle plan 上の連続 **`departure_time`** について **`departure_time <= 299`** を判定し、**898** 台だった。
+- **実状態**では **end + run + wait = 318 + 580 + 3 = 901** 台が evaluation end 時点で **home 以外の進行状態**（end/run/wait）または **network 関連状態**として観測される（reached 定義は **plan 上の連続値**、実状態集計は **UXsim state**）。
+
+**差の 3 台（plan departure_time）:**
+
+| Vehicle | departure_time（plan 連続値） |
+|---------|-------------------------------|
+| veh_898 | 299.133711237079 |
+| veh_899 | 299.4668222740914 |
+| veh_900 | 299.7999333111037 |
+
+**原因（処理順・production 原典）:**
+
+- UXsim production では **`departure_time_is_time_step` が False** の場合、実 World の departure timestep は
+  **`int(departure_time / DELTAT)`**
+  により **切り捨て**られる。
+- **`DELTAT=1`** なので上記 3 台は plan 上は **> 299** だが、実 World では **departure timestep 299** となり、**T=299** で home から **wait** へ移った（§29.2 の wait **3** と整合）。
+
+**結論:**
+
+- **898 対 901** は **不整合ではなく**、
+  - **Vehicle plan 上の連続値分類**（`departure_time <= EVALUATION_END_TIMESTEP`）
+  - **UXsim 内部の整数 departure timestep**
+  の **定義差**である。
+- **`scheduled_departure_reached_count`** は **実際に network へ進入した台数**を **直接意味しない**。
+- **実状態の評価**には **`vehicle_state_counts`**、Link 上 Vehicle 数、completed 等を用いる。
+- **production** および **Vehicle plan 生成式**は **変更していない**。
+
+### 29.5 最短profiling設計
+
+**診断スクリプト:** `diagnostics/order_control/tvt_mp_3000_vehicle_t96_single_timestep_profile.py`
+
+**出力 directory:** `research_outputs/diagnostic/tvt_mp_3000_vehicle_t96_single_timestep_profile_seed_0_vot_seed_1`
+
+**設計方針:**
+
+- 過去に **全 World baseline 基盤**の profiling 実績があったが、**現在の TVT-MP 全体**（Candidate 局所仮想計算・FIFO 検査・N=10 等）を網羅したもの **ではなかった**。
+- 過去 profiling を **全面レビュー**するのではなく、**既知の cProfile 測定方法だけ**を再利用し、**現在の TVT-MP** を **最短範囲**で profile した。
+- 既存 **816 取引**について、**単一 timestep** で取引数が最多だった **T=96** の **8 取引**を **代表時刻**とした。
+- **T=0〜95** は profiler **なし**で通常実行。
+- **T=96 の 1 timestep だけ**を **cProfile** で囲んだ。
+- **T=0〜99 全体**、**T=0〜299 全体**を profile **しなかった**（wall-clock の総量推定に cProfile 秒数を **使わない**方針）。
+- **cProfile の秒数自体**は通常性能値として **使わず**、**累積時間（cumtime）** と **自己時間（tottime）** の **主要因特定**だけを使用した。
+
+**profiling 結果（T=96 の 1 timestep、cProfile 全体）:**
+
+| 項目 | 値 |
+|------|-----|
+| cProfile 計測区間 wall-clock 目安 | **126.189 s**（**T=0〜299 全体の exec 時間ではない**） |
+| function calls | **642,089,037** calls（**545,284,990** primitive calls） |
+| `run_tvt_mp_driver` | 約 **126.155 s**（支配） |
+| **`World.copy()`** | **18 回**、累積約 **125.663 s** |
+| **`dill.dumps()`** | **18 回**、累積約 **124.324 s** |
+| **`dill.loads()`** | **18 回**、累積約 **1.331 s** |
+| Baseline fork | **`World.copy()` 1 回**、累積約 **7.22 s** |
+| Candidate **局所状態構築** | **17 Candidate**、累積約 **118.72 s** |
+| Candidate **局所仮想前進** | **17 Candidate**、**215** virtual timestep、累積約 **0.198 s** |
+| Vehicle.update、Node.transfer、route 処理、経済評価等 | **支配的でなかった** |
+
+**結論（ボトルネック）:**
+
+- 当該 timestep における CPU 時間の **ほぼ全体**が、**Candidate ごとの全 World 複製**に伴う **`dill` 直列化（dumps）** へ集中していた。
+- **Candidate 仮想交通計算そのもの**は **非常に軽かった**。
+- 最適化対象は **Candidate 数削減**、**horizon 短縮**、**取引ロジック** **ではなく**、**同一 real World snapshot の重複 `dill.dumps`** であると **確定**した。
+
+### 29.6 FIFO True Candidateの意味
+
+- **FIFO True Candidate** とは、同一 inlink 内の **物理的な先後関係を壊さず**、**Candidate 局所仮想計算**へ進める候補である。
+- **FIFO False Candidate** は、同一 inlink 内の **追越し**等を生じうるため、重い **局所仮想計算**へ **進めない**（production の FIFO 検査契約）。
+- **T=96** では **FIFO True Candidate が 17 件**存在した（profiling 時の inspection set）。
+- **従来（最適化前）**は、この **17 件それぞれ**について **全 World** の **`dill.dumps` + `dill.loads`**（実装経路では **`World.copy()`** 起点）を行っていた。
+
+### 29.7 共有直列化A/B診断
+
+**診断スクリプト:** `diagnostics/order_control/tvt_mp_candidate_shared_serialization_ab.py`
+
+**出力 directory:** `research_outputs/diagnostic/tvt_mp_candidate_shared_serialization_ab_seed_0_vot_seed_1_t96`
+
+**比較方式:**
+
+| 方式 | 内容 |
+|------|------|
+| **A（現行方式）** | FIFO True Candidate **ごと**に **`World.copy()`** → Candidate **ごと**に **`dill.dumps` + `dill.loads`** 相当 |
+| **B（共有直列化）** | Candidate 集合の開始時に **`dill.dumps(real_W)` を 1 回** → Candidate **ごと**に **同じ bytes** から **`dill.loads`** → 各 Candidate は **独立した local World**（**local World 自体は共有しない**） |
+
+**公正性（A/B 同一前提）:**
+
+- 同じ **real_W snapshot**、同じ **FIFO inspection set**、同じ **rank state**、同じ **baseline fork result**
+- **A→B** と **B→A** の **両順序**で実行
+- 各条件前に **`gc.collect()`**
+- **cProfile なし**、**production 未変更**（診断内のみ）
+
+**wall-clock 結果（Candidate 局所状態構築部分の比較）:**
+
+| round | A (s) | B (s) | speedup (A/B) | 短縮 (s) |
+|-------|-------|-------|---------------|----------|
+| 1 | 25.468520540976897 | 3.2518680000212044 | **7.831966285473711** | 22.216652540955693 |
+| 2 | 25.87662420910783 | 3.1868181669851765 | **8.119893528028891** | 22.689806042122655 |
+| **平均** | **25.672572375042364** | **3.2193430835031904** | **7.9744754470549495** | — |
+
+**B 内訳（参考）:**
+
+- **1 回の dumps:** round1 **1.3902505000587553 s** / round2 **1.4084241670789197 s**
+- **17 回の loads:** round1 **1.7823060839436948 s** / round2 **1.7016391650540754 s**
+
+**正確性（A/B 一致監査）:**
+
+- **Candidate 結果完全一致**、**first difference なし**
+- **17 local World** すべて **real_W と別 object**
+- Candidate 間で **World、Node、Link、Vehicle、registry** が **別 object**、**mutation 漏れなし**
+- **real_W 不変**、**traffic RNG 不変**、**order-control RNG 不変**、**shared bytes 不変**
+- **A** は **17 dumps + 17 loads** 相当、**B** は **1 dumps + 17 loads**
+- 判定: **`promising_for_production_design_review`**、`shared_serialization_candidate_is_promising=True`
+
+**数値の混同禁止:** 本節の **約 7.97 倍**は **T=96・Candidate 集合部分**の A/B。**T=0〜299 全体**の通常 exec 短縮（§29.10 の **約 3.84 倍**）とは **別尺度**である。
+
+### 29.8 production実装
+
+**変更 production（本最適化の範囲）:**
+
+1. `uxsim/order_control_tvt_mp_candidate_local_state.py`
+2. `uxsim/order_control_tvt_mp_local_virtual_calculation_set.py`
+
+**追加した主要関数（明示的 API）:**
+
+- **`serialize_tvt_mp_candidate_real_world_snapshot(real_W)`** — real World を **1 回** `dill.dumps` し **bytes** を返す（入力検証付き）
+- **`build_tvt_mp_candidate_local_state_from_serialized_world(...)`** — **同じ bytes** から **1 回** `pickle.loads` し、**独立 local World** 上で Candidate 局所状態を構築
+- 共通 **private helper**（入力検証、独立 local World 確認、copy または restore 済み World から Candidate 局所状態を生成）
+
+**処理順（`evaluate_tvt_mp_candidate_local_virtual_calculations` 内）:**
+
+1. **real_W**、FIFO 結果、rank state、baseline 整合を **検証**
+2. **FIFO True Candidate が 1 件以上**ある場合 **だけ** **real_W を 1 回 `dill.dumps`**
+3. serialized **bytes** を **evaluate 関数の local 変数**として保持（**global / World 属性に置かない**）
+4. **Node 順・Candidate 順**を **従来どおり**走査
+5. **FIFO True Candidate ごと**に **`pickle.loads` を 1 回**
+6. Candidate **ごと**に **独立 local World** を生成
+7. **従来と同じ helper**、**局所仮想計算**、**結果生成**を実行
+8. **evaluate 呼出し終了時**に bytes を **持ち越さない**（次 timestep へ cache しない）
+
+**明記（変更しないもの・直列化しない条件）:**
+
+- **FIFO True Candidate 0 件**では **直列化しない**
+- **normal-not-generated** では **直列化しない**
+- **FIFO False Candidate だけ**なら **直列化しない**
+- **global cache なし**、**World 属性 cache なし**、**timestep またぎ cache なし**、**Candidate 間 local World 共有なし**
+- **`World.copy()` 自体**は **変更していない**（単独 builder・baseline fork は従来経路）
+- **baseline World copy**は **変更していない**
+- 単独呼出しの既存 **`build_tvt_mp_candidate_local_state()`** は **従来どおり `World.copy()` を 1 回**行う
+- **Candidate 形成、FIFO 検査、N、horizon、経済評価、rank、passage、RNG 処理**は **変更していない**
+
+**Python 可読性（設計制約）:**
+
+- bytes **生成位置**、**使用範囲**、**loads 位置**を **名前付き関数**と **中間変数**で明示
+- 高度な cache class、descriptor、暗黙的状態共有を **使用していない**
+
+### 29.9 production test
+
+**変更 test:**
+
+1. `tests_order_control_tvt_mp_candidate_local_state.py`
+2. `tests_order_control_tvt_mp_local_virtual_calculation_set.py`
+
+**追加・更新した主な検証:**
+
+- serialize が **bytes** を返す；**real_W・traffic RNG・order-control RNG 不変**
+- **同じ bytes から 2 回復元**した World が **独立**（Node、Link、Vehicle、registry **別 object**、**mutation 非漏洩**）
+- **real vehicle ID 写像一致**、**bytes 不変**、**非 bytes 拒否**、**stale timestep** は loads 前に拒否
+- **既存 copy builder 互換性**
+- **FIFO True 2 件** → serialize **1 回**、復元 **2 回**；**FIFO True 1 + False 1** → 復元 **1 回**；**FIFO True 0 件** → serialize **なし**；**normal-not-generated** → serialize **なし**
+- **2 件目 Candidate 例外**時も **1 件目 local World** と **real_W** を維持
+- **Node 順・Candidate 順・identity 順**、resolved/unresolved mix **維持**
+
+**実行結果（作業ログ上、関連 suite）:**
+
+| test モジュール | 結果 |
+|----------------|------|
+| Candidate local state | **25 passed** |
+| Candidate local calculation set | **41 passed** |
+| Candidate local virtual calculation | **90 passed** |
+| Candidate outlink boundary | **22 passed** |
+| Candidate unbound FCFS transfer | **28 passed** |
+| Candidate virtual time | **13 passed** |
+| TVT-MP driver | **31 passed** |
+| **関連合計** | **250 passed** |
+
+- 同じ主要 test 2 本を **誤って 2 回**実行したが、**2 回とも成功**した。
+- その後、test 結果文字列を Terminal へ **貼り付け**たため **zsh** が `PASS` 等を **コマンド**として解釈したが、**コード、test 結果、Git 状態**には **影響しなかった**（作業ログ）。
+
+### 29.10 最適化後T=0〜299全体再検証
+
+**スクリプト:** `research_scripts/run_tvt_mp_6x6_grid_3000_vehicle_200m_60kph_eval_300_timestep_shared_serialization_validation.py`
+
+**scenario / 出力 directory:** `tvt_mp_6x6_grid_3000_vehicle_200m_60kph_eval_300_timestep_shared_serialization_validation_candidate_limit_10_seed_0_vot_seed_1`
+
+**条件:**
+
+- **最適化前 benchmark（§29.2）と同一**（道路・需要・VOT・N=10・baseline horizon 30・evaluation T=0〜299 等）
+- **`show_progress_deltat` のみ 100 → 600**（§29.3）。**交通・TVT-MP 条件は同一**
+- **profiling なし**、**`exec_simulation` 1 回**
+- 最適化前結果は **スクリプト内定数 `REFERENCE_PRE_OPTIMIZATION_BENCHMARK`** と比較（**既存 output を runtime 読込みしない**）
+
+**研究結果（構造化集計・一致判定）:**
+
+- **transactions 816**
+- **state:** end 318 / home 2,099 / run 580 / wait 3
+- **scheduled reached 898** / **not reached 2,102**
+- **internal Link Vehicle 517** / **OD connector Vehicle 63**
+- **Vehicle plan digest 一致**
+- **`research_result_equality_checks passed=True`**
+
+**性能（T=0〜299 全体・通常 exec、同一 Mac 上の 2 回実行比較）:**
+
+| 指標 | 最適化前 | 最適化後 |
+|------|----------|----------|
+| exec_simulation (s) | **6295.571890000021** | **1637.9535257919924** |
+| seconds / eval timestep | **20.985239633333403** | **5.459845085973308** |
+| final_script_total (s) | **6310.222256791894** | **1652.2862650000025** |
+
+- **speedup（reference/current）:** **3.8435595338127504** 倍
+- **短縮:** **4657.618364208029 s**（約 **77 分 38 秒**）
+- **runtime reduction:** **73.9824506111392%**
+- **wall-clock 目安（最適化後）:** 約 **27 分 18 秒**
+
+**正確性を維持できる理由（要約）:** 各 FIFO True Candidate は **従来と同様に独立 local World** を **`loads` で復元**するだけであり、**real_W snapshot の bytes 化を 1 回に集約**した。**Candidate 形成・FIFO・経済・rank・RNG** は未変更。**A/B** と **250 test** と **本再検証**で一致を確認（§29.11 参照）。
+
+### 29.11 CSV全内容の独立完全一致確認
+
+**方法:** スクリプト内の構造化 equality に加え、**Terminal 上**で最適化前後の出力 CSV を **独立比較**した（**scenario_name 列のみ除外**、**行順維持**、それ以外の **全列・全行 exact equality**）。
+
+| ファイル | 行数（前/後） | 比較結果 |
+|----------|---------------|----------|
+| `tvt_mp_transactions.csv` | 816 / 816 | **完全一致** |
+| `tvt_mp_visits.csv` | 1,927 / 1,927 | **完全一致** |
+| `tvt_mp_vehicles.csv` | 877 / 877 | **完全一致** |
+| `tvt_mp_nodes.csv` | 36 / 36 | **完全一致** |
+| `tvt_mp_scenario.csv` | 1 / 1 | **完全一致** |
+| `vehicle_vot.csv` | 3,000 / 3,000 | **完全一致** |
+
+**結論:** **`all normalized CSV contents identical=True`**
+
+したがって、**取引・Visit・Vehicle・Node・scenario 集計・VOT** の研究出力 **内容**が最適化前後で **完全一致**した（**ファイル全体 SHA-256** は scenario_name を含むため **一致を要求しない**）。
+
+### 29.12 正確性の最終判断
+
+- **共有直列化 production 最適化**は、**現在の検証範囲**で **研究結果を変更しない**。
+- **同一 real_W snapshot** の **重複 `dill.dumps`** を **1 回**へ集約しただけであり、各 Candidate は **従来どおり独立 World** を **`loads` で得る**。
+- **T=96 A/B** を **A→B、B→A** 両順序で実行し、**完全一致**した（§29.7）。
+- **Candidate 独立性、real_W 不変、両 RNG 不変**を確認した。
+- **関連 test 250 件**が成功した（§29.9）。
+- **T=0〜299 通常実行**で **主要集計**が一致した（§29.10）。
+- **6 種類 CSV** について **scenario_name 以外**の **全行・全列**が完全一致した（§29.11）。
+- 以上により、**追加の同規模完全一致 trial を直ちに要求せず**、**production 最適化を受入れてよい**と判断した。
+- **将来の長期 trial** や **別 seed** 結果は **追加の回帰確認**として利用 **できる**が、**今回の実装受入れの前提**とは **しない**。
+
+### 29.13 残る留保
+
+- **性能値**は **同じ Mac 上**の **2 回の通常実行**比較であり、**外部負荷**や **OS 状態**の影響を **完全には除外していない**。
+- ただし **約 3.84 倍**、**73.98% 削減**という差は **大きく**、**profiling**（§29.5）および **A/B 診断**（§29.7、**約 7.97 倍**は **T=96 部分**）の **原因分析**とも **整合**する。
+- **T=0〜299** は **交通立ち上がり期間**であり、T=999 付近や **交通解消まで**の計算時間を **代表しない**。
+- 最適化後でも T=0〜299 に **約 27 分**かかる。
+- **T=999** や **T=2,296** までの実行時間を **単純比例で断定しない**。
+- **Baseline World copy** は **今回の最適化対象外**（§29.5 profiling で Baseline 約 7.22 s は残存しうる）。
+- Candidate **1 件**の場合も **dumps 1 回・loads 1 回**で、従来の **copy 1 回**と **ほぼ同等の構造**である。
+- **FIFO True Candidate が多い**意思決定ほど **短縮効果が大きい**。
+- **shared bytes** の **memory 使用量**は今回の **主要課題ではない**が、**長期 trial** で **memory pressure** が生じないかは **実行時に観察可能**。
+- production の **他の最適化**、**最小局所 World 構築**、**近似化**、**Candidate 削減**、**N 変更**は **行っていない**。
+
+### 29.14 作成・変更したファイル
+
+**新規 research scripts:**
+
+1. `research_scripts/run_tvt_mp_6x6_grid_3000_vehicle_200m_60kph_eval_300_timestep_short_benchmark.py`
+2. `research_scripts/run_tvt_mp_6x6_grid_3000_vehicle_200m_60kph_eval_300_timestep_shared_serialization_validation.py`
+
+**新規 diagnostics:**
+
+1. `diagnostics/order_control/tvt_mp_3000_vehicle_t96_single_timestep_profile.py`
+2. `diagnostics/order_control/tvt_mp_candidate_shared_serialization_ab.py`
+
+**変更 production:**
+
+1. `uxsim/order_control_tvt_mp_candidate_local_state.py`
+2. `uxsim/order_control_tvt_mp_local_virtual_calculation_set.py`
+
+**変更 test:**
+
+1. `tests_order_control_tvt_mp_candidate_local_state.py`
+2. `tests_order_control_tvt_mp_local_virtual_calculation_set.py`
+
+**主要出力 directory:**
+
+- `research_outputs/trial/tvt_mp_6x6_grid_3000_vehicle_200m_60kph_eval_300_timestep_short_benchmark_candidate_limit_10_seed_0_vot_seed_1`
+- `research_outputs/diagnostic/tvt_mp_3000_vehicle_t96_single_timestep_profile_seed_0_vot_seed_1`
+- `research_outputs/diagnostic/tvt_mp_candidate_shared_serialization_ab_seed_0_vot_seed_1_t96`
+- `research_outputs/trial/tvt_mp_6x6_grid_3000_vehicle_200m_60kph_eval_300_timestep_shared_serialization_validation_candidate_limit_10_seed_0_vot_seed_1`
+
+**失敗履歴（診断のみ）:**
+
+- **A/B 診断初回**は **`infer_order_control_eligible_nodes()` 欠落**により **`g_0_0` が `eligible=False`** として停止した。
+- 原因確認後、**全 Link 作成後・`set_order_control_for_nodes` 前**に **`infer_order_control_eligible_nodes()`** を **追加**した。
+- 失敗時 output directory は Terminal で内容確認後 **削除**し、**再実行**した。
+- **production 結果**には **影響しない**（診断スクリプト修正のみ）。
+
+### 29.15 現時点の確定事項と次の作業
+
+**確定事項:**
+
+- **共有直列化 production 最適化**は **受入れてよい**（§29.12）。
+- **T=0〜299** で **研究結果完全一致**（§29.10・§29.11）。
+- **通常実行** 約 **3.8435595338127504 倍**高速化、実行時間 **約 73.9824506111392% 削減**（**T=0〜299 全体**）。
+- **profiling** や **A/B 診断**の **追加反復は不要**（原因特定・promising 判定済み）。
+- **同じ完全一致 trial をもう 1 回直ちに行う必要はない**。
+
+**次の作業:**
+
+- 今回の **script、diagnostic、production、test、出力、メモ**を **commit・push** する（進捗 **§18.11**）。
+- その後、**最適化後の計算時間**を前提に、**3,000 台 TVT-MP** の **次の実行範囲**を **利用者判断**する。
+- **T=599**、**T=999**、**正式 evaluation end**、**internal TSIZE**、**全車完走 trial** のいずれへ進むかは **未決定**。
+- **FCFS 最終完走 T=2,296** を **TVT-MP evaluation end へ自動採用しない**（§28.12 維持）。
+- **長期 trial** へ進む前に、最適化後の **T=0〜299 実績 5.459845085973308 s/timestep** と、**後半混雑**による **非線形増加**可能性を考慮する。
+- **追加の production 高速化**へ **自動的に進まない**。
+- **arrival tiebreaker**、**乱数源分離**、**Candidate 削減**、**近似化**へ **自動的に進まない**。
+- **次の重要判断**は、**正式な 3,000 台 TVT-MP をどこまで実行するか**である。

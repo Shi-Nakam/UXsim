@@ -23,6 +23,8 @@ from uxsim.order_control_tvt_candidate_visit_set import (
 )
 from uxsim.order_control_tvt_mp_candidate_local_state import (
     build_tvt_mp_candidate_local_state,
+    build_tvt_mp_candidate_local_state_from_serialized_world,
+    serialize_tvt_mp_candidate_real_world_snapshot,
 )
 from uxsim.order_control_tvt_mp_candidate_local_virtual_calculation import (
     OrderControlTvtMpCandidateLocalVirtualCalculationResult,
@@ -83,6 +85,9 @@ def evaluate_tvt_mp_candidate_local_virtual_calculations(
 
     Node order and candidate order come from the saved FIFO inspection
     result. FIFO False candidates are not copied and are not executed.
+    When at least one FIFO True candidate exists, real_W is serialized once
+    after the input checks. Each FIFO True candidate then loads its own
+    World from those bytes. The bytes live only in this call.
     """
     real_world = _require_real_world(real_W)
     fifo_set = _require_fifo_inspection_set_result(fifo_inspection_set_result)
@@ -90,6 +95,12 @@ def evaluate_tvt_mp_candidate_local_virtual_calculations(
     fork_result = _fork_result_from_fifo_set(fifo_set)
     _require_real_world_matches_baseline(real_world, fork_result)
     _require_fifo_nodes_match_target_node_names(fifo_set, fork_result)
+
+    serialized_real_world = None
+    if _fifo_set_has_fifo_true_candidate(fifo_set):
+        serialized_real_world = serialize_tvt_mp_candidate_real_world_snapshot(
+            real_world
+        )
 
     node_results: list[OrderControlTvtNodeMpLocalVirtualCalculationResult] = []
     fifo_node_results = fifo_set.node_fifo_inspection_results
@@ -101,6 +112,7 @@ def evaluate_tvt_mp_candidate_local_virtual_calculations(
             node_index=node_index,
             fork_result=fork_result,
             rank_states_by_node_name=rank_states,
+            serialized_real_world=serialized_real_world,
         )
         node_results.append(node_result)
 
@@ -402,6 +414,18 @@ def _downstream_boundary_node_result_for_evaluated_node(
     return node_boundary_result
 
 
+def _fifo_set_has_fifo_true_candidate(
+    fifo_set: OrderControlTvtMpFifoInspectionSetResult,
+) -> bool:
+    """True only when a complete node still has a FIFO-passed candidate."""
+    for fifo_node_result in fifo_set.node_fifo_inspection_results:
+        if not _build_status_is_complete(fifo_node_result.build_status):
+            continue
+        if _node_has_fifo_true_candidate(fifo_node_result):
+            return True
+    return False
+
+
 def _evaluate_one_fifo_true_candidate(
     *,
     real_world: World,
@@ -412,15 +436,21 @@ def _evaluate_one_fifo_true_candidate(
     downstream_boundary_node_result: (
         OrderControlBaselineDownstreamBoundaryNodeResult
     ),
+    serialized_real_world: bytes,
 ) -> OrderControlTvtMpCandidateLocalVirtualCalculationResult:
     binding_rank_sequence = build_tvt_mp_local_binding_rank_sequence(
         fifo_set,
         candidate_fifo_inspection_result,
         rank_state,
     )
-    candidate_local_state = build_tvt_mp_candidate_local_state(
+    if type(serialized_real_world) is not bytes:
+        raise RuntimeError(
+            "Shared serialized real World is missing for a FIFO True candidate."
+        )
+    candidate_local_state = build_tvt_mp_candidate_local_state_from_serialized_world(
         real_world,
         binding_rank_sequence,
+        serialized_real_world,
     )
     calculation_state = (
         initialize_tvt_mp_candidate_local_virtual_calculation_state(
@@ -444,6 +474,7 @@ def _evaluate_complete_node_candidates(
     node_index: int,
     fork_result: OrderControlBaselineForkResult,
     rank_states_by_node_name: Mapping,
+    serialized_real_world: bytes,
 ) -> tuple[OrderControlTvtMpCandidateLocalVirtualCalculationResult, ...]:
     node_name = fifo_node_result.node_name
     candidate_results: list[
@@ -476,6 +507,7 @@ def _evaluate_complete_node_candidates(
             rank_state=rank_state,
             fork_result=fork_result,
             downstream_boundary_node_result=downstream_boundary_node_result,
+            serialized_real_world=serialized_real_world,
         )
         candidate_results.append(one_candidate_result)
     return tuple(candidate_results)
@@ -489,6 +521,7 @@ def _evaluate_one_fifo_node(
     node_index: int,
     fork_result: OrderControlBaselineForkResult,
     rank_states_by_node_name: Mapping,
+    serialized_real_world: bytes | None,
 ) -> OrderControlTvtNodeMpLocalVirtualCalculationResult:
     build_status = fifo_node_result.build_status
     if _build_status_is_normal_not_generated(build_status):
@@ -507,6 +540,7 @@ def _evaluate_one_fifo_node(
         node_index=node_index,
         fork_result=fork_result,
         rank_states_by_node_name=rank_states_by_node_name,
+        serialized_real_world=serialized_real_world,
     )
     return OrderControlTvtNodeMpLocalVirtualCalculationResult(
         node_name=fifo_node_result.node_name,

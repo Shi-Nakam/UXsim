@@ -15,6 +15,8 @@ from uxsim.order_control_tvt_mp_candidate_local_state import (
     OrderControlTvtMpCandidateLocalState,
     OrderControlTvtMpLocalLinkVehicleState,
     build_tvt_mp_candidate_local_state,
+    build_tvt_mp_candidate_local_state_from_serialized_world,
+    serialize_tvt_mp_candidate_real_world_snapshot,
 )
 from uxsim.order_control_tvt_mp_concrete_buyer_candidate_set import (
     OrderControlTvtMpConcreteBuyerCandidateSet,
@@ -666,6 +668,137 @@ def test_route_next_link_real_world_link_leak_is_runtime_error():
     assert world.VEHICLES["in_front"].route_next_link is world.get_link("out")
 
 
+def test_serialize_snapshot_returns_bytes_and_leaves_real_world_and_rng_unchanged():
+    world, _sequence = _ready_case()
+    before = _real_snapshot(world)
+    rng_before = _rng_snapshot(world)
+    serialized = serialize_tvt_mp_candidate_real_world_snapshot(world)
+    assert type(serialized) is bytes
+    assert len(serialized) > 0
+    assert _real_snapshot(world) == before
+    assert _rng_snapshot(world) == rng_before
+
+
+def test_two_loads_from_the_same_bytes_do_not_share_objects():
+    world, sequence = _ready_case()
+    serialized = serialize_tvt_mp_candidate_real_world_snapshot(world)
+    first = build_tvt_mp_candidate_local_state_from_serialized_world(
+        world,
+        sequence,
+        serialized,
+    )
+    second = build_tvt_mp_candidate_local_state_from_serialized_world(
+        world,
+        sequence,
+        serialized,
+    )
+    assert first.local_world is not second.local_world
+    assert first.local_world is not world
+    assert first.target_node is not second.target_node
+    assert first.target_node is not world.get_node("merge")
+    assert first.inlinks[0] is not second.inlinks[0]
+    assert first.inlinks[0] is not world.get_link(first.inlinks[0].name)
+    vehicle_name = first.local_vehicles[0].name
+    assert (
+        first.local_world.VEHICLES[vehicle_name]
+        is not second.local_world.VEHICLES[vehicle_name]
+    )
+    assert first.local_world.VEHICLES is not second.local_world.VEHICLES
+    assert first.local_world.VEHICLES is not world.VEHICLES
+
+
+def test_serialized_local_state_mutation_does_not_leak():
+    world, sequence = _ready_case()
+    serialized = serialize_tvt_mp_candidate_real_world_snapshot(world)
+    first = build_tvt_mp_candidate_local_state_from_serialized_world(
+        world,
+        sequence,
+        serialized,
+    )
+    second = build_tvt_mp_candidate_local_state_from_serialized_world(
+        world,
+        sequence,
+        serialized,
+    )
+    vehicle_name = first.local_vehicles[0].name
+    saved_second_x = second.local_world.VEHICLES[vehicle_name].x
+    saved_real_x = world.VEHICLES[vehicle_name].x
+    first.local_world.VEHICLES[vehicle_name].x = saved_second_x + 1000.0
+    assert second.local_world.VEHICLES[vehicle_name].x == saved_second_x
+    assert world.VEHICLES[vehicle_name].x == saved_real_x
+
+
+def test_serialized_local_states_keep_the_same_real_vehicle_ids():
+    world, sequence = _ready_case()
+    serialized = serialize_tvt_mp_candidate_real_world_snapshot(world)
+    first = build_tvt_mp_candidate_local_state_from_serialized_world(
+        world,
+        sequence,
+        serialized,
+    )
+    second = build_tvt_mp_candidate_local_state_from_serialized_world(
+        world,
+        sequence,
+        serialized,
+    )
+    names = sorted(first.local_vehicle_by_real_vehicle_name)
+    assert names == sorted(second.local_vehicle_by_real_vehicle_name)
+    for name in names:
+        assert first.real_vehicle_id(name) == second.real_vehicle_id(name)
+        assert first.real_vehicle_id(name) == world.VEHICLES[name].id
+
+
+def test_serialized_bytes_stay_unchanged_across_builds():
+    world, sequence = _ready_case()
+    serialized = serialize_tvt_mp_candidate_real_world_snapshot(world)
+    before = serialized
+    build_tvt_mp_candidate_local_state_from_serialized_world(world, sequence, serialized)
+    build_tvt_mp_candidate_local_state_from_serialized_world(world, sequence, serialized)
+    assert serialized == before
+    assert serialized is before
+
+
+def test_serialized_builder_rejects_non_bytes():
+    world, sequence = _ready_case()
+    try:
+        build_tvt_mp_candidate_local_state_from_serialized_world(
+            world,
+            sequence,
+            "not-bytes",
+        )
+        raise AssertionError("expected ValueError")
+    except ValueError as exc:
+        assert "bytes" in str(exc)
+
+
+def test_stale_binding_timestep_is_rejected_before_loads():
+    world, sequence = _ready_case()
+    world.T = 11
+    serialized = b"not-a-pickle"
+    before = serialized
+    try:
+        build_tvt_mp_candidate_local_state_from_serialized_world(
+            world,
+            sequence,
+            serialized,
+        )
+        raise AssertionError("expected timestep ValueError")
+    except ValueError as exc:
+        assert "11" in str(exc)
+        assert "10" in str(exc)
+        assert "does not match" in str(exc)
+    assert serialized == before
+    assert serialized is before
+
+
+def test_existing_copy_builder_still_returns_an_independent_world():
+    world, sequence = _ready_case()
+    state = build_tvt_mp_candidate_local_state(world, sequence)
+    assert state.local_world is not world
+    assert state.target_node is not world.get_node("merge")
+    assert state.local_world.VEHICLES["in_front"] is not world.VEHICLES["in_front"]
+
+
 TESTS = (
     test_public_types_are_frozen_and_local_world_stays_mutable,
     test_copy_extracts_local_targets_and_keeps_initial_traffic_state,
@@ -684,6 +817,14 @@ TESTS = (
     test_binding_sequence_type_error_is_value_error,
     test_frozen_auxiliary_types_reject_field_reassignment,
     test_route_next_link_real_world_link_leak_is_runtime_error,
+    test_serialize_snapshot_returns_bytes_and_leaves_real_world_and_rng_unchanged,
+    test_two_loads_from_the_same_bytes_do_not_share_objects,
+    test_serialized_local_state_mutation_does_not_leak,
+    test_serialized_local_states_keep_the_same_real_vehicle_ids,
+    test_serialized_bytes_stay_unchanged_across_builds,
+    test_serialized_builder_rejects_non_bytes,
+    test_stale_binding_timestep_is_rejected_before_loads,
+    test_existing_copy_builder_still_returns_an_independent_world,
 )
 
 

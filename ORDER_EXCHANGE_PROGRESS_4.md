@@ -1070,3 +1070,170 @@ FCFS との保存値比 **23,349 倍**を**純粋 CPU 性能倍率として採�
 **profiling または短期 benchmark の範囲を決めるまで、3,000 台 TVT-MP 全期間 trial は作成・実行しない。**
 
 **production 最適化、arrival tiebreaker、乱数源分離へ自動的に進まない。**
+
+**歴史的注記（§17 執筆時点との関係）:** 上記 §17.1・§17.11 は **FCFS 需要選定完了時点**（3,000 台 **TVT-MP 本体未作成**）の記録である。**2026-11-01 後続**に 3,000 台 TVT-MP **短期 benchmark**、**T=96 profiling**、**共有直列化** production 最適化、**完全一致再検証**まで実施した。**進捗の最新正本は §18**（本 §17 は改番・削除しない）。
+
+---
+
+## 18. 3,000台TVT-MP共有直列化最適化・完全一致検証と最新再開地点（2026-11-01）
+
+**検索語:** 3,000台TVT-MP、短期benchmark、T=0〜299、profiling、T=96、World.copy、dill、pickle、直列化、共有直列化、production最適化、完全一致、CSV完全一致、816取引、3.84倍、73.98%削減、N=10、baseline horizon 30、計算時間短縮、Python可読性。
+
+### 18.1 今回の作業範囲
+
+- 3,000 台 **TVT-MP** を **T=0〜299** で **通常実行**（最適化前 **短期 benchmark**）
+- **単一 timestep profiling**（**T=96**）
+- **Candidate 共有直列化 A/B 診断**（**T=96**）
+- **production 最適化**（Candidate 集合内 **dumps 1 回 / loads per Candidate**）
+- **関連 test**（**250 件**成功）
+- **最適化後全体再検証**（同一研究条件 + **`show_progress_deltat=600`**）
+- **CSV 全内容独立比較**（scenario_name 除外）
+- **production、test、script、diagnostic、出力**を **新規・変更**した
+- **まだ commit・push していない**（§18.11）
+
+### 18.2 最適化前短期benchmark
+
+**正本:** 詳細設計 **§29.2**。
+
+**主要条件:** §28 採用候補（3,000 台、departure T=0〜999、全 Link **200 m / 60 km/h**、capacity_in/out 未指定、内部 36 Node TVT-MP、**N=10**、baseline horizon **30**、evaluation **T=0〜299**、VOT seed **1** 等）。
+
+**主要結果:**
+
+- **816 取引**
+- **state** end **318** / home **2,099** / run **580** / wait **3**
+- **exec_simulation** **6295.571890000021 s**（**20.985239633333403 s/timestep**、約 **1 時間 45 分**）
+- **T=0〜299** は **交通立ち上がり期間**（T=999 強混雑を代表しない）
+
+### 18.3 profilingで特定した原因
+
+**正本:** 詳細設計 **§29.5**。
+
+- **T=96** の **1 timestep のみ** cProfile（T=0〜95 通常、T=0〜299 全体は profile しない）
+- **FIFO True Candidate 17 件**（当該 timestep）
+- **`World.copy()` 18 回**（Baseline 1 + Candidate 17）
+- Candidate 局所状態構築 **17 回**、累積約 **118.72 s**（cProfile 尺度）
+- **`dill.dumps` 累積約 124.324 s** が支配；**Candidate 仮想前進** 約 **0.198 s** は軽量
+- **主因:** Candidate **ごとの全 World 重複直列化**（**ボトルネック**）
+
+### 18.4 共有直列化A/B結果
+
+**正本:** 詳細設計 **§29.7**。
+
+| 指標 | 値 |
+|------|-----|
+| A 平均 wall-clock | **25.672572375042364 s** |
+| B 平均 wall-clock | **3.2193430835031904 s** |
+| 平均 speedup（A/B） | **7.9744754470549495 倍**（**T=96 Candidate 集合部分**。全体 **3.84 倍**と混同しない） |
+| 結果 | **完全一致** |
+| Candidate 独立 / real_W 不変 / 両 RNG 不変 | **確認済み** |
+| 判定 | **`promising_for_production_design_review`** |
+
+### 18.5 production変更
+
+**正本:** 詳細設計 **§29.8**。
+
+- Candidate **evaluation set** ごとに **`dill.dumps(real_W)` 1 回**（**FIFO True ≥1** のときのみ）
+- FIFO True Candidate **ごとに `loads` 1 回** → **独立 local World**
+- **FIFO True 0 件** / normal-not-generated / FIFO False のみ → **直列化なし**
+- **global cache・World 属性 cache なし**
+- 既存 **単独 `build_tvt_mp_candidate_local_state()`** は **`World.copy()` 互換**
+- **baseline copy**、**TVT-MP アルゴリズム**（FIFO、N、horizon、経済、rank、RNG）は **変更なし**
+- **Python 可読性:** 直列化・復元・局所状態構築を **明示的関数**で分割
+
+### 18.6 test結果
+
+**正本:** 詳細設計 **§29.9**。**関連 test 250 件すべて成功。**
+
+| モジュール | passed |
+|-----------|--------|
+| `tests_order_control_tvt_mp_candidate_local_state.py` | 25 |
+| `tests_order_control_tvt_mp_local_virtual_calculation_set.py` | 41 |
+| `tests_order_control_tvt_mp_local_virtual_calculation.py` | 90 |
+| `tests_order_control_tvt_mp_candidate_outlink_boundary.py` | 22 |
+| `tests_order_control_tvt_mp_candidate_unbound_fcfs_transfer.py` | 28 |
+| `tests_order_control_tvt_mp_candidate_virtual_time.py` | 13 |
+| `tests_order_control_tvt_mp_driver.py` | 31 |
+| **合計** | **250** |
+
+### 18.7 最適化後全体再検証
+
+**正本:** 詳細設計 **§29.10**。
+
+| 指標 | 値 |
+|------|-----|
+| exec_simulation | **1637.9535257919924 s** |
+| s / eval timestep | **5.459845085973308** |
+| speedup vs 最適化前 | **3.8435595338127504 倍** |
+| 短縮 | **4657.618364208029 s**（約 77 分 38 秒） |
+| runtime reduction | **73.9824506111392%** |
+| final_script_total 目安 | 約 **27 分 18 秒** |
+| 816 取引 | **一致** |
+| Vehicle 状態 / Link 数 / plan digest | **一致** |
+
+### 18.8 CSV完全一致
+
+**正本:** 詳細設計 **§29.11**。**scenario_name 列除外**の独立比較。
+
+- `tvt_mp_transactions.csv` **816** 行 — 完全一致
+- `tvt_mp_visits.csv` **1,927** 行 — 完全一致
+- `tvt_mp_vehicles.csv` **877** 行 — 完全一致
+- `tvt_mp_nodes.csv` **36** 行 — 完全一致
+- `tvt_mp_scenario.csv` **1** 行 — 完全一致
+- `vehicle_vot.csv` **3,000** 行 — 完全一致
+
+### 18.9 現時点の受入れ判断
+
+- **コード修正に問題なし**と判断（§29.12）
+- **追加の同規模完全一致 trial** は **直ちに不要**
+- **将来の別 seed・長期 trial** は **追加回帰確認**として利用可能
+- **production 最適化（Candidate 集合内共有直列化のみ）を受入れる**
+
+### 18.10 未完了事項
+
+- **文書化後の commit・push**
+- **正式な 3,000 台 TVT-MP evaluation end**
+- **internal TSIZE**（長期 trial 用）
+- **T=599** または **T=999** 延長 trial
+- **全車完走 trial** の要否
+- **複数 seed**
+- **長期 trial** の **計算時間**見積り（**単純比例禁止**）
+- **研究室デスクトップ**との性能比較
+- **memory pressure**（shared bytes）の実行時観察
+- **追加高速化**の要否（**自動進行しない**）
+
+**研究室デスクトップ（別論点）:**
+
+- 2 年前購入の **AMD Ryzen** 搭載 **らしい**が、**正確な CPU 型番・RAM・OS は未確認**
+- 現時点では研究室へ行かないと確認できないため、作業を **中断せず Mac で継続**
+- 将来、**同一 benchmark** で実機比較可能
+- **今回の production 最適化**とは **別論点**
+
+### 18.11 最新再開地点（本節）
+
+**本 §18 が進捗第4巻の最新再開地点である（2026-11-01 後半）。** 詳細設計正本 **§29** を正本とする（§28・§17 は **歴史的記録**として維持）。
+
+**再開時に最初に行うこと:**
+
+1. 詳細設計 **§29** と本 **§18** を読む。
+2. 今回の **変更・新規ファイル**（§29.14）と **出力 directory**（4 箇所）を確認する。
+3. **文書化を含めて commit・push** する。
+   - **commit 名に `document` を含める**
+   - **commit と push は分ける**
+   - **`diagnostics/order_control.zip` は対象外**
+   - 既存の **大量未追跡 diagnostic/output** を **自動 stage しない**
+4. **commit・push 後**、**正式な 3,000 台 TVT-MP** の **次の実行範囲**を **利用者判断**する。
+
+**次の判断前に自動進行しないもの:**
+
+- **追加 profiling**
+- **production 高速化**（baseline copy 最適化等）
+- **T=599 / T=999 / T=2,296** への **自動延長**
+
+**数値の整理（混同禁止）:**
+
+| 尺度 | speedup / 削減 |
+|------|----------------|
+| T=96 Candidate 集合 A/B | **≈7.97 倍**（§18.4） |
+| T=0〜299 全体通常 exec | **3.8435595338127504 倍**、**73.9824506111392% 削減**（§18.7） |
+
+**歴史的注記（§17 執筆時点との関係）:** 上記 §17.1・§17.11 は **FCFS 需要選定完了時点**（3,000 台 **TVT-MP 本体未作成**）の記録である。**2026-11-01 後続**に 3,000 台 TVT-MP **短期 benchmark**、**T=96 profiling**、**共有直列化** production 最適化、**完全一致再検証**まで実施した。**進捗の最新正本は §18**（本 §17 は改番・削除しない）。

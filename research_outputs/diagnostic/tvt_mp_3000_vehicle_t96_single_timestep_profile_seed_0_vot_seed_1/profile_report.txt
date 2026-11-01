@@ -1,0 +1,284 @@
+TVT-MP 3000-vehicle T=96 single-timestep cProfile diagnostic
+Purpose: identify dominant functions for wall-clock at the busiest single timestep.
+This is not a research evaluation trial.
+Profiling wall-clock must not be used as normal benchmark performance.
+
+Reference normal benchmark (evaluation T=0..299):
+  exec_simulation_seconds = 6295.571890000021
+  seconds_per_evaluation_timestep = 20.985239633333403
+  transaction_count = 816
+
+Profile scope:
+  profile_timestep = 96 (one timestep only)
+  unprofiled prefix = T=0..95
+  benchmark busiest single timestep T=96 transaction_count = 8
+
+World.T before profile = 96
+World.T after profile = 97
+normal_prefix_wall_seconds = 454.15548816602677
+profiled_single_timestep_wall_seconds = 126.19509074999951
+cProfile total function calls = 642089037
+vehicle_plan_sha256 = 0b1fc2d2b084c3c5ce94d0ec0c476de4b2c60d40543f58f789dd644d1e3d71d9
+transaction_count_before_t96_step = 142
+transaction_count_after_t96_step = 150
+transactions_established_at_t96 = 8
+vehicle_state_counts = {'end': 5, 'home': 2708, 'run': 284, 'wait': 3}
+recursion_limit_before = 1000
+recursion_limit_effective = 50000
+production_unchanged = True
+
+Cumulative time (top by cumulative):
+         642089037 function calls (545284990 primitive calls) in 126.189 seconds
+
+   Ordered by: cumulative time
+   List reduced from 1278 to 80 due to restriction <80>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+      2/1    0.022    0.011  126.195  126.195 uxsim.py:5145(exec_simulation)
+        1    0.000    0.000  126.155  126.155 order_control_tvt_mp_driver.py:76(run_tvt_mp_driver)
+       18    0.008    0.000  125.663    6.981 uxsim.py:5654(copy)
+       18    0.000    0.000  124.324    6.907 _dill.py:263(dumps)
+       18    0.088    0.005  124.324    6.907 _dill.py:250(dump)
+       18    0.000    0.000  124.236    6.902 _dill.py:426(dump)
+       18    0.000    0.000  124.236    6.902 pickle.py:473(dump)
+47393520/18   12.093    0.000  124.235    6.902 _dill.py:375(save)
+47393520/18   41.213    0.000  124.235    6.902 pickle.py:532(save)
+203148/18    0.321    0.000  124.235    6.902 pickle.py:619(save_reduce)
+384696/18    0.506    0.000  124.234    6.902 _dill.py:1240(save_module_dict)
+384660/18    0.301    0.000  124.234    6.902 pickle.py:983(save_dict)
+384786/18    1.589    0.000  124.234    6.902 pickle.py:994(_batch_setitems)
+        1    0.000    0.000  118.927  118.927 order_control_tvt_mp_local_virtual_calculation_set.py:75(evaluate_tvt_mp_candidate_local_virtual_calculations)
+       36    0.000    0.000  118.927    3.304 order_control_tvt_mp_local_virtual_calculation_set.py:484(_evaluate_one_fifo_node)
+       11    0.000    0.000  118.927   10.812 order_control_tvt_mp_local_virtual_calculation_set.py:439(_evaluate_complete_node_candidates)
+       17    0.000    0.000  118.927    6.996 order_control_tvt_mp_local_virtual_calculation_set.py:405(_evaluate_one_fifo_true_candidate)
+       17    0.000    0.000  118.720    6.984 order_control_tvt_mp_candidate_local_state.py:661(build_tvt_mp_candidate_local_state)
+757566/587484    5.261    0.000   99.746    0.000 pickle.py:956(_batch_appends)
+752382/603504    0.413    0.000   99.616    0.000 pickle.py:943(save_list)
+ 32544722    9.865    0.000   20.427    0.000 pickle.py:749(save_long)
+ 47393574    8.258    0.000   11.795    0.000 pickle.py:211(commit_frame)
+ 50941594    7.488    0.000   11.529    0.000 pickle.py:235(write)
+        1    0.000    0.000    7.220    7.220 order_control_tvt_baseline_fork_alignment.py:37(run_snapshot_fixed_baseline_fork_and_align_undetermined_visits)
+        1    0.000    0.000    7.219    7.219 order_control_baseline_driver.py:522(run_snapshot_fixed_baseline_fork_with_tvt_rank_ledger_registration)
+        1    0.000    0.000    6.947    6.947 order_control_baseline_driver.py:278(_prepare_baseline_fork)
+620102/296786    0.622    0.000    6.737    0.000 pickle.py:892(save_tuple)
+    72288    0.086    0.000    5.279    0.000 _dill.py:409(save_numpy_array)
+ 44726692    4.372    0.000    4.372    0.000 {built-in method _struct.pack}
+ 47597799    4.242    0.000    4.242    0.000 {method 'get' of 'dict' objects}
+ 50950522    4.154    0.000    4.154    0.000 {method 'write' of '_io.BytesIO' objects}
+ 47393592    3.443    0.000    3.443    0.000 {method 'tell' of '_io.BytesIO' objects}
+ 53287400    3.336    0.000    3.336    0.000 {built-in method builtins.id}
+ 10709100    1.880    0.000    2.821    0.000 pickle.py:523(get)
+ 37259408    2.756    0.000    2.756    0.000 {built-in method builtins.getattr}
+ 36684420    2.577    0.000    2.631    0.000 _dill.py:324(get)
+  2046496    1.381    0.000    2.431    0.000 pickle.py:488(memoize)
+ 47393520    2.405    0.000    2.405    0.000 pickle.py:603(persistent_id)
+  2035160    0.794    0.000    1.668    0.000 {built-in method builtins.all}
+       18    0.000    0.000    1.331    0.074 _dill.py:299(loads)
+       18    0.041    0.002    1.331    0.074 _dill.py:291(load)
+  1017576    0.263    0.000    1.314    0.000 _dill.py:132(numpydtype)
+       18    0.000    0.000    1.289    0.072 _dill.py:451(load)
+       18    1.042    0.058    1.289    0.072 {function Unpickler.load at 0x12852d8a0}
+  1017576    0.264    0.000    1.206    0.000 _dill.py:130(numpyufunc)
+  1017576    0.233    0.000    1.077    0.000 _dill.py:120(ndarraysubclassinstance)
+  1017615    0.446    0.000    0.942    0.000 {built-in method builtins.any}
+  1272834    0.364    0.000    0.776    0.000 pickle.py:780(save_float)
+  3797226    0.496    0.000    0.496    0.000 _dill.py:131(<genexpr>)
+  3797226    0.441    0.000    0.441    0.000 _dill.py:121(<genexpr>)
+  3608334    0.433    0.000    0.433    0.000 _dill.py:133(<genexpr>)
+4096419/4096389    0.317    0.000    0.317    0.000 {built-in method builtins.len}
+    94554    0.043    0.000    0.310    0.000 pickle.py:801(save_bytes)
+   101036    0.084    0.000    0.261    0.000 pickle.py:869(save_str)
+        1    0.000    0.000    0.255    0.255 order_control_baseline_driver.py:370(_complete_baseline_fork_after_registration)
+    72288    0.211    0.000    0.243    0.000 _dill.py:981(_create_array)
+    94446    0.081    0.000    0.227    0.000 _dill.py:113(__hook__)
+   915552    0.156    0.000    0.226    0.000 logger.py:136(trace)
+   574236    0.098    0.000    0.226    0.000 pickle.py:738(save_none)
+       17    0.000    0.000    0.198    0.012 order_control_tvt_mp_candidate_local_virtual_calculation.py:744(run_tvt_mp_candidate_local_virtual_calculation)
+      215    0.002    0.000    0.198    0.001 order_control_tvt_mp_candidate_local_virtual_calculation.py:595(run_tvt_mp_candidate_local_virtual_calculation_one_timestep)
+    92263    0.024    0.000    0.193    0.000 uxsim.py:3149(update)
+   384696    0.152    0.000    0.179    0.000 _dill.py:1236(_repr_dict)
+  2046496    0.171    0.000    0.171    0.000 pickle.py:511(put)
+    94554    0.067    0.000    0.152    0.000 pickle.py:787(_save_bytes_no_memo)
+    92320    0.076    0.000    0.147    0.000 uxsim.py:3913(record_log)
+   284004    0.091    0.000    0.146    0.000 <frozen importlib._bootstrap>:1390(_handle_fromlist)
+      215    0.006    0.000    0.127    0.001 order_control_tvt_mp_candidate_local_vehicle_advance.py:713(advance_tvt_mp_candidate_local_vehicles_and_register_new_arrivals)
+  1319298    0.115    0.000    0.115    0.000 {built-in method builtins.hasattr}
+  1154844    0.105    0.000    0.105    0.000 _dill.py:2237(is_dill)
+  1143018    0.103    0.000    0.103    0.000 {built-in method builtins.iter}
+      215    0.062    0.000    0.089    0.000 order_control_tvt_mp_candidate_local_vehicle_advance.py:208(_living_target_vehicles)
+    72288    0.082    0.000    0.082    0.000 {method '__reduce__' of 'numpy.ndarray' objects}
+   738676    0.079    0.000    0.079    0.000 {method 'append' of 'list' objects}
+   130734    0.069    0.000    0.075    0.000 {method '__reduce_ex__' of 'object' objects}
+922465/922461    0.072    0.000    0.073    0.000 {built-in method builtins.isinstance}
+   135288    0.032    0.000    0.063    0.000 pickle.py:742(save_bool)
+   130968    0.041    0.000    0.053    0.000 _dill.py:330(__missing__)
+   385897    0.042    0.000    0.042    0.000 {method 'items' of 'dict' objects}
+      215    0.004    0.000    0.036    0.000 order_control_tvt_mp_candidate_outlink_boundary.py:316(process_tvt_mp_candidate_outlink_boundaries_at_current_timestep)
+
+Internal time / tottime (top by tottime):
+         642089037 function calls (545284990 primitive calls) in 126.189 seconds
+
+   Ordered by: internal time
+   List reduced from 1278 to 80 due to restriction <80>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+47393520/18   41.213    0.000  124.235    6.902 pickle.py:532(save)
+47393520/18   12.093    0.000  124.235    6.902 _dill.py:375(save)
+ 32544722    9.865    0.000   20.427    0.000 pickle.py:749(save_long)
+ 47393574    8.258    0.000   11.795    0.000 pickle.py:211(commit_frame)
+ 50941594    7.488    0.000   11.529    0.000 pickle.py:235(write)
+757566/587484    5.261    0.000   99.746    0.000 pickle.py:956(_batch_appends)
+ 44726692    4.372    0.000    4.372    0.000 {built-in method _struct.pack}
+ 47597799    4.242    0.000    4.242    0.000 {method 'get' of 'dict' objects}
+ 50950522    4.154    0.000    4.154    0.000 {method 'write' of '_io.BytesIO' objects}
+ 47393592    3.443    0.000    3.443    0.000 {method 'tell' of '_io.BytesIO' objects}
+ 53287400    3.336    0.000    3.336    0.000 {built-in method builtins.id}
+ 37259408    2.756    0.000    2.756    0.000 {built-in method builtins.getattr}
+ 36684420    2.577    0.000    2.631    0.000 _dill.py:324(get)
+ 47393520    2.405    0.000    2.405    0.000 pickle.py:603(persistent_id)
+ 10709100    1.880    0.000    2.821    0.000 pickle.py:523(get)
+384786/18    1.589    0.000  124.234    6.902 pickle.py:994(_batch_setitems)
+  2046496    1.381    0.000    2.431    0.000 pickle.py:488(memoize)
+       18    1.042    0.058    1.289    0.072 {function Unpickler.load at 0x12852d8a0}
+  2035160    0.794    0.000    1.668    0.000 {built-in method builtins.all}
+620102/296786    0.622    0.000    6.737    0.000 pickle.py:892(save_tuple)
+384696/18    0.506    0.000  124.234    6.902 _dill.py:1240(save_module_dict)
+  3797226    0.496    0.000    0.496    0.000 _dill.py:131(<genexpr>)
+  1017615    0.446    0.000    0.942    0.000 {built-in method builtins.any}
+  3797226    0.441    0.000    0.441    0.000 _dill.py:121(<genexpr>)
+  3608334    0.433    0.000    0.433    0.000 _dill.py:133(<genexpr>)
+752382/603504    0.413    0.000   99.616    0.000 pickle.py:943(save_list)
+  1272834    0.364    0.000    0.776    0.000 pickle.py:780(save_float)
+203148/18    0.321    0.000  124.235    6.902 pickle.py:619(save_reduce)
+4096419/4096389    0.317    0.000    0.317    0.000 {built-in method builtins.len}
+384660/18    0.301    0.000  124.234    6.902 pickle.py:983(save_dict)
+  1017576    0.264    0.000    1.206    0.000 _dill.py:130(numpyufunc)
+  1017576    0.263    0.000    1.314    0.000 _dill.py:132(numpydtype)
+  1017576    0.233    0.000    1.077    0.000 _dill.py:120(ndarraysubclassinstance)
+    72288    0.211    0.000    0.243    0.000 _dill.py:981(_create_array)
+  2046496    0.171    0.000    0.171    0.000 pickle.py:511(put)
+   915552    0.156    0.000    0.226    0.000 logger.py:136(trace)
+   384696    0.152    0.000    0.179    0.000 _dill.py:1236(_repr_dict)
+  1319298    0.115    0.000    0.115    0.000 {built-in method builtins.hasattr}
+  1154844    0.105    0.000    0.105    0.000 _dill.py:2237(is_dill)
+  1143018    0.103    0.000    0.103    0.000 {built-in method builtins.iter}
+   574236    0.098    0.000    0.226    0.000 pickle.py:738(save_none)
+   284004    0.091    0.000    0.146    0.000 <frozen importlib._bootstrap>:1390(_handle_fromlist)
+       18    0.088    0.005  124.324    6.907 _dill.py:250(dump)
+    72288    0.086    0.000    5.279    0.000 _dill.py:409(save_numpy_array)
+   101036    0.084    0.000    0.261    0.000 pickle.py:869(save_str)
+    72288    0.082    0.000    0.082    0.000 {method '__reduce__' of 'numpy.ndarray' objects}
+    94446    0.081    0.000    0.227    0.000 _dill.py:113(__hook__)
+   738676    0.079    0.000    0.079    0.000 {method 'append' of 'list' objects}
+    92320    0.076    0.000    0.147    0.000 uxsim.py:3913(record_log)
+922465/922461    0.072    0.000    0.073    0.000 {built-in method builtins.isinstance}
+   130734    0.069    0.000    0.075    0.000 {method '__reduce_ex__' of 'object' objects}
+    94554    0.067    0.000    0.152    0.000 pickle.py:787(_save_bytes_no_memo)
+      215    0.062    0.000    0.089    0.000 order_control_tvt_mp_candidate_local_vehicle_advance.py:208(_living_target_vehicles)
+    94554    0.043    0.000    0.310    0.000 pickle.py:801(save_bytes)
+   385897    0.042    0.000    0.042    0.000 {method 'items' of 'dict' objects}
+       18    0.041    0.002    1.331    0.074 _dill.py:291(load)
+   130968    0.041    0.000    0.053    0.000 _dill.py:330(__missing__)
+   135288    0.032    0.000    0.063    0.000 pickle.py:742(save_bool)
+   268091    0.024    0.000    0.024    0.000 {built-in method builtins.issubclass}
+    92263    0.024    0.000    0.193    0.000 uxsim.py:3149(update)
+      2/1    0.022    0.011  126.195  126.195 uxsim.py:5145(exec_simulation)
+    72288    0.017    0.000    0.017    0.000 {method '__setstate__' of 'numpy.ndarray' objects}
+    72288    0.016    0.000    0.016    0.000 {built-in method numpy._core.multiarray._reconstruct}
+   101036    0.015    0.000    0.015    0.000 {method 'encode' of 'str' objects}
+   203283    0.015    0.000    0.015    0.000 {built-in method builtins.callable}
+     1430    0.014    0.000    0.019    0.000 uxsim.py:3738(route_next_link_choice)
+17311/431    0.008    0.000    0.018    0.000 copy.py:119(deepcopy)
+       18    0.008    0.000  125.663    6.981 uxsim.py:5654(copy)
+      860    0.007    0.000    0.013    0.000 order_control_tvt_mp_candidate_outlink_boundary.py:1040(_snapshot_outlink)
+      215    0.006    0.000    0.127    0.001 order_control_tvt_mp_candidate_local_vehicle_advance.py:713(advance_tvt_mp_candidate_local_vehicles_and_register_new_arrivals)
+     3631    0.006    0.000    0.015    0.000 order_control_tvt_mp_candidate_local_vehicle_advance.py:232(_require_vehicle_can_be_advanced)
+    29478    0.005    0.000    0.009    0.000 order_control_tvt_mp_candidate_local_vehicle_advance.py:142(_require_number)
+     5274    0.005    0.000    0.006    0.000 copyreg.py:107(_slotnames)
+      215    0.004    0.000    0.036    0.000 order_control_tvt_mp_candidate_outlink_boundary.py:316(process_tvt_mp_candidate_outlink_boundaries_at_current_timestep)
+      860    0.003    0.000    0.008    0.000 order_control_tvt_mp_candidate_outlink_boundary.py:579(_prevalidate_outlink)
+     5208    0.003    0.000    0.011    0.000 uxsim.py:2647(update)
+     2084    0.003    0.000    0.005    0.000 order_control_tvt_mp_candidate_outlink_boundary.py:1030(_copy_log_rows)
+      860    0.003    0.000    0.010    0.000 order_control_tvt_mp_candidate_outlink_boundary.py:743(_apply_outlink_boundary)
+     1720    0.003    0.000    0.007    0.000 order_control_tvt_mp_candidate_virtual_time.py:213(_next_link_capacity_remains)
+     1800    0.003    0.000    0.004    0.000 order_control_baseline_downstream_boundary.py:299(capture_before_transfer)
+
+Interested-function partial-match summary
+----------------------------------------
+
+World.copy:
+  ncalls=18 tottime=0.008033 cumtime=125.662853 uxsim.py:5654(copy)
+
+dill/pickle dumps:
+  ncalls=18 tottime=0.000054 cumtime=124.323902 _dill.py:263(dumps)
+
+dill/pickle loads:
+  ncalls=18 tottime=0.000030 cumtime=1.330919 _dill.py:299(loads)
+
+run_tvt_mp_driver:
+  ncalls=1 tottime=0.000052 cumtime=126.154907 order_control_tvt_mp_driver.py:76(run_tvt_mp_driver)
+
+baseline (funcname):
+  ncalls=1 tottime=0.000054 cumtime=7.220063 order_control_tvt_baseline_fork_alignment.py:37(run_snapshot_fixed_baseline_fork_and_align_undetermined_visits)
+  ncalls=1 tottime=0.000077 cumtime=7.218529 order_control_baseline_driver.py:522(run_snapshot_fixed_baseline_fork_with_tvt_rank_ledger_registration)
+  ncalls=1 tottime=0.000011 cumtime=6.947417 order_control_baseline_driver.py:278(_prepare_baseline_fork)
+  ncalls=1 tottime=0.000011 cumtime=0.255356 order_control_baseline_driver.py:370(_complete_baseline_fork_after_registration)
+  ncalls=563 tottime=0.000632 cumtime=0.011265 order_control_tvt_mp_physical_transfer.py:731(_try_unconfirmed_baseline_vehicles)
+
+candidate (funcname):
+  ncalls=1 tottime=0.000029 cumtime=118.926890 order_control_tvt_mp_local_virtual_calculation_set.py:75(evaluate_tvt_mp_candidate_local_virtual_calculations)
+  ncalls=11 tottime=0.000134 cumtime=118.926737 order_control_tvt_mp_local_virtual_calculation_set.py:439(_evaluate_complete_node_candidates)
+  ncalls=17 tottime=0.000067 cumtime=118.926565 order_control_tvt_mp_local_virtual_calculation_set.py:405(_evaluate_one_fifo_true_candidate)
+  ncalls=17 tottime=0.000359 cumtime=118.720149 order_control_tvt_mp_candidate_local_state.py:661(build_tvt_mp_candidate_local_state)
+  ncalls=17 tottime=0.000129 cumtime=0.198151 order_control_tvt_mp_candidate_local_virtual_calculation.py:744(run_tvt_mp_candidate_local_virtual_calculation)
+
+local virtual (funcname):
+  ncalls=1 tottime=0.000029 cumtime=118.926890 order_control_tvt_mp_local_virtual_calculation_set.py:75(evaluate_tvt_mp_candidate_local_virtual_calculations)
+  ncalls=17 tottime=0.000359 cumtime=118.720149 order_control_tvt_mp_candidate_local_state.py:661(build_tvt_mp_candidate_local_state)
+  ncalls=17 tottime=0.000129 cumtime=0.198151 order_control_tvt_mp_candidate_local_virtual_calculation.py:744(run_tvt_mp_candidate_local_virtual_calculation)
+  ncalls=215 tottime=0.002315 cumtime=0.197984 order_control_tvt_mp_candidate_local_virtual_calculation.py:595(run_tvt_mp_candidate_local_virtual_calculation_one_timestep)
+  ncalls=215 tottime=0.005907 cumtime=0.127342 order_control_tvt_mp_candidate_local_vehicle_advance.py:713(advance_tvt_mp_candidate_local_vehicles_and_register_new_arrivals)
+
+decision (funcname):
+  ncalls=1 tottime=0.000083 cumtime=0.000435 order_control_tvt_leading_nonparticipating_confirmation.py:231(confirm_leading_nonparticipating_decision_window_visits)
+  ncalls=1 tottime=0.000046 cumtime=0.000097 order_control_tvt_right_of_entry_selection.py:115(select_right_of_entry_decision_window_visits)
+  ncalls=36 tottime=0.000014 cumtime=0.000015 order_control_tvt_leading_nonparticipating_confirmation.py:67(_extract_decision_window_visit_keys)
+  ncalls=1 tottime=0.000004 cumtime=0.000012 order_control_tvt_mp_atomic_apply.py:492(_require_decision_timestep)
+  ncalls=36 tottime=0.000006 cumtime=0.000009 order_control_tvt_leading_nonparticipating_confirmation.py:113(_remaining_decision_window_visit_keys)
+
+transaction (funcname):
+  ncalls=600 tottime=0.000061 cumtime=0.000061 order_control_tvt_mp_actual_passage.py:2715(_validate_trade_transaction_key_matches_trade_wait)
+  ncalls=150 tottime=0.000037 cumtime=0.000052 order_control_tvt_mp_actual_passage.py:3380(_validate_trade_ex_post_result_identity_for_transaction_key)
+  ncalls=10 tottime=0.000001 cumtime=0.000001 order_control_tvt_mp_actual_passage.py:1642(_transaction_key_from_wait_entry)
+
+rank (funcname):
+  ncalls=1 tottime=0.000077 cumtime=7.218529 order_control_baseline_driver.py:522(run_snapshot_fixed_baseline_fork_with_tvt_rank_ledger_registration)
+  ncalls=17 tottime=0.000263 cumtime=0.004397 order_control_tvt_mp_local_binding_rank_sequence.py:853(build_tvt_mp_local_binding_rank_sequence)
+  ncalls=667 tottime=0.001668 cumtime=0.002755 order_control_tvt_mp_physical_transfer.py:553(_copy_validated_current_visit_rank_fields)
+  ncalls=1491 tottime=0.000422 cumtime=0.001700 order_control_tvt_node_rank_state.py:663(assigned_rank)
+  ncalls=371 tottime=0.000750 cumtime=0.001231 order_control_tvt_mp_physical_transfer.py:451(_copy_validated_baseline_rank_fields)
+
+passage (funcname):
+  ncalls=1116 tottime=0.001467 cumtime=0.022419 order_control_tvt_mp_physical_transfer.py:68(transfer_tvt_mp_passage_attempts)
+  ncalls=1 tottime=0.000012 cumtime=0.012643 uxsim.py:5113(_maybe_finalize_tvt_mp_evaluation_end_unobserved_passages)
+  ncalls=215 tottime=0.000498 cumtime=0.002723 order_control_tvt_mp_candidate_local_virtual_calculation.py:1497(_apply_binding_transfer_required_passage_and_traffic_observation_updates)
+  ncalls=1 tottime=0.000074 cumtime=0.002695 order_control_tvt_mp_actual_passage.py:2843(prepare_tvt_mp_actual_passage_evaluation_end_unobserved_finalization)
+  ncalls=134 tottime=0.001102 cumtime=0.001470 order_control_tvt_mp_actual_passage.py:2399(_require_existing_node_passage_records)
+
+build_tvt_mp (funcname):
+  ncalls=17 tottime=0.000359 cumtime=118.720149 order_control_tvt_mp_candidate_local_state.py:661(build_tvt_mp_candidate_local_state)
+  ncalls=17 tottime=0.000263 cumtime=0.004397 order_control_tvt_mp_local_binding_rank_sequence.py:853(build_tvt_mp_local_binding_rank_sequence)
+  ncalls=1 tottime=0.000034 cumtime=0.000717 order_control_tvt_mp_general_trade_rank.py:1099(build_tvt_mp_general_trade_ranks)
+  ncalls=1 tottime=0.000018 cumtime=0.000552 order_control_tvt_mp_final_rank.py:160(build_tvt_mp_final_ranks)
+  ncalls=1 tottime=0.000029 cumtime=0.000422 order_control_tvt_mp_fifo_inspection.py:472(build_tvt_mp_fifo_inspection_results)
+
+Node.transfer:
+  ncalls=1860 tottime=0.001003 cumtime=0.025956 uxsim.py:2383(transfer)
+
+Vehicle.update:
+  ncalls=92263 tottime=0.024145 cumtime=0.192560 uxsim.py:3149(update)
+  ncalls=5208 tottime=0.003297 cumtime=0.010799 uxsim.py:2647(update)
+  ncalls=1860 tottime=0.000526 cumtime=0.002012 uxsim.py:2420(update)
+
+route search:
+  (no matching entries in this profile scope)

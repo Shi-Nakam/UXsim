@@ -665,6 +665,7 @@ class _StageHarness:
         self.local_states = []
         self.calc_states = []
         self.original_world_copy = World.copy
+        self.serialize_calls = 0
 
     def binding(self, fifo_set, ticket, rank_state):
         self.binding_calls.append((fifo_set, ticket, rank_state))
@@ -675,8 +676,8 @@ class _StageHarness:
         concrete = ticket.general_trade_rank_result.concrete_buyer_candidate_set
         return _dummy_binding_sequence(rank_state.node_name, concrete)
 
-    def local_state(self, real_W, sequence):
-        self.local_state_calls.append((real_W, sequence))
+    def local_state(self, real_W, sequence, serialized_real_world=None):
+        self.local_state_calls.append((real_W, sequence, serialized_real_world))
         if self.raise_on_local_state == len(self.local_state_calls):
             raise self.local_state_error
         if self.local_state_error is not None and self.raise_on_local_state is None:
@@ -719,6 +720,10 @@ class _StageHarness:
             resolved=resolved,
         )
 
+    def serialize(self, real_W):
+        self.serialize_calls += 1
+        return b"one-decision-snapshot"
+
     def world_copy(self, world):
         copied = self.original_world_copy(world)
         self.copied_worlds.append(copied)
@@ -735,8 +740,13 @@ def _patched_stage_apis(harness: _StageHarness):
         ),
         patch.object(
             set_mod,
-            "build_tvt_mp_candidate_local_state",
+            "build_tvt_mp_candidate_local_state_from_serialized_world",
             harness.local_state,
+        ),
+        patch.object(
+            set_mod,
+            "serialize_tvt_mp_candidate_real_world_snapshot",
+            harness.serialize,
         ),
         patch.object(
             set_mod,
@@ -1200,6 +1210,7 @@ def test_normal_not_generated_statuses_return_empty_without_rank_boundary_or_cop
         assert node_result.candidate_local_virtual_calculation_results == ()
         assert harness.binding_calls == []
         assert harness.copied_worlds == []
+        assert harness.serialize_calls == 0
         assert harness.init_calls == []
 
 
@@ -1217,6 +1228,7 @@ def test_complete_with_zero_candidates_is_empty_and_does_not_require_rank_or_bou
     assert node_result.candidate_local_virtual_calculation_results == ()
     assert harness.binding_calls == []
     assert harness.copied_worlds == []
+    assert harness.serialize_calls == 0
 
 
 def test_complete_all_fifo_false_is_empty_and_keeps_false_on_fifo_result():
@@ -1231,6 +1243,7 @@ def test_complete_all_fifo_false_is_empty_and_keeps_false_on_fifo_result():
     assert result.fifo_inspection_set_result is fifo_set
     assert harness.binding_calls == []
     assert harness.copied_worlds == []
+    assert harness.serialize_calls == 0
     assert harness.run_calls == []
 
 
@@ -1776,7 +1789,8 @@ def test_production_source_keeps_required_shape_and_forbids_out_of_scope_work():
     assert "for node_index, fifo_node_result in enumerate" in source_text
     assert "for candidate_fifo_inspection_result in" in source_text
     assert "build_tvt_mp_local_binding_rank_sequence" in source_text
-    assert "build_tvt_mp_candidate_local_state" in source_text
+    assert "build_tvt_mp_candidate_local_state_from_serialized_world" in source_text
+    assert "serialize_tvt_mp_candidate_real_world_snapshot" in source_text
     assert "initialize_tvt_mp_candidate_local_virtual_calculation_state" in source_text
     assert "run_tvt_mp_candidate_local_virtual_calculation(" in source_text
     lowered = source_text.lower()
@@ -1858,13 +1872,25 @@ def test_end_to_end_one_unresolved_candidate_is_kept():
 
 
 def test_end_to_end_mixed_true_false_and_independent_copies():
-    copied = []
+    restored = []
+    serialize_calls = {"n": 0}
+    copy_calls = {"n": 0}
+    original_build = set_mod.build_tvt_mp_candidate_local_state_from_serialized_world
+    original_serialize = set_mod.serialize_tvt_mp_candidate_real_world_snapshot
     original_copy = World.copy
 
+    def counting_serialize(real_W):
+        serialize_calls["n"] += 1
+        return original_serialize(real_W)
+
+    def counting_build(real_W, sequence, serialized_real_world):
+        state = original_build(real_W, sequence, serialized_real_world)
+        restored.append(state.local_world)
+        return state
+
     def counting_copy(world):
-        copied_world = original_copy(world)
-        copied.append(copied_world)
-        return copied_world
+        copy_calls["n"] += 1
+        return original_copy(world)
 
     world, fifo_set, rank_states, collector, visit_keys, created = _prepare_end_to_end_buyers(
         [
@@ -1888,9 +1914,20 @@ def test_end_to_end_mixed_true_false_and_independent_copies():
     )
     fingerprint = _world_fingerprint(world)
     rng_before = copy.deepcopy(world.rng.bit_generator.state)
-    with patch.object(World, "copy", counting_copy):
+    order_rng_before = copy.deepcopy(world.order_control_rng.bit_generator.state)
+    with (
+        patch.object(set_mod, "serialize_tvt_mp_candidate_real_world_snapshot", counting_serialize),
+        patch.object(
+            set_mod,
+            "build_tvt_mp_candidate_local_state_from_serialized_world",
+            counting_build,
+        ),
+        patch.object(World, "copy", counting_copy),
+    ):
         result = _evaluate(world, fifo_set, rank_states)
-    assert len(copied) == 1
+    assert serialize_calls["n"] == 1
+    assert len(restored) == 1
+    assert copy_calls["n"] == 0
     kept = result.node_local_virtual_calculation_results[0].candidate_local_virtual_calculation_results
     assert len(kept) == 1
     assert kept[0].concrete_buyer_candidate_set is (
@@ -1899,6 +1936,7 @@ def test_end_to_end_mixed_true_false_and_independent_copies():
     assert _fifo_tickets(fifo_set)[1].preserves_inlink_fifo is False
     assert _world_fingerprint(world) == fingerprint
     assert world.rng.bit_generator.state == rng_before
+    assert world.order_control_rng.bit_generator.state == order_rng_before
     assert collector is (
         fifo_set.general_trade_rank_set_result.concrete_buyer_candidate_set_result.inlink_candidate_physical_order_result.candidate_visit_set_result.right_of_entry_selection_result.leading_confirmation_result.arrived_confirmation_result.alignment_fork_result.fork_result.collector
     )
@@ -1906,13 +1944,25 @@ def test_end_to_end_mixed_true_false_and_independent_copies():
 
 
 def test_end_to_end_two_true_candidates_use_separate_copies_and_keep_identity_order():
-    copied = []
+    restored = []
+    serialize_calls = {"n": 0}
+    copy_calls = {"n": 0}
+    original_build = set_mod.build_tvt_mp_candidate_local_state_from_serialized_world
+    original_serialize = set_mod.serialize_tvt_mp_candidate_real_world_snapshot
     original_copy = World.copy
 
+    def counting_serialize(real_W):
+        serialize_calls["n"] += 1
+        return original_serialize(real_W)
+
+    def counting_build(real_W, sequence, serialized_real_world):
+        state = original_build(real_W, sequence, serialized_real_world)
+        restored.append(state.local_world)
+        return state
+
     def counting_copy(world):
-        copied_world = original_copy(world)
-        copied.append(copied_world)
-        return copied_world
+        copy_calls["n"] += 1
+        return original_copy(world)
 
     world, fifo_set, rank_states, collector, visit_keys, created = _prepare_end_to_end_buyers(
         [
@@ -1935,14 +1985,26 @@ def test_end_to_end_two_true_candidates_use_separate_copies_and_keep_identity_or
         fifo_flags=(True, True),
     )
     fingerprint = _world_fingerprint(world)
-    with patch.object(World, "copy", counting_copy):
+    rng_before = copy.deepcopy(world.rng.bit_generator.state)
+    order_rng_before = copy.deepcopy(world.order_control_rng.bit_generator.state)
+    with (
+        patch.object(set_mod, "serialize_tvt_mp_candidate_real_world_snapshot", counting_serialize),
+        patch.object(
+            set_mod,
+            "build_tvt_mp_candidate_local_state_from_serialized_world",
+            counting_build,
+        ),
+        patch.object(World, "copy", counting_copy),
+    ):
         result = _evaluate(world, fifo_set, rank_states)
-    assert len(copied) == 2
-    assert copied[0] is not copied[1]
-    assert copied[0].get_node("merge") is not copied[1].get_node("merge")
-    assert copied[0].VEHICLES["buyer_a"] is not copied[1].VEHICLES["buyer_a"]
-    copied[0].T = 99
-    assert copied[1].T == BASELINE_T
+    assert serialize_calls["n"] == 1
+    assert len(restored) == 2
+    assert copy_calls["n"] == 0
+    assert restored[0] is not restored[1]
+    assert restored[0].get_node("merge") is not restored[1].get_node("merge")
+    assert restored[0].VEHICLES["buyer_a"] is not restored[1].VEHICLES["buyer_a"]
+    restored[0].T = 99
+    assert restored[1].T == BASELINE_T
     assert world.T == BASELINE_T
     kept = result.node_local_virtual_calculation_results[0].candidate_local_virtual_calculation_results
     tickets = _fifo_tickets(fifo_set)
@@ -1984,6 +2046,8 @@ def test_end_to_end_two_true_candidates_use_separate_copies_and_keep_identity_or
         id(tickets[1].general_trade_rank_result.concrete_buyer_candidate_set),
     ]
     assert _world_fingerprint(world) == fingerprint
+    assert world.rng.bit_generator.state == rng_before
+    assert world.order_control_rng.bit_generator.state == order_rng_before
     assert created["buyer_a"] is world.VEHICLES["buyer_a"]
     assert visit_keys[0][0] == "buyer_a"
 
@@ -2020,13 +2084,13 @@ def test_end_to_end_outlink_order_mismatch_is_detected_by_existing_initialize():
 
 
 def test_end_to_end_second_candidate_error_does_not_rollback_first_copy_or_real_world():
-    copied = []
-    original_copy = World.copy
+    restored = []
+    original_build = set_mod.build_tvt_mp_candidate_local_state_from_serialized_world
 
-    def counting_copy(world):
-        copied_world = original_copy(world)
-        copied.append(copied_world)
-        return copied_world
+    def counting_build(real_W, sequence, serialized_real_world):
+        state = original_build(real_W, sequence, serialized_real_world)
+        restored.append(state.local_world)
+        return state
 
     world, fifo_set, rank_states, _collector, _visit_keys, _created = _prepare_end_to_end_buyers(
         [
@@ -2049,6 +2113,8 @@ def test_end_to_end_second_candidate_error_does_not_rollback_first_copy_or_real_
         fifo_flags=(True, True),
     )
     fingerprint = _world_fingerprint(world)
+    rng_before = copy.deepcopy(world.rng.bit_generator.state)
+    order_rng_before = copy.deepcopy(world.order_control_rng.bit_generator.state)
     original_run = set_mod.run_tvt_mp_candidate_local_virtual_calculation
     run_count = {"n": 0}
 
@@ -2061,7 +2127,11 @@ def test_end_to_end_second_candidate_error_does_not_rollback_first_copy_or_real_
             return result
         raise RuntimeError("second candidate failed")
 
-    with patch.object(World, "copy", counting_copy):
+    with patch.object(
+        set_mod,
+        "build_tvt_mp_candidate_local_state_from_serialized_world",
+        counting_build,
+    ):
         with patch.object(
             set_mod,
             "run_tvt_mp_candidate_local_virtual_calculation",
@@ -2072,13 +2142,15 @@ def test_end_to_end_second_candidate_error_does_not_rollback_first_copy_or_real_
                 raise AssertionError("expected RuntimeError")
             except RuntimeError as error:
                 assert "second candidate failed" in str(error)
-    assert len(copied) == 2
-    assert copied[0] is not copied[1]
-    assert copied[0] is not world
-    assert copied[0]._set_entry_keep_marker == "first-candidate-not-rolled-back"
+    assert len(restored) == 2
+    assert restored[0] is not restored[1]
+    assert restored[0] is not world
+    assert restored[0]._set_entry_keep_marker == "first-candidate-not-rolled-back"
     assert not hasattr(world, "_set_entry_keep_marker")
-    assert not hasattr(copied[1], "_set_entry_keep_marker")
+    assert not hasattr(restored[1], "_set_entry_keep_marker")
     assert _world_fingerprint(world) == fingerprint
+    assert world.rng.bit_generator.state == rng_before
+    assert world.order_control_rng.bit_generator.state == order_rng_before
 
 
 def test_end_to_end_resolved_and_unresolved_mix_on_one_node():
