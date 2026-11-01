@@ -1,0 +1,36 @@
+FCFS 6x6 grid 3000-vehicle departure-1200 evaluation-T1200 pretrial
+Not a formal performance comparison. No TVT-MP benchmark comparison.
+scenario: fcfs_6x6_grid_3000_vehicle_departure_1200_evaluation_t1200_pretrial_seed_0_demand_seed_42
+purpose: Light FCFS pretrial before a future 3000-vehicle TVT-MP trial. Measures FCFS traffic state and runtime at T=1200 after injecting 3000 vehicles over departure T=0..1200 on the same 6x6 network as prior FCFS scaling scripts. Provides prior information for choosing evaluation end, internal TSIZE, and observation horizon of the future TVT-MP trial. Not a formal performance comparison. Does not compare to the 5000-vehicle TVT-MP benchmark.
+This pretrial stops at T=1200. Full trip completion for all vehicles is not required. The timestep when all vehicles would complete is not measured.
+This pretrial observes FCFS traffic state at the departure-end evaluation timestep T=1200 after a single exec_simulation. No segmented execution or extension to full completion.
+This pretrial alone does not classify the 3000-vehicle departure 0..1200 condition as normal demand, quasi-high demand, or high demand.
+vehicles: 3000
+departure: T=0..1200
+simulation: T=0..1200 (World.T after sim=1201)
+FCFS internal nodes: 36
+FCFS clearance timesteps: 1
+vehicle state counts: {'end': 1702, 'run': 1297, 'wait': 1}
+completed: 1702
+not completed: 1298
+internal link vehicles: 1223 (aggregate occupancy 0.127396)
+external->internal connector vehicles: 53 (aggregate occupancy 0.036806)
+internal->external connector vehicles: 21 (aggregate occupancy 0.014583)
+links at or above 90% occupancy (all links): 0
+exec_simulation seconds: 2.8749280829215422
+seconds per simulated timestep: 0.0023937785869454975
+vehicle_plan_generation seconds: 0.005297375028021634
+world_build seconds: 0.0022647500736638904
+vehicle_add seconds: 0.035370625089854
+finalize seconds: 14.572901207953691
+exec_simulation seconds: 2.8749280829215422
+result_collection seconds: 0.0022194579942151904
+pre_manifest_output_write seconds: 0.0007776250131428242
+pre_manifest_script_total seconds: 17.494064625003375
+seconds per simulated timestep: 0.0023937785869454975
+timing scope note: pre_manifest_script_total_seconds ends after link_occupancy_at_t1200.csv, vehicle_state_summary.csv, and vehicle_plan_audit.json are written. manifest.json write time and run_summary.txt write time are not included in manifest timing fields.
+manifest_write seconds: 0.0004595409845933318
+run_summary timing scope note: run_summary.txt write time is not included in the timing lines above. run_summary_write_seconds is appended on the last line after the file is closed.
+output directory: /Users/nishinarilab/Documents/UXsim_GitHub_original/UXsim/research_outputs/trial/fcfs_6x6_grid_3000_vehicle_departure_1200_evaluation_t1200_pretrial_seed_0_demand_seed_42
+Production code and existing reference files were not modified.
+run_summary_write seconds: 0.0001232079230248928

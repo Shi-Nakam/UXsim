@@ -920,7 +920,9 @@ FCFS との保存値比 **23,349 倍**を**純粋 CPU 性能倍率として採�
 
 ### 16.12 最新再開地点（本節）
 
-**本 §16 が進捗第4巻の最新再開地点である（2026-10-31）。**
+**本 §16 は 2026-10-31 時点の再開地点として記録する（歴史的記録）。**
+
+**2026-11-01 以降の最新再開地点は §17。** 3,000 台 FCFS 需要選定・**TMAX=5000** 完走確認の詳細は詳細正本 **§28**。
 
 | 論点 | 正本 |
 |------|------|
@@ -954,3 +956,117 @@ FCFS との保存値比 **23,349 倍**を**純粋 CPU 性能倍率として採�
 - `ORDER_EXCHANGE_PROGRESS_4.md`
 
 `research_outputs` の採否は**未決定**。既存未追跡ファイルを**自動 stage しない**。関連ファイルが他にも存在する可能性があるため、**Git 対象を最終確定しない**。
+
+**最新参照（2026-11-01）:** 3,000 台 FCFS 需要選定・**TMAX=5000** 完走確認の詳細は詳細正本 **§28**。進捗の最新再開地点は **§17**（本 **§16** は 5,000 台スケーリング時点の歴史的記録として維持）。
+
+---
+
+## 17. 3,000台FCFS需要条件選定・全車完走確認と最新再開地点（2026-11-01）
+
+**検索語:** 3,000台、3台/timestep、2.5台/timestep、200m Link、60km/h、capacity_in、capacity_out、臨界密度、FCFS完走確認、TMAX=5000、最終完走時刻、需要条件選定、TVT-MP評価期間、vehicle plan digest。
+
+### 17.1 今回の作業範囲
+
+- **5,000 台集中投入**（§16）の次に、**3,000 台**条件を **FCFS** で選定した。
+- **新規 FCFS スクリプト 4 本**を作成・実行した（§17.2）。
+- **production**、既存 trial、既存 test、既存出力は **変更していない**。
+- **3,000 台 TVT-MP 本体**は **未作成・未実行**。
+
+### 17.2 作成・実行した4スクリプト
+
+| # | スクリプト | 役割 |
+|---|-----------|------|
+| 1 | `run_fcfs_6x6_grid_3000_vehicle_departure_1200_evaluation_t1200_pretrial.py` | 当初 **400 m / 300 m / 20 m/s**、**2.5 台/timestep**、T=1,200 観測（道路未調整） |
+| 2 | `run_fcfs_6x6_grid_3000_vehicle_all_links_200m_speed_60kph_departure_1200_evaluation_t1200_pretrial.py` | **全 Link 200 m / 60 km/h**、**2.5 台/timestep**、T=1,200 観測 |
+| 3 | `run_fcfs_6x6_grid_3000_vehicle_all_links_200m_speed_60kph_departure_999_evaluation_t999_pretrial.py` | 同上道路、**3 台/timestep**、**T=999** 投入終了 snapshot（**全車完走不要求**） |
+| 4 | `run_fcfs_6x6_grid_3000_vehicle_all_links_200m_speed_60kph_departure_999_tmax_5000_completion_check.py` | 同上需要、**TMAX=5000** **FCFS完走確認**（T=999 snapshot **再取得なし**） |
+
+（いずれも `research_scripts/` 配下。出力は `research_outputs/trial/` 配下の各 scenario directory。詳細 **§28.14**。）
+
+### 17.3 採用候補となった道路条件
+
+- 全 Link **200 m**、**60 km/h**、jam density **0.2 台/m**、reaction time **1 s**
+- **capacity_in / capacity_out 未指定**（**1,500 台/h** は **参考値**として保持、今回 **未設定**）
+- 単車線、merge priority 1
+- 今回の **4 本 FCFS 事前 trial** では内部 36 Node を **FCFS**・clearance 1 で実測した。**将来 3,000 台 TVT-MP** は内部 36 Node を **TVT-MP 対象**（clearance 1 維持候補）とする想定であり、FCFS 事前検証は **TVT-MP でも FCFS を採用する**意味ではない（§28.11）。
+- FD 容量 ≈ **0.76923 台/s**；**臨界密度** ≈ **0.04615 台/m**；1 Link **40 台**収容；臨界密度相当 ≈ **9.23 台/Link**（≈**23.08% occupancy**）
+
+### 17.4 2.5台/timestep条件の結果（200 m / 60 km/h、T=1,200）
+
+- run **1,400** / wait **1** / 内部 occupancy **0.277** / 外部→内部 **0.05625**
+- 内部 **臨界密度以上 46 本**、**90% 以上 1 本**
+- **解釈:** **入口余裕**（wait 1）、**内部Link混雑**。**入口飽和・大量 wait なし**（§28.5）。
+
+### 17.5 3台/timestep条件の結果（T=999）
+
+- run **1,940** / wait **1** / 内部 occupancy **0.360625** / 外部→内部 **0.208**
+- 内部 **臨界密度以上 59 本**、全 Link **90% 以上 5 本**
+- **解釈:** **内部Link混雑**は **2.5 台/timestep** より強い。**connector** にも混雑開始だが **wait 1** で **入口外大量待機には至らない**（§28.7）。
+
+### 17.6 現時点の需要条件判断
+
+- **主たる TVT-MP 候補:** 3,000 台、departure **T=0〜999**、名目 **3 台/timestep**、名目 **0.125 台/timestep・外部 OD Node**（**実配分非均等**）
+- **2.5 台/timestep:** 感度分析候補として保持
+- **5,000 台・T=0〜500:** 高需要ストレス条件（§16）
+- **通常需要 / 準高需要 / 高需要** の呼称は **未確定**（**強い混雑**は明記）
+
+### 17.7 完走確認結果（TMAX=5000）
+
+- **全 3,000 台正常完走**、**abort 0**
+- **最終完走 T=2,296**、最終完走 Vehicle **veh_2818**
+- departure 終了 **T=999** から **1,297 timestep** で解消
+- **T=4,999** で全 Link 上 Vehicle **0**
+- T=999 pretrial との **vehicle_plan_sha256 完全一致:** `0b1fc2d2b084c3c5ce94d0ec0c476de4b2c60d40543f58f789dd644d1e3d71d9`
+
+### 17.8 実行時間（FCFS）
+
+| trial | exec_simulation (s) |
+|-------|---------------------|
+| 2.5 台/timestep・200 m、T=1,200 | **3.1263249160256237** |
+| 3 台/timestep、T=999 | **2.7421296659158543** |
+| completion check **TMAX=5000** | **5.314151040976867** |
+
+**FCFS は軽量**だが、これを **TVT-MP 実行時間と同一視しない**（§16.9、§27.9）。
+
+### 17.9 設計上の重要な留保
+
+- **departure 終了時点同士**の比較（2.5 は T=1,200、3 は T=999）。**同一絶対時刻比較ではない**。
+- occupancy は **jam density 基準**。**臨界密度 ≈ 23.08% occupancy**。
+- **snapshot Vehicle 数のみ**で動的交通状態を完全断定しない。
+- **3 台/timestep** は **強い混雑**だが **100% Link**・**大量 wait** はない。
+- **capacity_in/out へ 1,500 台/h を設定していない**。
+- **FCFS 完走 T=2,296** を **TVT-MP evaluation end へそのまま採用しない**。
+
+### 17.10 最新の確定事項
+
+- **3 台/timestep** を **主候補**
+- **全 Link 200 m、60 km/h、capacity_in/out 未指定** を **主候補**
+- FCFS **最終完走 T=2,296**
+- **3,000 台 TVT-MP へ自動進行しない**
+- **profiling または短期 benchmark の先行判断が必要**
+
+### 17.11 未完了事項
+
+詳細正本 **§28.15** と整合: 3,000 台 TVT-MP 本体、短期 benchmark、profiling、正式 **evaluation end** / **internal TSIZE**、VOT、TVT-MP 出力、複数 seed 等 **未実施**。
+
+### 17.12 最新再開地点（本節）
+
+**本 §17 が進捗第4巻の最新再開地点である（2026-11-01）。** 詳細設計正本 **§28** を正本とする。
+
+**再開時に最初に行うこと（3,000 台 TVT-MP 本体の作成ではない）:**
+
+1. **§28** と本 **§17** を読む。
+2. T=999 pretrial と **TMAX=5000** completion check の manifest / run_summary を確認する。
+3. **TVT-MP 計算量 profile を先に行うか、短期 benchmark を先に行うか**を **利用者判断**する。
+
+**判断材料:**
+
+- FCFS **最終完走 T=2,296**
+- T=999 時 **run 1,940 台**
+- 内部 Link **59 本**が **臨界密度**以上
+- 全 Link **90% 以上 5 本**
+- §27 実績: **1,000 台 TVT-MP** 1,000 timestep 約 **7,620 s**；**5,000 台 TVT-MP** T=599 約 **79,685 s**
+
+**profiling または短期 benchmark の範囲を決めるまで、3,000 台 TVT-MP 全期間 trial は作成・実行しない。**
+
+**production 最適化、arrival tiebreaker、乱数源分離へ自動的に進まない。**

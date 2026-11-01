@@ -1,0 +1,16 @@
+{
+  "plan_count": 3000,
+  "first_departure": 0.0,
+  "last_departure": 1200.0,
+  "minimum_manhattan_distance": 5,
+  "average_manhattan_distance": 6.714666666666667,
+  "maximum_manhattan_distance": 10,
+  "origin_count": 24,
+  "destination_count": 24,
+  "vehicle_plan_sha256": "a6d592088468a2f3d342c1ad892f32e6a316fd03934b8f30e77190b326c9517e",
+  "demand_gen_seed": 42,
+  "min_od_manhattan_distance": 5,
+  "departure_window": "T=0..1200",
+  "specified_route": false,
+  "route_assignment_mode": "uxsim_free_route_choice"
+}

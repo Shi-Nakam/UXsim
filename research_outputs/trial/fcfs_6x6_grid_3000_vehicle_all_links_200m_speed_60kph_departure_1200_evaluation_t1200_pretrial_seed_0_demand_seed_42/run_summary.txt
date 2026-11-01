@@ -1,0 +1,45 @@
+FCFS 6x6 grid 3000-vehicle all-links-200m 60km/h departure-1200 pretrial
+Not a TVT-MP benchmark comparison.
+scenario: fcfs_6x6_grid_3000_vehicle_all_links_200m_speed_60kph_departure_1200_evaluation_t1200_pretrial_seed_0_demand_seed_42
+purpose: FCFS pretrial under research candidate road conditions: all 168 links 200 m, free-flow speed 60 km/h (~16.667 m/s), jam density 0.2 veh/m, with the same 3000-vehicle departure T=0..1200 demand and 6x6 topology as the prior departure-1200 FCFS pretrial. Observes traffic state at T=1200 after one exec_simulation. Independent pretrial for before/after road-condition comparison. Prior information for a future 3000-vehicle TVT-MP trial. Not a TVT-MP benchmark comparison.
+All 168 directed links are 200 m. Free-flow speed is 60 km/h (~16.667 m/s). Jam density is 0.2 veh/m. capacity_in and capacity_out are not passed to addLink; UXsim default automatic values apply. No additional 1500 veh/h (0.4167 veh/s) boundary capacity is configured.
+Independent FCFS pretrial for comparing road-condition changes against the prior 3000-vehicle departure-1200 pretrial (400 m / 300 m links, 20 m/s).
+This pretrial stops at T=1200. Full trip completion for all vehicles is not required. The timestep when all vehicles would complete is not measured.
+This pretrial observes FCFS traffic state at the departure-end evaluation timestep T=1200 after a single exec_simulation. No segmented execution or extension to full completion.
+This pretrial alone does not classify the 3000-vehicle departure 0..1200 condition as normal demand, quasi-high demand, or high demand.
+vehicles: 3000
+departure: T=0..1200
+simulation: T=0..1200 (World.T after sim=1201)
+FCFS internal nodes: 36
+FCFS clearance timesteps: 1
+vehicle state counts: {'end': 1599, 'run': 1400, 'wait': 1}
+completed: 1599
+not completed: 1401
+internal link vehicles: 1331 (aggregate occupancy 0.277292)
+external->internal connector vehicles: 54 (aggregate occupancy 0.056250)
+internal->external connector vehicles: 15 (aggregate occupancy 0.015625)
+links at or above 90% occupancy (all links): 1
+FD capacity: 0.7692307692307693 veh/s, 2769.2307692307695 veh/h
+critical density: 0.046153846153846156 veh/m, 46.15384615384615 veh/km
+critical-density vehicles per 200 m link: 9.230769230769232
+critical-density occupancy ratio (vs jam-density capacity): 0.23076923076923078
+links at or above critical density — internal: 46, external->internal: 0, internal->external: 0, all: 46
+occupancy_ratio uses jam-density theoretical capacity (length × 0.2 veh/m, 40 vehicles per 200 m link). It is not FD critical-density occupancy.
+Links can satisfy vehicle_count >= critical_density_vehicle_count (~9.23) while jam-density occupancy remains below 90%. Snapshot vehicle counts alone do not fully identify dynamic traffic regime on each link.
+exec_simulation seconds: 3.1263249160256237
+seconds per simulated timestep: 0.0026031015120946076
+vehicle_plan_generation seconds: 0.005300332908518612
+world_build seconds: 0.0020145419985055923
+vehicle_add seconds: 0.032026040949858725
+finalize seconds: 14.503697584033944
+exec_simulation seconds: 3.1263249160256237
+result_collection seconds: 0.002939208992756903
+pre_manifest_output_write seconds: 0.0012175410520285368
+pre_manifest_script_total seconds: 17.674212458077818
+seconds per simulated timestep: 0.0026031015120946076
+timing scope note: pre_manifest_script_total_seconds ends after link_occupancy_at_t1200.csv, vehicle_state_summary.csv, and vehicle_plan_audit.json are written. manifest.json write time and run_summary.txt write time are not included in manifest timing fields.
+manifest_write seconds: 0.0007735000690445304
+run_summary timing scope note: run_summary.txt write time is not included in the timing lines above. run_summary_write_seconds is appended on the last line after the file is closed.
+output directory: /Users/nishinarilab/Documents/UXsim_GitHub_original/UXsim/research_outputs/trial/fcfs_6x6_grid_3000_vehicle_all_links_200m_speed_60kph_departure_1200_evaluation_t1200_pretrial_seed_0_demand_seed_42
+Production code and existing reference files were not modified.
+run_summary_write seconds: 0.0002298750914633274

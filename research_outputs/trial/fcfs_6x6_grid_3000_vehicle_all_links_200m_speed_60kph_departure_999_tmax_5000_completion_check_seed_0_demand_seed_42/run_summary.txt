@@ -1,0 +1,54 @@
+FCFS 6x6 grid 3000-vehicle all-links-200m 60km/h departure-999 TMAX=5000 completion check
+Not a TVT-MP benchmark comparison.
+scenario: fcfs_6x6_grid_3000_vehicle_all_links_200m_speed_60kph_departure_999_tmax_5000_completion_check_seed_0_demand_seed_42
+purpose: FCFS completion check under research candidate road conditions (all 168 links 200 m, 60 km/h free flow, jam density 0.2 veh/m) with 3000 vehicles evenly spaced over departure T=0..999 (nominal 3 veh/timestep). One exec_simulation observes T=0..4999. Checks whether all vehicles complete normally by T=4999, records completion timing and T=4999 link occupancy. Prior information for future 3000-vehicle TVT-MP trial design (evaluation end, TSIZE, observation horizon). Not a TVT-MP benchmark comparison.
+This trial checks whether all vehicles complete normally by T=4999, records non-completion if any vehicles remain, and does not require successful full completion in order to write diagnostic outputs.
+Departure-end traffic snapshot at T=999 is stored by the existing departure-999 evaluation pretrial. This completion check does not re-fetch T=999 link or vehicle snapshots, does not split exec_simulation, and does not read pretrial output files at runtime.
+world.exec_simulation() is called exactly once. UXsim runs T=0..4999 even if all vehicles finish earlier; World.T after simulation is 5000.
+Departure times are evenly spaced from T=0 through T=999 for 3000 vehicles. Nominal average injection rate over the 1000-timestep window (T=0..999) is 3.0 veh/timestep (3000 / 1000). If the same total rate were split evenly across the 24 external OD nodes, the nominal average would be 0.125 veh/timestep per node. Actual OD assignment follows random OD sampling and is not guaranteed to be uniform per external OD node.
+Same demand and road conditions as the departure T=999 FCFS pretrial (3000 vehicles, departure T=0..999, all links 200 m, 60 km/h). That pretrial stops at T=999; this completion check runs to T=4999.
+All 168 directed links are 200 m. Free-flow speed is 60 km/h (~16.667 m/s). Jam density is 0.2 veh/m. capacity_in and capacity_out are not passed to addLink; UXsim default automatic values apply. No additional 1500 veh/h (0.4167 veh/s) boundary capacity is configured.
+vehicles: 3000
+departure: T=0..999
+simulation: T=0..4999 (TMAX=5000, World.T after sim=5000)
+FCFS internal nodes: 36
+FCFS clearance timesteps: 1
+vehicle state counts at T=4999: {'end': 3000}
+all_vehicles_normally_completed_by_final_observation: True
+completion_status: all_vehicles_normally_completed_by_t4999
+normally_completed / not_normally_completed: 3000 / 0
+latest_observed_completion_timestep: 2296
+last_vehicle_completion_timestep: 2296
+post_departure_clearance_timesteps (last completion minus departure end 999): 1297
+last_completion_vehicle_count: 1
+last_completion_vehicle_names sample: {'total_count': 1, 'sampled_vehicle_names': ['veh_2818'], 'sample_limit': 50, 'names_truncated': False}
+abort_count: 0
+link vehicles at T=4999 (all links): 0
+internal link vehicles: 0 (aggregate occupancy 0.000000)
+external->internal connector vehicles: 0 (aggregate occupancy 0.000000)
+internal->external connector vehicles: 0 (aggregate occupancy 0.000000)
+links at or above 90% occupancy (all links): 0
+FD capacity: 0.7692307692307693 veh/s, 2769.2307692307695 veh/h
+critical density: 0.046153846153846156 veh/m, 46.15384615384615 veh/km
+critical-density vehicles per 200 m link: 9.230769230769232
+critical-density occupancy ratio (vs jam-density capacity): 0.23076923076923078
+links at or above critical density — internal: 0, external->internal: 0, internal->external: 0, all: 0
+occupancy_ratio uses jam-density theoretical capacity (length × 0.2 veh/m, 40 vehicles per 200 m link). It is not FD critical-density occupancy.
+Links can satisfy vehicle_count >= critical_density_vehicle_count (~9.23) while jam-density occupancy remains below 90%. Snapshot vehicle counts alone do not fully identify dynamic traffic regime on each link.
+exec_simulation seconds: 5.314151040976867
+seconds per simulated timestep: 0.0010628302081953733
+vehicle_plan_generation seconds: 0.006452250061556697
+world_build seconds: 0.0007005829829722643
+vehicle_add seconds: 0.03211433393880725
+finalize seconds: 14.84290804201737
+exec_simulation seconds: 5.314151040976867
+result_collection seconds: 0.005469416966661811
+pre_manifest_output_write seconds: 0.001098749926313758
+pre_manifest_script_total seconds: 20.20347191602923
+seconds per simulated timestep: 0.0010628302081953733
+timing scope note: pre_manifest_script_total_seconds ends after link_occupancy_at_t4999.csv, vehicle_state_summary.csv, and vehicle_plan_audit.json are written. manifest.json write time and run_summary.txt write time are not included in manifest timing fields.
+manifest_write seconds: 0.0009669170249253511
+run_summary timing scope note: run_summary.txt write time is not included in the timing lines above. run_summary_write_seconds is appended on the last line after the file is closed.
+output directory: /Users/nishinarilab/Documents/UXsim_GitHub_original/UXsim/research_outputs/trial/fcfs_6x6_grid_3000_vehicle_all_links_200m_speed_60kph_departure_999_tmax_5000_completion_check_seed_0_demand_seed_42
+Production code and existing reference files were not modified.
+run_summary_write seconds: 0.00021466705948114395
