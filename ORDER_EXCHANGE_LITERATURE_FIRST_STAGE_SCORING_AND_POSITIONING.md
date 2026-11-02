@@ -2220,3 +2220,296 @@ Lin・Jabariにもあるため、TVT-MPの単独独自貢献としないもの�
 - PEXICの書誌同定は、詳細比較の順番とは別に並行して先に実施してよい。
 - 文献調査の再開地点は本§21である。
 - TVT-MP実装側の仕様と再開地点は変更しない。
+
+**歴史的注記（2026-11-02）：** 上記「次の文献作業はSchepperle・Böhm系列への第二段階台帳適用」「文献調査の再開地点は本§21」は、Lin・Jabari系列の台帳初回適用完了時点（2026-10-19）の記録である。Schepperle・Böhm系列への第二段階初回適用は **§22** へ記録した。**Schepperle・Böhm系列の最新状態は§22**である。本§21のLin・Jabari記録は削除しない。第一段階採点は変更していない。
+
+## 22. Schepperle・Böhm系列への第二段階台帳初回適用とポジショニング評価（2026-11-02）
+
+本§22を、Schepperle・Böhm系列の第二段階初回適用に関する**詳細正本**とする。
+
+§8.2、§10.1、§13.1、§20.7、§21.14は削除・置換しない。それらの「年・DOI・論文分担は要出典固定」「auctionとexchangeの系列内分担は未確定」「次の文献作業はSchepperle・Böhm系列」は、各節作成時点の**歴史的記録**である。Schepperle・Böhm系列の最新文献状態は本節である。
+
+本節の確定事項は次である。
+
+- 第一段階採点は変更しない。Schepperle・Böhm系列は X=8（2, 2, 1, 1, 1, 1）、Y=3（2, 1, 0, 0, 0, 0）、制度Medium-High・network Lowのままである。
+- 採点変更の必要性が観察されても、本節では採点を動かさない。未確定事項として残す。
+- Time-Slot Exchange（TSE）は、TVT-MPとの直接比較における中核文献として維持する。
+- 論文の事実、著者の主張、simulation結果、こちらの評価を分離する。
+- 未確認事項を推測で埋めない。未確認理由は、記号ではなく意味の分かる短い表現で記録する。
+- TVT-MP実装側の仕様と再開地点は変更しない。未実装・未評価のTVT-MP機能を確定済み成果として書かない。
+
+研究系列IDは `SB` とする。論文IDは `SB-P1` から `SB-P4` とする。
+
+### 22.1 系列内の役割分担と中核文献
+
+Schepperle・Böhm系列は、単一の「auction論文」でも単一の「交換論文」でもない。初期配分、非valuation-aware reservation、任意参加の事後交換、concurrency-aware auction、系列総括が並ぶ。第一段階（§8.2）が指摘した「初期auctionと交換の論文分担」は、本節で次のとおり固定する。
+
+**SB-P1。** Heiko Schepperle、Klemens Böhm、*Agent-Based Traffic Control Using Auctions*、LNAI 4676、pp. 119–133、2007、DOI: 10.1007/978-3-540-75119-9_9。**Initial Time-Slot Auction（ITSA）**。役割は **auction-based initial allocation**。交差点通過のための初期time slotをauctionで配分する。静的second-priceのtruthfulness議論は、第一段階のX5=1の根拠であり、系列全体のstrategy-proofnessへ拡張しない（§8.2・§10.1維持）。
+
+**SB-P2。** Heiko Schepperle、Klemens Böhm、Simone Forster、*Traffic Management Based on Negotiations between Vehicles: A Feasibility Demonstration Using Agents*、LNBIP 13、pp. 90–104、2008、DOI: 10.1007/978-3-540-88713-3_7。**Time-Slot Exchange（TSE）**。役割は **voluntary bilateral post-allocation exchange**。割当済みtime slotを、任意参加の1対1交渉で交換する。TVT-MPとの直接比較における**中核文献**である。割当て済みslotの交換と補償という点で、FRAMEWORKおよび第一段階が直接競合候補とした制度は、このTSEである。
+
+**SB-P3。** Heiko Schepperle、Klemens Böhm、*Auction-Based Traffic Management: Towards Effective Concurrent Usage of Road Intersections*、2008。役割は **Free Choice・Clocked** による **concurrency-aware auction**。これはTSEのbilateral exchangeの拡張ではない。auction系列の**別方向の拡張**である。ITSAの初期配分を、交差点の同時利用へ向けてauction側で発展させる。交換mechanismの後継として読まない。
+
+**SB-P4。** Heiko Schepperle、Klemens Böhm、*Valuation-Aware Traffic Control: The Notion and the Issues*、*Multi-Agent Systems for Traffic and Transportation Engineering*、pp. 218–239、2009、DOI: 10.4018/978-1-60566-226-8.ch010。役割は系列総括、A3C統合、実装課題。**全文は資料未入手**。publisher previewのみ確認済み。総括章の細部、式、証明、未解決課題の全文列挙は本節で確定しない。
+
+系列内の制度分担は次である。
+
+- **ITSA：** 初期time slotをauctionで配分する。valuation-awareな初期allocationである。
+- **TSR：** request順とspace-time feasibilityに基づく、非valuation-awareなreservationである。金銭auctionではない。
+- **TSE：** 割当済みtime slotを、任意参加の1対1交渉で交換する。初期配分の後処理である。
+- **Free Choice・Clocked：** auction-based initial allocationのconcurrency拡張である。TSEの交換規則の拡張ではない。
+
+ITSAとTSEを同一mechanismとして採点・比較しない。TSRとTSEを同一の権利源として扱わない。SB-P3をTSEの後継としない。第一段階が「系列内にInitial Time-Slot Auctionがある」「Time-Slot Exchangeが直接競合」と分けた判断は、この分担と整合する。
+
+### 22.2 TSRによる初期allocationとTSEの権利構造
+
+TSEは割当済みslotを交換するため、**交換前slotがbaseline entitlement**になる。そのslotがどのように正当化されたかが、TSEのfairness評価の前提である。ここでの初期allocationは、停止線到着順の単純FIFOではない。
+
+TSRの核心は次である。
+
+- Vehicleが到着予定時刻、速度、方向、加減速限界、車体寸法をrequestする。
+- Intersection managerがintersection内部のspace-time trajectoryをsimulationする。
+- 既存reservationとtile-time conflictがなければacceptする。
+- Conflictがあればrejectする。
+- RejectされたVehicleは減速して再requestする。
+- Accept済みVehicleがreservationを守れなければcancelして再requestする。
+
+TSRのFCFS性は、単一のglobal passage orderではない。先にacceptされたspace-time reservationを、後続requestが奪わないという意味に近い。停止線での物理的到着順そのものが通過順位になるわけではない。通信タイミング、approach、trajectory conflict、reject・retryが、どのreservationが先に確定するかを左右する。
+
+重要な評価は次である。
+
+- TSRのinitial allocationは金銭auctionではない。ITSAの初期auctionとも別である。
+- Request処理順とspace-time feasibilityによる **procedural baseline** である。
+- 確認できるのは、衝突しないreservationを先着requestから順に確定する処理規則である。この規則自体が公平または正当であることまで原論文から導かない。
+- 結果的公平性は自動的に保証されない。通信が遅いVehicle、複雑な軌跡のVehicle、reject後に再requestするVehicleは、同じ処理規則を適用されても不利なslotを持ち得る。
+- TSEのfairness評価は、このinitial slot entitlementの正当性へ依存する。交換規則が任意参加かつbilateralであっても、交換前slotが不公正または実行不能なら、交換後の配分を公正とは言えない。
+
+TSEをTVT-MPと比較するとき、TVT-MPのbaselineは当該decisionのbaseline局所順位である。TSEでは、何らかのinitial-allocation mechanismによって既に割り当てられたtime slotが交換前のentitlementとなる。TSE原論文の各実験で、そのinitial slotをTSRまたはITSAのどちらが生成したかは、本文の該当箇所を未取得のため未確認である。両制度は「交換前allocationをentitlementとして使う」点では比較可能だが、entitlementの具体的な生成方法は確定していない。TSRを単純FIFOと扱わず、ITSAをTSEの必須前提とも扱わない。
+
+### 22.3 TSEの任意参加と非参加者保護の限界
+
+確認済みの事実は次である。
+
+- TSEは **voluntary bilateral exchange** である。
+- Driverは自分のslotを交換しない選択を持つ。
+- 全員へITSA参加を強制しない。
+- 自分が合意しないexchangeの直接当事者にならない。
+
+これは、低budget Driverが交換を拒否できること、および交換の直接当事者にされないことを意味する。第一段階のX6=1（公平性制度化は部分的、TVT-MP型非参加保護と同一視しない）と整合する。
+
+確認できないことは次である。これらをTSEの保護内容として書かない。
+
+- 他者間exchangeによるqueue外部効果を受けない。
+- Actual crossing timeが不変。
+- Traffic positionが不変。
+- Utilityが不変。
+- Network上の間接的遅延を受けない。
+
+結論は狭い。TSEが直接保護するのは、**自分のslotを交換しない自由**である。自分が合意しない取引の当事者にならないことと、他者間取引の交通結果から遮断されることとは別である。
+
+これはTVT-MPの、他者間取引による **nonparticipating Visitの直接的baseline順位後退防止** と同一ではない。TVT-MP側の非参加保護は、取引当事者からの除外に加え、当該decisionのtrade-scopeにおけるbaseline局所順位の直接後退を防ぐ制度である。TSEの拒否権を、その意味での順位保護またはactual traffic outcome保護として読み替えない。
+
+非参加者のactual traffic outcome保護について、本文の該当箇所は未取得である。完全版確認後、記載がなければ「入手済み原文に記載なし」へ更新する。現時点で「保護している」とも「保護していないと論文が明言している」とも書かない。
+
+### 22.4 単独交差点reservationへの依存とnetwork適用性
+
+ポジショニング上、**最重要の差**はここである。取引構造ではTSEはTVT-MPの直接競合である。しかし、TSR・TSE系列の実行可能性は、単独交差点内部のspace-time reservationに依存する。
+
+TSR・TSE系列について確認できる範囲は次である。
+
+- Single intersection中心である。
+- Intersection内部のspace-time conflictを管理する。
+- Requestが競合すればreject・retryする。
+- 下流link容量、outlink入口空間、spillback、隣接交差点queue、network gridlockへの対応は確認できない。
+- Different intersections間のcooperationは研究対象外である。
+- Reservationがnetwork congestion下でも実行可能である保証はない。
+
+こちらの評価は次である。
+
+TSRは、下流へ流出余地がある高需要状態では、intersection内部の競合を効率化し得る。tile-time conflictを事前に避けるreservationは、単一交差点の局所効率には意味がある。
+
+一方、下流spillbackを伴う過飽和networkでは、予約したtrajectoryやtime slotが実行不能になる可能性がある。上流交差点がslotを確定しても、下流入口に空間がなければ、そのreservationは物理的に完了できない。reject・retryは交差点内部のconflict処理であり、下流閉塞の解消ではない。
+
+したがって、次を区別する。
+
+- Single-intersection局所reservationとしては意味がある。
+- 現実的な渋滞networkへの一般化は支持されない。
+- Network applicabilityへ拡張する場合の構造的前提依存性は **High候補** である。第三段階のLow、Medium、Highの正式閾値は§20.10どおり未確定であり、これは暫定ラベルである。
+- 取引構造ではTVT-MPの直接競合である。slot交換と補償の比較対象は維持する。
+- Network統合軸ではTVT-MPと十分に分離可能である。第一段階のY3からY6が0、network Lowであることは、この観察と整合する。採点自体は動かさない。
+
+TVT-MP側の対比は、確定済み実装範囲に限る。Candidate予測を実Worldへ確定reservationとして強制しない。下流容量、入口空間、temporary skip等を受け入れる。Candidate predictionとactual passageの差を評価対象とする。未実装・未評価のTVT-MP機能、未完了の長期trial結果、未確定のnetwork性能を、確定済み成果として書かない。
+
+### 22.5 主要な構造的前提と系列の最終評価
+
+特筆すべき前提は次の4件に絞る。通信遅延や計算負荷など、将来技術で解決可能な前提は、§19.5および§21.11と同様に重大欠点として扱わない。
+
+**1. Linear valuation。** Waiting timeの1秒短縮価値を一定額で表す。Structurally difficultである。Utilityおよびweighted waiting time評価へ不可欠である。非線形な待ち時間苦痛、遅延の閾値効果、行程全体のschedule delayを捨象する。ITSAの入札評価とTSEの交換判断の両方に効く。
+
+**2. Moneyの同一marginal utility。** 全Driverがmoneyを同じ尺度で評価すると仮定する。Total utilityとoverall satisfactionの強い主張へ不可欠である。所得差による同額支払のutility差を捨象する。低所得Driverにとっての支払苦痛と、高所得Driverにとっての支払苦痛を同一視する。TSEの補償額を「同じ満足の移転」と読む場合、この前提がEssentialである。
+
+**3. Initial time-slot entitlementの正当性。** TSEを公平な制度として評価するには、TSE開始前のslotが公正かつ実行可能な方法で配分されていることが必要である。割当済みslotの存在はTSEのexchange mechanismに不可欠だが、その初期配分が公正であることは確認できていない。§22.2で確認できたのは、TSRがrequest処理順とspace-time feasibilityに従ってreservationを確定する処理規則であり、その規則自体の公平性または正当性ではない。ITSAによる初期配分も、budget差と入札規則の影響を受ける。交換前slotが不公正または実行不能なら、任意参加のexchangeは不公正な初期配分を所与として維持し、場合によってはその差を固定または拡大し得る。したがって、initial entitlementの正当性はTSEのmechanism constructionそのものではなく、fairnessに関する強い結論へ不可欠な条件付き解釈前提として扱う。
+
+**4. Voluntary participationによるfairness。** Exchangeを拒否できることが、低budget Driverへの公平性を十分保護する。Formal fairness theoremは確認できない。Traffic outcome保護までは示されていない。§22.3のとおり、拒否権は直接当事者にならない自由であり、他者間交換のqueue外部効果からの遮断ではない。この前提をFairnessの強い一般化に使う場合、依存性は高い。
+
+系列全体の暫定評価は次である。第三段階の正式閾値は未確定である。
+
+- 構造的前提依存性：**Medium候補**。
+- Lin・Jabari系列より、分配・公平性前提への依存が強い。Lin・Jabariはgroup-level TUと利用者間budget balanceを中核とし、fairnessの強い一般化は限定的だった（§21）。本系列はoverall satisfactionとfairness主張が、linear valuation、同一marginal utility、初期slotの正当性、拒否権による保護へ依存する。
+- 重大な通信・計算前提は将来技術で解決可能なため重視しない。
+- TSEのexchange mechanism自体は直接競合として維持する。
+- Overall satisfaction、fairness、network applicabilityの強い一般化は割り引く。
+
+第一段階採点の変更必要性は、本節では未確定のまま残す。network LowとX6=1は本節の観察と大きく矛盾しない。ITSAの静的second-priceを系列全体のX5へ拡張しない判断も維持する。採点修正手続は§20.8どおり本節で確定しない。
+
+### 22.6 TVT-MPとの差別化、未確認理由、再開地点
+
+共通するため、TVT-MPの単独独自貢献としないもの：
+
+- Crossing priority・time slotの取引
+- 交換前allocationをbaseline entitlementとして使う
+- Waiting-time reduction valuation
+- 早い通過権を得る側から譲渡側への金銭移転
+- Voluntary participation
+- Exchange拒否権
+- No-overtaking
+- Physically feasible allocation
+- FIFO系mechanismとのsimulation比較
+
+有力なTVT-MP差別化候補（こちらの評価。実装仕様の変更ではない）：
+
+- Baseline順位からmulti-party候補を形成する
+- 非参加Visitの直接的baseline順位後退を防止する
+- 各sellerの必要補償額 `R_s` を個別充足する
+- Seller必要補償総額だけをbuyer側へ配分する
+- 順位sellerとactual payeeを分離する
+- 順位変化と時間結果を分離する
+- Candidate predictionとactual passageを比較する
+- Nonparticipatingへのactual外部効果を記録する
+- 複数Node、OD、右左折、単車線FIFO、下流容量制約を統合する
+
+「time slotを交換すること」「拒否できること」「物理的に実行可能な配分を使うこと」自体を、TVT-MPの独自性としない。Budget balance単独を独自貢献としない（§20.9維持）。
+
+未確認事項は、次の短い理由表現で記録する。記号だけにしない。
+
+- 資料未入手
+- 本文の該当箇所を未取得
+- 入手済み原文に記載なし
+- 記載が曖昧
+- 研究対象外
+
+現時点の未確認理由は次である。
+
+**TSEの価格・交渉手順。** 本文の該当箇所を未取得。TSE正式PDFは存在するため、論文の説明不足とはまだ判断しない。
+
+**TSEのbudget balance、individual rationality、strategy-proofness。** 本文の該当箇所を未取得。定義は確認済みだが、TSEが満たすことの判定・証明部分を未取得。budget balanceからIR・公平性・非参加者保護を自動導出しない（§20.9）。
+
+**TSE simulationの詳細parameter・効果量。** 本文の該当箇所を未取得。
+
+**SB-P4全文。** 資料未入手。Publisher previewのみ確認済み。
+
+**Multiple intersections、spillback、downstream blocking、multiple OD、route choice。** 研究対象外。単独交差点結論を否定しないが、networkへ一般化しない。
+
+**非参加者のactual traffic outcome保護。** 本文の該当箇所を未取得。完全版確認後、記載がなければ「入手済み原文に記載なし」へ更新する。
+
+次の文献研究対象は **PEXIC系列** である。比較順は§20.7どおり第3対象である。ただし、TSE完全PDFまたはSB-P4全文を別経路で入手した場合、価格式、budget balance、IR、誘因性質、非参加者外部効果を再確認する。その再確認はPEXIC調査の開始を自動的に取り消さない。
+
+文献調査の再開地点は本§22である。TVT-MP実装側の仕様と再開地点は変更しない。第一段階採点は変更していない。
+
+### 22.7 三段階評価の統合結果と主要事実の出典対応
+
+本節は、将来の三段階評価説明資料を再構成するための**短い索引**である。§22.1〜§22.6の全文転載は行わない。詳細は各小節および§20.3・§20.8・§20.10を参照する。
+
+#### 22.7.1 三段階評価の統合結果
+
+**第一段階**
+
+- Schepperle・Böhm系列は、制度面 **X=8**、network面 **Y=3** で直接競合候補へ残した。
+- 制度評価は **Medium-High**、network評価は **Low**。
+- 第一段階採点は今回変更していない。
+- TSEは priority・time-slot exchange と補償という制度構造が TVT-MP に近いため、詳細比較対象とした。
+
+**第二段階**
+
+- ITSA、TSR、TSE、Free Choice・Clocked の役割を分離した。
+- TVT-MP との直接比較の中核は、割当済み slot を任意参加の 1 対 1 交渉で交換する **TSE**。
+- TSE は交換前 slot を entitlement として使う。
+- TSR で確認できたのは、request 処理順と space-time feasibility による reservation 確定規則。
+- 初期 slot の生成方式と公平性は確定していない。
+- TSE の任意参加が直接保護するのは、自分の slot を交換しない自由。
+- 他者間 exchange による非参加者の actual traffic outcome 保護は確認できない。
+- 系列は single intersection と局所 space-time reservation を中心とし、network spillback 等は研究対象外。
+
+**第三段階**
+
+- 特筆すべき構造的前提は次の 4 件。
+  1. Linear valuation
+  2. Money の同一 marginal utility
+  3. Initial time-slot entitlement の公平性・実行可能性
+  4. Voluntary participation が fairness を十分保護すること
+- 系列全体の構造的前提依存性は **Medium 候補**。
+- Network applicability へ一般化する場合は **High 候補**。
+- Low、Medium、High の正式閾値は未確定（§20.10）。
+- TSE の exchange mechanism 自体は直接競合として維持する。
+- Overall satisfaction、fairness、network applicability の**強い一般化は割り引く**。
+
+**最終ポジショニング**
+
+Schepperle・Böhm系列は、既存の交差点通過権を時間価値に基づいて交換し、slot 譲渡側へ対価を移転する点で、TVT-MP の**直接競合**である。一方、TSE は bilateral time-slot exchange、TSR は single-intersection の space-time reservation を中核とし、非参加者の actual traffic outcome、spillback、downstream blocking、複数交差点間の相互作用を扱わない。したがって、**取引構造では近い**が、multi-party candidate formation、非参加 Visit の直接的 baseline 順位保護、seller 単位の必要補償、prediction と actual の分離、network traffic simulation への統合という**組合せ**で TVT-MP と分離可能である。
+
+#### 22.7.2 主要事実の出典対応
+
+**1. ITSA の制度的位置付け**
+
+- **確認した事実：** ITSA は valuation-aware な initial time-slot allocation を auction で行う。
+- **確認資料：** SB-P1、*Agent-Based Traffic Control Using Auctions*、DOI: 10.1007/978-3-540-75119-9_9
+- **確認状態：** 正式書誌と制度の基本的位置付けを確認済み。
+- **留保：** 詳細 auction 形式、payment rule、revenue 帰属については本文の該当箇所を未取得。ページ・節は固定していない。
+
+**2. TSE の制度的位置付け**
+
+- **確認した事実：** TSE は割当済み time slot を Vehicle 間の bilateral negotiation で交換し、参加は任意である。
+- **確認資料：** SB-P2、*Traffic Management Based on Negotiations between Vehicles: A Feasibility Demonstration Using Agents*、DOI: 10.1007/978-3-540-88713-3_7
+- **確認状態：** 正式書誌、bilateral exchange、voluntary participation を確認済み。
+- **留保：** 価格・交渉手順、budget balance、IR、誘因性質については本文の該当箇所を未取得。ページ・節は固定していない。
+
+**3. TSR の reservation 処理**
+
+- **確認した事実：** Vehicle が到着予定時刻、速度、方向、加減速限界、寸法を request し、intersection manager が space-time trajectory を simulation して、既存 reservation との conflict がなければ accept する。Reject 時は減速して再 request する。
+- **確認資料：** Kurt Dresner、Peter Stone、*Multiagent Traffic Management: A Reservation-Based Intersection Control Mechanism*（2004）、および *Multiagent Traffic Management: An Improved Intersection Control Mechanism*（2005）。
+- **確認状態：** Request 情報、accept・reject、retry、reservation cancel の処理を確認済み。
+- **留保：** Schepperle・Böhm による TSR 実装が、Dresner・Stone 方式をどこまで変更したかは本文の該当箇所を未取得。ページ・節は固定していない。
+
+**4. 非参加者保護**
+
+- **確認した事実：** TSE では Driver が exchange 参加を拒否でき、自分の slot を自発的に交換しない選択を持つ。
+- **確認資料：** SB-P2
+- **確認状態：** Voluntary participation を確認済み。
+- **留保：** 他者間 exchange による非参加者の actual crossing time、traffic position、utility への影響は本文の該当箇所を未取得。ページ・節は固定していない。
+
+**5. Single-intersection と network 範囲**
+
+- **確認した事実：** Schepperle・Böhm系列はsingle intersectionを中心とする。SB-P3は、different intersections間のcooperationを扱わないことを明示する。
+- **確認資料：** SB-P2およびSB-P3
+- **確認状態：** Single-intersection中心であることと、SB-P3が交差点間cooperationを研究対象外とすることを確認済み。
+- **研究対象外：** Different intersections間のcooperation。
+- **入手済み・確認済み範囲に記載なし：** Spillback、downstream blocking、multiple OD、route choice。これらを著者が明示的に研究対象外としたとは断定しないが、対応または検証も確認できない。
+- **注意：** 単独交差点の限定結論自体を否定せず、network applicabilityへ一般化しない。ページ・節は固定していない。
+
+**6. 2009 年 overview chapter**
+
+- **確認した事実：** Valuation-aware intersection control と A3C を統合し、割当 time slot に合わせた Vehicle speed adaptation と実装課題を扱う総括資料である。
+- **確認資料：** SB-P4、*Valuation-Aware Traffic Control: The Notion and the Issues*、DOI: 10.4018/978-1-60566-226-8.ch010
+- **確認状態：** 正式書誌と publisher preview を確認済み。
+- **未確認理由：** 全文は**資料未入手**。
+- **対応：** 大学契約、図書館、著者版等で全文を入手できた場合に再確認する。ページ・節は固定していない。
+
+#### 22.7.3 将来の説明資料作成時の使用方法
+
+- 第一段階の説明では、X=8、Y=3、制度 Medium-High、network Low を使う。
+- 第二段階の説明では、ITSA・TSR・TSE の分担、initial entitlement、任意参加の保護範囲、single-intersection 依存を中心にする。
+- 第三段階の説明では、4 つの構造的前提と、Medium 候補・network 拡張 High 候補を使う。
+- 最終ポジショニングでは、**取引構造上は直接競合**、**network 統合軸では分離可能**と説明する。
+- 未確認事項は、**資料未入手**、**本文の該当箇所を未取得**、**入手済み原文に記載なし**、**記載が曖昧**、**研究対象外**を区別して示す。
+- ページ・節・式を未確認の項目について、推測で出典位置を記載しない。
+- 完全版資料の追加入手で新事実が判明した場合だけ本節を更新し、既述内容を繰り返さない。

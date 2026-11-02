@@ -856,6 +856,102 @@ Lin・Jabariにも存在するため、TVT-MPの単独独自貢献としない�
 - 次の直接対象はSchepperle・Böhm系列（正式書誌、全文資料、系列内のauctionとexchangeの分担、出典箇所の固定の後、第二段階5台帳へ初回適用）。
 - Lin・Jabari系列の未確認事項は詳細正本§21.13を参照する。
 
+## 5D. Schepperle・Böhm系列への第二段階初回適用結果（2026-11-02）
+
+詳細正本は `ORDER_EXCHANGE_LITERATURE_FIRST_STAGE_SCORING_AND_POSITIONING.md` の**§22**である。本§5Dは要約であり、§22の台帳・長文を転載しない。第一段階採点（Schepperle・Böhm系列 X=8、Y=3、制度Medium-High・network Low）は変更しない。TVT-MP実装仕様、実装側の再開地点は本節で変更しない。
+
+### 5D.1 系列内の役割分担
+
+- **ITSA：** auction-based initial time-slot allocation
+- **TSR：** request順とspace-time feasibilityに基づく非valuation-aware reservation
+- **TSE：** 割当済みslotのvoluntary bilateral exchange
+- **Free Choice・Clocked：** auction側のconcurrency拡張
+- TVT-MPとの直接比較の中核は**TSE**
+- ITSA、TSR、TSEを同一mechanismとして扱わない
+
+### 5D.2 初期slotとfairness
+
+- TSEは割当済みslotを交換前entitlementとして使う
+- Initial-allocation mechanismの具体的方法は未確認
+- TSRで確認できたのはrequest順とspace-time feasibilityによる処理規則
+- その規則自体の公平性・正当性までは導かない
+- Initial slotの公平性は、TSEを公平な制度として強く評価する場合の**条件付き解釈前提**
+- Voluntary participationだけでは、不公正な初期配分の問題を解消しない
+
+### 5D.3 非参加者保護の範囲
+
+- TSE参加は任意
+- Driverは自分のslotを交換しない選択を持つ
+- 自分が合意しないexchangeの直接当事者にならない
+- 他者間exchangeによるactual crossing time、traffic position、utilityへの影響は確認できない
+- TSEの拒否権を、TVT-MPのnonparticipating Visitの**直接的baseline順位後退防止**と同一視しない
+
+### 5D.4 Network適用性
+
+- TSR・TSE系列はsingle intersection中心
+- Intersection内部のspace-time conflictを管理する
+- Spillback、downstream blocking、outlink入口空間、隣接交差点queueへの対応は研究対象外
+- Single-intersection局所reservationとしての価値は認める
+- 現実的な過飽和networkへの一般化は支持しない
+- 取引構造ではTVT-MPの直接競合
+- Network統合軸ではTVT-MPと十分に分離可能
+- Network applicabilityへ拡張する場合の構造的前提依存性は**High候補**
+- Low、Medium、Highの正式閾値は未確定
+
+### 5D.5 構造的前提と系列評価
+
+特筆する前提は次の4件だけとする。
+
+- Linear valuation
+- Moneyの同一marginal utility
+- Initial time-slot entitlementの公平性・実行可能性
+- Voluntary participationがfairnessを十分保護すること
+
+系列全体：
+
+- 構造的前提依存性は**Medium候補**
+- Lin・Jabari系列より分配・公平性前提への依存が強い
+- TSEのexchange mechanismは直接競合として維持
+- Overall satisfaction、fairness、network applicabilityの強い一般化は割り引く
+- 第一段階採点は変更しない
+
+### 5D.6 TVT-MPとの差別化と次の作業
+
+共通するため単独独自貢献としないもの：
+
+- Crossing priority・time slotの取引
+- 交換前allocationをbaseline entitlementとして使うこと
+- Waiting-time reduction valuation
+- Slot譲渡側への金銭移転
+- Voluntary participation
+- Exchange拒否権
+- No-overtaking
+- Physically feasible allocation
+- FIFO系mechanismとのsimulation比較
+
+有力な差別化候補：
+
+- Baseline順位からmulti-party候補を形成
+- 非参加Visitの直接的baseline順位後退を防止
+- 各sellerの必要補償額 `R_s` を個別充足
+- Seller必要補償総額だけをbuyer側へ配分
+- 順位sellerとactual payeeを分離
+- 順位変化と時間結果を分離
+- Candidate predictionとactual passageを比較
+- Nonparticipatingへのactual外部効果を記録
+- 複数Node、OD、右左折、単車線FIFO、下流容量制約を統合
+
+未確認理由（記号ではなく短い表現）：
+
+- **TSEの価格・交渉手順：** 本文の該当箇所を未取得
+- **TSEのbudget balance、individual rationality、strategy-proofness：** 本文の該当箇所を未取得
+- **TSE simulationの詳細parameter・効果量：** 本文の該当箇所を未取得
+- **2009年overview chapter全文：** 資料未入手
+- **Multiple intersections、spillback、downstream blocking、multiple OD、route choice：** 研究対象外
+- **非参加者のactual traffic outcome保護：** 本文の該当箇所を未取得
+
+次の文献対象は**PEXIC系列**である。TSE完全PDFまたは2009年overview chapter全文を別経路で入手した場合は、価格式、budget balance、IR、誘因性質、非参加者外部効果を再確認する。
+
 ## 6. 図における点数の扱い
 
 - 点数化は内部分析として使用する。

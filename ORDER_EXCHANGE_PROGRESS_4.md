@@ -1327,3 +1327,90 @@ FCFS との保存値比 **23,349 倍**を**純粋 CPU 性能倍率として採�
 **§18.11**（共有直列化・T=0〜299 完全一致時点）は **歴史的再開地点**として維持する。**T=999 departure-end 結果**は **§30.1**。**audit validation 完了**は **§30.5**。**3,000 台 full completion trial** は **§30.8 / 本 §19.2**（**結果未確定**）。
 
 **歴史的注記（§18 執筆時点との関係）:** 上記 **§18.11** は **2026-11-01 後半**（共有直列化受入れ・完全一致検証時点）の最新再開地点であった。**その後** T=999 trial、監査 helper、validation trial、長期本番スクリプトまで進んだ。**進捗の最新正本は §19**（**§18** は改番・削除しない）。
+
+---
+
+## 20. Schepperle・Böhm系列への第二段階初回適用完了（2026-11-02）
+
+本§20は**先行研究調査**の進捗だけを記録する節である。**§19**は削除・変更・置換しない。
+
+- **TVT-MP実装・長期trial側**の最新再開地点は引き続き **§19**（**結果未確定**）。
+- **文献調査側**の最新再開地点は **本§20**。
+- 両者は別系統の再開地点であり、混同しない。
+
+本§20の追加を理由に、実行中の長期trialが完了したとは記録しない。
+
+### 20.1 完了した文献調査
+
+- Schepperle・Böhm系列の**第二段階初回適用**を完了した。
+- 詳細正本：`ORDER_EXCHANGE_LITERATURE_FIRST_STAGE_SCORING_AND_POSITIONING.md` **§22**
+- 方法論・ポジショニング要約：`ORDER_EXCHANGE_LITERATURE_POSITIONING_FRAMEWORK.md` **§5D**
+- 第一段階採点は変更していない。
+- Schepperle・Böhm系列は、**取引構造上の直接競合**として維持した。
+
+### 20.2 ポジショニング上の主要結論
+
+**1. 系列内の役割分担**
+
+- ITSAはauction-based initial allocation。
+- TSRはrequest順とspace-time feasibilityに基づくreservation。
+- TSEは割当済みslotのvoluntary bilateral exchange。
+- Free Choice・Clockedはauction側のconcurrency拡張。
+- TVT-MPとの直接比較の中核は**TSE**。
+
+**2. Initial slotとfairness**
+
+- TSEは割当済みslotを交換前entitlementとして使う。
+- Initial-allocation mechanismの具体的方法は**未確認**。
+- TSRで確認できたのはreservation確定の**処理規則**であり、その規則の公平性・正当性ではない。
+- Initial slotの公平性は、TSEを公平な制度として強く評価する場合の**条件付き解釈前提**。
+
+**3. 非参加者保護**
+
+- TSEは自分のslotを交換しない自由を保護する。
+- 他者間exchangeによるactual crossing time、traffic position、utilityへの影響は確認できない。
+- TVT-MPのnonparticipating Visitに対する**直接的baseline順位後退防止**とは同一ではない。
+
+**4. Network適用性**
+
+- TSR・TSE系列はsingle intersection中心。
+- Spillback、downstream blocking、outlink入口空間、隣接交差点queueは研究対象外。
+- Single-intersection局所reservationとしての価値は認める。
+- 現実的な過飽和networkへの一般化は支持しない。
+- 取引構造では**直接競合**だが、network統合軸ではTVT-MPと**十分に分離可能**。
+
+**5. 構造的前提**
+
+特筆する前提：Linear valuation、Moneyの同一marginal utility、Initial time-slot entitlementの公平性・実行可能性、Voluntary participationがfairnessを十分保護すること。
+
+暫定評価：系列全体の構造的前提依存性は**Medium候補**。Network applicabilityへ拡張する場合は**High候補**（Low・Medium・Highの正式閾値は未確定）。Overall satisfaction、fairness、network applicabilityの**強い一般化は割り引く**。
+
+### 20.3 TVT-MPとの差別化
+
+共通するため**単独独自貢献としない**もの：Crossing priority・time slotの取引、交換前allocationをbaseline entitlementとして使うこと、Waiting-time reduction valuation、Slot譲渡側への金銭移転、Voluntary participation、Exchange拒否権、No-overtaking、Physically feasible allocation。
+
+**組合せとして**評価する有力な差別化候補：Baseline順位からmulti-party候補を形成、非参加Visitの直接的baseline順位後退を防止、各sellerの必要補償額 `R_s` を個別充足、Seller必要補償総額だけをbuyer側へ配分、順位sellerとactual payeeを分離、順位変化と時間結果を分離、Candidate predictionとactual passageを比較、Nonparticipatingへのactual外部効果を記録、複数Node・OD・右左折・単車線FIFO・下流容量制約を統合。未実装・未評価のTVT-MP機能を確定済み成果として書かない。
+
+### 20.4 未確認理由と次の文献対象
+
+- **TSEの価格・交渉手順：** 本文の該当箇所を未取得
+- **TSEのbudget balance、individual rationality、strategy-proofness：** 本文の該当箇所を未取得
+- **TSE simulationの詳細parameter・効果量：** 本文の該当箇所を未取得
+- **2009年overview chapter全文：** 資料未入手
+- **Multiple intersections、spillback、downstream blocking、multiple OD、route choice：** 研究対象外
+- **非参加者のactual traffic outcome保護：** 本文の該当箇所を未取得
+
+**次の文献対象：** **PEXIC系列**
+
+**次の文献作業：** PEXICの正式書誌と全文資料を固定する。制度構造と中核結論を5〜6点へ絞って把握する。TVT-MPとの本質的な共通点と差異を特定する。ポジショニングに効く構造的前提だけを抽出する。追加調査では、既述内容を再掲せず、新たに判明した事項だけを報告する。
+
+TSE完全PDFまたは2009年overview chapter全文を別経路で入手した場合は、価格式、budget balance、IR、誘因性質、非参加者外部効果を再確認する。この再確認可能性を理由に、PEXIC調査の開始を自動的に延期しない。
+
+### 20.5 TVT-MP実装・長期trial側との分離
+
+- 本§20は文献調査の進捗だけを記録する。
+- TVT-MP実装仕様を変更しない。詳細設計正本 **§30** を変更しない。
+- **§19** の長期trial**実行中**という状態を変更しない。長期trialの**結果は未確定**。
+- 全車完走、交通解消、実行時間、transaction数、audit行数等を**確定事項として記録しない**。
+- 実装・長期trial側へ戻る場合は **§19** と詳細設計 **§30** を読む。
+- 文献調査を再開する場合は **本§20**、詳細正本 **§22**、FRAMEWORK **§5D** を読む。
