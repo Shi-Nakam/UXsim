@@ -8,8 +8,9 @@
 - 今後の最新進捗と最新再開地点は本第4巻へ記録する
 - 技術的詳細の正本は、各時点で指定された詳細設計メモを参照する
 - 第4巻開始時点の技術的正本は `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_5.md` の **§23** である
+- **2026-11-02 追記:** 監査出力・full-run audit helper・3,000 台長期 trial の技術的正本は詳細設計 **§30**。進捗の最新再開地点は **§19**（§23・§18 等は **歴史記録**として維持）
 
-**検索語:** ORDER_EXCHANGE_PROGRESS_4、進捗第4巻、TVT-MP、4交差点、nonparticipating 20％、T=382、初回Actual arrival、Actual arrival上書き、Baseline arrival一致、first divergenceなし、T=402、一時skip、clearance、C順位183、Actual通過順位177、selected=False、baseline fallback、leading nonparticipating、順位確定源、完了、最新再開地点、Git対象、commit、push。
+**検索語:** ORDER_EXCHANGE_PROGRESS_4、進捗第4巻、TVT-MP、横並び表示、事後分析、監査出力、full-run audit helper、nonparticipating 20％、全車完走、交通解消、3,000台、T=999、departure-end、4交差点、T=382、初回Actual arrival、Actual arrival上書き、Baseline arrival一致、first divergenceなし、T=402、一時skip、clearance、C順位183、Actual通過順位177、selected=False、baseline fallback、leading nonparticipating、順位確定源、完了、最新再開地点、Git対象、commit、push。
 
 ---
 
@@ -1071,7 +1072,7 @@ FCFS との保存値比 **23,349 倍**を**純粋 CPU 性能倍率として採�
 
 **production 最適化、arrival tiebreaker、乱数源分離へ自動的に進まない。**
 
-**歴史的注記（§17 執筆時点との関係）:** 上記 §17.1・§17.11 は **FCFS 需要選定完了時点**（3,000 台 **TVT-MP 本体未作成**）の記録である。**2026-11-01 後続**に 3,000 台 TVT-MP **短期 benchmark**、**T=96 profiling**、**共有直列化** production 最適化、**完全一致再検証**まで実施した。**進捗の最新正本は §18**（本 §17 は改番・削除しない）。
+**歴史的注記（§17 執筆時点との関係）:** 上記 §17.1・§17.11 は **FCFS 需要選定完了時点**（3,000 台 **TVT-MP 本体未作成**）の記録である。**2026-11-01 後続**に 3,000 台 TVT-MP **短期 benchmark**、**T=96 profiling**、**共有直列化** production 最適化、**完全一致再検証**まで実施した。**進捗の最新正本は §19**（本 **§17** は改番・削除しない）。
 
 ---
 
@@ -1212,7 +1213,9 @@ FCFS との保存値比 **23,349 倍**を**純粋 CPU 性能倍率として採�
 
 **本 §18 が進捗第4巻の最新再開地点である（2026-11-01 後半）。** 詳細設計正本 **§29** を正本とする（§28・§17 は **歴史的記録**として維持）。
 
-**再開時に最初に行うこと:**
+**歴史的注記（2026-11-02 追記）:** その後 **T=999 departure-end trial**、**full-run audit helper**、**audit validation**、**3,000 台 full completion 長期 trial** まで進んだ。**進捗の最新再開地点は §19**、詳細設計正本は **§30**（本 **§18.11** の当時の再開手順は **歴史記録**として残す）。
+
+**再開時に最初に行うこと（2026-11-01 後半時点の記録）:**
 
 1. 詳細設計 **§29** と本 **§18** を読む。
 2. 今回の **変更・新規ファイル**（§29.14）と **出力 directory**（4 箇所）を確認する。
@@ -1236,4 +1239,91 @@ FCFS との保存値比 **23,349 倍**を**純粋 CPU 性能倍率として採�
 | T=96 Candidate 集合 A/B | **≈7.97 倍**（§18.4） |
 | T=0〜299 全体通常 exec | **3.8435595338127504 倍**、**73.9824506111392% 削減**（§18.7） |
 
-**歴史的注記（§17 執筆時点との関係）:** 上記 §17.1・§17.11 は **FCFS 需要選定完了時点**（3,000 台 **TVT-MP 本体未作成**）の記録である。**2026-11-01 後続**に 3,000 台 TVT-MP **短期 benchmark**、**T=96 profiling**、**共有直列化** production 最適化、**完全一致再検証**まで実施した。**進捗の最新正本は §18**（本 §17 は改番・削除しない）。
+**歴史的注記（§17 執筆時点との関係）:** 上記 §17.1・§17.11 は **FCFS 需要選定完了時点**（3,000 台 **TVT-MP 本体未作成**）の記録である。**2026-11-01 後続**に 3,000 台 TVT-MP **短期 benchmark**、**T=96 profiling**、**共有直列化** production 最適化、**完全一致再検証**、**T=999 departure-end trial**、**full-run audit helper**、**3,000 台 full completion 長期 trial 準備**まで実施した。**進捗の最新正本は §19**（本 **§17**・**§18** は改番・削除しない）。
+
+---
+
+## 19. 3,000台長期trialの監査出力準備と全車完走実行（2026-11-02）
+
+**検索語:** 横並び表示、事後分析、監査出力、long-run trial、full-run audit helper、T=999、3,000台、departure-end、transactions 3579、1727台未完走、production監査不採用、git restore、f323820、12台audit validation、600台、nonparticipating 20%、same-inlink、actual arrival、奇数到着、全車完走、交通解消、safety cap T=5000、正式10ファイル、finalize TSIZE、AttributeError、caffeinate、console log、結果未確定。
+
+**詳細技術正本:** `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_5.md` **§30**。
+
+**区分（混同禁止）:**
+
+| 対象 | 状態 |
+|------|------|
+| **T=999 departure-end trial** | **正常完了**（**全車完走 trial ではない**） |
+| **audit validation**（12 台 / 600 台 20% NP） | **完了** |
+| **3,000 台 full completion + audit trial** | **実行中**、**結果未確定** |
+| **production 大規模監査拡張** | **不採用・破棄済み** |
+| **full-run audit helper** | **採用**（production **非変更**） |
+
+### 19.1 完了事項
+
+- **T=999・3,000 台 departure-end trial**を **正常完了**（`run_tvt_mp_6x6_grid_3000_vehicle_200m_60kph_eval_1000_timestep_departure_end_trial.py`）
+- **exec_simulation** 約 **6 時間 35 分**（**23697.24 s**、**23.70 s/timestep**）
+- **transactions 3579**
+- **T=999 時点**で **1727 台未完走**（end 1273 / run 1726 / wait 1）
+- **正式出力 8 ファイル**保存
+- **manifest / CSV / Node 別取引合計 / state counts / Link Vehicle 数**を **独立確認**
+- **正式 CSV だけ**では **従来横並び監査を完全再現できない**ことを確認（詳細 **§30.2**）
+- **production 大規模監査拡張案**を **不採用**
+- 未 commit **13 ファイル・約 2112 行**を **`git restore`** で破棄、production/test を **`f323820`** へ復元（patch 退避 **`/tmp/tvt_mp_audit_overdesign_backup.patch`**）
+- **`tvt_mp_full_run_audit_helper.py`** を **新規作成**（helper **py_compile**・**static validation** 通過）
+- **12 台全参加** audit validation trial：**audit CSV 検証通過**
+- **4 交差点・600 台・20% nonparticipating** audit validation trial：**228 取引**、**626 visit audit 行**、**FIFO violation 0**、**検証通過**
+- **buyer / seller / nonparticipating** の **横並び監査**を **保存可能**（inlink、actual arrival、局所順位、Node 累積順位、passage、**G_b/R_s/P_b/C_s**）
+- **same-inlink 複数 buyer/seller** の **横並び再構成**に成功（例 **T=392 northwest**、詳細 **§30.6**）
+- **奇数到着**を含む **成立取引 136 件**を確認（helper **偶数丸めなし**、**§30.7**）
+- **3,000 台・20% NP・全車完走・監査** 長期本番スクリプトを **新規作成**（`run_tvt_mp_6x6_grid_3000_vehicle_nonparticipating_20_full_completion_audit_trial.py`）
+- 作成後 **py_compile**・**static validation** **通過**
+- **finalize 前 TSIZE 参照**不具合を **修正**（finalize **前**の `verify_network_runtime` **削除のみ**）
+- **修正後**も **py_compile**・**static validation** **通過**
+
+### 19.2 現在実行中
+
+- **3,000 台** TVT-MP
+- **nonparticipating 20%**（600 / 2400、seed **3**）
+- **全車完走・交通解消**まで（**safety cap T=5000**、internal TSIZE **5031**）
+- **full-run audit helper** 接続
+- **想定約 12 時間**（**未確定**）
+- **caffeinate** 使用
+- **console log** 保存
+
+**注意:** 「**全車完走した**」「**交通解消した**」「**12 時間で終了した**」等は **未確定**のため **確定事項として書かない**。
+
+### 19.3 未確定事項（長期 trial 完了待ち）
+
+- 最終 **World.T**
+- 最終 **actual passage timestep**
+- **実行時間**（exec_simulation / script total）
+- **transaction 数**
+- **audit transaction / visit 行数**
+- **buyer / seller / nonparticipating 監査行数**
+- **same-inlink 最大値**
+- **FIFO violation** 合計
+- **全車完走・交通解消**の **成否**
+- **safety cap T=5000 以内**で終了するか
+
+### 19.4 再開時チェックリスト
+
+1. **長期実行 process** が継続中か確認
+2. 終了後 **console output** を確認
+3. **正式 10 ファイル**の存在確認（研究 CSV 5 + audit 2 + vehicle_vot + manifest + run_summary）
+4. **run_summary** と **manifest** を確認
+5. **Vehicle state**、**Link 上 Vehicle**、**completion 条件**を **独立確認**
+6. **transaction / visit audit 行数**を **正式 CSV** と比較
+7. **buyer / seller / nonparticipating 監査行**を確認
+8. **same-inlink 最大構成**を **横並び表示**
+9. **奇数到着・奇数通過**を含む取引も確認
+10. 結果を **詳細設計 §30** と **本 §19** へ **追記**
+11. その後 **commit 対象**を整理
+
+### 19.5 最新再開地点（本節）
+
+**本 §19 が進捗第4巻の最新再開地点である（2026-11-02）。** 技術的正本は詳細設計 **§30**。
+
+**§18.11**（共有直列化・T=0〜299 完全一致時点）は **歴史的再開地点**として維持する。**T=999 departure-end 結果**は **§30.1**。**audit validation 完了**は **§30.5**。**3,000 台 full completion trial** は **§30.8 / 本 §19.2**（**結果未確定**）。
+
+**歴史的注記（§18 執筆時点との関係）:** 上記 **§18.11** は **2026-11-01 後半**（共有直列化受入れ・完全一致検証時点）の最新再開地点であった。**その後** T=999 trial、監査 helper、validation trial、長期本番スクリプトまで進んだ。**進捗の最新正本は §19**（**§18** は改番・削除しない）。

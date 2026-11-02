@@ -10206,3 +10206,294 @@ departure_time = DEPARTURE_START + (
 - **追加の production 高速化**へ **自動的に進まない**。
 - **arrival tiebreaker**、**乱数源分離**、**Candidate 削減**、**近似化**へ **自動的に進まない**。
 - **次の重要判断**は、**正式な 3,000 台 TVT-MP をどこまで実行するか**である。
+
+**歴史的注記（§29.15 執筆時点との関係）:** 上記 §29.15 の「次の作業」（commit・push、evaluation end 未決定等）は **2026-11-01 後半**（共有直列化受入れ・T=0〜299 完全一致時点）の記録である。**その後**、3,000 台 **departure-end observation trial（T=999）**、正式 CSV の **横並び事後監査不足**の確認、**production 大規模監査拡張案の不採用**、**full-run audit helper** の新規作成と **12 台 / 600 台 20% nonparticipating** 検証、**3,000 台・20% nonparticipating・全車完走・交通解消** 長期本番スクリプト作成まで進んだ。**最新の設計正本は §30**（本 §29 の過去記録は削除・改番しない）。
+
+---
+
+## 30. 長時間trialの事後監査出力とfull-run audit helper（2026-11-02）
+
+**検索語（本 §30 へ到達するための目安）:** 横並び表示、事後分析、監査出力、長時間trial、full-run audit helper、同一inlink、到着時刻、actual node arrival、baseline arrival、局所順位、baseline local rank、post-trade local rank、Node累積連続順位、assigned rank、actual node passage rank、binding sequence auxiliary rank、経済条件、G_b、R_s、P_b、C_s、nonparticipating 20%、全車完走、交通解消、T=999、departure-end、3,000台、production監査拡張不採用、diagnostic再利用、inlink_name、FIFO、same-inlink、safety cap T=5000、正式10ファイル。
+
+### 30.1 T=999・3,000台departure-end trial
+
+**スクリプト:** `research_scripts/run_tvt_mp_6x6_grid_3000_vehicle_200m_60kph_eval_1000_timestep_departure_end_trial.py`
+
+**scenario / output directory:** `tvt_mp_6x6_grid_3000_vehicle_200m_60kph_eval_1000_timestep_departure_end_candidate_limit_10_seed_0_vot_seed_1`（`research_outputs/trial/` 配下）
+
+**条件:**
+
+| 項目 | 値 |
+|------|-----|
+| Vehicle 数 | **3,000** 台 |
+| 参加 | **全車 participating** |
+| departure | **T=0〜999** |
+| evaluation | **T=0〜999** |
+| internal TSIZE | **1030**（999 + baseline horizon 30 + 1） |
+| simulation 後 World.T | **1000** |
+| Candidate Visit 数上限 **N** | **10** |
+| baseline horizon | **30** |
+| Link | 全 **168** 本 **200 m** |
+| free-flow speed | **60 km/h**（60/3.6 m/s） |
+| capacity_in / capacity_out | **未指定** |
+| production | **Candidate 共有直列化**最適化を使用 |
+| 全車完走・交通解消 | **要求しない**（**departure-end observation trial**） |
+
+**結果（manifest・run_summary 正本）:**
+
+- **exec_simulation_seconds:** **23697.237107249908**（約 **6 時間 34 分 57 秒**）
+- **1 evaluation timestep 平均:** **23.697237107249908 s/timestep**
+- **transactions:** **3579**
+- **Vehicle state:** end **1273** / run **1726** / wait **1** / home **0**（合計 **3000**）
+- **未完走（end 以外）:** **1727** 台相当（run+wait）
+- **scheduled departure reached:** **3000** / **not reached:** **0**
+- **internal grid Link 上 Vehicle:** **1565**
+- **OD connector 上 Vehicle:** **161**
+- **Link 上合計 1565+161=1726** は **run** 数 **1726** と一致
+- **Vehicle plan SHA-256:** `0b1fc2d2b084c3c5ce94d0ec0c476de4b2c60d40543f58f789dd644d1e3d71d9`
+- transaction 数は **manifest**、**tvt_mp_transactions.csv**、**Node 別合計**のすべてで **3579** 件
+- **Vehicle state counts 合計**は **3000**
+- **正式出力 8 ファイル**を保存（研究 CSV 5 + vehicle_vot + manifest + run_summary）
+
+**性能上の観察（条件→結果→判断）:**
+
+- T=0〜299 **最適化後** trial では約 **5.46 s/timestep**（§29.10）
+- **T=0〜999** では約 **23.70 s/timestep**（非線形に重い）
+- 後半混雑、**Candidate World 復元**、**pickle load**、**GC** 負荷により **単純比例**で見積もれない
+- **T=600** 表示後も **CPU 約 100%** で計算継続しており、**停止ではなかった**
+- **`SHOW_PROGRESS_DELTAT=600`** のため、**T=600 以降**は完了まで **新しい実 World 進捗表示がなかった**
+- **T=999** 時点で **1727 台未完走**であり、**交通解消には遠かった**
+
+**区分（混同禁止）:** 本 trial は **正常終了した departure-end observation** であり、**全車完走 trial ではない**（§30.8 の full completion trial とは別物）。
+
+### 30.2 T=999出力の監査性不足（横並び事後分析）
+
+**T=999 正式 CSV**（`tvt_mp_transactions.csv` / `tvt_mp_visits.csv` 等）には、従来の **横並び事後分析**に必要な次が **不足**していた。
+
+- 取引成立時の **inlink_name**
+- **baseline arrival**（decision 内 baseline 到着 timestep）
+- **actual node arrival**（実 World 初回到着）
+- **baseline local rank** / **post-trade local rank**
+- **Node 累積連続順位**（**assigned_rank**）と **actual node passage rank** の **完全な横並び**
+- **buyer 別 G_b** / **seller 別 R_s**
+- **同一 inlink** 上の **buyer / seller / nonparticipating** 構成
+
+**保存されていたもの:** baseline / Candidate / **actual passage**、実現結果、既存正式列の **経済評価**・**Node 別集計** 等。
+
+**結論:** 従来 CSV **だけ**から **完全な横並び事後監査**を再現 **できない**。
+
+**禁止（監査契約）:**
+
+- 既存出力を **後付け推測・補完しない**
+- **passage 時刻**から **actual arrival を逆算しない**
+- **baseline arrival** を **actual arrival** として **流用しない**
+
+**T=999 出力が有効な用途:**
+
+- transaction 数、Vehicle 状態、Node 別集計
+- passage・経済評価の **既存正式列**
+- **実行性能**、**departure-end 時点の交通状態**
+
+### 30.3 過剰なproduction監査拡張の不採用
+
+**経緯:** 正式監査出力のため、**production と test の 13 ファイル**へ **約 2112 行**を追加する案を **一度実装**した。
+
+**案に含まれていた主な変更:**
+
+- **actual arrival** の production 保存
+- **Candidate arrival status**
+- **CommonFrozenInput** の大幅拡張
+- **buyer / seller economic frozen 型**
+- **TradeWait** の大幅拡張
+- **transaction audit / visit audit** の **production writer**
+- 多数の **test fixture** 更新
+
+**不採用理由:** 既存 **横並び diagnostic** を再利用する目的に対し **変更範囲が過大**で、既存 fixture 基盤へ **広く波及**した。
+
+**破棄:**
+
+- 未 commit 変更は **`git restore`** で破棄
+- **production** と **test** を commit **`f323820`** の状態へ復元
+- 破棄前 patch: **`/tmp/tvt_mp_audit_overdesign_backup.patch`**（約 **116 KB**、**一時退避**。**正式設計ではない**。再採用を前提にしない）
+
+**確定判断:**
+
+- **production へ大規模監査基盤を追加しない**
+- 既存 **diagnostic** で確立済みの **横並び取得方法**を **再利用**する
+- **production を変更しない外部 helper** 方式を採用
+- **Candidate arrival** の新規 production 基盤は **今回追加しない**
+- **timestep 単位 physical trace** は **長期本番 trial** では保存しない
+- **成立取引**と **trade-scope Visit** だけを保存する
+
+**最新参照:** 採用方式は **§30.4**（`research_scripts/tvt_mp_full_run_audit_helper.py`）。
+
+### 30.4 最小full-run audit helper
+
+**新規 helper:** `research_scripts/tvt_mp_full_run_audit_helper.py`
+
+**公開 API:**
+
+- `install_tvt_mp_full_run_audit(real_world)`
+- `finalize_tvt_mp_full_run_audit(real_world, research_output_bundle)`
+- `write_tvt_mp_full_run_audit_csv(audit_result, output_directory)`
+
+**static validation:** `validate_tvt_mp_full_run_audit_helper_static_contract()`
+
+**方式（production 非変更）:**
+
+- 既存 **横並び diagnostic** で用いた **保存済み result chain** を読み取る（**diagnostic module は import しない** — trial script 副作用のため）
+- **TVT-MP driver** の **成立取引**結果を **hook** で捕捉
+- `Vehicle.record_order_control_node_arrival()` の **正常処理後**に、**実 World のみ**を対象として Visit 単位の **actual node arrival** を保存
+- **key:** `(node_name, vehicle_name, visit_id)`
+- **同一 Visit の再登録:** 最初に保存した到着 timestep を **維持**し、**現在 World.T とは再比較しない**（production は初回 `arrival_time` を保持するため）
+- **baseline World** / **Candidate local World** は **`vehicle.W` の同一性**により **除外**
+- **passage から actual arrival を逆算しない** / **baseline arrival を actual arrival へ流用しない**
+- **Vehicle 名 prefix から inlink を推測しない**（**binding_visit.inlink_name** を使用）
+- **live World、Vehicle、Node、Link** を最終 audit result に **保持しない**
+- **physical trace** や **全 timestep 履歴**を保存しない
+- **finalize 後**に hook を **外す**
+
+**新規監査 CSV（正式出力に追加）:**
+
+- `tvt_mp_transaction_audit.csv`
+- `tvt_mp_visit_audit.csv`
+
+**transaction audit の主要情報:** decision timestep、Node、Candidate identity、right-of-entry Visit、buyer / seller / nonparticipating Visit 集合、baseline order、Candidate order、total G / total R、surplus、FIFO 結果、**同一 inlink 最大** party / buyer / seller / nonparticipating 数、ex-post evaluation status 等。
+
+**visit audit の主要情報:** VisitKey、role、**inlink_name**、formal route、**baseline arrival**、**actual node arrival**、arrival tiebreaker、**baseline local rank**、**post-trade local rank**、**assigned_rank**（Node 累積連続 C 順位）、**actual node passage rank**、baseline / Candidate / **actual passage**、declared / true VOT、**buyer G_b**、**seller R_s**、**payment P_b**、**compensation C_s**、realized gain / delay loss、satisfaction、**binding sequence auxiliary rank**、**same-inlink FIFO preserved** 等。
+
+**局所順位と Node 順位の区別（検索・横並び用）:**
+
+| 名称 | 意味 |
+|------|------|
+| **baseline_local_rank** | 当該 decision 内の **baseline 局所順位** |
+| **post_trade_local_rank** | 当該 decision 内の **取引後局所順位** |
+| **assigned_rank** | **Node 単位**の **累積連続 C 順位** |
+| **actual_node_passage_rank** | **Node 単位**の **実通過連続順位** |
+| **binding_sequence_auxiliary_rank** | binding sequence 上の **補助順位**（local rank や Node 累積順位 **とは別物**）。**同一 inlink FIFO** 注釈は diagnostic と同様 **補助順位**を用い、**post_trade_local_rank を FIFO 順序源にしない** |
+
+**trial 接続順（契約）:** World 構築 → Vehicle plan → 参加設定 → `finalize_scenario` → **`install`（simulation 直前 1 回）** → simulation → **`build_tvt_mp_research_output`** → **`finalize`（bundle 直後 1 回）** → 既存正式 CSV → **同一 output directory** へ audit CSV。
+
+### 30.5 監査helperの実動検証（audit validation）
+
+#### 30.5.1 全参加 12 台
+
+**スクリプト:** `research_scripts/run_tvt_mp_single_cross_intersection_12_vehicle_full_run_audit_validation.py`
+
+**scenario:** `tvt_mp_single_cross_intersection_12_vehicle_full_run_audit_validation_seed_1`
+
+**結果:**
+
+- **transactions = 2**
+- **transaction audit rows = 2** / **visit audit rows = 8**
+- **全 12 台完走**
+- **audit validation passed**
+- **production 変更なし**
+
+#### 30.5.2 4 交差点・600 台・20% nonparticipating
+
+**スクリプト:** `research_scripts/run_tvt_mp_four_cross_intersections_grid_medium_nonparticipating_20_full_run_audit_validation.py`
+
+**scenario:** `tvt_mp_four_cross_intersections_grid_medium_nonparticipating_20_600_vehicle_eval_900_timestep_seed_1_nonparticipation_seed_3_full_run_audit_validation`
+
+**結果:**
+
+- **transactions = 228**
+- **transaction audit rows = 228** / **visit audit rows = 626**
+- **buyer rows = 263** / **seller rows = 324** / **nonparticipating rows = 39**
+- **actual arrival saved rows = 626**
+- **FIFO violation total = 0**
+- **same-inlink maximum party count = 2**
+- **audit CSV validation passed**
+- **total runtime ≈ 1246.906 s**
+- **production 変更なし**
+
+**結論:** **全 participating** と **20% nonparticipating** の双方で、**監査 CSV だけ**から既存 **横並び事後分析**に必要な情報を取得できた（**audit validation 完了**）。**3,000 台 full completion trial の結果は未確定**（§30.8）。
+
+### 30.6 同一inlink複数当事者の実例（横並び再構成）
+
+**代表取引:** **T=392**、**northwest_intersection**
+
+- **buyer 3** / **seller 3** / **trade-scope total 6**
+- **same-inlink buyer 最大 2** / **same-inlink seller 最大 2**
+- **FIFO violation 0**
+
+**同一 inlink buyer（例）:** `west_north_od_to_northwest_intersection`
+
+- `veh_wn_en_base_025:1`
+- `veh_wn_se_base_025:1`
+
+**同一 inlink seller（例）:** `southwest_intersection_to_northwest_intersection`
+
+- `veh_sw_nw_base_039:2`
+- `veh_sw_nw_base_040:2`
+
+**監査 CSV から横並び再現できた項目:** baseline / actual arrival、baseline / Candidate / actual passage、baseline / post-trade local rank、assigned rank / actual passage rank、**G_b / R_s**、**P_b / C_s**、realized gain、satisfaction、**same-inlink FIFO**。
+
+### 30.7 到着・通過時刻の奇偶確認（actual arrival 丸めの否定）
+
+**T=392 代表取引:** 到着・通過時刻が **すべて偶数**であったため、helper が **偶数へ丸めている可能性**を確認した。
+
+**600 台 audit output 全体:** baseline arrival または actual arrival に **奇数**を含む **成立取引が 136 件**存在。
+
+**代表:** **T=41**、**northeast_intersection**
+
+- seller arrivals: **47 / 47**（3 Visit）
+- buyer arrival: **49 / 49**
+- baseline passage: **51, 53, 55, 57**
+- Candidate / actual passage: **52, 54, 56, 50**
+
+**結論:** 監査 helper は **baseline arrival**、**actual arrival**、**baseline passage** を **偶数へ丸めていない**。
+
+**構成上の観察（欠損ではない）:** 600 台 trial では、**同一 inlink に buyer または seller が複数**かつ **奇数到着を含む成立取引は 0 件**だった。これは **監査欠損**ではなく、**今回の成立取引集合の構成**上の結果である。
+
+### 30.8 次回長期trial（3,000台・20% nonparticipating・全車完走・監査接続）
+
+**新規本番スクリプト:** `research_scripts/run_tvt_mp_6x6_grid_3000_vehicle_nonparticipating_20_full_completion_audit_trial.py`
+
+**scenario / output directory:** `tvt_mp_6x6_grid_3000_vehicle_nonparticipating_20_full_completion_audit_candidate_limit_10_seed_0_vot_seed_1_nonparticipation_seed_3`
+
+**条件（§30.1 の plan・道路・TVT-MP と整合、参加のみ変更）:**
+
+| 項目 | 値 |
+|------|-----|
+| Vehicle | **3000** |
+| participating / nonparticipating | **2400 / 600**（**20%**） |
+| nonparticipation seed | **3**（4 交差点 20% trial と同型 **`random.Random(3).sample`** + plan 順維持） |
+| departure | **T=0〜999** |
+| traffic / demand / VOT seed | **0 / 42 / 1** |
+| Vehicle plan SHA-256 | `0b1fc2d2b084c3c5ce94d0ec0c476de4b2c60d40543f58f789dd644d1e3d71d9`（**参加は plan digest に含めない**） |
+| N / baseline horizon / clearance | **10 / 30 / 1** |
+| 道路 | 全 Link **200 m**、**60 km/h**、capacity_in/out **未指定** |
+| 実行 | **全車完走・交通解消**まで（**固定 evaluation end T=999 で終了しない**） |
+| safety cap（最終 TVT decision 上限） | **T=5000** |
+| internal TSIZE | **5031**（5000 + 30 + 1） |
+| full-run audit helper | **接続**（§30.4 順序） |
+| 想定 wall-clock | **約 12 時間**（**未確定**。単純比例禁止） |
+| 実行運用 | **caffeinate**、**console log 保存**（記録上の運用；本メモは実行結果を確定しない） |
+
+**終了条件（スクリプト契約）:**
+
+- end **= 3000**、run **= 0**、wait **= 0**、home **= 0**
+- **network 上 Vehicle = 0**、internal Link **= 0**、OD connector **= 0**
+- **scheduled departure reached = 3000**
+- **traffic clearance complete** / **full trip completion complete**
+- 最終 **World.T** > 最終 **actual passage timestep**
+
+**正式出力:** 従来 **8 ファイル** + 監査 CSV **2 本** = **10 ファイル**。
+
+**スクリプト作成・検証（確定）:**
+
+- 作成後 **py_compile** と **static validation** は **通過**
+- **初回実行**は **`finalize_scenario()` 前**に **`world.TSIZE`** を参照する **`verify_network_runtime(world)`** により **simulation 開始前 AttributeError** で停止
+- **原因:** **`World.TSIZE` は `finalize_scenario()` で初めて作成される**
+- **修正:** finalize **前**の **`verify_network_runtime(world)` 呼出しのみ削除**。finalize **後**の **`TSIZE` 検証**と **`verify_network_runtime(world)` は維持**
+- **修正後:** **py_compile** と **static validation** は **再度通過**
+
+**現在（2026-11-02 記録時点）:**
+
+- **修正版**の **3,000 台・20% nonparticipating・全車完走・交通解消・full-run audit** 長期 trial を **実行中**
+- **正常終了結果は未確定**（最終 World.T、transaction 数、監査行数、実行時間、same-inlink 最大、FIFO、完走成否等は **確定事項として記載しない**）
+- **完了後**に正式結果を **本 §30** および進捗 **§19** へ **追記**する
+
+**歴史的参照:** §29.15 の「T=999 未決定」は **T=999 departure-end trial 実施前**の判断記録である。**T=999 trial 結果**は **§30.1**。**全車完走**は **§30.8**（**結果未確定**）。
