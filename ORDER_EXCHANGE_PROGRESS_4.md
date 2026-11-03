@@ -9,6 +9,9 @@
 - 技術的詳細の正本は、各時点で指定された詳細設計メモを参照する
 - 第4巻開始時点の技術的正本は `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_5.md` の **§23** である
 - **2026-11-02 追記:** 監査出力・full-run audit helper・3,000 台長期 trial の技術的正本は詳細設計 **§30**。進捗の最新再開地点は **§19**（§23・§18 等は **歴史記録**として維持）
+- **2026-11-03 最新参照:** 3,000 台 full-completion trial の **確定結果**、**総合評価指標**、および **次の実装・高速化課題**について、TVT-MP 実装・評価側の最新再開地点は **§21**、詳細技術正本は `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_5.md` **§31**。
+- **§19・§30** は、長期 trial の **実行前・実行中** および **監査準備**の **歴史的記録**として維持する。
+- **文献調査側**の最新再開地点は **§20**。
 
 **検索語:** ORDER_EXCHANGE_PROGRESS_4、進捗第4巻、TVT-MP、横並び表示、事後分析、監査出力、full-run audit helper、nonparticipating 20％、全車完走、交通解消、3,000台、T=999、departure-end、4交差点、T=382、初回Actual arrival、Actual arrival上書き、Baseline arrival一致、first divergenceなし、T=402、一時skip、clearance、C順位183、Actual通過順位177、selected=False、baseline fallback、leading nonparticipating、順位確定源、完了、最新再開地点、Git対象、commit、push。
 
@@ -1338,6 +1341,8 @@ FCFS との保存値比 **23,349 倍**を**純粋 CPU 性能倍率として採�
 - **文献調査側**の最新再開地点は **本§20**。
 - 両者は別系統の再開地点であり、混同しない。
 
+**2026-11-03 最新参照（歴史的注記）:** 上記の **§19・結果未確定** という記述は、**先行研究調査 §20 を作成した時点**の **歴史的状態**である。その後、**3,000 台 full-completion trial** は **正常終了**し、**確定結果**を記録した。**TVT-MP 実装・評価側**の最新再開地点は **§21**。**詳細技術正本**は詳細設計 **§31**。**文献調査側**の最新再開地点は引き続き **§20**。**§20 を §21 で置換しない**。
+
 本§20の追加を理由に、実行中の長期trialが完了したとは記録しない。
 
 ### 20.1 完了した文献調査
@@ -1414,3 +1419,191 @@ TSE完全PDFまたは2009年overview chapter全文を別経路で入手した場
 - 全車完走、交通解消、実行時間、transaction数、audit行数等を**確定事項として記録しない**。
 - 実装・長期trial側へ戻る場合は **§19** と詳細設計 **§30** を読む。
 - 文献調査を再開する場合は **本§20**、詳細正本 **§22**、FRAMEWORK **§5D** を読む。
+
+**2026-11-03 最新参照:** 本 §20.5 の「長期 trial **実行中**」「**結果未確定**」「**§19・§30 を読む**」という記述は、**文献調査作業時点**の **歴史的状態**である。**長期 trial の確定結果**、**総合評価指標**、および **次の実装・高速化課題**は、進捗 **§21** と詳細設計 **§31** を参照する。**文献調査**の再開先は引き続き **本 §20**、詳細文献正本 **§22**、FRAMEWORK **§5D**。**TVT-MP 実装・評価**の再開先は **§21・§31**。**両系統を混同しない**。
+
+---
+
+## 21. 3,000台full-completion結果、総合評価指標設計、および次の実装・高速化課題（2026-11-03）
+
+本§21は **TVT-MP 実装・評価**側の進捗を記録する。**§20** は Schepperle・Böhm 系列の **文献調査**進捗として **削除・変更・置換しない**。文献調査側の最新再開地点は **§20**、TVT-MP 実装・評価側の最新再開地点は **本§21**。
+
+### 21.0 検索語と正本
+
+**検索語:** 3,000台、full completion、traffic clearance、20% nonparticipating、AWT、AWWT、ACWT、ACWWT、Vehicle当たり累積waiting time、平均Visit数、総旅行時間、総遅延、最終Vehicle完走時刻、FCFS比較、Buyer、Seller、Nonparticipating、Seller unsatisfied、18時間、pickle.load、GC、高速化、評価指標算出、makespan、conservative makespan、詳細設計§31。
+
+**詳細技術正本:** `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_5.md` **§31**
+
+### 21.1 完了事項
+
+**長期 trial（確定）:**
+
+| 項目 | 値 |
+|------|-----|
+| Vehicle | **3000** 台（participating **2400** / nonparticipating **600**） |
+| departure | **T=0〜999** |
+| 終了 | **全車完走・交通解消** |
+| final **World.T** | **2035** |
+| evaluation end timestep | **2034** |
+| Vehicle state | end **3000** / run **0** / wait **0** / home **0** |
+| transaction count | **4298** |
+| transaction audit rows | **4298** |
+| visit audit rows | **11871** |
+| buyer / seller / nonparticipating audit rows | **5013 / 6170 / 688** |
+| actual arrival rows | **11871** |
+| same-inlink max party / buyer / seller / nonparticipating | **3 / 3 / 3 / 2** |
+| FIFO violation total | **0** |
+| audit CSV validation | **passed** |
+| exec_simulation | **65093.892005 s** |
+| final script total | **65116.178632 s** |
+| wall-clock | **約 18 時間 5 分** |
+| 正式出力 | **10 ファイル** |
+
+**scenario / スクリプト:** 詳細設計 **§31.1**（`run_tvt_mp_6x6_grid_3000_vehicle_nonparticipating_20_full_completion_audit_trial.py`、output directory 名は同節）。
+
+**FCFS 比較（同条件性）:**
+
+- **同一 Vehicle plan SHA-256**、**同じ 3000 台**、departure **T=0〜999**、Link **200 m**、**60 km/h**、jam density **0.2**
+- FCFS **last_vehicle_completion_timestep = 2296**
+- FCFS **World.T=5000** は **固定観測終了値**であり **比較値ではない**
+- TVT-MP は **遅くとも T=2033** までに **全車完走・交通解消**
+- TVT-MP の **exact な最終 Vehicle 完走 timestep** は **未保存**
+- **保守的**に **少なくとも 263 timestep**、**約 11.45% 短い makespan**（詳細設計 **§31.2**）
+- **最終 departure 後だけ**を比較した **20.3% 短縮**という **旧解釈は不採用**
+- **makespan** は **補助指標**であり、**最終総合評価を単独で決めない**
+
+**メモ:**
+
+- 詳細設計 **§31** を **追加済み**
+- **Terminal** で **§31.1〜§31.17** を **独立通読済み**
+- **修正必須の誤りなし**
+
+**区分:** **§19**・**§20.5** の「長期 trial **結果未確定**」は **実行前・実行中の歴史記録**。**確定数値**は **本§21** および詳細設計 **§31** を参照（**§19** は改番・削除しない）。
+
+### 21.2 総合評価指標の確定事項
+
+**中核指標:**
+
+1. Visit 単位 **AWT**
+2. Visit 単位 **AWWT**
+3. **平均 Visit 数**
+4. **ACWT**
+5. **ACWWT**
+6. **平均旅行時間**
+7. **総旅行時間**
+8. **平均遅延**
+9. **総遅延**
+10. **最終 Vehicle 完走時刻**
+11. **全車完走**
+12. **交通解消**
+
+**ACWT:** Average Cumulative Waiting Time (per Vehicle) — Vehicle 当たり平均累積 waiting time
+
+**ACWWT:** Average Cumulative Weighted Waiting Time (per Vehicle) — Vehicle 当たり平均累積 weighted waiting time
+
+**重要:**
+
+- **ACWT = Visit 単位 AWT × 平均 Visit 数**
+- **ACWWT = Visit 単位 AWWT × 平均 Visit 数**
+- これは **線形近似ではなく**、**同じ Visit 集合と分母**を用いる限り **恒等式**
+- FCFS 基準の **補正値**ではなく **各方式の実値**を **主表**へ示す
+- **名称**は **有力候補**であり、**既存用語との重複調査前**に **最終確定しない**
+- **数理定義**は **固定可能**
+
+**方式比較行:** signalized UXsim、FCFS、BATCH、TVT-MP
+
+**当面保留（最初から過剰実装しない）:** Node 別 AWT・AWWT、時間帯別 AWT・AWWT、詳細空間分布、時系列 throughput、VOT 階層別詳細分析
+
+（定義・主表・waiting time: 詳細設計 **§31.3〜§31.10**）
+
+### 21.3 Role別評価
+
+**Buyer:** FCFS より **AWWT** が **大幅に改善**することを **期待**。**集計単位は未確定**。
+
+**Seller:** **AWT・AWWT** 悪化を **できるだけ小さく**。**Seller unsatisfied 率**を **必須**。**新規 NetLoss・NetBenefit** 等の **補償込み独自式は導入しない**。**既存 Satisfied / Unsatisfied 事後評価**を使う。**集計単位は未確定**。
+
+**Nonparticipating:** **出発から trip end まで固定 Vehicle 属性**。**600 台**を **Vehicle 単位**で評価。FCFS の **同一 Vehicle 集合**と比較。**ACWT・ACWWT** が **不変または改善**することを **期待**。**旅行時間・遅延**も比較。**改善・不変・悪化 Vehicle 数**、**最大悪化量**を確認する **候補**。
+
+**Buyer・Seller 未確定集計単位:** **Role-Visit 方式** / **Role 経験 Vehicle 方式** / **両方式併記** — **小規模 output** で **試算してから決定**。**コード実装時に無断で一方式へ固定しない**（詳細設計 **§31.11〜§31.12**）。
+
+### 21.4 旅行時間・遅延・計測範囲
+
+- **inlink** 上の **queue**、**congestion**、**spillback** は **waiting time** へ **反映される**
+- **最後の内部交差点後**の **最終 OD Link** は **別 Visit を形成しない**場合がある
+- **ACWT・ACWWT だけ**で **trip 全体**を **完全には表さない**
+- **旅行時間**は **departure から trip end まで直接計測**
+- **総遅延**は **実旅行時間 − 実走行経路の自由走行時間**
+- **200 m、60 km/h** では **1 Link 自由走行時間は 12 秒**
+- **12 × Link 数 + 累積 waiting time** は **概念的整合確認に限る** — **正式な旅行時間算定式にしない**
+- **最終 OD Link** を **人工的な order-control Visit** へ **追加しない**
+
+（詳細: 詳細設計 **§31.9・§31.13**）
+
+### 21.5 次の課題1: 評価指標算出基盤
+
+**実装前**に **読取り専用**で確認する項目:
+
+- **departure** / **trip end**
+- **Link 通過履歴** / **route 履歴**
+- **earliest arrival** / **actual intersection entry**
+- **外部 OD Link**
+- **revisit Visit ID**
+- **最終 Vehicle 完走 timestep**
+- FCFS、BATCH、TVT-MP、signalized UXsim で **共通利用できる field**
+
+**注意:**
+
+- UXsim 上の **actual intersection entry** を **actual node arrival** または **actual passage** の **どちらへ対応させるか**は **未確定** — **原典確認後**に決める
+- **passage から arrival を逆算しない**
+- **trip end** や **実経路**を **推測しない**
+- **定義確認前**に **production** を **変更しない**
+
+（必須出力・禁止: 詳細設計 **§31.14**）
+
+### 21.6 次の課題2: 約18時間実行の高速化
+
+**確定:**
+
+- **exec_simulation 約 18 時間 5 分**（§21.1）
+- **混雑中盤**で **非線形**に重い
+- **macOS sample** では **`pickle.load`** と **Python GC** が **主要負荷**
+- process は **停止・sleep・deadlock ではなかった**
+- **console log** が **約 5 時間更新されない区間**があった
+- **正規の共有直列化復元の多数回実行**か、**想定外反復**かは **未判定**
+- **py-spy** による **Python 関数 stack** 取得は **失敗**
+
+**高速化調査方針:**
+
+- **推測**で **production** を **変更しない**
+- **再現可能な短縮 trial** または **限定 instrumentation** を **先に**作る
+- **計測候補:** pickle 復元 **回数・bytes・時間**、GC **回数・時間**、decision timestep 別 **Candidate 数**、Candidate **World 復元数**、**living Vehicle 数**、**serialized World size**
+- **原因確認後**に **のみ** **最適化**を設計
+- **最適化前後**で **取引結果・順位・passage・RNG・Vehicle state** の **完全一致**を確認
+- **原因不明のまま** **長期 trial** を **再実行しない**
+
+（詳細: 詳細設計 **§31.15**）
+
+### 21.7 次の再開順序
+
+1. **本§21** の記録
+2. **Terminal** による **独立確認**
+3. **評価指標**に必要な **既存 field・履歴**の **読取り専用調査**
+4. **ACWT・ACWWT・旅行時間・遅延・最終完走時刻**の **算出設計**
+5. **Buyer・Seller 集計単位**を **小規模 output** で **試算**
+6. **評価算出コード**を **最小実装**
+7. **4 方式**の **共通定義**を検証
+8. **高速化用**の **短縮再現 trial** または **限定 instrumentation** 設計
+9. **pickle・GC・Candidate 反復**を **計測**
+10. **原因確定後**に **のみ** **最適化**
+11. **小規模完全一致検証**
+12. **必要時のみ** **長期 trial 再実行**
+
+（詳細設計 **§31.16** と整合）
+
+### 21.8 最新再開地点
+
+- **TVT-MP 実装・評価側**の最新再開地点は **本§21**
+- **詳細設計正本**は `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_5.md` **§31**（監査・長期 trial 準備の **§30** は **歴史・準備記録**として維持）
+- **文献調査側**の最新再開地点は **§20**（**本§21 で置換しない**）
+- **§19** は **長期 trial 実行前・実行中**の **歴史的再開地点**として **維持**（**確定結果**は **§21**・**§31** を参照）
+- **長期 trial の確定結果**は **本§21** および **詳細設計 §31** を参照

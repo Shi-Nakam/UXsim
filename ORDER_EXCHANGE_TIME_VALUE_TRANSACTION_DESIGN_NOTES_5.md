@@ -10497,3 +10497,554 @@ departure_time = DEPARTURE_START + (
 - **完了後**に正式結果を **本 §30** および進捗 **§19** へ **追記**する
 
 **歴史的参照:** §29.15 の「T=999 未決定」は **T=999 departure-end trial 実施前**の判断記録である。**T=999 trial 結果**は **§30.1**。**全車完走**は **§30.8**（**結果未確定**）。
+
+**最新参照（確定結果）:** 3,000 台・20% nonparticipating **full-completion trial** の **確定結果**、および **FCFS・BATCH・TVT-MP・signalized UXsim** の **総合評価指標設計**の最新正本は **§31**（2026-11-03）。本 §30.8 の上記「実行中」「結果未確定」記述は **歴史的記録**として削除しない。
+
+---
+
+## 31. FCFS・BATCH・TVT-MP・signalized UXsimの総合評価指標と3,000台full-completion結果（2026-11-03）
+
+**最新参照:** 3,000 台・20% nonparticipating full-completion trial の **確定数値**と **方式比較・評価指標**の設計正本は **本 §31**。§30.8 は **実行前・実行中**の歴史的記録（**結果未確定**の記述を含む）。
+
+### 31.0 検索語
+
+**検索語（本 §31 へ到達するための目安）:** AWT、AWWT、ACWT、ACWWT、waiting time、累積waiting time、Vehicle当たり、平均Visit数、FCFS比較、BATCH比較、TVT-MP比較、signalized UXsim比較、総旅行時間、平均旅行時間、総遅延、平均遅延、最終Vehicle完走時刻、makespan、Buyer、Seller、Nonparticipating、Satisfied、Unsatisfied、role別評価、3,000台、20% nonparticipating、full completion、traffic clearance、18時間、pickle.load、GC、高速化、last_vehicle_completion_timestep、conservative makespan、Vbar、true VOT、Seller unsatisfied、最終OD Link、earliest arrival time、actual intersection entry time。
+
+### 31.1 3,000台・20% nonparticipating full-completion trialの確定結果
+
+**実行スクリプト:** `research_scripts/run_tvt_mp_6x6_grid_3000_vehicle_nonparticipating_20_full_completion_audit_trial.py`
+
+**scenario / output directory:** `tvt_mp_6x6_grid_3000_vehicle_nonparticipating_20_full_completion_audit_candidate_limit_10_seed_0_vot_seed_1_nonparticipation_seed_3`（`research_outputs/trial/` 配下）
+
+**条件:**
+
+| 項目 | 値 |
+|------|-----|
+| Vehicle | **3000** 台 |
+| participating / nonparticipating | **2400 / 600**（**20%**） |
+| nonparticipation seed | **3** |
+| departure | **T=0〜999** |
+| traffic seed | **0** |
+| demand seed | **42** |
+| VOT seed | **1** |
+| Candidate Visit 数上限 **N** | **10** |
+| baseline horizon | **30** |
+| clearance | **1** |
+| safety cap（最終 TVT decision 上限） | **T=5000** |
+| internal TSIZE | **5031** |
+| Vehicle plan SHA-256 | `0b1fc2d2b084c3c5ce94d0ec0c476de4b2c60d40543f58f789dd644d1e3d71d9` |
+| full-run audit helper | **接続**（§30.4 順序） |
+| 実行運用 | **caffeinate**、**console log 保存** |
+| 実行目的 | **全車完走・交通解消**まで |
+
+**確定結果:**
+
+| 項目 | 値 |
+|------|-----|
+| final **World.T** | **2035** |
+| evaluation end timestep | **2034** |
+| final actual passage timestep | **1869** |
+| final Vehicle state | home **0** / wait **0** / run **0** / end **3000** |
+| full trip completion | **True** |
+| traffic clearance | **True** |
+| transaction count | **4298** |
+| transaction audit rows | **4298** |
+| visit audit rows | **11871** |
+| buyer audit rows | **5013** |
+| seller audit rows | **6170** |
+| nonparticipating audit rows | **688** |
+| actual arrival saved rows | **11871** |
+| same-inlink maximum party count | **3** |
+| same-inlink maximum buyer count | **3** |
+| same-inlink maximum seller count | **3** |
+| same-inlink maximum nonparticipating count | **2** |
+| FIFO violation total | **0** |
+| audit CSV validation | **passed** |
+| exec_simulation seconds | **65093.892005** |
+| final script total seconds | **65116.178632** |
+| wall-clock 目安 | **約 18 時間 5 分** |
+| seconds per real-world timestep | **31.987171** |
+| output directory bytes | **12463559** |
+
+**正式 10 ファイル:**
+
+1. `tvt_mp_transactions.csv`
+2. `tvt_mp_visits.csv`
+3. `tvt_mp_vehicles.csv`
+4. `tvt_mp_nodes.csv`
+5. `tvt_mp_scenario.csv`
+6. `tvt_mp_transaction_audit.csv`
+7. `tvt_mp_visit_audit.csv`
+8. `vehicle_vot.csv`
+9. `manifest.json`
+10. `run_summary.txt`
+
+**区分:** 本節は **§30.8** で準備した同一 scenario の **正常終了・確定結果**である。§30.1 の **departure-end observation（T=999 固定終了）** とは **別 trial**。
+
+### 31.2 FCFS full-completion結果との同条件性
+
+**FCFS 比較対象 output directory:** `research_outputs/trial/fcfs_6x6_grid_3000_vehicle_all_links_200m_speed_60kph_departure_999_tmax_5000_completion_check_seed_0_demand_seed_42`
+
+**原典確認済み条件:**
+
+| 項目 | 値 |
+|------|-----|
+| Vehicle | **3000** 台 |
+| departure | **T=0〜999** |
+| Vehicle plan SHA-256 | `0b1fc2d2b084c3c5ce94d0ec0c476de4b2c60d40543f58f789dd644d1e3d71d9` |
+| internal Link length | **200 m** |
+| free-flow speed | **16.666666666666668 m/s**（**60 km/h**） |
+| jam density | **0.2** |
+| 全車正常完走 | **completed_count 3000** / **not_completed_count 0** |
+| last_vehicle_completion_timestep | **2296** |
+| world_t_after_simulation | **5000** |
+
+**重要な区別:**
+
+- FCFS の **World.T=5000** は **固定観測終了時刻**であり、**処理能力比較値ではない**。
+- FCFS の **比較値**は **last_vehicle_completion_timestep=2296**。
+- TVT-MP の **final World.T=2035** は、**全車完走・network 空**を確認した後、**評価終了処理**のために **closing timestep を 1 回実行した後**の値。
+- TVT-MP では **T=2034** を実行する **前**に、すでに **全車完走・全 Link 空**だった。
+- したがって、TVT-MP の **最終 Vehicle 完走**は **遅くとも T=2033**。
+- TVT-MP の **個別 Vehicle 最終完走 timestep** は **今回の正式出力に独立保存されていない**。
+- **exact** な最終 Vehicle 完走 timestep を **2033 と断定しない**。
+- **保守的上限**として **「遅くとも T=2033」** と記録する。
+
+**保守的 makespan 比較:**
+
+| 方式 | 値 |
+|------|-----|
+| FCFS | **2296** |
+| TVT-MP | **遅くとも 2033** |
+| 差 | TVT-MP は **少なくとも 263 timestep 早い** |
+| 保守的短縮率 | **(2296 − 2033) / 2296 ≈ 11.45%** |
+
+**ただし（一般化禁止）:**
+
+- この結果は **system makespan** の比較である。
+- **飽和交通流率が 11.45% 向上した**と表現 **しない**。
+- **常に TVT-MP が FCFS より高い処理能力を持つ**と一般化 **しない**。
+- **最終 departure T=999 後だけ**の所要時間差から **20.3% 短縮**と評価する **旧解釈は不採用**。
+- **理由:** T=999 までの **完走台数**、**残存台数**、**Vehicle 位置**、**queue**、**spillback 状態**が方式間で **異なり得る**ため、**最終 departure 後だけの時間差**は **同じ初期状態からの比較ではない**。
+
+### 31.3 waiting timeの正式定義
+
+各 **Vehicle**・各 **対象交差点 Visit i** について:
+
+**earliest arrival time:** 他 Vehicle が存在しないと仮定した場合に、その Vehicle が **対象交差点へ進入できる最も早い時刻**。
+
+**waiting time:**
+
+\[
+W_i = \text{actual intersection entry time}_i - \text{earliest arrival time}_i
+\]
+
+**意味:**
+
+- **passive delay** を含む。
+- TVT 取引により Seller が **自発的に引き受ける active delay** も含む。
+- 一般的な **delay** に近いが、**能動的に受け入れた遅れ**を含むため **waiting time** という用語を **維持**する。
+
+**重要:**
+
+- **Waiting time** は **対象交差点へ進入するまで**の **inlink 上の queue**、**congestion**、**spillback** による遅れを **反映する**。
+- **「Link 上の渋滞を表さない」**と記録 **しない**。
+- 一方、**対象交差点を通過した後**の **最終 OD Link 走行**など、**独立した次の order-control Visit を形成しない区間**は、そのままでは **別 Visit の waiting time** として **計測されない**。
+- したがって **waiting time だけ**で **trip 全体の負担**を **完全に置き換えない**。
+
+### 31.4 AWT・AWWTの原定義
+
+方式 **m** について、評価対象 Visit 総数を **Z_m** とする。
+
+**Visit 単位 AWT:**
+
+\[
+\text{AWT}_m = \frac{1}{Z_m} \sum_i W_{m,i}
+\]
+
+**Visit 単位 AWWT:**
+
+\[
+\text{AWWT}_m = \frac{1}{Z_m} \sum_i C_i W_{m,i}
+\]
+
+**各記号:**
+
+| 記号 | 意味 |
+|------|------|
+| **W_{m,i}** | 方式 **m** における Visit **i** の waiting time |
+| **C_i** | Vehicle の **時間価値**（true VOT） |
+| **Z_m** | 方式 **m** で評価対象となる **Visit 総数** |
+
+**方針:** AWWT では **全方式に同じ true VOT** を使用する。TVT-MP の **nonparticipating Vehicle** にも **評価用 true VOT** を適用する。**申告 VOT** や **参加有無**によって総合評価の重みを **欠落させない**。
+
+### 31.5 方式ごとのVisit数差という問題
+
+FCFS、BATCH、TVT-MP、signalized UXsim では、**route choice** や **経路変化**により、各 Vehicle が OD 完遂までに経験する **Visit 数**が **異なり得る**。
+
+**Visit 単位 AWT だけ**を比較すると、
+
+- **1 Visit 当たり**の waiting time が **短い**方式、
+- しかし **1 Vehicle 当たり**の Visit 数が **多い**方式、
+
+を **過大評価**する可能性がある。
+
+**当初の提案:** FCFS の平均 Visit 数を **10**、TVT-MP を **15** とした場合、
+
+\[
+\text{AWT}_{\text{FCFS}} \quad \text{vs.} \quad \text{AWT}_{\text{TVT}} \times (15 / 10)
+\]
+
+として比較する。
+
+**本 §31 の方針:** この発想は **妥当**だが、FCFS 基準で補正した **独自指数**として提示するより、**Vehicle 当たり累積 waiting time** へ変換する **恒等式**として定義する方が **明確**である（§31.6・§31.7）。
+
+### 31.6 ACWTの導出
+
+方式 **m** について:
+
+- Vehicle 数 **N**
+- Visit 総数 **Z_m**
+- Vehicle 当たり平均 Visit 数: **V̄_m = Z_m / N**
+- Visit 単位 AWT: **AWT_m = (1 / Z_m) Σ_i W_{m,i}**
+
+すると:
+
+\[
+\text{AWT}_m \times \bar{V}_m = \left(\frac{1}{Z_m} \sum_i W_{m,i}\right) \times \frac{Z_m}{N} = \frac{1}{N} \sum_i W_{m,i}
+\]
+
+これは **線形近似ではなく**、**同じ Visit 集合**と **同じ分母**を使用する限り **厳密な恒等式**である。
+
+**正式名称候補:** Average Cumulative Waiting Time (per Vehicle)
+
+**略称:** **ACWT**
+
+**日本語:** Vehicle 当たり平均累積 waiting time
+
+**定義:**
+
+\[
+\text{ACWT}_m = \frac{1}{N} \sum_z \sum_{i \in \text{Visits}_m(z)} W_{m,z,i}
+\]
+
+**同値:** **ACWT_m = AWT_m × V̄_m**
+
+**単位:** seconds per Vehicle
+
+**名称上の注意:**
+
+- 「Average Cumulative Waiting Time per Vehicle」は **Average** と **per Vehicle** が **重複して見える**。
+- 正式表記候補: **Average Cumulative Waiting Time (per Vehicle)**、略称 **ACWT** を維持。
+- 名称は **現時点の有力候補**であり、論文本文への **最終採用前**に **既存用語との重複調査**を行う余地を残す。
+- **指標の数理的定義**は名称確定前でも **固定可能**。
+
+### 31.7 ACWWTの導出
+
+**Visit 単位 AWWT:**
+
+\[
+\text{AWWT}_m = \frac{1}{Z_m} \sum_z \sum_{i \in \text{Visits}_m(z)} C_z W_{m,z,i}
+\]
+
+**平均 Visit 数:** **V̄_m = Z_m / N**
+
+したがって:
+
+\[
+\text{AWWT}_m \times \bar{V}_m = \frac{1}{N} \sum_z C_z \sum_{i \in \text{Visits}_m(z)} W_{m,z,i}
+\]
+
+**正式名称候補:** Average Cumulative Weighted Waiting Time (per Vehicle)
+
+**略称:** **ACWWT**
+
+**日本語:** Vehicle 当たり平均累積 weighted waiting time
+
+**定義:**
+
+\[
+\text{ACWWT}_m = \frac{1}{N} \sum_z C_z \sum_{i \in \text{Visits}_m(z)} W_{m,z,i}
+\]
+
+**同値:** **ACWWT_m = AWWT_m × V̄_m**
+
+**単位:** VOT が money/second なら **money per Vehicle**。
+
+**重要:**
+
+- **ACWWT** は、各 Vehicle が **全 Visit** で経験した waiting time を **true VOT** で重み付けした **平均**。
+- FCFS、BATCH、TVT-MP、signalized UXsim 間で **Vehicle 数 N が同じ**場合に **直接比較**する。
+- FCFS 基準の **平均 Visit 数比を掛けた正規化値**は、比較上 **同値**でも **主表には採用しない**（§31.8）。
+- 各方式の **Visit 単位 AWWT**、**平均 Visit 数**、**ACWWT 実値**を **直接示す**。
+
+### 31.8 主表の構成
+
+**最終比較の主表**では、方式ごとに次を **直接示す**。
+
+**列:**
+
+- 方式
+- Visit 単位 AWT
+- 平均 Visit 数
+- ACWT
+- Visit 単位 AWWT
+- ACWWT
+- 平均旅行時間
+- 総旅行時間
+- 平均遅延
+- 総遅延
+- 最終 Vehicle 完走時刻
+- 全車完走
+- 交通解消
+
+**行:**
+
+- signalized UXsim
+- FCFS
+- BATCH
+- TVT-MP
+
+**禁止:** FCFS の平均 Visit 数を基準とした **比率補正値**を **主表**へ置かない。**各方式の実値**を直接示す。
+
+**解釈:** Visit 単位 AWT・AWWT は **ACWT・ACWWT の構成要素**として表示する。**Visit 単位 AWT・AWWT だけ**で方式の **総合優劣**を **判定しない**。
+
+### 31.9 ACWT・ACWWTと旅行時間・遅延の関係
+
+全 Link が **200 m**、free-flow speed が **60 km/h** なので、**1 Link** の自由走行時間は:
+
+\[
+200 / (60 / 3.6) = 12 \text{ 秒}
+\]
+
+Vehicle **z** の実走行 Link 数を **L_z**、累積 waiting time を **CW_z** とすれば、**概念的には**:
+
+\[
+\text{TravelTime}_z \approx 12 L_z + \text{CW}_z
+\]
+
+という構造を **期待できる**。
+
+**ただし**、これを **正式な旅行時間算定式**には **しない**。
+
+**理由:** OD connector の扱い、trip 終端 Link、order-control 対象外 Node、離散 timestep、Link 内の走行状態、Visit 境界と trip 境界、clearance、route choice 等により、**12 L_z + CW_z** が **実旅行時間と完全一致**するとは **限らない**。
+
+**正式方針:**
+
+- **旅行時間**は **departure から trip end まで直接計測**。
+- **実走行経路**の **自由走行時間**を **別に算出**。
+- **総遅延**は **実旅行時間 − 実走行経路の自由走行時間** として **独立算出**。
+- **ACWT** と **総遅延**の **一致・差**は **整合確認**に使う。
+- **ACWT** が **Link 上の渋滞を一切表さない**とは **評価しない**（inlink 上の渋滞・queue・spillback は **対象 Visit の waiting time** へ反映される）。
+- **ただし**、**ACWT だけ**で **trip 全体の全負担**を **完全に代表させない**（§31.3・§31.13）。
+
+### 31.10 当面採用する総合評価指標
+
+**正式な中核指標:**
+
+1. AWT
+2. AWWT
+3. 平均 Visit 数
+4. ACWT
+5. ACWWT
+6. 平均旅行時間
+7. 総旅行時間
+8. 平均遅延
+9. 総遅延
+10. 最終 Vehicle 完走時刻
+11. 全車完走
+12. 交通解消
+
+**Makespan** は **重要な補助指標**だが、AWT・AWWT・ACWT・ACWWT・旅行時間・遅延を **置き換えない**（§31.2 の **保守的 makespan** は **補助**）。
+
+**当面保留:**
+
+- Node 別 AWT・AWWT
+- 時間帯別 AWT・AWWT
+- 詳細な空間分布
+- 時系列 throughput
+- VOT 階層別詳細分析
+
+これらは **方式差の原因分析**で必要になった場合に **のみ**追加する。**最初から正式出力要件**へ含め **ない**。
+
+### 31.11 Buyer・Seller・Nonparticipating別評価
+
+**Buyer:**
+
+- TVT-MP で **buyer role** となった対象。
+- FCFS より **AWWT** が **大幅に改善**することを **期待**。
+- Buyer の **集計単位**を **role 付き Visit** にするか、**buyer 経験 Vehicle の trip 全体**にするかは **未確定**（§31.12）。
+
+**Seller:**
+
+- TVT-MP で **seller role** となった対象。
+- **AWT・AWWT** の **悪化**を **できるだけ小さく抑える**ことを **期待**。
+- 既存の **Seller Satisfied / Unsatisfied** 評価を **使用**。
+- **Seller unsatisfied 率**を **必須指標**とする。
+- **新しい補償込み NetLoss、NetBenefit** 等の **独自式は導入しない**。
+- Seller 補償の十分性は **既存の事後 satisfaction 評価**で扱う。
+- Seller の **集計単位**を **role 付き Visit** にするか、**seller 経験 Vehicle の trip 全体**にするかは **未確定**（§31.12）。
+
+**Nonparticipating:**
+
+- Buyer・Seller と異なり、**出発から trip end まで一貫した Vehicle 属性**。
+- **600 台**を **Vehicle 単位**で評価。
+- FCFS の **同一 Vehicle 集合**と比較。
+- **Vehicle 単位 ACWT・ACWWT** が **不変または改善**することを **期待**。
+- **総旅行時間・総遅延**も **同じ Vehicle 集合**で比較。
+- **改善 Vehicle 数** / **不変 Vehicle 数** / **悪化 Vehicle 数** / **最大悪化量** を **最低限確認する候補**。
+
+**全 Vehicle:**
+
+- 全 **3000 台**について **ACWT・ACWWT**、**旅行時間**、**遅延**を比較。
+
+### 31.12 Buyer・Seller集計単位の未確定事項
+
+**確定:**
+
+- Buyer・Seller 評価は **必要**。
+- TVT-MP で付与された **role** を基準に FCFS 側と **対応付ける**。
+- **Seller unsatisfied 率**は **必須**。
+- **新規補償込み独自式**は **不要**。
+
+**未確定:**
+
+1. **Role-Visit 方式** — Buyer または Seller となった **各 Visit** を FCFS の対応 Visit と比較。取引の **直接効果**を測りやすい。**同じ Vehicle が複数回集計**される。
+2. **Role 経験 Vehicle 方式** — Buyer または Seller を **経験した Vehicle の trip 全体**を比較。**downstream への波及**や **route 変更**を含む。**同一 Vehicle が buyer と seller の双方**を経験した場合の **分類規則**が必要。
+3. **両方式の併記** — 情報量が増え、**過剰分析**になる可能性がある。
+
+**方針:**
+
+- 現時点で **いずれかへ固定しない**。
+- **小規模の保存済み output**で **両方式を試算**。
+- **結果の意味**、**重複**、**説明可能性**を確認してから **正式採用**を決める。
+- **コード実装時**に **無断で一方へ固定しない**。
+
+### 31.13 最終OD Linkと計測範囲
+
+- **order-control 対象**の **内部 Node** へ向かう **inlink 上の渋滞**は、**actual entry time** の遅れとして **waiting time** へ **反映される**。
+- **最後の内部交差点**を通過した後、**外部 OD Node** へ向かう **最終 Link** が **新しい対象 Node Visit を形成しない**場合、その **最終区間**は **別 Visit の waiting time** としては **計測されない**。
+- したがって **ACWT・ACWWT だけ**で **trip 終端までの全所要時間**を **完全には表さない**。
+- この問題を **補完**するため、**平均・総旅行時間**と **平均・総遅延**を **必須**とする（§31.10）。
+- **最終 OD Link** を **新たな order-control Visit** として **人工的に追加**する方針は **現時点で採用しない**。
+- **trip end までの旅行時間**を **直接計測**する方が **適切**。
+- 将来必要なら **計測範囲の独立検証**を行う。
+
+### 31.14 次の実装課題1: 評価指標算出基盤
+
+今後、simulation 結果から次を **算出できるよう**コードを **追加・修正**する。
+
+**必須:**
+
+- Vehicle ごとの **全対象 Visit waiting time**
+- **Visit 総数**
+- Vehicle ごとの **Visit 数**
+- 方式別 **平均 Visit 数**
+- Visit 単位 **AWT**
+- Visit 単位 **AWWT**
+- **ACWT**
+- **ACWWT**
+- **departure timestep**
+- **trip end timestep**
+- **実旅行時間**
+- **実走行 Link 数**または **実走行経路**
+- **実走行経路の自由走行時間**
+- **Vehicle 別遅延**
+- **平均旅行時間** / **総旅行時間**
+- **平均遅延** / **総遅延**
+- **最終 Vehicle 完走 timestep**
+- **全車完走・交通解消**
+- **Nonparticipating 600 台**の **Vehicle 単位比較**
+- **Seller Satisfied / Unsatisfied 率**
+
+**実装前の必須調査:**
+
+- UXsim **production** で既に保存される **departure**、**trip end**、**Link 通過履歴**、**route 履歴**
+- FCFS、BATCH、TVT-MP、signalized UXsim で **共通利用可能な field**
+- **earliest arrival** の **正式保存位置**
+- **actual intersection entry** の **正式保存位置**
+- **外部 OD Link** と **trip end** の扱い
+- **revisit** の **Visit ID**
+- 各手法で **Visit 対応付け**が可能か
+- **最終 Vehicle 完走 timestep** を **今後の trial** で **正式保存**する方法
+
+**禁止:**
+
+- **定義確認前**の **production 変更**
+- **trip end** を **推測**
+- **実経路**を **Vehicle 名や OD 名から推測**
+- **passage から arrival を逆算**
+- FCFS 基準 **正規化値だけ**を保存して **原値を失う**
+- **Node 別・時間帯別分析**を **最初から過剰に実装**
+
+### 31.15 次の実装課題2: 約18時間実行の高速化
+
+**確定した性能（§31.1）:**
+
+| 項目 | 値 |
+|------|-----|
+| exec_simulation | **65093.892005 s** |
+| final script total | **65116.178632 s** |
+| wall-clock | **約 18 時間 5 分** |
+| seconds / real-world timestep | **31.987171** |
+
+**観測:**
+
+- **T=600** 時点で **1114 台走行**、計算時間 **約 5447 s**
+- **T=1200** 時点で **約 1386 台走行**、計算時間 **約 29804 s**
+- **T=1800** 時点で **168 台走行**、計算時間 **約 60294 s**
+- **交通混雑が大きい中盤**で **非線形**に重くなった。
+- **13.5 時間**時点でも process は **R+**、CPU **約 80%**、演算継続。
+- **30 秒観測**で CPU 累積時間が **約 23.9 s 増加**。
+- **停止**、**sleep**、**deadlock** では **なかった**。
+- **console log** が **約 5 時間更新されない区間**があった。
+- **macOS sample** では主負荷が **`_pickle.load`** と **Python GC**。
+- **pickle 復元**と **GC** が **大きな負荷**であることは **確認**。
+- **正規の共有直列化復元**を **多数回**行っているのか、**想定外の反復経路**かは **実行中には未判定**。
+- **py-spy** は macOS で **root** が必要。
+- **sudo py-spy** は **Anaconda Python 3.13** process を認識できず、`Failed to find a python interpreter in the .data section` で **失敗**。
+- **Python 関数単位**の **実行中 stack** は **取得できなかった**。
+
+**高速化調査の原則:**
+
+- **推測**で **production** を変更 **しない**。
+- 前回の **過剰な監査 production 拡張**を **繰り返さない**（§30.3）。
+- まず **再現可能な短縮 trial** または **限定 instrumentation** を作る。
+- **計測候補:** pickle 復元 **回数** / **bytes** / **時間**、GC **回数** / **時間**、decision timestep 別 **Candidate 数**、Candidate **World 復元数**、Vehicle 数、**living 車両数**、World **serialized size**。
+- **production 変更前**に **原因を独立確認**する。
+- 既存の **共有直列化最適化**を **覆さない**（§29）。
+- **最適化前後**で **取引結果**、**順位**、**passage**、**RNG**、**Vehicle state** の **完全一致**を確認する。
+- **長時間本番 trial** を **原因不明のまま繰り返さない**。
+
+### 31.16 次の作業順序
+
+1. **本 §31** と **進捗メモ**への記録
+2. **Terminal** による **本文の独立確認**
+3. **評価指標算出**に必要な **既存 field・履歴**の **読取り専用調査**
+4. **ACWT・ACWWT・旅行時間・遅延・最終完走時刻**の **算出設計**
+5. **Buyer・Seller 集計単位**を **小規模 output** で比較
+6. **評価算出コード**の **最小実装**
+7. **FCFS・BATCH・TVT-MP・signalized UXsim** で **共通定義**を検証
+8. **高速化用**の **短縮再現 trial** または **限定 instrumentation** を設計
+9. **pickle 復元・GC・Candidate 反復**の **原因計測**
+10. **原因確定後**に **のみ** **最適化設計**
+11. **小規模一致検証**
+12. **必要時のみ** **長期 trial 再実行**
+
+### 31.17 記述上の注意（混同禁止・未確定の明示）
+
+**混同しないこと:**
+
+- Visit 単位 **AWT・AWWT** vs Vehicle 単位累積 **ACWT・ACWWT**
+- **総旅行時間** / **総遅延** / **makespan**
+- Buyer・Seller の **role** vs Nonparticipating の **固定 Vehicle 属性**
+- **Seller satisfaction** vs **金銭補償込みの新規独自指標**
+
+**確定事項として書かないこと:**
+
+- **ACWT**、**ACWWT** という名称が **既存研究で未使用**であること
+- Buyer・Seller の **正式集計単位**
+- **12 L + cumulative waiting time** が旅行時間へ **厳密一致**すること
+- TVT-MP が **一般に FCFS より常に 11.45% 優れる**こと
+- **pickle 負荷**が **想定外反復**によると **確定**したこと
+- **次の高速化方法**が **確定**したこと
