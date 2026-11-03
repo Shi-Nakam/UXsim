@@ -10654,6 +10654,8 @@ W_i = \text{actual intersection entry time}_i - \text{earliest arrival time}_i
 
 ### 31.4 AWT・AWWTの原定義
 
+**最新参照（2026-11-04、不採用注記）:** 本節以下（§31.4〜§31.8）の **Visit 単位 AWT・AWWT** と **平均 Visit 数** による **ACWT・ACWWT 導出**は、**定義検討過程の歴史的記録**である。**network 全体**の最新定義は **§31.18**。**order-control Visit** は **全 Node・全 Link・全制御方式を網羅しない**ため、**network-wide ACWT・ACWWT には使用しない**。本節の数式を **最新定義として読まない**。
+
 方式 **m** について、評価対象 Visit 総数を **Z_m** とする。
 
 **Visit 単位 AWT:**
@@ -10779,6 +10781,8 @@ FCFS、BATCH、TVT-MP、signalized UXsim では、**route choice** や **経路�
 - 各方式の **Visit 単位 AWWT**、**平均 Visit 数**、**ACWWT 実値**を **直接示す**。
 
 ### 31.8 主表の構成
+
+**最新参照（2026-11-04、不採用注記）:** 本節の **旧主表案**は **歴史的記録**である。**Visit 単位 AWT**、**平均 Visit 数**、**Visit 単位 AWWT** を network 全体の主表へ置く案は **不採用**。**最新主表**は **§31.18.9**。
 
 **最終比較の主表**では、方式ごとに次を **直接示す**。
 
@@ -10932,6 +10936,8 @@ Vehicle **z** の実走行 Link 数を **L_z**、累積 waiting time を **CW_z*
 
 ### 31.14 次の実装課題1: 評価指標算出基盤
 
+**最新参照（2026-11-04）:** **最新実装方針**は **§31.18**。**Visit 単位指標を先に実装しない**。**`travel_time`**、**`traveled_route`**、**自由流経路時間**、**ACWT**、**ACWWT** を **先に検証**する（§31.18.11）。下記の Visit 単位必須リストは **検討過程の歴史的記録**であり、network-wide 算出の先行実装要件としては **不採用**。
+
 今後、simulation 結果から次を **算出できるよう**コードを **追加・修正**する。
 
 **必須:**
@@ -11018,6 +11024,8 @@ Vehicle **z** の実走行 Link 数を **L_z**、累積 waiting time を **CW_z*
 
 ### 31.16 次の作業順序
 
+**最新参照（2026-11-04）:** **最新作業順序**は、**§31.18.11** の **単車両・無交通検証を最初に行う**。その後に **評価算出設計を確定**する。下記 1〜12 は **§31 初稿時点**の順序であり、network-wide 定義訂正後の再開順序としては **§31.18.11 および進捗 §21.9** を優先する。
+
 1. **本 §31** と **進捗メモ**への記録
 2. **Terminal** による **本文の独立確認**
 3. **評価指標算出**に必要な **既存 field・履歴**の **読取り専用調査**
@@ -11048,3 +11056,349 @@ Vehicle **z** の実走行 Link 数を **L_z**、累積 waiting time を **CW_z*
 - TVT-MP が **一般に FCFS より常に 11.45% 優れる**こと
 - **pickle 負荷**が **想定外反復**によると **確定**したこと
 - **次の高速化方法**が **確定**したこと
+
+### 31.18 ACWT・ACWWTの方式共通network定義への訂正
+
+**最新正本:** **network 全体**の **ACWT・ACWWT** は **本 §31.18**。§31.4〜§31.8 の Visit 数による導出は **採用前の検討過程**として残し、**network 全体の正式定義としては不採用**。
+
+#### 31.18.1 旧定義を訂正する理由
+
+§31.4〜§31.8 では、**order-control Visit** を単位とする AWT・AWWT と平均 Visit 数から、
+
+\[
+\text{ACWT} = \text{Visit 単位 AWT} \times \text{平均 Visit 数}
+\]
+
+\[
+\text{ACWWT} = \text{Visit 単位 AWWT} \times \text{平均 Visit 数}
+\]
+
+と導出した。
+
+この恒等式は、対象とする **waiting event 集合を漏れなく網羅する Visit 集合**については **数理的に正しい**。
+
+しかし、現在の UXsim における **order-control Visit** は、TVT-MP・BATCH 等の **order-control 対象 Node への訪問**を表す **内部概念**である。
+
+次の区間・訪問を **必ずしも網羅しない**。
+
+- **order-control 対象外 Node**
+- **external Node**
+- UXsim の **自動 route choice** により経路途中で通過する **external Node**
+- 最後の内部交差点から destination の external Node へ向かう **最終 Link**
+- **signalized UXsim** 等、order-control Visit を **同じ形で生成しない**制御方式
+
+したがって、**order-control Visit 数を使う ACWT・ACWWT** は、**network 全体を表す方式共通指標にならない**。
+
+特に、**signalized UXsim、FCFS、BATCH、TVT-MP が Node ごとに混在する network** でも、ACWT・ACWWT は **同じ定義で計算できなければならない**。
+
+**確定判断:**
+
+- **order-control Visit 数**を **network 全体の ACWT・ACWWT 算出に使わない**
+- **平均 Visit 数**を **network 全体の経路長や自由流所要時間の代替に使わない**
+- §31.4〜§31.8 の Visit 数による導出は、**採用前の検討過程**として残す
+- **network 全体の正式定義としては不採用**
+- **最新定義は本 §31.18 を正本**とする
+
+#### 31.18.2 UXsimのNode通過時間に関する原典確認
+
+**原典:** `uxsim/uxsim.py`、`Node._transfer_one_vehicle_between_links()`
+
+**確認した処理:**
+
+- 通過を許可された **同じ `W.T` 内**で Vehicle を **inlink から outlink へ移す**
+- outlink 進入時に、`vehicle.link_arrival_time = W.T * DELTAT` とする
+- Vehicle を outlink の **x=0** へ置く
+- inlink で残った **`move_remain`** を outlink へ **引き継ぐ**
+- 次の式で同じ timestep 内の残余移動距離を outlink 側へ換算する
+
+\[
+x_{\text{next}} = \text{vehicle.move\_remain} \times \text{outlink.u} / \text{inlink.u}
+\]
+
+- Vehicle を **同じ timestep 内**で outlink 上の **`x_next` まで進める**
+- **Node 自体に物理的長さや固定通過時間を設定していない**
+- **無信号、無競合、capacity 制約なし、clearance 制約なし**なら、Node 境界で **固定 1 timestep を追加しない構造**である
+- **signal、clearance、下流入口空間不足、capacity、priority** 等により transfer できず待つ時間は **実旅行時間へ含まれる**
+
+**ただし:**
+
+- UXsim の離散 timestep 境界に **オフバイワンがないこと**は、**単車両・無交通・複数 Link の最小 trial** で **実作動確認する**
+- **原典読解だけ**で **数値的一致を未検証のまま断定しない**
+
+#### 31.18.3 実旅行時間
+
+Vehicle **z** の実旅行時間を、
+
+\[
+\text{TT}_z = t_z^{(\text{trip end})} - t_z^{(\text{departure})}
+\]
+
+とする。
+
+UXsim では `Vehicle.end_trip()` で、
+
+- `arrival_time = W.T`
+- `travel_time = (arrival_time - departure_time) * DELTAT`
+
+を保存する。
+
+**TT_z** には、出発から trip end までの **全経過時間**が含まれる。少なくとも次を含む。
+
+- 起点で network へ進入できず待つ時間
+- Link 上の自由走行
+- Link 上の queue、congestion、spillback
+- signal 待ち
+- FCFS、BATCH、TVT-MP 等による Node passage 待ち
+- clearance 待ち
+- 下流 Link 入口空間不足
+- capacity 制約
+- priority 待ち
+- 最終 OD Link 走行
+- trip end までの全経過時間
+
+#### 31.18.4 同一実走行経路の最短旅行時間
+
+Vehicle **z** の実走行経路を **actual_route_z** とする。
+
+同じ実走行経路を、**他 Vehicle なし**、**待機なし**、**signal・priority・capacity 等による追加待ちなし**で走った場合の **UXsim 上の最短旅行時間**を、
+
+\[
+T_{\min,z}
+\]
+
+と定義する。
+
+**一般形:**
+
+\[
+T_{\min,z} = \sum_{\text{link} \in \text{actual\_route}_z} \frac{\text{length}_{\text{link}}}{\text{free\_flow\_speed}_{\text{link}}}
+\]
+
+Node 自体に **固定通過時間がない**ことを原典確認したため、原則として **Link 自由流時間の合計**を用いる。
+
+今回の **全 Link 200 m、free-flow speed 60 km/h** 条件では、
+
+\[
+200 / (60 / 3.6) = 12 \text{ 秒}
+\]
+
+なので、
+
+\[
+T_{\min,z} = 12 \times \text{actual traveled Link count}_z
+\]
+
+と **簡約できる**。
+
+**ただし正式実装では固定値 12 を直接使わず**、各実走行 Link について **length / free_flow_speed** を合計する。
+
+**理由:**
+
+- 将来の **異質 Link** へ対応できる
+- Link 長・速度条件の変更に耐える
+- **signalized UXsim、FCFS、BATCH、TVT-MP、混在 network** へ共通適用できる
+
+**実走行経路の正本:**
+
+- `Vehicle.traveled_route()`
+- `Vehicle.log_t_link`
+- 実際に通過した **Link object 列**
+
+**禁止:**
+
+- Vehicle 名や OD 名から経路を **推測しない**
+- order-control Visit 数から Link 数を **推測しない**
+- **Link 数 = Visit 数 + 1** のような **固定補正式を使わない**
+- **external Node が中継地点にならないと仮定しない**
+
+#### 31.18.5 Vehicle単位の累積waiting time
+
+Vehicle **z** の **network 全体**における累積 waiting time を、
+
+\[
+\text{CW}_z = \text{TT}_z - T_{\min,z}
+\]
+
+と定義する。
+
+**意味:**
+
+- 同じ実走行経路を自由流で完遂する最短時間を超えて、実際に追加で要した **全時間**
+- **passive delay** を含む
+- TVT-MP で Seller が取引により自発的に受け入れた **active delay** も含む
+- **signal、FCFS、BATCH、TVT-MP、capacity、queue、spillback** 等による追加時間を **制御方式に依存せず含む**
+- **external Node、途中の external Node、最終 OD Link、order-control 対象外 Node** も実旅行時間と実走行経路に含まれるため **欠落しない**
+
+この **CW_z** は、数理的には **actual-route-conditioned delay** と同じ時間量である。
+
+ただし、本研究では **active delay も含む**ことを明示するため、**waiting time** という用語を **維持**する。
+
+#### 31.18.6 ACWTの最新定義
+
+全 Vehicle 数を **N** とする。
+
+**ACWT:**
+
+\[
+\text{ACWT} = \frac{1}{N} \sum_z \text{CW}_z = \frac{1}{N} \sum_z \bigl(\text{TT}_z - T_{\min,z}\bigr)
+\]
+
+**正式名称候補:** Average Cumulative Waiting Time (per Vehicle)
+
+**日本語:** Vehicle 当たり平均累積 waiting time
+
+**位置付け:**
+
+- **passive delay と active delay を含む Vehicle 当たり平均遅延**
+- **特別な独立性能指標ではない**
+- 最重要指標 **ACWWT** を定義・解釈するための **前段となる基礎時間量**
+- **全方式共通の network-wide 指標**
+- **order-control Visit、TVT role、Node の制御方式に依存しない**
+
+§31.6 の Visit 数による ACWT 導出は **network 全体の最新定義として不採用**。**本 §31.18.6 を最新正本**とする。
+
+#### 31.18.7 ACWWTの最新定義
+
+Vehicle **z** の true VOT を **C_z** とする。
+
+**ACWWT:**
+
+\[
+\text{ACWWT} = \frac{1}{N} \sum_z C_z \text{CW}_z = \frac{1}{N} \sum_z C_z \bigl(\text{TT}_z - T_{\min,z}\bigr)
+\]
+
+**位置付け:**
+
+- 各 Vehicle の **network 全体の累積 waiting time** を **true VOT** で重み付け
+- 本研究の方式比較における **最重要指標**
+- **high-VOT Vehicle** の時間損失をより大きく評価
+- **signalized UXsim、FCFS、BATCH、TVT-MP、混在 network** へ **同じ式**を適用
+- TVT-MP の **nonparticipating Vehicle にも true VOT を適用**
+- **申告 VOT の有無**や **取引参加状態**によって評価対象から **除外しない**
+
+§31.7 の Visit 数による ACWWT 導出は **network 全体の最新定義として不採用**。**本 §31.18.7 を最新正本**とする。
+
+#### 31.18.8 Visit概念の今後の用途
+
+**order-control Visit** は次の用途に **限定**する。
+
+- TVT-MP 取引形成
+- BATCH 形成
+- baseline / Candidate / actual passage 比較
+- Buyer / Seller role 評価
+- Node 単位順位
+- transaction audit
+- 取引の直接効果分析
+
+**order-control Visit を次には使わない。**
+
+- network 全体 ACWT の母集団
+- network 全体 ACWWT の母集団
+- network 全体の経路長
+- 自由流所要時間
+- travel time
+- route-conditioned delay
+- signalized UXsim を含む共通総合評価の分母
+
+**Visit 単位 AWT・AWWT:**
+
+- **network 全体の中核指標から外す**
+- 単一 Node、取引直接効果、Buyer・Seller 評価等で必要になった場合の **補助分析候補**
+- **現時点では正式実装を保留**
+- Node 別・時間帯別詳細分析と同様、**必要になった場合だけ追加**
+
+#### 31.18.9 主表の訂正
+
+§31.8 の旧主表案は **歴史的検討として残す**が、**最新主表から次を外す**。
+
+- Visit 単位 AWT
+- 平均 Visit 数
+- Visit 単位 AWWT
+
+**最新主表の候補列:**
+
+- 方式
+- 平均実走行 Link 数
+- 平均実走行経路自由流時間
+- 平均旅行時間
+- 総旅行時間
+- ACWT
+- ACWWT
+- VOT 加重累積 waiting time 総量
+- 最終 Vehicle 完走時刻
+- 全車完走
+- 交通解消
+
+**行:**
+
+- signalized UXsim
+- FCFS
+- BATCH
+- TVT-MP
+- 必要に応じて **混在制御 network**
+
+**重要:**
+
+- **ACWT は平均遅延と同じ時間量**なので、**平均遅延を別の独立列として重複表示しない**
+- **総累積 waiting time** は **N × ACWT**
+- ACWWT に対応する総量は **N × ACWWT**
+- **平均旅行時間**は **経路長差と waiting time の双方**を含む
+- **平均実走行 Link 数**と **平均自由流時間**は **経路差を説明する補助値**
+
+#### 31.18.10 Role別評価との分離
+
+**Network-wide ACWT・ACWWT:**
+
+- **全 Vehicle**、または **固定 Vehicle 集合**について計算する
+
+**Nonparticipating:**
+
+- 出発から trip end まで **固定された Vehicle 属性**
+- 同じ **600 台**について FCFS と TVT-MP の ACWT・ACWWT を計算できる
+
+**Buyer・Seller:**
+
+- 固定 Vehicle 属性ではなく **取引ごとの Visit role**
+- **network-wide ACWT・ACWWT の定義へ混入しない**
+- **Role-Visit 方式**か **role 経験 Vehicle 方式**かは **引き続き未確定**
+- **Seller unsatisfied 率は必須**
+- **新規補償込み独自式は導入しない**
+
+#### 31.18.11 実装前の最小検証
+
+正式実装前に、**単車両・無交通の最小 trial** で次を確認する。
+
+**最低限:**
+
+- 1 Link
+- 複数 Link
+- 内部 Node 通過
+- external Node を途中経由
+- 最終 OD Link
+- 全 Link 同一長・速度
+- 必要なら異質 Link 長・速度
+
+**確認:**
+
+- `Vehicle.travel_time`
+- `Vehicle.traveled_route()` の Link 列
+- **Σ length / free_flow_speed**
+- Node 通過による **固定追加時間の有無**
+- timestep 境界の **off-by-one**
+- **trip end 時刻**
+- **CW_z** が **0** または **UXsim 離散処理上の期待値**になること
+- **`Vehicle.departure_time`**
+- **`Vehicle.traveled_route(include_departure_time=True)`** で得られる **予定出発時刻**
+- **`Vehicle.log_t_link`** に記録された **最初の Link 進入時刻**
+- **予定出発時刻**と **最初の Link 進入時刻**の **差**
+- **起点で network へ直ちに進入できる無交通条件**では、その差が **0** または **UXsim の離散処理上の期待値**になること
+- **起点で network へ進入できず待つ条件**では、その **待ち時間**が **`Vehicle.travel_time`** および **`CW_z`** へ **含まれる**こと
+
+**起点流入待ち（理由）:**
+
+- `Vehicle.end_trip()` の **`travel_time`** は **`arrival_time − departure_time`** で計算される
+- したがって、**予定出発後**に **最初の Link へ入るまでの待ち時間**も **実旅行時間**へ **含まれる**
+- **ACWT・ACWWT** の **方式共通 network 定義**では、この **起点流入待ちを欠落させてはならない**
+- **単車両・無交通 trial** で、**予定出発時刻**、**最初の Link 進入時刻**、**trip end 時刻**の **境界関係**を **実作動確認**する
+
+この検証前に、**T_{min,z} = Σ length/u** が **数値的に完全一致する**と **確定事項として扱わない**。

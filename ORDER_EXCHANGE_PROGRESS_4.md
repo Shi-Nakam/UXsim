@@ -1482,6 +1482,8 @@ TSE完全PDFまたは2009年overview chapter全文を別経路で入手した場
 
 ### 21.2 総合評価指標の確定事項
 
+**最新参照（2026-11-04、不採用注記）:** 本節の **Visit 単位 AWT・AWWT** と **平均 Visit 数** による **ACWT・ACWWT** は、**定義検討過程の歴史的記録**である。**network 全体の最新定義・再開先**は **§21.9** および詳細設計 **§31.18**。本節の Visit 数恒等式を **最新定義として読まない**。
+
 **中核指標:**
 
 1. Visit 単位 **AWT**
@@ -1528,6 +1530,8 @@ TSE完全PDFまたは2009年overview chapter全文を別経路で入手した場
 
 ### 21.4 旅行時間・遅延・計測範囲
 
+**最新参照（2026-11-04）:** Visit 計測漏れを理由に ACWT を補完指標扱いする本節の記述は、**Visit 数ベース定義時点の歴史的記録**である。**network-wide ACWT・ACWWT** の最新定義は **§21.9** および詳細設計 **§31.18**（**CW_z = TT_z − T_min,z**）。最終 OD Link を人工 Visit へ追加しない方針は維持する。
+
 - **inlink** 上の **queue**、**congestion**、**spillback** は **waiting time** へ **反映される**
 - **最後の内部交差点後**の **最終 OD Link** は **別 Visit を形成しない**場合がある
 - **ACWT・ACWWT だけ**で **trip 全体**を **完全には表さない**
@@ -1540,6 +1544,8 @@ TSE完全PDFまたは2009年overview chapter全文を別経路で入手した場
 （詳細: 詳細設計 **§31.9・§31.13**）
 
 ### 21.5 次の課題1: 評価指標算出基盤
+
+**最新参照（2026-11-04）:** **最新実装方針**は **§21.9** および詳細設計 **§31.18**。**Visit 単位指標を先に実装しない**。**`travel_time`**、**`traveled_route`**、自由流経路時間、ACWT、ACWWT を **先に検証**する。下記の Visit / earliest arrival 調査リストは **検討過程の歴史的記録**。
 
 **実装前**に **読取り専用**で確認する項目:
 
@@ -1585,6 +1591,8 @@ TSE完全PDFまたは2009年overview chapter全文を別経路で入手した場
 
 ### 21.7 次の再開順序
 
+**最新参照（2026-11-04）:** **最新再開順序**は **§21.9**（最初に **単車両・無交通検証**）。下記 1〜12 は **§21 初稿時点**の順序であり、network 定義訂正後の再開先としては **§21.9** および詳細設計 **§31.18.11** を優先する。
+
 1. **本§21** の記録
 2. **Terminal** による **独立確認**
 3. **評価指標**に必要な **既存 field・履歴**の **読取り専用調査**
@@ -1607,3 +1615,52 @@ TSE完全PDFまたは2009年overview chapter全文を別経路で入手した場
 - **文献調査側**の最新再開地点は **§20**（**本§21 で置換しない**）
 - **§19** は **長期 trial 実行前・実行中**の **歴史的再開地点**として **維持**（**確定結果**は **§21**・**§31** を参照）
 - **長期 trial の確定結果**は **本§21** および **詳細設計 §31** を参照
+
+**2026-11-04 追記:** **TVT-MP 実装・評価側**の最新再開地点は **§21.9**。**詳細設計正本**は **§31.18**。**§31.4〜§31.10** および **§21.2** 等の **Visit 数ベース定義**は **検討過程の歴史的記録**であり、**network-wide ACWT・ACWWT の最新定義として読まない**。
+
+### 21.9 ACWT・ACWWTの方式共通network定義への訂正
+
+**詳細技術正本:** `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_5.md` **§31.18**
+
+**確定:**
+
+- **order-control Visit** は TVT-MP・BATCH 等の **内部概念**
+- **external Node**、途中の **external Node**、**最終 OD Link**、**order-control 対象外 Node**、**signalized UXsim** 等を **網羅しない**
+- **Visit 数**を **network 全体 ACWT・ACWWT 算出に使わない**
+- **平均 Visit 数**を **経路長や自由流時間へ使わない**
+- **ACWT** は **`Vehicle.travel_time`** と **`Vehicle.traveled_route()`** から計算する
+- **T_min,z = Σ length/u** を候補とする
+- **CW_z = TT_z − T_min,z**
+- **ACWT = average(CW_z)**
+- **ACWWT = average(true VOT_z × CW_z)**
+- **ACWT** は **active delay を含む平均遅延**
+- **ACWT** は **ACWWT の前段となる基礎時間量**
+- **ACWWT が最重要指標**
+- **全方式混在 network** にも **共通適用**する
+- **Nonparticipating** は **固定 Vehicle 集合**として比較
+- **Buyer・Seller 評価**は **network-wide ACWT・ACWWT と分離**
+
+**原典確認（`Node._transfer_one_vehicle_between_links()`）:**
+
+- Node transfer は **同一 `W.T`** で inlink から outlink へ移る
+- **`link_arrival_time` も同じ `W.T`**
+- **`move_remain`** を outlink へ引き継ぐ
+- **Node に固定通過時間を設定していない**
+- **ただし数値的一致**は **単車両・無交通 trial** で **実作動確認が必要**（未完了）
+
+**次の作業:**
+
+1. **単車両・無交通・複数 Link** の最小 trial（**`departure_time`**、**最初の Link 進入時刻**、**起点流入待ち**、**`travel_time`**、**Σ length/u**、**trip end 時刻**、**off-by-one** を確認）
+2. **`travel_time` と Σ length/u** の一致確認
+3. **external Node 中継**と **最終 OD Link** 確認
+4. **off-by-one** 確認（起点・Link 境界・trip end を含む）
+5. 方式共通の **ACWT・ACWWT 算出設計**
+6. **最小実装**
+7. その後に **高速化調査**
+
+**最小 trial で特に確認すること:**
+
+- **起点での network 進入待ち**が **`travel_time`** と **`CW_z`** へ **含まれる**こと
+- **`departure_time`** と **最初の Link 進入時刻**を **同一視せず**、**実データ**で確認する
+
+**歴史的記録:** §21.2、§21.4、§21.5、§21.7 の旧記述は **削除しない**。Visit 数ベース定義の最新参照先は **本 §21.9** および **§31.18**。
