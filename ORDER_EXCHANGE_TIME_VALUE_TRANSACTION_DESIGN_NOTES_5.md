@@ -12127,3 +12127,934 @@ route_audit_identity = tuple(
 - **`free_flow_speed` 表示値だけ**を参照し **`link.u`** を **無視**
 - **同一評価処理を越えて** **無検証再利用**
 - **設計確定前**の **production 実装**
+
+**最新参照（2026-11-04）:** **Link 名 audit identity** の **保持設計**は **§31.18.15** で **確定**。**次**は **実装前設計 2/4** の **DELTAN=1 validation**。**production 実装**は **未着手**。
+
+#### 31.18.15 Link名列をaudit identityとして保持する設計
+
+**位置付け:** **実装前設計 1/4**。**production コードは実装しない**。**CASE 7B**（**§31.18.14.4**）を前提とする。
+
+##### 31.18.15.1 目的
+
+**1 つの physical_route_key** に **複数の route_audit_identity** が対応するとき、**Link 名列**を **失わず**、**重複登録せず**、**最初に観測した順序**で **保持**する。
+
+**physical_route_key** は **reference replay 結果を共有できるか**を判断する値である。**route_audit_identity** は、**どの実走行 Link 列**がその結果を利用したかを **後から確認**する値である。**両者を混同しない**。
+
+##### 31.18.15.2 物理識別値とaudit identityの分離
+
+**物理識別値候補**（**§31.18.14.2**、**変更しない**）:
+
+```python
+physical_route_key = (
+    float(W.DELTAT),
+    tuple(
+        (
+            float(link.length),
+            float(link.u),
+        )
+        for link in actual_route_links
+    ),
+)
+```
+
+**Link 名を physical_route_key へ追加しない。**
+
+**理由:**
+
+- **Link 名**が違っても **物理条件**が同じなら、**同じ reference replay 結果**を **共有**できる（**CASE 7B**）
+- **Link 名**を **物理識別値**へ入れると、**物理的に同じ経路条件**の **再利用**を **不必要に妨げる**
+- **Link 名**は **計算条件**ではなく **監査情報**である
+
+##### 31.18.15.3 route_audit_identityの形式
+
+**候補として確定:**
+
+```python
+route_audit_identity = tuple(
+    str(link.name)
+    for link in actual_route_links
+)
+```
+
+**要件:**
+
+- **実走行順**を **維持**する
+- **list** ではなく **tuple** として **保持**する
+- **Link 名**を **文字列**として **明示**する
+- **名前を並べ替えない**
+- **set** へ **変換しない**
+- **同じ Link 名**が経路内で **複数回**現れる場合も、**出現順**と **回数**を **保持**する
+- **Vehicle 名**、**OD 名**、**Visit 数**から **Link 名列**を **推測しない**
+- **`Vehicle.traveled_route()`** から得た **実走行 Link 列**を **正本**とする
+
+##### 31.18.15.4 1つの物理識別値に対する複数Link名列
+
+**概念上の対応:**
+
+```text
+physical_route_key
+    ->
+ordered unique route_audit_identity collection
+```
+
+**要件:**
+
+- **最初に観測した順序**を **維持**する
+- **同じ route_audit_identity** を **重複登録しない**
+- **異なる route_audit_identity** は **すべて保持**する
+- **順序を失う単純な set だけ**を **正本にしない**
+- **重複確認**を速くする必要があっても、**表示順**を保持する構造を **別に持つ**
+- 将来の実装は、**初学者が追える明示的な形**を採る
+
+**現時点の有力な概念構造**（**コードは未実装**）:
+
+```python
+audit_identities_by_physical_key = {
+    physical_route_key: [
+        route_audit_identity_1,
+        route_audit_identity_2,
+    ]
+}
+```
+
+##### 31.18.15.5 重複判定と観測順序
+
+**同じ physical_route_key** の **登録済み Link 名列**に、今回の **route_audit_identity** と **完全一致**する **tuple** がある場合:
+
+- **新規追加しない**
+- **重複回数**は、将来の **軽量 counter** で数える **候補**とする（**counter 自体は今回実装しない**。**4/4** で扱う）
+
+**完全一致しない**場合:
+
+- **新しい route_audit_identity** として **末尾**へ **追加**する
+- **最初に観測した順序**を **維持**する
+
+**同一 Link 名列**の判定に、次を **使わない**。
+
+- **部分一致**
+- **Link 名集合**の一致
+- **先頭だけ**、または **末尾だけ**の一致
+
+**Link 名列が違うだけ**で、**別の reference replay** を **無条件に実行しない**。
+
+##### 31.18.15.6 Vehicleとの対応
+
+各 **Vehicle** の算出時に、将来 **最低限**次を **対応付けられる**ようにする。
+
+- **Vehicle 名**
+- **physical_route_key**
+- **route_audit_identity**
+- **reference replay 最短旅行時間**
+
+**今回確定するのは、Vehicle ごとの算出時に physical_route_key と route_audit_identity の両方を得られることだけ**である。
+
+**全 Vehicle 名**を、物理識別値ごとの確認記録へ **無制限に重複保存するか**は、**実装前設計 4/4** で決める。**今回は決めない**。
+
+##### 31.18.15.7 将来の確認出力
+
+各 **physical_route_key** について、将来 **最低限**次を **表示できる**ようにする。
+
+- **物理識別値**
+- **対応する異なる Link 名列の数**
+- **各 Link 名列**
+- **最初に観測した順序**
+- **同じ Link 名列の重複利用回数**
+- **reference replay 結果を共有したこと**
+
+**具体的な出力ファイル形式**は **今回決定しない**。
+
+##### 31.18.15.8 不整合候補
+
+次は **不整合**または **設計違反**として扱う **候補**とする。
+
+- **実走行 Link 列**が **空**
+- **Link 名**が **None**
+- **physical_route_key** 作成に使った Link 列と、**route_audit_identity** 作成に使った Link 列の **長さが異なる**
+- **両者が別の Link 列**から作成された
+- **Link 順序**を失った
+- **Link 名列**を **physical_route_key** へ **混入**した
+- **Link 名列が異なるだけ**で **別の reference replay** を **無条件に実行**した
+
+**どの不整合を即時停止にするか**は、**failure 診断設計**（**4/4** に含む）で **最終確定**する。**今回は確定しない**。
+
+##### 31.18.15.9 未実装事項
+
+次は **今回実装しない**。
+
+- **production 用の共有辞書**
+- **reference replay helper**
+- **Vehicle 別 CW_z**
+- **ACWT**
+- **ACWWT**
+- **CSV 出力**
+- **永続保存**
+- **別 process 間共有**
+- **全 Vehicle 名の保持方法**
+- **counter**
+- **failure 時の最終例外設計**
+
+##### 31.18.15.10 残りの実装前設計
+
+**実装前設計 1/4 は本節で完了**した。**残りは 3 つ**である。
+
+- **2/4** **DELTAN=1 前提**の **validation 方法**（**未着手**、**次の作業**）
+- **3/4** **reference World** の **標準条件**（**未着手**）
+- **4/4** **同一評価処理内**で結果を共有する仕組みの **所有者・存続範囲・保存内容・確認記録**（**未着手**）
+
+**2/4 以降の設計・実装・検証には、本節では進まない。**
+
+**最新参照（2026-11-04）:** **DELTAN=1 validation** の **設計**は **§31.18.16** で **確定**。**実装前設計 2/4 完了**。**残り 2 つ**。**次**は **3/4 reference World 標準条件**。**production 実装**は **未着手**。
+
+#### 31.18.16 DELTAN=1前提のvalidation設計
+
+**位置付け:** **実装前設計 2/4**。**production コードは実装しない**。**3/4 以降**の **reference World 全標準条件**、**共有辞書**、**helper 実装**には **進まない**。
+
+**原典（`uxsim/uxsim.py` の `World.__init__`）:**
+
+- **`W.DELTAN = deltan`** として **引数をそのまま保持**する
+- **`W.DELTAT = W.REACTION_TIME * W.DELTAN`**
+- 引数注釈は **`deltan: int = 5`** だが、**実行時に型や値 1 を検査しない**
+- したがって **World 生成時点**では、**DELTAN が整数 1 であることは保証されない**
+
+**原典（`_validate_order_control_deltan`）:**
+
+- **`isinstance(deltan, int)`** かつ **`bool` ではない** かつ **`deltan == 1`** を要求する
+- **`Node` 作成時**に **`order_control_type != "none"`** のときだけ呼ぶ
+- **signalized UXsim** など **order-control を使わない World** では **呼ばれない**
+
+##### 31.18.16.1 目的
+
+**FCFS、BATCH、TVT-MP** は **個別 Vehicle object** を制御するため、**DELTAN=1** を前提とする。**評価対象 World** と **reference World** の両方を **DELTAN=1** に限定し、**1 以外の World** へ **ACWT・ACWWT 評価**を **適用しない**。
+
+**DELTAN** を **物理識別値**へ追加して **可変一般化しない**。**評価処理全体の前提条件**として **固定**する。
+
+**CASE 6E-2**（**§31.18.13.8**）では、**DELTAT を同じに保った単車両・非拘束条件**で **最短旅行時間は変わらなかった**。ただし **DELTAN** は **platoon size** であり、**capacity 判定**や **Vehicle 表現**へ **影響し得る**。**一般化してよいとは確認していない**。
+
+##### 31.18.16.2 評価処理入口での実World確認
+
+**ACWT・ACWWT 評価処理の開始時**に、評価対象の **実 World** について **一度だけ**次を確認する。
+
+```text
+W.DELTAN == 1
+```
+
+**1 でなければ**、次へ **進まない**。
+
+- **Vehicle 別経路抽出**
+- **reference replay**
+- **CW_z**
+- **ACWT**
+- **ACWWT**
+
+**各 Vehicle、各経路、各 reference replay** で **同じ確認を繰り返さない**。
+
+**理由:**
+
+- **DELTAN** は評価処理中に変化しない **World 設定**
+- **評価開始時**に保証できる **不変条件**
+- **Vehicle ごとの繰り返し**は不要
+- **後段の原因不明エラー**より、**入口で停止**する
+
+##### 31.18.16.3 型と値の厳密確認
+
+**World 生成**は型を **実行時保証しない**（**§31.18.16** 冒頭の原典）。したがって **評価処理側**で、値と型を **自分で確認**する。
+
+**不適合**として扱う。
+
+- **1 以外の整数**
+- **0**
+- **負数**
+- **None**
+- **文字列の `"1"`**
+- **`1.0` など、整数設定として保証できない型**
+- **`True`**（**`bool` は `int` の派生型**であり、**有効な DELTAN=1 として受け入れない**）
+
+**推奨判定の趣旨**（**今回は実装しない**）:
+
+```text
+type(W.DELTAN) is int
+and W.DELTAN == 1
+```
+
+**`isinstance` だけ**では **`True`** を **int** とみなす。**`type(...) is int`** は **`bool` を除外**する。これは既存 **`_validate_order_control_deltan`** が **`bool` を別拒否**する趣旨と揃う。
+
+**不適合時の診断**へ、最低限次を含める。
+
+- **World 名**
+- **実際の `W.DELTAN`**
+- **実際の型**
+- **要求値 1**
+- **ACWT・ACWWT の reference replay 評価**では **DELTAN=1** が必要な理由
+- **DELTAN=1** で **World を再構築**する必要があること
+
+##### 31.18.16.4 Reference Worldの確認
+
+**実 World:**
+
+- **評価処理の入口**で **一度**確認する
+- **不適合**なら **評価全体を開始しない**
+
+**Reference World:**
+
+- **構築直後**、**replay 開始前**に **一度**確認する
+- **DELTAN=1** であることを確認する
+- **実 World の DELTAN を無条件にコピーしない**
+- **標準条件**として **明示的に 1** を設定する
+- **1 以外**なら、その **reference replay を実行しない**
+
+**reference World の他の標準条件**（capacity、signal、DELTAT の作り方など）は **3/4** で扱う。**今回確定するのは DELTAN=1 の確認だけ**である。
+
+##### 31.18.16.5 DELTAT一致確認との分離
+
+**DELTAN=1** であっても、**実 World** と **reference World** の **DELTAT** が一致するとは限らない。**`DELTAT = REACTION_TIME × DELTAN`** であり、**REACTION_TIME** が違えば **DELTAT** も違う（**§31.18.13.6**、**CASE 6D**）。
+
+**混同しない。**
+
+- **両 World がそれぞれ DELTAN=1** であること
+- **`reference_W.DELTAT == real_W.DELTAT`** であること
+
+**DELTAT 一致**は、**reference World 構築後**に確認する **候補**とする。**一致確認の具体的な構築方法と標準条件**は **3/4** で確定する。
+
+**2/4 の未完了事項:** **DELTAN=1 の確認だけでは十分ではない**。**DELTAT 一致確認**も **別途必要**である。
+
+##### 31.18.16.6 不適合時の停止
+
+**DELTAN 不適合**は、**警告だけで続行しない**。
+
+**理由:**
+
+- **評価方式間**の比較前提が崩れる
+- **個別 Vehicle** を前提とする **FCFS、BATCH、TVT-MP** と整合しない
+- **reference replay 結果**の意味が変わる可能性がある
+- **誤った ACWT・ACWWT** を生成するより、**評価開始前に停止**する
+
+将来の production 実装では、説明を含む **`ValueError`** または **専用の明示的エラー**を **候補**とする。**最終的な例外型とメッセージ形式**は **4/4** の **failure 診断設計**で確定する。
+
+##### 31.18.16.7 既存order-control validationとの関係
+
+既存の **`_validate_order_control_deltan`** があっても、**ACWT・ACWWT 評価処理側の入口確認を省略しない**。
+
+**理由:**
+
+- **signalized UXsim** など、**order-control を使わない比較方式**も評価対象である
+- **reference replay** は **order-control なし**で構築する
+- **ACWT・ACWWT** は **制御方式に依存しない共通評価**である
+- **既存 validation** が **呼ばれない World** があり得る
+
+**同じ helper を再利用するか、評価専用 helper を分けるか**は、**production 実装場所**の設計時に決める。**今回、production helper は作成しない**。
+
+##### 31.18.16.8 将来の処理順序
+
+将来の評価処理の **順序候補:**
+
+1. 評価対象 World が **全車完走済み**であることを確認
+2. **評価対象 Vehicle 集合**を確定
+3. **実 World** の **DELTAN=1** を確認
+4. 実 World の必要な **時間設定**を取得
+5. 各 Vehicle の **実走行経路**を抽出
+6. **reference World** を構築
+7. **reference World** の **DELTAN=1** を確認
+8. 実 World と reference World の **DELTAT 一致**を確認
+9. **reference replay** を実行
+10. **CW_z、ACWT、ACWWT** を算出
+
+**全車完走確認**や **Vehicle 集合確定**との **最終順序**は **4/4** で再確認する。
+
+**今回確定する核心:**
+
+- **replay 開始前**に **両 World** の **DELTAN=1** を保証する
+- **不適合なら停止**する
+
+##### 31.18.16.9 将来の確認記録
+
+将来の確認記録として、最低限次を残す **候補**とする。
+
+- **real_world_deltan**
+- **reference_world_deltan**
+- **deltan_validation_passed**
+- **validation 実施回数**
+- **不適合時**の **World 名**と **実値**
+
+**保存場所、出力形式、counter の詳細**は **4/4** で確定する。**通常成功時**に **Vehicle ごとの重複記録**は **行わない**。
+
+##### 31.18.16.10 未実装事項
+
+次は **今回実装しない**。
+
+- **production validation helper**
+- **reference World 構築**
+- **DELTAT 一致 helper**
+- **tests**
+- **research validation script**
+- **counter**
+- **CSV 出力**
+- **failure 時の最終例外**
+- **ACWT・ACWWT 算出**
+
+##### 31.18.16.11 残りの実装前設計
+
+**実装前設計 2/4 は本節で完了**した。**残りは 2 つ**である。
+
+- **3/4** **reference World** の **標準条件**（**未着手**、**次の作業**）
+- **4/4** **同一評価処理内**で結果を共有する仕組みの **所有者・存続範囲・保存内容・確認記録**（**未着手**）
+
+**3/4 以降の設計・実装・検証 script 作成には、本節では進まない。**
+
+**最新参照（2026-11-04）:** **reference World 標準条件**の **設計**は **§31.18.17** で **確定**。**実装前設計 3/4 完了**。**残り 1 つ**。**次**は **4/4**。**production 実装**は **未着手**。
+
+#### 31.18.17 Reference World標準条件設計
+
+**位置付け:** **実装前設計 3/4**。**production コードは実装しない**。**4/4** の共有の仕組み、**helper 実装**、**検証 script 作成**には **進まない**。
+
+**検証 script で合格済みの World 設定**（`research_scripts/validate_uxsim_single_vehicle_network_wide_waiting_time_basis.py` の `_make_world`）を、出力抑制と randomness の基準にする。
+
+- **`random_seed=0`**
+- **`hard_deterministic_mode=True`**（UXsim 既定は **False**。物理 key へは **含めない**）
+- **`print_mode=0`**、**`save_mode=0`**、**`show_mode=0`**、**`show_progress=0`**
+- **`vehicle_logging_timestep_interval`** は **渡していない**。UXsim 既定は **1**（**`-1` は logging 無効**）。**`traveled_route()`** を失わないため **1 を維持**する
+- 経路固定は **`Vehicle.enforce_route()`**。出発は **timestep 0**、**`departure_time_is_time_step=1`**
+- **`NON_BINDING_CAPACITY = 1000000.0`**
+
+**UXsim `Link` 既定:** **`jam_density=0.2`**、**`number_of_lanes=1`**、**`merge_priority=1`**、**`signal_group=[0]`**。**Node** の **`signal=[0]`** は無信号。
+
+##### 31.18.17.1 目的
+
+**reference World** は、実 World の **交通状態**や **制御**を再現する World ではない。
+
+目的は次の **1 点**だけである。
+
+- **実走行 Link 物理条件列**を、**余計な待ちなし**で UXsim 上に再現し、その経路の **UXsim 最短旅行時間**（**`Vehicle.travel_time`**）を取得する
+
+**再現しないもの:**
+
+- 実 World の **他 Vehicle**、**congestion**、**queue**、**spillback**
+- **signal 待ち**、**FCFS**、**BATCH**、**TVT-MP**、**priority 待ち**
+- **Node flow capacity 待ち**、**Link capacity 待ち**
+- **user_function** による動的変更
+- **route choice** による別経路選択
+
+**正式 T_{\min,z}** は、この replay の **`travel_time`** である。**Σ(length/u)** でも **1+Σ(length/u)** でも求めない（**§31.18.12**）。
+
+##### 31.18.17.2 World時間条件
+
+**明示する。**
+
+- **DELTAN = 1**
+- **REACTION_TIME = real_W.DELTAT**
+- したがって **reference_W.DELTAT = real_W.DELTAT**
+
+**理由:** UXsim では **`DELTAT = REACTION_TIME × DELTAN`**（**§31.18.16**）。**DELTAN を 1 に固定**し、**REACTION_TIME** へ **実 World の DELTAT** を置けば、同じ **DELTAT** を作れる。**実 World の REACTION_TIME をそのままコピーしない**。
+
+**構築直後**に、次を **別々に**確認する。
+
+- **`type(reference_W.DELTAN) is int`**
+- **`reference_W.DELTAN == 1`**
+- **`reference_W.DELTAT == real_W.DELTAT`**
+
+**DELTAT** は **float** なので、**厳密一致**を基本候補とする。両方とも **同じ実 World の値**から作るため、通常は **同じ float** になる。**最終的な比較方法と failure message** は **4/4** で確定する。
+
+##### 31.18.17.3 Node標準条件
+
+実走行 Link 数を **n** とすると、**n+1 個**の Node を **直列**に作る。
+
+- **起点 Node 1 個**
+- **Link 境界 Node n-1 個**
+- **終点 Node 1 個**
+- **分岐なし**、**合流なし**
+- **signal なし**（**`signal=[0]`**）
+- **flow_capacity なし**
+- **`order_control_type="none"`**、**`order_control_eligible=False`**
+- **user_function なし**
+
+**Node 名**は reference World 内部の一意な連番を候補とする。例: **`reference_node_0`** … **`reference_node_n`**。
+
+**実 World の Node 名や Node 制御属性はコピーしない。** **T_{\min,z}** に必要なのは **実走行 Link の物理条件列**である。実 World の Node 制御は **待ち要因**なので持ち込まない。直列化で **route choice の曖昧さ**を除く。
+
+##### 31.18.17.4 Link標準条件
+
+各実走行 Link について、**同じ順序**で reference Link を **1 本ずつ**作る。
+
+**実 World から引き継ぐ物理値:**
+
+- **`length = float(real_link.length)`**
+- **`free_flow_speed = float(real_link.u)`**
+
+**speed** は **`real_link.free_flow_speed` ではなく `real_link.u`** から取る（**§31.18.14.9**）。**float を round しない**。**Link 順序を変えない**。
+
+**reference World 側で標準化する値:**
+
+- **`number_of_lanes = 1`**
+- **`jam_density = 0.2`**（UXsim 既定の正の標準値）
+- **`jam_density_per_lane = None`**
+- **`merge_priority = 1`**
+- **`signal_group`** は無信号と整合する既定 **`[0]`**
+- **`capacity_in = 1000000.0`**、**`capacity_out = 1000000.0`**（**`NON_BINDING_CAPACITY`**）
+- **`user_function = None`**
+- **attribute**、**user_attribute** は設定しない
+
+**非拘束 capacity** は Vehicle 1 台の流入・流出を制約しない。**infinity は使わない**。**実 World の capacity_in / out はコピーしない**。
+
+**jam_density と車線数をコピーしない理由:** **CASE 6A** では、単車両・leader なし・capacity 非拘束で **jam_density** は **T_{\min,z}** を変えなかった。**CASE 6B** では同条件で **number_of_lanes** も変えなかった（**§31.18.13**）。単純で安定した標準値へ固定する。
+
+検証 script の現行 reference builder は、感度確認のため **jam_density** と **number_of_lanes** を経路から写す場合がある。**正式な標準条件**は、それらを写さず **上記の固定値**とする。
+
+##### 31.18.17.5 Link名とaudit identity
+
+**Reference Link 名**は、内部で一意な連番を候補とする。例: **`reference_link_0`** … **`reference_link_{n-1}`**。
+
+**実 World の Link 名を reference Link 名としてコピーする必要はない。** 実 World の Link 名列は、確定済みの **`route_audit_identity`** として **別保持**する（**§31.18.15**）。
+
+**CASE 6C** と **CASE 7B** で、Link 名は物理的 **T_{\min,z}** を変えなかった。内部名と監査用の実 World 名を分離し、同名の反復や自動 rename の曖昧さを避ける。
+
+##### 31.18.17.6 Vehicle標準条件
+
+**Vehicle は 1 台だけ**作る。
+
+- **departure timestep = 0**
+- **`mode = "single_trip"`**
+- 起点は **`reference_node_0`**、終点は **`reference_node_n`**
+- **route** を reference Link 列へ **明示的に固定**
+- **user_function なし**、**他 Vehicle なし**
+- **taxi mode なし**、**trip-end の特殊処理なし**
+- **order-control 参加属性**を持ち込まない
+- **true VOT**、**申告 VOT**、**Buyer**、**Seller**、**Nonparticipating** 等の評価属性を持ち込まない
+
+必要なのは **同一物理経路の最短旅行時間**だけである。取引属性や制御方式は **T_{\min,z}** へ不要である。route choice の結果へ依存せず、実走行 Link 順序を直接再現する。
+
+##### 31.18.17.7 Route固定
+
+Reference Vehicle は、構築した reference Link 列を **順番どおり**通るよう **明示的に固定**する。
+
+- **分岐のない直列 network** でも route を **明示的に固定**する
+- **自動 route choice** の結果へ **依存しない**
+- Link 順序が実 World の **actual_route_links** と **完全に対応**する
+- 固定後に、**route Link 数**と **reference Link 数**が一致することを確認する **候補**とする
+
+公開 API の基本候補は、検証 script で使用済みの **`enforce_route()`** である。**production helper の具体実装は今回行わない。**
+
+##### 31.18.17.8 実行時間上限
+
+Reference Vehicle が完走できる **十分な実行時間**を設定する。
+
+**Σ(length/u)** は正式 **T_{\min,z}** には使わない。**実行時間上限の見積り**には使ってよい。
+
+**保守的候補の趣旨:**
+
+```text
+reference_tmax
+=
+analytical_free_flow_time
++
+(n + 2) * real_W.DELTAT
++
+fixed_margin_seconds
+```
+
+- **analytical_free_flow_time = Σ(length / u)**
+- **n** は Link 数
+- **fixed_margin_seconds** の候補は **60 秒**
+
+この上限は **T_{\min,z} の算定式ではない**。完走のための実行可能時間を確保するだけである。上限までに完走しなければ、値を推測して続行しない。**未完走は明示的な失敗**とする。同じ処理内で **無制限に延長しない**。
+
+検証 script の小さい CASE は固定 **tmax=600 秒**で完走している。**正式な標準**は上の保守的上限とする。**最終的な式と余裕値**は、実装時の小規模検証で確認する。**未完走なら停止**する方針は、今回確定する。
+
+##### 31.18.17.9 実行後の合格条件
+
+replay 完了後に、最低限次を確認する **候補**とする。
+
+- Reference Vehicle の **state** が **end**
+- **arrival_time** が有効
+- **travel_time** が **0 以上**
+- **`traveled_route()`** の Link 数が期待数と一致
+- reference route の **length 列**と **u 列**が **physical_route_key** と一致
+- **reference_W.DELTAN == 1**
+- **reference_W.DELTAT == real_W.DELTAT**
+- **他 Vehicle が存在しない**
+- **signal**、**order-control**、**Node flow_capacity**、**user_function** が存在しない
+- **capacity 待ち**が発生していない
+- **route 固定どおり**完走した
+
+どこまでを毎回確認し、どこまでを構築時保証へ委ねるかは **4/4** で最終整理する。
+
+**基本方針:** 構築時に保証した不変条件を、Vehicle の各 timestep で繰り返し確認しない。**replay 完了後**に、重大な結果整合性だけを確認する。
+
+##### 31.18.17.10 空経路と不正Link値
+
+**actual_route_links** が空なら、reference World を **構築しない**。物理識別値を作れず、経路を定義できず、**T_{\min,z}** を算出できない。**空経路を 0 秒として扱わない。** 不整合として停止する候補とする。即時停止の最終例外形式は **4/4** で確定する。
+
+構築前に、各 Link について次を確認する **候補**とする。
+
+- **length** が有限の数値かつ **length > 0**
+- **u** が有限の数値かつ **u > 0**
+- Link object が **None** でない
+
+**NaN**、**infinity**、**0**、**負数**は受け入れない。不正値のまま World を作ると、未完走や曖昧な結果を招く。型と値の最終 helper、例外型、message は **4/4** で確定する。
+
+##### 31.18.17.11 Randomness
+
+次により、経路・交通上の不確実性を除く。
+
+- **Vehicle 1 台**
+- **分岐なし**、**合流なし**
+- **route 固定**
+- **signal なし**、**order-control なし**、**user_function なし**
+
+この条件では、**random seed が T_{\min,z} へ影響しない**構造とする。World へ seed を指定する場合は、検証 script と同じ **固定値 0** を候補とする。
+
+**`hard_deterministic_mode`:** route 固定、単車両、分岐・合流なしなら、物理結果の追加条件としては不要である。**実 World からコピーしない。** 物理結果へ不要な設定を **physical_route_key** へ追加しない。
+
+**推奨:** 検証 script で合格済みの設定を基準にする。**`random_seed=0`**。**`hard_deterministic_mode=True`**。どちらも **physical_route_key へ含めない**。
+
+##### 31.18.17.12 Loggingと出力抑制
+
+reference World は内部計算用であり、通常の研究 output を生成しない。
+
+- **print_mode**、**save_mode**、**show_mode**、**show_progress** を抑制する（検証 script と同じ **0**）
+- **画像を作らない**、**CSV を書かない**、**output directory を作らない**
+- console へ通常進行を大量表示しない
+
+**`Vehicle.travel_time`** と **`traveled_route()`** を取得できる最低限の記録は維持する。
+
+**`vehicle_logging_timestep_interval`** は **1** とする。UXsim 既定であり、検証 script はこれを上書きしていない。**`-1` で logging を無効化しない。**
+
+##### 31.18.17.13 実Worldから持ち込まない属性
+
+次を実 World から **コピーしない**。
+
+- **signal** 設定、**signal phase**
+- **Node flow_capacity**
+- **order_control_type**、**order_control_eligible**、**batch_size**、**transaction_case**、**TVT-MP 設定**
+- **Link capacity_in / out**、**merge_priority**、**signal_group**
+- **jam_density**、**jam_density_per_lane**、**number_of_lanes**
+- **route_choice_penalty**、**user_function**
+- Vehicle の **VOT**、**申告値**、**participating 状態**、**Buyer / Seller 等の role**
+- **actual departure time**
+- **他 Vehicle**、実 World の **混雑**、**queue**、**Link 上位置**
+
+**物理的に引き継ぐのは次だけ**とする。
+
+- **Link 順序**
+- 各 Link の **length**
+- 各 Link の **u**
+- **real_W.DELTAT**
+
+**Link 名列**は物理条件ではなく、**audit identity** として別保持する。
+
+##### 31.18.17.14 未実装事項
+
+次は **今回実装しない**。
+
+- **production reference World builder**
+- **replay helper**
+- **validation helper**
+- **tests**
+- **research validation script**
+- **結果共有の仕組み**
+- **counter**
+- **failure 時の最終例外**
+- **CSV**
+- **Vehicle 別 CW_z**
+- **ACWT**
+- **ACWWT**
+
+##### 31.18.17.15 残りの実装前設計
+
+**実装前設計 3/4 は本節で完了**した。**残りは 1 つ**である。
+
+- **4/4** **同一評価処理内**で結果を共有する仕組みの **所有者・存続範囲・保存内容・確認記録**（**未着手**、**次の作業**）
+
+**4/4 の設計・実装・検証 script 作成には、本節では進まない。**
+
+**最新参照（2026-11-04）:** **reference replay 結果共有**の **設計**は **§31.18.18** で **確定**。**実装前設計 4/4 完了**。**4 つすべて完了**。**production 実装**は **未着手**。**次**は **4 設計の独立確認**、**commit・push**、**実装場所候補の読取り専用調査**。
+
+#### 31.18.18 同一評価処理内のreference replay結果共有設計
+
+**位置付け:** **実装前設計 4/4**。**production class、helper、tests、検証 script は作らない。**
+
+**原典:** `Vehicle.end_trip()` は **state を end** にし、**`travel_time = (arrival_time - departure_time) × DELTAT`** とする。実走行 Link 列の正本は **`traveled_route()`** である。正式 **T_{\min,z}** は、この **travel_time** を reference replay で取った値である（**§31.18.12**、**§31.18.14**、**§31.18.17**）。
+
+##### 31.18.18.1 目的
+
+同じ物理的走行条件の複数 Vehicle について、**reference replay を Vehicle ごとに繰り返さない**。結果を **別の評価実行へ持ち越さない**。どの経路が同じ結果を使ったかを確認でき、共有回数と新規計算回数を残す。不整合時は、誤った **ACWT・ACWWT** を出さず **停止**する。
+
+##### 31.18.18.2 所有者と存続範囲
+
+共有結果は、**ACWT・ACWWT を 1 回算出する評価処理**が所有する。
+
+- 評価処理の入口で、**局所的な評価 context** を **1 個**作る
+- その context に、共有結果と確認記録を置く
+- context は **その評価処理の中だけ**で受け渡す
+- **module-level global cache** は使わない
+- **World の恒久属性**にしない
+
+**有効範囲**は、その評価処理の **開始から終了まで**である。終了後は memory 上の共有結果を破棄する。次の評価は **空から**始める。別 process、file、serialize、pickle、CSV 再読込へは持ち越さない。同じ実 World を再評価する場合も、**新しい評価処理**として作り直す。
+
+**理由:** World や Link 属性が変わった可能性を無視しない。古い結果の混入を防ぎ、再現性と監査を優先する。初期実装を単純にする。
+
+**class 名と配置**は production 実装時に決める。**今回 class は作らない。**
+
+##### 31.18.18.3 物理識別値
+
+共有判断には **§31.18.14** の物理識別値を使う。
+
+```python
+physical_route_key = (
+    float(real_W.DELTAT),
+    tuple(
+        (
+            float(link.length),
+            float(link.u),
+        )
+        for link in actual_route_links
+    ),
+)
+```
+
+**Link 順序を維持**する。**float を丸めない**。**Link 名を含めない**。**DELTAT を含める**。**set** も **文字列 key** も使わない。実走行 Link 列から作る。
+
+**DELTAN** は key へ追加しない。評価処理入口で **DELTAN=1** を前提として保証する（**§31.18.16**）。
+
+##### 31.18.18.4 保存するreference結果
+
+1 つの **physical_route_key** について、最低限次を保存する候補とする。
+
+- **uxsim_reference_minimum_trip_time_s**
+- **analytical_route_free_flow_time_s**（診断用）
+- **reference_route_link_count**
+- **reference_world_deltat**
+- **reference_world_deltan**
+- **reference_vehicle_state**
+- **reference_vehicle_arrival_time**
+- **reference_vehicle_travel_time**
+- **reference_validation_passed**
+
+**正式な T_{\min,z}** として使うのは **uxsim_reference_minimum_trip_time_s** だけである。解析自由流時間は診断用であり、正式値にしない。
+
+**Reference World、Vehicle、Node、Link の object** は、評価処理全体の共有値として **保持し続けない**。完了後に数値と確認情報を取り出し、World object は破棄できる状態にする。大量の終了済み simulation object を残さない。
+
+##### 31.18.18.5 Audit identityの保存
+
+1 つの物理識別値に、複数の **route_audit_identity** を保持する（**§31.18.15**）。
+
+```python
+audit_identities_by_physical_key = {
+    physical_route_key: [
+        route_audit_identity_1,
+        route_audit_identity_2,
+    ]
+}
+```
+
+**最初の観測順**を維持する。**完全一致**する Link 名列は重複登録しない。異なる列はすべて残す。**set だけを正本にしない**。Link 名が違うだけでは replay をやり直さない。
+
+重複確認を速くする必要が出た場合は、表示順の **list** と所属確認用の **set** を併用する候補とする。初期実装は可読性を優先し、実測で必要になるまで最適化しない。
+
+##### 31.18.18.6 Vehicle別評価record
+
+Vehicle ごとの最終 record には、最低限次を対応付ける候補とする。
+
+- **vehicle_name**
+- **physical_route_key**
+- **route_audit_identity**
+- **actual_travel_time_s**
+- **uxsim_reference_minimum_trip_time_s**
+- **cumulative_waiting_time_s**
+- **true_vot**
+- **weighted_cumulative_waiting_time**
+- **participation 区分**
+- 必要なら **比較方式名**
+
+```text
+cumulative_waiting_time_s
+=
+actual_travel_time_s
+-
+uxsim_reference_minimum_trip_time_s
+
+weighted_cumulative_waiting_time
+=
+true_vot
+×
+cumulative_waiting_time_s
+```
+
+**true VOT** の単位と時間単位は一致させる。単位変換の最終は **ACWWT 実装時**に確認する。**Buyer・Seller** の取引 role 評価とは分離する。participation 区分は、方式間で同じ固定 Vehicle 集合を比較するために使う。
+
+物理識別値ごとの summary へ、**全 Vehicle 名を無制限に重複保存しない**。Vehicle 名は Vehicle 別 record に置き、summary は **件数**を基本とする。
+
+##### 31.18.18.7 軽量counter
+
+評価処理ごとに、最低限次を記録する候補とする。
+
+- **evaluated_vehicle_count**
+- **unique_physical_route_count**
+- **reference_replay_run_count**
+- **reference_reuse_count**
+- **unique_audit_identity_count**
+- **duplicate_audit_identity_observation_count**
+- **validation_failure_count**
+- **incomplete_vehicle_count**
+- **negative_cumulative_waiting_time_count**
+- **near_zero_negative_cumulative_waiting_time_count**
+
+期待する関係は、**reference_replay_run_count == unique_physical_route_count** である。評価対象だけを数えるとき、**evaluated_vehicle_count == reference_replay_run_count + reference_reuse_count** とする。対象外や失敗を除く場合は、その内訳を別に残す。
+
+counter は確認用であり、物理結果を変えない。Vehicle ごとの大量 console 出力はしない。
+
+##### 31.18.18.8 共有処理順序
+
+1. Vehicle の実走行 Link 列を取得する
+2. **physical_route_key** を作る
+3. **route_audit_identity** を作る
+4. audit identity を対応表へ登録する
+5. 物理識別値が未登録かを見る
+6. 未登録なら reference replay を **1 回**実行する
+7. **合格結果だけ**を共有結果へ保存する
+8. **reference_replay_run_count** を増やす
+9. 登録済みなら保存済み結果を使う
+10. **reference_reuse_count** を増やす
+11. 実 travel_time と **T_{\min,z}** から **CW_z** を算出する
+12. Vehicle 別 record を作る
+
+replay が失敗した場合、失敗結果を成功として登録しない。不完全な値を共有しない。曖昧なまま継続しない。**評価全体を停止**する候補とする。
+
+##### 31.18.18.9 評価対象Vehicle集合
+
+基本対象は、評価対象 World で **完走**した Vehicle である。**state が end**、**travel_time が有効**、**traveled_route() が空でない**。
+
+未完走は通常平均へ混ぜない。黙って除外せず、**incomplete_vehicle_count** と、Vehicle 名・状態を診断へ残す候補とする。
+
+**本研究の正式評価**は **全車完走**を原則とする。未完走があるとき、正式な **ACWT・ACWWT** を確定値として出さない。長期 trial を交通解消・全車完走まで実行する方針と揃える。
+
+##### 31.18.18.10 負のCW_z
+
+同一物理条件の reference replay には余計な待ちがないため、通常は **CW_z >= 0** を期待する。float や境界差によるごく小さい負値は無視しない。
+
+**負値を無条件に 0 へ丸めない。** 小さい負値と実質的な不整合を区別する。許容値を根拠なく決めない。実装時の小規模検証で観測してから許容範囲を決める。許容内でも元値を監査用に残す候補とする。明確な負値は、reference 条件または経路対応の不整合として停止する。
+
+今回確定するのは、**無断で 0 にしない**ことと、**negative_cumulative_waiting_time_count** を記録することである。最終許容値は小規模実装検証後に決める。
+
+##### 31.18.18.11 Validation実施範囲
+
+**毎回確認する。**
+
+- 入口の **real_W.DELTAN** が厳密な int の 1
+- 評価対象 Vehicle の完走
+- 実走行 Link 列が空でない
+- length と u が有限かつ正
+- 新規 reference World の **DELTAN=1**
+- 実 World と reference World の **DELTAT 一致**
+- reference Vehicle の完走
+- reference route の Link 数、length 列、u 列の一致
+- reference travel_time が有効
+
+**構築時に一度保証し、各 timestep では繰り返さない。**
+
+- Node が直列
+- signal なし、order-control なし、Node flow capacity なし、user_function なし
+- Vehicle 1 台
+- capacity_in / out が非拘束
+- route 固定
+
+保存済み結果を再利用するとき、reference World を再確認しない。保存値の **validation_passed が True** であることだけを確認する候補とする。
+
+##### 31.18.18.12 停止対象
+
+次は警告だけで続行せず、評価を停止する候補とする。
+
+- **real_W.DELTAN** または **reference_W.DELTAN** が厳密な int の 1 ではない
+- **DELTAT** 不一致
+- actual route が空
+- length または u が NaN、infinity、0、負数
+- reference Vehicle が未完走
+- reference route 不一致
+- reference travel_time が無効
+- 物理識別値と audit identity を別 Link 列から作成した
+- 保存済み value が未検証
+- 同じ物理識別値へ異なる reference 最短時間を登録しようとした
+- 明確な負の **CW_z**
+- 未完走がある状態で正式結果を確定しようとした
+
+初期実装の例外は、原因を明示した **ValueError** または **RuntimeError** を候補とする。入力・前提の不適合は **ValueError**、replay 後の重大不整合は **RuntimeError** とする。専用例外 class は、必要性が明確になるまで作らない。
+
+##### 31.18.18.13 Failure診断
+
+停止時の message には、原因に関係する範囲で次を含める。
+
+- evaluation stage、World 名、Vehicle 名
+- physical_route_key、route_audit_identity
+- Link index、Link 名、length、u
+- 両 World の DELTAT と DELTAN
+- actual travel_time、reference travel_time、CW_z
+- 期待値または満たすべき条件
+
+無関係な項目をすべての失敗へ大量表示しない。
+
+##### 31.18.18.14 成功時の確認記録
+
+通常成功時は、Vehicle ごとの大量 console 出力をしない。評価終了時の summary で、最低限次を確認できるようにする。
+
+- evaluated_vehicle_count
+- unique_physical_route_count
+- reference_replay_run_count
+- reference_reuse_count
+- unique_audit_identity_count
+- duplicate_audit_identity_observation_count
+- incomplete_vehicle_count
+- validation_failure_count
+- negative_cumulative_waiting_time_count
+- **ACWT**、**ACWWT**
+- Nonparticipating 固定集合の Vehicle 数、その **ACWT** と **ACWWT**
+
+CSV 列やファイル名は、実装時に既存 output 構造を調査して決める。**今回ファイル形式は確定しない。**
+
+##### 31.18.18.15 保存期間
+
+共有結果、audit identity、counter は、**評価処理の終了まで**保持する。終了後は、外部参照が残らない限り破棄する。World へ恒久保存せず、次回評価へ持ち越さない。
+
+Vehicle 別の最終 record や summary を研究 output へ保存するかは、**ACWT・ACWWT 出力設計**で決める。今回確定するのは、**共有用の途中結果を永続保存しない**ことだけである。
+
+##### 31.18.18.16 直列実装
+
+初期実装は、1 つの評価処理を **直列**で行う。同時更新、lock、multiprocessing 共有、process-global 状態は扱わない。正しさと監査を先にする。並列化は、正しい直列実装と、小規模および 3,000 台評価の後の高速化課題とする。
+
+##### 31.18.18.17 実装場所候補
+
+制御方式に依存しない評価機能として、**TVT-MP 固有の取引処理の内部へ埋め込まない**。
+
+候補は、新しい評価専用 module、analyzer 側の明示的な評価 helper、research 評価専用 module である。
+
+求める条件は、FCFS、BATCH、TVT-MP、signalized UXsim への共通適用、order-control Visit へ依存しないこと、simulation 本体へ不要な状態を足さないこと、通常実行と評価処理の分離、初学者が追える構造である。
+
+最終配置は、production 既存構造の **読取り専用調査**の後に決める。**今回ファイルは作らない。**
+
+##### 31.18.18.18 4つの実装前設計の統合
+
+実装時は、次を **1 つの評価処理**として統合する。分離したまま実装漏れを起こさない。
+
+- **1/4:** 物理識別値と audit identity を分離し、同じ物理条件へ複数 Link 名列を対応させる
+- **2/4:** 両 World の **DELTAN=1** を保証し、不適合なら停止する
+- **3/4:** reference World を標準条件で構築し、引き継ぐ物理量は Link 順序、length、u、DELTAT だけにする
+- **4/4:** 同一評価処理内で共有し、新規物理条件だけ replay し、既存条件は保存結果を使う。audit identity、counter、failure 診断を保持する
+
+##### 31.18.18.19 実装前設計完了後の順序
+
+**実装前設計 4/4 は本節で完了**した。**1/4 から 4/4 まですべて完了**した。**直ちに production 実装へ進まない。**
+
+1. 4 つの設計記録を独立確認する
+2. メモ 2 本を **commit・push** する
+3. production 内の実装場所候補を **読取り専用**で調査する
+4. reference replay helper と評価 context の具体設計
+5. 変更影響範囲を報告する
+6. 小規模な別 trial または検証 script で共有動作を検証する
+7. その後に production 実装判断
+8. Vehicle 別 **CW_z**
+9. **ACWT**
+10. **ACWWT**
+11. Nonparticipating 固定 600 台
+12. 4 方式共通検証
+13. manual 一致
+14. 3,000 台 output
+15. 高速化
+
+**次の段階**は、**4 設計の独立確認**、**commit・push**、**実装場所候補の読取り専用調査**である。
