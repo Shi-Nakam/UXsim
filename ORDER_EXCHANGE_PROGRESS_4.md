@@ -1634,6 +1634,10 @@ TSE完全PDFまたは2009年overview chapter全文を別経路で入手した場
 
 **2026-11-04 追記（4 方式共通評価の実装場所等の調査完了）:** **最新再開地点**は **§21.9.8**。**詳細正本**は **§31.18.19**。**調査 1/3〜3/3 完了**。**4 方式共通評価**である。**production 実装未着手**。
 
+**2026-11-04 追記（production 実装前 1/3 完了）:** **最新再開地点**は **§21.9.9**。**詳細正本**は **§31.18.20**。**production 実装開始まで残り 2 工程**。**production 未実装**。
+
+**2026-11-04 追記（production 実装前追加確認 4/4 完了）:** **最新再開地点**は **§21.9.11**。**詳細正本**は **§31.18.22**。**production 実装前の追加確認は残件 0**。**production 未実装**。
+
 ### 21.9 ACWT・ACWWTの方式共通network定義への訂正
 
 **詳細技術正本:** `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_5.md` **§31.18**
@@ -2000,5 +2004,79 @@ TSE完全PDFまたは2009年overview chapter全文を別経路で入手した場
 - **4 方式で同じ入口と同じ定義**を使用する
 
 **最新再開地点:** **§21.9.8**。**詳細正本**は **§31.18.19**。**次**は **4 方式共通 module** の **具体的な部品構成**と **CASE 8 設計**。
+
+**最新注記（2026-11-04）:** **具体設計**は **完了**（**§21.9.9**、**§31.18.20**）。**今後**は **§21.9.9** を **優先**する。**次**は **CASE 8**。
+
+**歴史的記録:** §21.2、§21.4、§21.5、§21.7 の旧記述は **削除しない**。Visit 数ベース定義の最新参照先は **本 §21.9** および **§31.18**。
+
+#### 21.9.9 production実装前1/3: 4方式共通評価の具体設計完了
+
+**詳細正本:** `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_5.md` **§31.18.20**
+
+**確定（設計のみ。production 未実装）:**
+
+- 新 module 候補 **`uxsim/network_wide_waiting_time_evaluation.py`**
+- 公開入口候補 **`evaluate_network_wide_waiting_time`**
+- データ構造は physical key、audit identity、reference 結果、Vehicle record、counters、summary、評価結果
+- 評価ごとの小さな context dataclass
+- helper は入力確認、経路取得、key、replay、record、summary に分離
+- 処理順序は入口確認から結果返却まで 16 段
+- 正式式は **CW_z = 実旅行時間 − T_min,z**、**ACWT** と **ACWWT** はその平均
+- participation は participating、nonparticipating、unspecified
+- 不適合と不整合は停止する
+- 終了時に replay 回数と再利用回数の整合を確認する
+- CASE 8 は **8A〜8F** の 6 群。4 方式の method_name 確認は 8A または 8F へ統合する
+
+**固定工程:**
+
+- **1/3 完了:** 具体設計（**本節**）
+- **2/3 次:** CASE 8 小規模検証
+- **3/3 未着手:** 検証結果確認と production 実装可否判断
+- **その後** production 実装開始
+
+**最新再開地点:** **§21.9.9**。**詳細正本**は **§31.18.20**。**次**は **2/3 CASE 8 小規模検証**。
+
+**最新注記（2026-11-04）:** **最新契約**は **§21.9.11** および **§31.18.22**。**`true_vot_per_second`**、**`evaluation_cohort`**、**timestep 差を正本とする CW_z**、**reference 専用 runner**。**§31.18.20** の **`true_vot`** / **`participation_category`** は **読み替え**。
+
+**歴史的記録:** §21.2、§21.4、§21.5、§21.7 の旧記述は **削除しない**。Visit 数ベース定義の最新参照先は **本 §21.9** および **§31.18**。
+
+#### 21.9.10 production実装前2/3: CASE 8小規模検証（validation script）
+
+**詳細正本:** **§31.18.20.11**、**§31.18.20.12**（CASE 8 設計）。**実装**は **`research_scripts/validate_uxsim_single_vehicle_network_wide_waiting_time_basis.py`** への **CASE 8A〜8F** 追加。
+
+**記録（script 変更は別途実行・記録。production 未実装）:**
+
+- **verification-only** 限定実装。**production module は未作成**
+- **Analyzer なし loop** は **検証用**。**§31.18.22** で **production 専用 runner** を **正式確定**
+- **CASE 1〜7** は **変更しない**契約
+
+**最新注記（2026-11-04）:** **追加確認 4 項目**は **§21.9.11**、**§31.18.22**。**今後**は **§21.9.11** を **優先**。
+
+**歴史的記録:** §21.2、§21.4、§21.5、§21.7 の旧記述は **削除しない**。Visit 数ベース定義の最新参照先は **本 §21.9** および **§31.18**。
+
+#### 21.9.11 production実装前追加確認4/4完了と最終統合契約
+
+**詳細正本:** `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_5.md` **§31.18.22**
+
+**確定（設計統合のみ。production 未実装）:**
+
+- **reference 専用 runner** が必要。**通常 `exec_simulation()`** は **Analyzer なし World** に **使用しない**
+- **true VOT** は **`true_vot_per_second`**。**CW_z 秒値へ直接乗算**。**3600 換算なし**
+- **同一 Vehicle plan** による **4 方式 paired 比較**
+- **複数 replication** でも **replication 内 paired 構造**を維持
+- **Vehicle 名**を **同一 plan 内対応 key** とする
+- **`vehicle_plan_digest` 等**で **同一標本**を監査
+- **TVT-MP nonparticipating 集合**は **他方式**では **比較 cohort**（**`evaluation_cohort`**）。**他方式へ制度上 nonparticipating を適用しない**
+- **CW_z** は **整数 timestep 差**を **正本**とする
+- **負の timestep 差**は **tolerance なし**で **停止**
+- **`near_zero_negative`** 区分は **廃止**
+
+**production 実装前:**
+
+- **追加確認 4/4 完了**
+- **残件 0**
+- **production 未実装**
+
+**最新再開地点:** **§21.9.11**。**詳細正本**は **§31.18.22**。**次**は **独立確認**、**commit・push**、**production 実装**。
 
 **歴史的記録:** §21.2、§21.4、§21.5、§21.7 の旧記述は **削除しない**。Visit 数ベース定義の最新参照先は **本 §21.9** および **§31.18**。

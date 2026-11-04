@@ -22,17 +22,27 @@ attributes changed the replay travel_time in these single-vehicle trials.
 CASE 7A-7G check an in-memory physical route key. The key is
 (DELTAT, ((length, link.u), ...)) with link order kept. It does not round
 floats, include link names, or define a persistent cache.
+
+CASE 8A-8F are a verification-only check of shared network-wide waiting time.
+They are not production code and are not a template to copy into production.
+true_vot in CASE 8 is a plain verification coefficient. It does not settle
+the formal ACWWT unit contract.
 """
 
 from __future__ import annotations
 
 import argparse
 import math
+import os
 import sys
 from dataclasses import dataclass
 from typing import Callable, Sequence
 
 from uxsim import World
+from uxsim.analyzer import Analyzer as UxsimAnalyzer
+from uxsim.uxsim import Link as UxsimLink
+from uxsim.uxsim import Node as UxsimNode
+from uxsim.uxsim import Vehicle as UxsimVehicle
 
 TIME_ABS_TOL = 1e-6
 
@@ -2425,6 +2435,1736 @@ def _run_identity_cases() -> None:
     _print_identity_summary()
 
 
+# CASE 8 is verification-only. It keeps one fresh in-memory state per
+# evaluation. It does not publish a production module and it does not keep a
+# module-level cache.
+CASE8_METHOD_NAMES = (
+    "signalized_uxsim",
+    "fcfs",
+    "batch",
+    "tvt_mp",
+)
+CASE8_PARTICIPATION_CATEGORIES = (
+    "participating",
+    "nonparticipating",
+    "unspecified",
+)
+# Plain multiplier for the CASE 8 weighted product. Not a yen-per-second
+# contract and not the formal ACWWT unit.
+CASE8_VERIFICATION_TRUE_VOT = 2.0
+CASE8_REFERENCE_WORLD_NAME = "case8_reference_replay"
+CASE8_REFERENCE_JAM_DENSITY = 0.2
+
+
+@dataclass
+class Case8ReferenceReplayResult:
+    """Numbers from one reference replay. The World itself is not stored.
+
+    minimum_trip_time_s and reference_vehicle_travel_time are seconds.
+    analytical_free_flow_time_s is a diagnostic sum of length/u, in seconds.
+    It is not the formal T_min,z.
+    """
+
+    physical_route_key: tuple
+    minimum_trip_time_s: float
+    analytical_free_flow_time_s: float
+    reference_route_link_count: int
+    reference_world_deltat: float
+    reference_world_deltan: int
+    reference_vehicle_arrival_time: float
+    reference_vehicle_travel_time: float
+    validation_passed: bool
+
+
+@dataclass
+class Case8VehicleRecord:
+    """One finished vehicle. true_vot is the CASE 8 verification coefficient.
+
+    actual_travel_time_s, minimum_trip_time_s, and cumulative_waiting_time_s
+    are seconds. weighted_cumulative_waiting_time is true_vot times CW_z.
+    """
+
+    vehicle_name: str
+    method_name: str
+    physical_route_key: tuple
+    route_audit_identity: tuple
+    actual_travel_time_s: float
+    minimum_trip_time_s: float
+    cumulative_waiting_time_s: float
+    true_vot: float
+    weighted_cumulative_waiting_time: float
+    participation_category: str
+
+
+@dataclass
+class Case8EvaluationCounters:
+    evaluated_vehicle_count: int = 0
+    unique_physical_route_count: int = 0
+    reference_replay_run_count: int = 0
+    reference_reuse_count: int = 0
+    unique_audit_identity_count: int = 0
+    duplicate_audit_identity_observation_count: int = 0
+    incomplete_vehicle_count: int = 0
+    validation_failure_count: int = 0
+    negative_cumulative_waiting_time_count: int = 0
+
+
+@dataclass
+class Case8EvaluationState:
+    """Local state for one evaluation call. Create a new one every time."""
+
+    real_deltat: float
+    method_name: str
+    reference_results_by_physical_key: dict
+    audit_identities_by_physical_key: dict
+    counters: Case8EvaluationCounters
+    vehicle_records: list
+
+
+@dataclass
+class Case8EvaluationResult:
+    method_name: str
+    vehicle_records: list
+    reference_results_by_physical_key: dict
+    audit_identities_by_physical_key: dict
+    counters: Case8EvaluationCounters
+    average_cumulative_waiting_time_s: float
+    average_weighted_cumulative_waiting_time: float
+
+
+@dataclass(frozen=True)
+class Case8CaseNote:
+    name: str
+    purpose: str
+    expected_relation: str
+
+
+def _case8_make_quiet_world(
+    label: str,
+    deltan: int = 1,
+    reaction_time: float = 1.0,
+    tmax_seconds: float = 600.0,
+) -> World:
+    """Actual CASE 8 world. No Analyzer is created until a later finalize."""
+    return World(
+        name=f"case8_{label}",
+        deltan=deltan,
+        reaction_time=reaction_time,
+        tmax=tmax_seconds,
+        random_seed=0,
+        print_mode=0,
+        save_mode=0,
+        show_mode=0,
+        show_progress=0,
+        hard_deterministic_mode=True,
+        vehicle_logging_timestep_interval=1,
+    )
+
+
+def _case8_add_route_chain(
+    world: World,
+    chain_name: str,
+    link_names: Sequence[str],
+    lengths: Sequence[float],
+    speeds: Sequence[float],
+    vehicle_name: str,
+    row_y: float,
+    departure_timestep: int = 0,
+    capacity_in: float | None = None,
+    link_user_function=None,
+) -> None:
+    """One serial chain and one vehicle. Nodes do not connect to other chains."""
+    if not (len(link_names) == len(lengths) == len(speeds)):
+        raise RuntimeError(
+            f"CASE 8 chain {chain_name} was given unequal link columns."
+        )
+    if len(link_names) == 0:
+        raise RuntimeError(f"CASE 8 chain {chain_name} has no links.")
+
+    node_names = []
+    node_count = len(link_names) + 1
+    for index in range(node_count):
+        node_name = f"{chain_name}_node_{index}"
+        world.addNode(node_name, float(index), float(row_y), signal=[0])
+        node_names.append(node_name)
+
+    for index in range(len(link_names)):
+        if capacity_in is None and link_user_function is None:
+            world.addLink(
+                link_names[index],
+                node_names[index],
+                node_names[index + 1],
+                length=lengths[index],
+                free_flow_speed=speeds[index],
+                number_of_lanes=1,
+            )
+        elif link_user_function is None:
+            world.addLink(
+                link_names[index],
+                node_names[index],
+                node_names[index + 1],
+                length=lengths[index],
+                free_flow_speed=speeds[index],
+                number_of_lanes=1,
+                capacity_in=capacity_in,
+            )
+        else:
+            world.addLink(
+                link_names[index],
+                node_names[index],
+                node_names[index + 1],
+                length=lengths[index],
+                free_flow_speed=speeds[index],
+                number_of_lanes=1,
+                capacity_in=capacity_in,
+                user_function=link_user_function,
+            )
+
+    _add_vehicle_with_route(
+        world,
+        vehicle_name,
+        node_names[0],
+        node_names[-1],
+        departure_timestep,
+        link_names,
+    )
+
+
+def _case8_record_travel_log_without_analyzer(vehicle, enforce_log: int = 0) -> None:
+    """Verification substitute for Vehicle.record_log.
+
+    The normal logger also writes into World.analyzer. CASE 8 worlds are
+    finalized with create_analyzer=False, so this writer keeps the route log
+    and does not touch an Analyzer.
+    """
+    interval = vehicle.W.vehicle_logging_timestep_interval
+    if interval != -1:
+        should_sample = (
+            interval == 1
+            or vehicle.W.T % interval == 0
+            or enforce_log
+        )
+        if should_sample:
+            if vehicle.state != "run":
+                vehicle.log_t.append(vehicle.W.T * vehicle.W.DELTAT)
+                vehicle.log_state.append(vehicle.state)
+                vehicle.log_link.append(-1)
+                vehicle.log_x.append(-1)
+                vehicle.log_s.append(-1)
+                vehicle.log_v.append(-1)
+                vehicle.log_lane.append(-1)
+            else:
+                vehicle.log_t.append(vehicle.W.T * vehicle.W.DELTAT)
+                vehicle.log_state.append(vehicle.state)
+                vehicle.log_link.append(vehicle.link)
+                vehicle.log_x.append(vehicle.x)
+                vehicle.log_v.append(vehicle.v)
+                vehicle.log_lane.append(vehicle.lane)
+                if vehicle.leader is not None and vehicle.link == vehicle.leader.link:
+                    vehicle.log_s.append(vehicle.leader.x - vehicle.x)
+                else:
+                    vehicle.log_s.append(-1)
+
+    if vehicle.link != vehicle.link_old:
+        if vehicle.state == "run":
+            vehicle.log_t_link.append([vehicle.W.T * vehicle.W.DELTAT, vehicle.link])
+        elif vehicle.state == "end":
+            vehicle.log_t_link.append([vehicle.W.T * vehicle.W.DELTAT, "end"])
+        vehicle.link_old = vehicle.link
+
+
+def _case8_attach_log_without_analyzer(world: World) -> None:
+    for vehicle in world.VEHICLES.values():
+        def record_for_this_vehicle(enforce_log=0, bound_vehicle=vehicle):
+            _case8_record_travel_log_without_analyzer(
+                bound_vehicle,
+                enforce_log,
+            )
+
+        vehicle.record_log = record_for_this_vehicle
+
+
+def _case8_all_vehicles_finished(world: World) -> bool:
+    if len(world.VEHICLES) == 0:
+        return False
+    for vehicle in world.VEHICLES.values():
+        if vehicle.state != "end":
+            return False
+    return True
+
+
+def _case8_execute_without_analyzer(world: World) -> None:
+    """Run a CASE 8 world without creating an Analyzer or an output directory.
+
+    UXsim's exec_simulation writes progress and vehicle samples to the
+    Analyzer, and Analyzer creates out{world name}. This loop keeps the same
+    link, node, and vehicle steps and skips those Analyzer calls.
+    """
+    if world.finalized == 0:
+        world.finalize_scenario(create_analyzer=False)
+    if hasattr(world, "analyzer"):
+        raise RuntimeError(
+            "CASE 8 created an Analyzer. "
+            f"world={world.name!r}."
+        )
+    _case8_attach_log_without_analyzer(world)
+
+    for world.T in range(0, world.TSIZE):
+        for link in world.LINKS:
+            link.update()
+        for node in world.NODES:
+            node.generate()
+            node.update()
+        for node in world.NODES:
+            node.transfer()
+        for vehicle in world.VEHICLES_RUNNING.values():
+            vehicle.carfollow()
+        living_names = list(world.VEHICLES_LIVING.keys())
+        for vehicle_name in living_names:
+            world.VEHICLES_LIVING[vehicle_name].update()
+        if world.T % world.DELTAT_ROUTE == 0:
+            world.ROUTECHOICE.route_search_all(noise=world.DUO_NOISE)
+            world.ROUTECHOICE.homogeneous_DUO_update()
+            for vehicle in world.VEHICLES_LIVING.values():
+                vehicle.route_pref_update(weight=world.DUO_UPDATE_WEIGHT)
+        world.TIME = world.T * world.DELTAT
+        if world.user_function is not None:
+            world.user_function(world)
+        if _case8_all_vehicles_finished(world):
+            break
+        if world.T == world.TSIZE - 1:
+            break
+
+
+def _case8_require_finished_world(world: World) -> None:
+    unfinished_names = []
+    for vehicle in world.VEHICLES.values():
+        if vehicle.state != "end":
+            unfinished_names.append(vehicle.name)
+    if unfinished_names:
+        raise RuntimeError(
+            "CASE 8 actual world did not finish every vehicle. "
+            f"world={world.name!r} unfinished={unfinished_names!r} "
+            f"T={world.T} TSIZE={world.TSIZE}."
+        )
+
+
+def _case8_assert_no_output_directory(world_name: str) -> None:
+    output_directory = f"out{world_name}"
+    if os.path.isdir(output_directory):
+        raise RuntimeError(
+            "CASE 8 created an output directory: "
+            f"{output_directory}"
+        )
+
+
+def _case8_validate_real_world(real_world: World) -> None:
+    deltan = real_world.DELTAN
+    if type(deltan) is not int or deltan != 1:
+        raise ValueError(
+            "CASE 8 real World DELTAN must be the int 1. "
+            f"got {deltan!r} type={type(deltan).__name__}."
+        )
+    deltat = real_world.DELTAT
+    if isinstance(deltat, bool) or not isinstance(deltat, (int, float)):
+        raise ValueError(
+            "CASE 8 real World DELTAT is not a number. "
+            f"got {deltat!r}."
+        )
+    if not math.isfinite(float(deltat)) or float(deltat) <= 0.0:
+        raise ValueError(
+            "CASE 8 real World DELTAT must be finite and positive. "
+            f"got {deltat!r}."
+        )
+
+
+def _case8_collect_evaluated_vehicles(
+    real_world: World,
+    evaluated_vehicle_names: Sequence[str] | None,
+) -> list:
+    if evaluated_vehicle_names is None:
+        vehicles = []
+        for vehicle_name in real_world.VEHICLES:
+            vehicles.append(real_world.VEHICLES[vehicle_name])
+    else:
+        vehicles = []
+        for vehicle_name in evaluated_vehicle_names:
+            if vehicle_name not in real_world.VEHICLES:
+                raise ValueError(
+                    "CASE 8 evaluated vehicle does not exist: "
+                    f"{vehicle_name!r}."
+                )
+            vehicles.append(real_world.VEHICLES[vehicle_name])
+    if len(vehicles) == 0:
+        raise ValueError("CASE 8 has no vehicles to evaluate.")
+    for vehicle in vehicles:
+        if vehicle.state != "end":
+            raise ValueError(
+                "CASE 8 vehicle is not finished. "
+                f"vehicle={vehicle.name!r} state={vehicle.state!r}."
+            )
+    return vehicles
+
+
+def _case8_get_actual_route_links(vehicle) -> list:
+    route, _timestamps = vehicle.traveled_route(
+        include_arrival_time=False,
+        include_departure_time=False,
+    )
+    route_links = list(route.links)
+    if len(route_links) == 0:
+        raise ValueError(
+            "CASE 8 actual route is empty. "
+            f"vehicle={vehicle.name!r}."
+        )
+    for index, link in enumerate(route_links):
+        if link is None:
+            raise ValueError(
+                "CASE 8 actual route contains an empty link. "
+                f"vehicle={vehicle.name!r} index={index}."
+            )
+        length = float(link.length)
+        speed_u = float(link.u)
+        if not math.isfinite(length) or length <= 0.0:
+            raise ValueError(
+                "CASE 8 link length is invalid. "
+                f"vehicle={vehicle.name!r} index={index} "
+                f"link={link.name!r} length={link.length!r}."
+            )
+        if not math.isfinite(speed_u) or speed_u <= 0.0:
+            raise ValueError(
+                "CASE 8 link u is invalid. "
+                f"vehicle={vehicle.name!r} index={index} "
+                f"link={link.name!r} u={link.u!r}."
+            )
+    return route_links
+
+
+def _case8_build_physical_route_key(deltat, route_links) -> tuple:
+    """Same tuple as CASE 7. Link order is kept and values are not rounded."""
+    return _build_physical_route_key(deltat, route_links)
+
+
+def _case8_build_route_audit_identity(route_links) -> tuple:
+    """Same name tuple as CASE 7. Built from the same link list as the key."""
+    return _build_route_audit_identity(route_links)
+
+
+def _case8_register_route_audit_identity(
+    state: Case8EvaluationState,
+    physical_key,
+    audit_identity,
+) -> None:
+    identities = state.audit_identities_by_physical_key.get(physical_key)
+    if identities is None:
+        identities = []
+        state.audit_identities_by_physical_key[physical_key] = identities
+    if audit_identity in identities:
+        state.counters.duplicate_audit_identity_observation_count += 1
+        return
+    identities.append(audit_identity)
+    state.counters.unique_audit_identity_count += 1
+
+
+def _case8_compute_reference_tmax(route_links, deltat: float) -> float:
+    """Finish-time budget for the reference run. This is not T_min,z."""
+    analytical_free_flow_time_s = 0.0
+    for link in route_links:
+        analytical_free_flow_time_s += float(link.length) / float(link.u)
+    link_count = len(route_links)
+    return (
+        analytical_free_flow_time_s
+        + (link_count + 2) * float(deltat)
+        + 60.0
+    )
+
+
+def _case8_build_reference_world(route_links, real_deltat: float) -> World:
+    """Standard reference world from the design notes. Verification copy only."""
+    if len(route_links) == 0:
+        raise ValueError("CASE 8 cannot build a reference world from an empty route.")
+    tmax_seconds = _case8_compute_reference_tmax(route_links, real_deltat)
+    world = World(
+        name=CASE8_REFERENCE_WORLD_NAME,
+        deltan=1,
+        reaction_time=real_deltat,
+        tmax=tmax_seconds,
+        random_seed=0,
+        print_mode=0,
+        save_mode=0,
+        show_mode=0,
+        show_progress=0,
+        hard_deterministic_mode=True,
+        vehicle_logging_timestep_interval=1,
+    )
+    if type(world.DELTAN) is not int or world.DELTAN != 1:
+        raise ValueError(
+            "CASE 8 reference World DELTAN must be the int 1. "
+            f"got {world.DELTAN!r} type={type(world.DELTAN).__name__}."
+        )
+    if world.DELTAT != real_deltat:
+        raise ValueError(
+            "CASE 8 reference DELTAT does not match the real World. "
+            f"reference={world.DELTAT!r} real={real_deltat!r}."
+        )
+
+    link_count = len(route_links)
+    for index in range(link_count + 1):
+        world.addNode(
+            f"reference_node_{index}",
+            float(index),
+            0.0,
+            signal=[0],
+        )
+    reference_link_names = []
+    for index, link in enumerate(route_links):
+        reference_link_name = f"reference_link_{index}"
+        world.addLink(
+            reference_link_name,
+            f"reference_node_{index}",
+            f"reference_node_{index + 1}",
+            length=float(link.length),
+            free_flow_speed=float(link.u),
+            number_of_lanes=1,
+            jam_density=CASE8_REFERENCE_JAM_DENSITY,
+            jam_density_per_lane=None,
+            merge_priority=1.0,
+            signal_group=[0],
+            capacity_in=NON_BINDING_CAPACITY,
+            capacity_out=NON_BINDING_CAPACITY,
+        )
+        reference_link_names.append(reference_link_name)
+    _add_vehicle_with_route(
+        world,
+        "case8_reference_vehicle",
+        "reference_node_0",
+        f"reference_node_{link_count}",
+        0,
+        reference_link_names,
+    )
+
+    for node in world.NODES:
+        if node.flow_capacity is not None:
+            raise RuntimeError(
+                "CASE 8 reference node has a flow capacity. "
+                f"node={node.name!r}."
+            )
+        if node.order_control_type != "none" or node.order_control_eligible:
+            raise RuntimeError(
+                "CASE 8 reference node has order control. "
+                f"node={node.name!r}."
+            )
+        if node.user_function is not None:
+            raise RuntimeError(
+                "CASE 8 reference node has a user function. "
+                f"node={node.name!r}."
+            )
+    for link in world.LINKS:
+        if link.user_function is not None:
+            raise RuntimeError(
+                "CASE 8 reference link has a user function. "
+                f"link={link.name!r}."
+            )
+    return world
+
+
+def _case8_run_reference_replay(
+    route_links,
+    real_deltat: float,
+    physical_key,
+) -> Case8ReferenceReplayResult:
+    world = _case8_build_reference_world(route_links, real_deltat)
+    _case8_execute_without_analyzer(world)
+    if hasattr(world, "analyzer"):
+        raise RuntimeError("CASE 8 reference replay created an Analyzer.")
+    if len(world.VEHICLES) != 1:
+        raise RuntimeError(
+            "CASE 8 reference world does not have one vehicle. "
+            f"count={len(world.VEHICLES)}."
+        )
+    vehicle = next(iter(world.VEHICLES.values()))
+    if vehicle.state != "end":
+        raise RuntimeError(
+            "CASE 8 reference vehicle did not finish. "
+            f"state={vehicle.state!r} T={world.T} TSIZE={world.TSIZE}."
+        )
+    travel_time_s = float(vehicle.travel_time)
+    if not math.isfinite(travel_time_s) or travel_time_s < 0.0:
+        raise RuntimeError(
+            "CASE 8 reference travel_time is invalid. "
+            f"travel_time={vehicle.travel_time!r}."
+        )
+    if vehicle.arrival_time is None or vehicle.arrival_time < 0:
+        raise RuntimeError(
+            "CASE 8 reference arrival_time is invalid. "
+            f"arrival_time={vehicle.arrival_time!r}."
+        )
+    route, _timestamps = vehicle.traveled_route(
+        include_arrival_time=False,
+        include_departure_time=False,
+    )
+    if len(route.links) != len(route_links):
+        raise RuntimeError(
+            "CASE 8 reference route link count does not match. "
+            f"reference={len(route.links)} actual={len(route_links)}."
+        )
+    for index, link in enumerate(route.links):
+        expected_length = float(route_links[index].length)
+        expected_u = float(route_links[index].u)
+        if float(link.length) != expected_length or float(link.u) != expected_u:
+            raise RuntimeError(
+                "CASE 8 reference route does not match the actual physical route. "
+                f"index={index} reference_length={link.length!r} "
+                f"actual_length={expected_length!r} "
+                f"reference_u={link.u!r} actual_u={expected_u!r}."
+            )
+    if type(world.DELTAN) is not int or world.DELTAN != 1:
+        raise RuntimeError(
+            "CASE 8 reference DELTAN changed during replay. "
+            f"got {world.DELTAN!r}."
+        )
+    if world.DELTAT != real_deltat:
+        raise RuntimeError(
+            "CASE 8 reference DELTAT changed during replay. "
+            f"reference={world.DELTAT!r} real={real_deltat!r}."
+        )
+
+    analytical_free_flow_time_s = 0.0
+    for link in route_links:
+        analytical_free_flow_time_s += float(link.length) / float(link.u)
+    result = Case8ReferenceReplayResult(
+        physical_route_key=physical_key,
+        minimum_trip_time_s=travel_time_s,
+        analytical_free_flow_time_s=analytical_free_flow_time_s,
+        reference_route_link_count=len(route.links),
+        reference_world_deltat=world.DELTAT,
+        reference_world_deltan=world.DELTAN,
+        reference_vehicle_arrival_time=vehicle.arrival_time,
+        reference_vehicle_travel_time=travel_time_s,
+        validation_passed=True,
+    )
+    # Drop the only local names that point at the reference objects.
+    del vehicle
+    del world
+    del route
+    return result
+
+
+def _case8_get_or_run_reference_replay(
+    state: Case8EvaluationState,
+    route_links,
+    physical_key,
+) -> Case8ReferenceReplayResult:
+    stored = state.reference_results_by_physical_key.get(physical_key)
+    if stored is None:
+        result = _case8_run_reference_replay(
+            route_links,
+            state.real_deltat,
+            physical_key,
+        )
+        if not result.validation_passed:
+            state.counters.validation_failure_count += 1
+            raise RuntimeError(
+                "CASE 8 will not store an unvalidated reference result."
+            )
+        state.reference_results_by_physical_key[physical_key] = result
+        state.counters.reference_replay_run_count += 1
+        state.counters.unique_physical_route_count += 1
+        return result
+
+    if not stored.validation_passed:
+        state.counters.validation_failure_count += 1
+        raise RuntimeError(
+            "CASE 8 stored reference result is not validated."
+        )
+    if stored.physical_route_key != physical_key:
+        state.counters.validation_failure_count += 1
+        raise RuntimeError(
+            "CASE 8 stored reference result is under a different physical key."
+        )
+    if stored.minimum_trip_time_s != stored.reference_vehicle_travel_time:
+        state.counters.validation_failure_count += 1
+        raise RuntimeError(
+            "CASE 8 stored minimum trip time does not match the stored travel time."
+        )
+    state.counters.reference_reuse_count += 1
+    return stored
+
+
+def _case8_read_true_vot(vehicle_name: str, true_vot_by_vehicle_name: dict):
+    if vehicle_name not in true_vot_by_vehicle_name:
+        raise ValueError(
+            "CASE 8 true_vot is missing. "
+            f"vehicle={vehicle_name!r}."
+        )
+    true_vot = true_vot_by_vehicle_name[vehicle_name]
+    if isinstance(true_vot, bool) or not isinstance(true_vot, (int, float)):
+        raise ValueError(
+            "CASE 8 true_vot is invalid. "
+            f"vehicle={vehicle_name!r} true_vot={true_vot!r}."
+        )
+    if not math.isfinite(float(true_vot)):
+        raise ValueError(
+            "CASE 8 true_vot is invalid. "
+            f"vehicle={vehicle_name!r} true_vot={true_vot!r}."
+        )
+    return float(true_vot)
+
+
+def _case8_read_participation(vehicle_name: str, participation_by_vehicle_name: dict) -> str:
+    if vehicle_name not in participation_by_vehicle_name:
+        return "unspecified"
+    category = participation_by_vehicle_name[vehicle_name]
+    if category not in CASE8_PARTICIPATION_CATEGORIES:
+        raise ValueError(
+            "CASE 8 participation category is invalid. "
+            f"vehicle={vehicle_name!r} category={category!r}."
+        )
+    return category
+
+
+def _case8_build_vehicle_record(
+    state: Case8EvaluationState,
+    vehicle,
+    physical_key,
+    audit_identity,
+    reference_result: Case8ReferenceReplayResult,
+    true_vot_by_vehicle_name: dict,
+    participation_by_vehicle_name: dict,
+) -> Case8VehicleRecord:
+    actual_travel_time_s = float(vehicle.travel_time)
+    if not math.isfinite(actual_travel_time_s):
+        raise ValueError(
+            "CASE 8 actual travel_time is invalid. "
+            f"vehicle={vehicle.name!r} travel_time={vehicle.travel_time!r}."
+        )
+    # method_name is stored for the audit. It is not used in this subtraction.
+    cumulative_waiting_time_s = (
+        actual_travel_time_s - reference_result.minimum_trip_time_s
+    )
+    if cumulative_waiting_time_s < -TIME_ABS_TOL:
+        state.counters.negative_cumulative_waiting_time_count += 1
+        raise RuntimeError(
+            "CASE 8 CW_z is clearly negative and was not changed to 0. "
+            f"vehicle={vehicle.name!r} CW_z={cumulative_waiting_time_s!r}."
+        )
+    true_vot = _case8_read_true_vot(vehicle.name, true_vot_by_vehicle_name)
+    weighted = true_vot * cumulative_waiting_time_s
+    participation_category = _case8_read_participation(
+        vehicle.name,
+        participation_by_vehicle_name,
+    )
+    return Case8VehicleRecord(
+        vehicle_name=vehicle.name,
+        method_name=state.method_name,
+        physical_route_key=physical_key,
+        route_audit_identity=audit_identity,
+        actual_travel_time_s=actual_travel_time_s,
+        minimum_trip_time_s=reference_result.minimum_trip_time_s,
+        cumulative_waiting_time_s=cumulative_waiting_time_s,
+        true_vot=true_vot,
+        weighted_cumulative_waiting_time=weighted,
+        participation_category=participation_category,
+    )
+
+
+def _case8_build_summary(state: Case8EvaluationState) -> tuple[float, float]:
+    vehicle_count = len(state.vehicle_records)
+    if vehicle_count == 0:
+        raise RuntimeError("CASE 8 cannot summarize an empty vehicle list.")
+    total_cw = 0.0
+    total_weighted = 0.0
+    for record in state.vehicle_records:
+        total_cw += record.cumulative_waiting_time_s
+        total_weighted += record.weighted_cumulative_waiting_time
+    average_cw = total_cw / vehicle_count
+    average_weighted = total_weighted / vehicle_count
+    return average_cw, average_weighted
+
+
+def _case8_check_result_consistency(state: Case8EvaluationState) -> None:
+    counters = state.counters
+    if counters.validation_failure_count != 0:
+        raise RuntimeError(
+            "CASE 8 will not return an official summary. "
+            f"validation_failure_count={counters.validation_failure_count}."
+        )
+    if counters.reference_replay_run_count != counters.unique_physical_route_count:
+        raise RuntimeError(
+            "CASE 8 replay count does not match the number of physical keys. "
+            f"replay={counters.reference_replay_run_count} "
+            f"keys={counters.unique_physical_route_count}."
+        )
+    if counters.evaluated_vehicle_count != (
+        counters.reference_replay_run_count + counters.reference_reuse_count
+    ):
+        raise RuntimeError(
+            "CASE 8 vehicle count does not match replay plus reuse. "
+            f"vehicles={counters.evaluated_vehicle_count} "
+            f"replay={counters.reference_replay_run_count} "
+            f"reuse={counters.reference_reuse_count}."
+        )
+    if len(state.vehicle_records) != counters.evaluated_vehicle_count:
+        raise RuntimeError(
+            "CASE 8 record count does not match the evaluated vehicle count. "
+            f"records={len(state.vehicle_records)} "
+            f"vehicles={counters.evaluated_vehicle_count}."
+        )
+    if len(state.reference_results_by_physical_key) != counters.unique_physical_route_count:
+        raise RuntimeError(
+            "CASE 8 stored reference count does not match the key count."
+        )
+    for physical_key, reference_result in state.reference_results_by_physical_key.items():
+        if not reference_result.validation_passed:
+            raise RuntimeError(
+                "CASE 8 stored reference result did not pass validation."
+            )
+        if reference_result.physical_route_key != physical_key:
+            raise RuntimeError(
+                "CASE 8 stored reference result key does not match its dict key."
+            )
+    for record in state.vehicle_records:
+        reference_result = state.reference_results_by_physical_key.get(
+            record.physical_route_key
+        )
+        if reference_result is None:
+            raise RuntimeError(
+                "CASE 8 vehicle has no reference result. "
+                f"vehicle={record.vehicle_name!r}."
+            )
+        if record.minimum_trip_time_s != reference_result.minimum_trip_time_s:
+            raise RuntimeError(
+                "CASE 8 vehicle T_min,z does not match the stored reference. "
+                f"vehicle={record.vehicle_name!r}."
+            )
+        identities = state.audit_identities_by_physical_key.get(
+            record.physical_route_key
+        )
+        if identities is None or record.route_audit_identity not in identities:
+            raise RuntimeError(
+                "CASE 8 audit identity is not registered for its physical key. "
+                f"vehicle={record.vehicle_name!r}."
+            )
+
+
+def _case8_value_holds_simulation_object(value, seen_ids: set) -> bool:
+    if id(value) in seen_ids:
+        return False
+    seen_ids.add(id(value))
+    if isinstance(value, (World, UxsimVehicle, UxsimNode, UxsimLink, UxsimAnalyzer)):
+        return True
+    if isinstance(value, (str, bytes, int, float, bool, type(None))):
+        return False
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if _case8_value_holds_simulation_object(key, seen_ids):
+                return True
+            if _case8_value_holds_simulation_object(item, seen_ids):
+                return True
+        return False
+    if isinstance(value, (list, tuple)):
+        for item in value:
+            if _case8_value_holds_simulation_object(item, seen_ids):
+                return True
+        return False
+    if hasattr(value, "__dataclass_fields__"):
+        for field_name in value.__dataclass_fields__:
+            item = getattr(value, field_name)
+            if _case8_value_holds_simulation_object(item, seen_ids):
+                return True
+        return False
+    return False
+
+
+def _case8_new_state(real_world: World, method_name: str) -> Case8EvaluationState:
+    return Case8EvaluationState(
+        real_deltat=real_world.DELTAT,
+        method_name=method_name,
+        reference_results_by_physical_key={},
+        audit_identities_by_physical_key={},
+        counters=Case8EvaluationCounters(),
+        vehicle_records=[],
+    )
+
+
+def _case8_evaluate_vehicle_list(
+    real_world: World,
+    vehicles: Sequence,
+    method_name: str,
+    true_vot_by_vehicle_name: dict,
+    participation_by_vehicle_name: dict,
+) -> Case8EvaluationResult:
+    """One evaluation. The state exists only inside this call."""
+    _case8_validate_real_world(real_world)
+    if len(vehicles) == 0:
+        raise ValueError("CASE 8 has no vehicles to evaluate.")
+    for vehicle in vehicles:
+        if vehicle.state != "end":
+            raise ValueError(
+                "CASE 8 vehicle is not finished. "
+                f"vehicle={vehicle.name!r} state={vehicle.state!r}."
+            )
+
+    state = _case8_new_state(real_world, method_name)
+    for vehicle in vehicles:
+        if float(vehicle.W.DELTAT) != float(state.real_deltat):
+            raise ValueError(
+                "CASE 8 cannot mix different DELTAT values in one evaluation. "
+                f"vehicle={vehicle.name!r} "
+                f"vehicle_DELTAT={vehicle.W.DELTAT!r} "
+                f"evaluation_DELTAT={state.real_deltat!r}."
+            )
+        if type(vehicle.W.DELTAN) is not int or vehicle.W.DELTAN != 1:
+            raise ValueError(
+                "CASE 8 vehicle world DELTAN must be the int 1. "
+                f"vehicle={vehicle.name!r} DELTAN={vehicle.W.DELTAN!r}."
+            )
+        route_links = _case8_get_actual_route_links(vehicle)
+        physical_key = _case8_build_physical_route_key(
+            state.real_deltat,
+            route_links,
+        )
+        audit_identity = _case8_build_route_audit_identity(route_links)
+        _case8_register_route_audit_identity(state, physical_key, audit_identity)
+        reference_result = _case8_get_or_run_reference_replay(
+            state,
+            route_links,
+            physical_key,
+        )
+        record = _case8_build_vehicle_record(
+            state,
+            vehicle,
+            physical_key,
+            audit_identity,
+            reference_result,
+            true_vot_by_vehicle_name,
+            participation_by_vehicle_name,
+        )
+        state.vehicle_records.append(record)
+        state.counters.evaluated_vehicle_count += 1
+
+    _case8_check_result_consistency(state)
+    average_cw, average_weighted = _case8_build_summary(state)
+    result = Case8EvaluationResult(
+        method_name=method_name,
+        vehicle_records=state.vehicle_records,
+        reference_results_by_physical_key=state.reference_results_by_physical_key,
+        audit_identities_by_physical_key=state.audit_identities_by_physical_key,
+        counters=state.counters,
+        average_cumulative_waiting_time_s=average_cw,
+        average_weighted_cumulative_waiting_time=average_weighted,
+    )
+    if _case8_value_holds_simulation_object(result, set()):
+        raise RuntimeError(
+            "CASE 8 result still holds a World, Vehicle, Node, Link, or Analyzer."
+        )
+    return result
+
+
+def _case8_evaluate_world(
+    real_world: World,
+    method_name: str,
+    true_vot_by_vehicle_name: dict,
+    participation_by_vehicle_name: dict,
+    evaluated_vehicle_names: Sequence[str] | None = None,
+) -> Case8EvaluationResult:
+    _case8_validate_real_world(real_world)
+    vehicles = _case8_collect_evaluated_vehicles(
+        real_world,
+        evaluated_vehicle_names,
+    )
+    return _case8_evaluate_vehicle_list(
+        real_world,
+        vehicles,
+        method_name,
+        true_vot_by_vehicle_name,
+        participation_by_vehicle_name,
+    )
+
+
+def _case8_vot_map(vehicle_names: Sequence[str]) -> dict:
+    vot_by_name = {}
+    for vehicle_name in vehicle_names:
+        vot_by_name[vehicle_name] = CASE8_VERIFICATION_TRUE_VOT
+    return vot_by_name
+
+
+def _case8_print_counts(label: str, result: Case8EvaluationResult) -> None:
+    counters = result.counters
+    cw_values = []
+    for record in result.vehicle_records:
+        cw_values.append(record.cumulative_waiting_time_s)
+    print(
+        f"  {label}: vehicles={counters.evaluated_vehicle_count} "
+        f"keys={counters.unique_physical_route_count} "
+        f"replay={counters.reference_replay_run_count} "
+        f"reuse={counters.reference_reuse_count} "
+        f"audit={counters.unique_audit_identity_count} "
+        f"CW_z={cw_values}"
+    )
+
+
+def _case8_print_success(
+    case_name: str,
+    comparison: str,
+    result: Case8EvaluationResult,
+    conclusion: str,
+    print_header: bool = True,
+) -> None:
+    counters = result.counters
+    cw_values = []
+    for record in result.vehicle_records:
+        cw_values.append(record.cumulative_waiting_time_s)
+    if print_header:
+        _print_case_header(case_name)
+    print(f"Comparison: {comparison}")
+    print(f"  method_name: {result.method_name}")
+    print(f"  evaluated vehicles: {counters.evaluated_vehicle_count}")
+    print(f"  unique physical routes: {counters.unique_physical_route_count}")
+    print(f"  reference replay runs: {counters.reference_replay_run_count}")
+    print(f"  reference reuse: {counters.reference_reuse_count}")
+    print(f"  audit identities: {counters.unique_audit_identity_count}")
+    print(
+        "  duplicate audit observations: "
+        f"{counters.duplicate_audit_identity_observation_count}"
+    )
+    print(f"  CW_z: {cw_values}")
+    print(f"Limited conclusion: {conclusion}")
+    print(f"PASS {case_name}")
+
+
+def _case8_assert_same_measured_times(
+    case_name: str,
+    left: Case8EvaluationResult,
+    right: Case8EvaluationResult,
+) -> None:
+    if len(left.vehicle_records) != len(right.vehicle_records):
+        raise RuntimeError(
+            f"{case_name}: method results have different vehicle counts."
+        )
+    for index, left_record in enumerate(left.vehicle_records):
+        right_record = right.vehicle_records[index]
+        if left_record.vehicle_name != right_record.vehicle_name:
+            raise RuntimeError(
+                f"{case_name}: method results are not in the same vehicle order."
+            )
+        if left_record.minimum_trip_time_s != right_record.minimum_trip_time_s:
+            raise RuntimeError(
+                f"{case_name}: T_min,z changed with method_name. "
+                f"vehicle={left_record.vehicle_name!r}."
+            )
+        if left_record.cumulative_waiting_time_s != right_record.cumulative_waiting_time_s:
+            raise RuntimeError(
+                f"{case_name}: CW_z changed with method_name. "
+                f"vehicle={left_record.vehicle_name!r}."
+            )
+        if (
+            left_record.weighted_cumulative_waiting_time
+            != right_record.weighted_cumulative_waiting_time
+        ):
+            raise RuntimeError(
+                f"{case_name}: weighted CW changed with method_name. "
+                f"vehicle={left_record.vehicle_name!r}."
+            )
+
+
+def _case8_run_actual(world: World) -> World:
+    _case8_execute_without_analyzer(world)
+    _case8_require_finished_world(world)
+    _case8_assert_no_output_directory(world.name)
+    _case8_assert_no_output_directory(CASE8_REFERENCE_WORLD_NAME)
+    return world
+
+
+def _validate_case8a() -> None:
+    case_name = "CASE 8A: same physical route is shared"
+    _print_case_header(case_name)
+    world = _case8_make_quiet_world("8a")
+    lengths = (200.0, 200.0, 200.0)
+    speeds = (
+        SPEED_60KPH_M_PER_S,
+        SPEED_60KPH_M_PER_S,
+        SPEED_60KPH_M_PER_S,
+    )
+    link_names = ("l1", "l2", "l3")
+    _case8_add_route_chain(
+        world,
+        "chain8a",
+        link_names,
+        lengths,
+        speeds,
+        "veh_8a_first",
+        row_y=0.0,
+        departure_timestep=0,
+    )
+    _add_vehicle_with_route(
+        world,
+        "veh_8a_second",
+        "chain8a_node_0",
+        "chain8a_node_3",
+        100,
+        link_names,
+    )
+    _case8_run_actual(world)
+    vehicle_names = ["veh_8a_first", "veh_8a_second"]
+    vot_by_name = _case8_vot_map(vehicle_names)
+    participation_by_name = {
+        "veh_8a_first": "participating",
+        "veh_8a_second": "nonparticipating",
+    }
+    results = []
+    for method_name in CASE8_METHOD_NAMES:
+        result = _case8_evaluate_world(
+            world,
+            method_name,
+            vot_by_name,
+            participation_by_name,
+        )
+        counters = result.counters
+        if counters.unique_physical_route_count != 1:
+            raise RuntimeError(f"{case_name}: expected one physical key.")
+        if counters.reference_replay_run_count != 1:
+            raise RuntimeError(f"{case_name}: expected one reference replay.")
+        if counters.reference_reuse_count != 1:
+            raise RuntimeError(f"{case_name}: expected one reuse.")
+        if counters.evaluated_vehicle_count != 2:
+            raise RuntimeError(f"{case_name}: expected two vehicles.")
+        if len(result.vehicle_records) != 2:
+            raise RuntimeError(f"{case_name}: expected two records.")
+        if counters.unique_audit_identity_count != 1:
+            raise RuntimeError(f"{case_name}: expected one audit identity.")
+        first = result.vehicle_records[0]
+        second = result.vehicle_records[1]
+        if first.minimum_trip_time_s != second.minimum_trip_time_s:
+            raise RuntimeError(f"{case_name}: the two vehicles do not share T_min,z.")
+        if first.physical_route_key != second.physical_route_key:
+            raise RuntimeError(f"{case_name}: physical keys differ.")
+        if first.route_audit_identity != ("l1", "l2", "l3"):
+            raise RuntimeError(f"{case_name}: audit identity changed.")
+        results.append(result)
+        _case8_print_counts(method_name, result)
+    for result in results[1:]:
+        _case8_assert_same_measured_times(case_name, results[0], result)
+    _case8_print_success(
+        case_name,
+        "two finished vehicles, same links, four method names",
+        results[0],
+        "One evaluation replays once. method_name does not change T_min,z or CW_z. "
+        "No method-specific field is read.",
+        print_header=False,
+    )
+
+
+def _validate_case8b() -> None:
+    case_name = "CASE 8B: same physics, different link names"
+    world_left = _case8_make_quiet_world("8b_left")
+    lengths = (200.0, 200.0, 200.0)
+    speeds = (
+        SPEED_60KPH_M_PER_S,
+        SPEED_60KPH_M_PER_S,
+        SPEED_60KPH_M_PER_S,
+    )
+    left_names = ("l1", "l2", "l3")
+    _case8_add_route_chain(
+        world_left,
+        "chain8b_left",
+        left_names,
+        lengths,
+        speeds,
+        "veh_8b_left_first",
+        row_y=0.0,
+    )
+    _add_vehicle_with_route(
+        world_left,
+        "veh_8b_left_second",
+        "chain8b_left_node_0",
+        "chain8b_left_node_3",
+        100,
+        left_names,
+    )
+    _case8_run_actual(world_left)
+
+    world_right = _case8_make_quiet_world("8b_right")
+    right_names = ("link_alpha", "link_beta", "link_gamma")
+    _case8_add_route_chain(
+        world_right,
+        "chain8b_right",
+        right_names,
+        lengths,
+        speeds,
+        "veh_8b_right",
+        row_y=1.0,
+    )
+    _case8_run_actual(world_right)
+    _case8_validate_real_world(world_left)
+    _case8_validate_real_world(world_right)
+    if world_left.DELTAT != world_right.DELTAT:
+        raise RuntimeError(f"{case_name}: the two worlds do not share DELTAT.")
+
+    vehicles = [
+        world_left.VEHICLES["veh_8b_left_first"],
+        world_right.VEHICLES["veh_8b_right"],
+        world_left.VEHICLES["veh_8b_left_second"],
+    ]
+    vehicle_names = ["veh_8b_left_first", "veh_8b_right", "veh_8b_left_second"]
+    result = _case8_evaluate_vehicle_list(
+        world_left,
+        vehicles,
+        "signalized_uxsim",
+        _case8_vot_map(vehicle_names),
+        {},
+    )
+    counters = result.counters
+    identities = result.audit_identities_by_physical_key[
+        result.vehicle_records[0].physical_route_key
+    ]
+    if counters.unique_physical_route_count != 1 or counters.reference_replay_run_count != 1:
+        raise RuntimeError(f"{case_name}: link names caused another replay.")
+    if counters.reference_reuse_count != 2:
+        raise RuntimeError(f"{case_name}: expected two reuses.")
+    if counters.unique_audit_identity_count != 2:
+        raise RuntimeError(f"{case_name}: expected two audit identities.")
+    if counters.duplicate_audit_identity_observation_count != 1:
+        raise RuntimeError(f"{case_name}: the repeated name tuple was stored again.")
+    if identities != [("l1", "l2", "l3"), ("link_alpha", "link_beta", "link_gamma")]:
+        raise RuntimeError(
+            f"{case_name}: audit identity order was not the first-seen order. "
+            f"got {identities!r}."
+        )
+    if result.vehicle_records[0].participation_category != "unspecified":
+        raise RuntimeError(
+            f"{case_name}: a missing participation mapping was not unspecified."
+        )
+    _case8_print_success(
+        case_name,
+        "l1/l2/l3 and link_alpha/link_beta/link_gamma with the same length and u",
+        result,
+        "One physical key, one replay, two audit identities, no duplicate tuple.",
+    )
+
+
+def _case8_assert_separated_keys(case_name: str, result: Case8EvaluationResult, expected_key_count: int) -> None:
+    counters = result.counters
+    if counters.unique_physical_route_count != expected_key_count:
+        raise RuntimeError(
+            f"{case_name}: expected {expected_key_count} physical keys."
+        )
+    if counters.reference_replay_run_count != expected_key_count:
+        raise RuntimeError(
+            f"{case_name}: replay count does not match the separated keys."
+        )
+    if counters.reference_reuse_count != 0:
+        raise RuntimeError(f"{case_name}: different physical keys were reused.")
+    keys = []
+    for record in result.vehicle_records:
+        if record.physical_route_key not in keys:
+            keys.append(record.physical_route_key)
+    if len(keys) != expected_key_count:
+        raise RuntimeError(f"{case_name}: vehicle keys were not separated.")
+
+
+def _validate_case8c() -> None:
+    case_name = "CASE 8C: different physical routes stay separate"
+    _print_case_header(case_name)
+
+    order_world = _case8_make_quiet_world("8c_order")
+    _case8_add_route_chain(
+        order_world,
+        "chain8c_order_left",
+        ("order_l1", "order_l2"),
+        (120.0, 200.0),
+        (10.0, 20.0),
+        "veh_8c_order_left",
+        row_y=0.0,
+    )
+    _case8_add_route_chain(
+        order_world,
+        "chain8c_order_right",
+        ("order_r1", "order_r2"),
+        (200.0, 120.0),
+        (20.0, 10.0),
+        "veh_8c_order_right",
+        row_y=1.0,
+    )
+    _case8_run_actual(order_world)
+    order_result = _case8_evaluate_world(
+        order_world,
+        "fcfs",
+        _case8_vot_map(["veh_8c_order_left", "veh_8c_order_right"]),
+        {},
+    )
+    _case8_assert_separated_keys("CASE 8C link order", order_result, 2)
+    _case8_print_counts("link order", order_result)
+
+    length_world = _case8_make_quiet_world("8c_length")
+    _case8_add_route_chain(
+        length_world,
+        "chain8c_length_left",
+        ("length_left",),
+        (200.0,),
+        (10.0,),
+        "veh_8c_length_left",
+        row_y=0.0,
+    )
+    _case8_add_route_chain(
+        length_world,
+        "chain8c_length_right",
+        ("length_right",),
+        (250.0,),
+        (10.0,),
+        "veh_8c_length_right",
+        row_y=1.0,
+    )
+    _case8_run_actual(length_world)
+    length_result = _case8_evaluate_world(
+        length_world,
+        "batch",
+        _case8_vot_map(["veh_8c_length_left", "veh_8c_length_right"]),
+        {},
+    )
+    _case8_assert_separated_keys("CASE 8C length", length_result, 2)
+    _case8_print_counts("length", length_result)
+
+    speed_world = _case8_make_quiet_world("8c_u")
+    _case8_add_route_chain(
+        speed_world,
+        "chain8c_u_left",
+        ("u_left",),
+        (200.0,),
+        (10.0,),
+        "veh_8c_u_left",
+        row_y=0.0,
+    )
+    _case8_add_route_chain(
+        speed_world,
+        "chain8c_u_right",
+        ("u_right",),
+        (200.0,),
+        (20.0,),
+        "veh_8c_u_right",
+        row_y=1.0,
+    )
+    _case8_run_actual(speed_world)
+    speed_result = _case8_evaluate_world(
+        speed_world,
+        "tvt_mp",
+        _case8_vot_map(["veh_8c_u_left", "veh_8c_u_right"]),
+        {},
+    )
+    _case8_assert_separated_keys("CASE 8C u", speed_result, 2)
+    _case8_print_counts("u", speed_result)
+
+    deltat_left = _case8_make_quiet_world("8c_deltat_1", reaction_time=1.0)
+    _case8_add_route_chain(
+        deltat_left,
+        "chain8c_deltat_1",
+        ("deltat_link",),
+        (200.0,),
+        (SPEED_60KPH_M_PER_S,),
+        "veh_8c_deltat_1",
+        row_y=0.0,
+    )
+    _case8_run_actual(deltat_left)
+    deltat_right = _case8_make_quiet_world("8c_deltat_0_5", reaction_time=0.5)
+    _case8_add_route_chain(
+        deltat_right,
+        "chain8c_deltat_0_5",
+        ("deltat_link",),
+        (200.0,),
+        (SPEED_60KPH_M_PER_S,),
+        "veh_8c_deltat_0_5",
+        row_y=0.0,
+    )
+    _case8_run_actual(deltat_right)
+    deltat_left_result = _case8_evaluate_world(
+        deltat_left,
+        "signalized_uxsim",
+        _case8_vot_map(["veh_8c_deltat_1"]),
+        {},
+    )
+    deltat_right_result = _case8_evaluate_world(
+        deltat_right,
+        "signalized_uxsim",
+        _case8_vot_map(["veh_8c_deltat_0_5"]),
+        {},
+    )
+    _case8_assert_separated_keys("CASE 8C DELTAT left", deltat_left_result, 1)
+    _case8_assert_separated_keys("CASE 8C DELTAT right", deltat_right_result, 1)
+    left_key = deltat_left_result.vehicle_records[0].physical_route_key
+    right_key = deltat_right_result.vehicle_records[0].physical_route_key
+    if left_key == right_key:
+        raise RuntimeError(f"{case_name}: different DELTAT values shared one key.")
+    _case8_print_counts("DELTAT 1 s", deltat_left_result)
+    _case8_print_counts("DELTAT 0.5 s", deltat_right_result)
+    print("  DELTAT values were evaluated as separate worlds.")
+    print(
+        "Limited conclusion: link order, length, u, and DELTAT each keep a separate replay."
+    )
+    print(f"PASS {case_name}")
+
+
+def _validate_case8d() -> None:
+    case_name = "CASE 8D: origin wait changes only CW_z"
+    world = _case8_make_quiet_world("8d")
+    _case8_add_route_chain(
+        world,
+        "chain8d_free",
+        ("free_l1",),
+        (200.0,),
+        (SPEED_60KPH_M_PER_S,),
+        "veh_8d_free",
+        row_y=0.0,
+    )
+    _case8_add_route_chain(
+        world,
+        "chain8d_wait",
+        ("wait_l1",),
+        (200.0,),
+        (SPEED_60KPH_M_PER_S,),
+        "veh_8d_wait",
+        row_y=1.0,
+        capacity_in=0.0,
+        link_user_function=_case5_release_first_link_inflow,
+    )
+    _case8_run_actual(world)
+    vehicle_names = ["veh_8d_free", "veh_8d_wait"]
+    vot_by_name = _case8_vot_map(vehicle_names)
+    participation_by_name = {
+        "veh_8d_free": "participating",
+        "veh_8d_wait": "nonparticipating",
+    }
+    results = []
+    for method_name in CASE8_METHOD_NAMES:
+        result = _case8_evaluate_world(
+            world,
+            method_name,
+            vot_by_name,
+            participation_by_name,
+        )
+        results.append(result)
+    for result in results[1:]:
+        _case8_assert_same_measured_times(case_name, results[0], result)
+    result = results[0]
+    free_record = result.vehicle_records[0]
+    wait_record = result.vehicle_records[1]
+    if free_record.physical_route_key != wait_record.physical_route_key:
+        raise RuntimeError(f"{case_name}: the two vehicles do not share a physical key.")
+    if free_record.minimum_trip_time_s != wait_record.minimum_trip_time_s:
+        raise RuntimeError(f"{case_name}: T_min,z was not shared.")
+    if result.counters.reference_replay_run_count != 1:
+        raise RuntimeError(f"{case_name}: the reference replay was not shared.")
+    if result.counters.reference_reuse_count != 1:
+        raise RuntimeError(f"{case_name}: expected the second vehicle to reuse T_min,z.")
+    if not math.isclose(free_record.cumulative_waiting_time_s, 0.0, abs_tol=TIME_ABS_TOL):
+        raise RuntimeError(
+            f"{case_name}: the vehicle without the hold has CW_z="
+            f"{free_record.cumulative_waiting_time_s!r}."
+        )
+    if not math.isclose(
+        wait_record.cumulative_waiting_time_s,
+        CASE5_EXPECTED_ADDITIONAL_ORIGIN_WAIT_S,
+        abs_tol=TIME_ABS_TOL,
+    ):
+        raise RuntimeError(
+            f"{case_name}: origin wait CW_z="
+            f"{wait_record.cumulative_waiting_time_s!r}, "
+            f"expected {CASE5_EXPECTED_ADDITIONAL_ORIGIN_WAIT_S}."
+        )
+    expected_weighted = (
+        CASE8_VERIFICATION_TRUE_VOT * CASE5_EXPECTED_ADDITIONAL_ORIGIN_WAIT_S
+    )
+    if not math.isclose(
+        wait_record.weighted_cumulative_waiting_time,
+        expected_weighted,
+        abs_tol=TIME_ABS_TOL,
+    ):
+        raise RuntimeError(
+            f"{case_name}: weighted CW did not use the verification coefficient."
+        )
+    if wait_record.participation_category != "nonparticipating":
+        raise RuntimeError(
+            f"{case_name}: nonparticipating did not keep the same true_vot product."
+        )
+    _case8_print_success(
+        case_name,
+        "same 200 m route, one vehicle held by the CASE 5 origin release",
+        result,
+        "Shared T_min,z. Only the held vehicle gains the CASE 5 extra 4 s.",
+    )
+
+
+def _case8_expect_stop(item_name: str, expected_type: type, action) -> None:
+    try:
+        action()
+    except expected_type as error:
+        print(f"CASE 8E: {item_name}")
+        print(f"  expected exception: {expected_type.__name__}")
+        print(f"  stopped: {error}")
+        print(f"PASS CASE 8E: {item_name}")
+        return
+    except Exception as error:
+        raise RuntimeError(
+            f"CASE 8E {item_name} stopped with {type(error).__name__}, "
+            f"expected {expected_type.__name__}."
+        ) from error
+    raise RuntimeError(
+        f"CASE 8E {item_name} returned an official result instead of stopping."
+    )
+
+
+def _case8_finished_single_link_world(label: str, vehicle_name: str) -> World:
+    world = _case8_make_quiet_world(label)
+    _case8_add_route_chain(
+        world,
+        f"chain_{label}",
+        ("l1",),
+        (200.0,),
+        (SPEED_60KPH_M_PER_S,),
+        vehicle_name,
+        row_y=0.0,
+    )
+    return _case8_run_actual(world)
+
+
+def _validate_case8e() -> None:
+    case_name = "CASE 8E: bad input does not return an official result"
+    _print_case_header(case_name)
+
+    def stop_bad_deltan():
+        world = _case8_make_quiet_world("8e_deltan", deltan=2)
+        _case8_evaluate_world(world, "signalized_uxsim", {}, {})
+
+    _case8_expect_stop("DELTAN is not int 1", ValueError, stop_bad_deltan)
+
+    def stop_empty_route():
+        world = _case8_finished_single_link_world("8e_empty", "veh_8e_empty")
+
+        def empty_route(include_arrival_time=False, include_departure_time=False):
+            del include_arrival_time, include_departure_time
+
+            class EmptyRoute:
+                links = []
+
+            return EmptyRoute(), []
+
+        world.VEHICLES["veh_8e_empty"].traveled_route = empty_route
+        _case8_evaluate_world(
+            world,
+            "fcfs",
+            _case8_vot_map(["veh_8e_empty"]),
+            {},
+        )
+
+    _case8_expect_stop("actual route is empty", ValueError, stop_empty_route)
+
+    def stop_unfinished():
+        world = _case8_make_quiet_world("8e_unfinished")
+        _case8_add_route_chain(
+            world,
+            "chain8e_unfinished",
+            ("l1",),
+            (200.0,),
+            (SPEED_60KPH_M_PER_S,),
+            "veh_8e_unfinished",
+            row_y=0.0,
+        )
+        _case8_evaluate_world(
+            world,
+            "batch",
+            _case8_vot_map(["veh_8e_unfinished"]),
+            {},
+        )
+
+    _case8_expect_stop("vehicle is not finished", ValueError, stop_unfinished)
+
+    def stop_bad_length():
+        world = _case8_finished_single_link_world("8e_length", "veh_8e_length")
+        route_links = _case8_get_actual_route_links(world.VEHICLES["veh_8e_length"])
+        route_links[0].length = 0.0
+        _case8_evaluate_world(
+            world,
+            "tvt_mp",
+            _case8_vot_map(["veh_8e_length"]),
+            {},
+        )
+
+    _case8_expect_stop("link length is 0", ValueError, stop_bad_length)
+
+    def stop_bad_u():
+        world = _case8_finished_single_link_world("8e_u", "veh_8e_u")
+        route_links = _case8_get_actual_route_links(world.VEHICLES["veh_8e_u"])
+        route_links[0].u = float("nan")
+        _case8_evaluate_world(
+            world,
+            "signalized_uxsim",
+            _case8_vot_map(["veh_8e_u"]),
+            {},
+        )
+
+    _case8_expect_stop("link u is NaN", ValueError, stop_bad_u)
+
+    def stop_missing_vot():
+        world = _case8_finished_single_link_world("8e_vot_missing", "veh_8e_vot")
+        _case8_evaluate_world(world, "fcfs", {}, {})
+
+    _case8_expect_stop("true_vot is missing", ValueError, stop_missing_vot)
+
+    def stop_invalid_vot():
+        world = _case8_finished_single_link_world("8e_vot_invalid", "veh_8e_vot_bad")
+        _case8_evaluate_world(
+            world,
+            "batch",
+            {"veh_8e_vot_bad": float("nan")},
+            {},
+        )
+
+    _case8_expect_stop("true_vot is NaN", ValueError, stop_invalid_vot)
+
+    def stop_missing_vehicle():
+        world = _case8_make_quiet_world("8e_missing_name")
+        _case8_add_route_chain(
+            world,
+            "chain8e_missing",
+            ("l1",),
+            (200.0,),
+            (SPEED_60KPH_M_PER_S,),
+            "veh_8e_present",
+            row_y=0.0,
+        )
+        _case8_evaluate_world(
+            world,
+            "tvt_mp",
+            {},
+            {},
+            evaluated_vehicle_names=["veh_does_not_exist"],
+        )
+
+    _case8_expect_stop(
+        "evaluated vehicle name does not exist",
+        ValueError,
+        stop_missing_vehicle,
+    )
+    print(
+        "Limited conclusion: each bad input stopped with no official ACWT or ACWWT."
+    )
+    print(f"PASS {case_name}")
+
+
+def _validate_case8f() -> None:
+    case_name = "CASE 8F: evaluations do not keep the previous result"
+    world = _case8_make_quiet_world("8f")
+    _case8_add_route_chain(
+        world,
+        "chain8f",
+        ("l1",),
+        (200.0,),
+        (SPEED_60KPH_M_PER_S,),
+        "veh_8f",
+        row_y=0.0,
+    )
+    _case8_run_actual(world)
+    attribute_names_before = set(vars(world))
+    vot_by_name = _case8_vot_map(["veh_8f"])
+    first = _case8_evaluate_world(world, "signalized_uxsim", vot_by_name, {})
+    second = _case8_evaluate_world(world, "tvt_mp", vot_by_name, {})
+    if first.reference_results_by_physical_key is second.reference_results_by_physical_key:
+        raise RuntimeError(f"{case_name}: the two evaluations share one result dict.")
+    if first.audit_identities_by_physical_key is second.audit_identities_by_physical_key:
+        raise RuntimeError(f"{case_name}: the two evaluations share one audit dict.")
+    if first.counters is second.counters:
+        raise RuntimeError(f"{case_name}: the two evaluations share one counter object.")
+    if first.counters.reference_replay_run_count != 1:
+        raise RuntimeError(f"{case_name}: the first evaluation did not replay.")
+    if second.counters.reference_replay_run_count != 1:
+        raise RuntimeError(
+            f"{case_name}: the second evaluation reused the first result."
+        )
+    if second.counters.reference_reuse_count != 0:
+        raise RuntimeError(f"{case_name}: the second evaluation did not start empty.")
+    first.reference_results_by_physical_key["sentinel"] = "changed-first-only"
+    if "sentinel" in second.reference_results_by_physical_key:
+        raise RuntimeError(f"{case_name}: changing the first dict changed the second.")
+    attribute_names_after = set(vars(world))
+    if attribute_names_before != attribute_names_after:
+        added_names = sorted(attribute_names_after - attribute_names_before)
+        raise RuntimeError(
+            f"{case_name}: the real World gained attributes {added_names!r}."
+        )
+    if _case8_value_holds_simulation_object(first, set()):
+        raise RuntimeError(f"{case_name}: the first result holds a simulation object.")
+    if _case8_value_holds_simulation_object(second, set()):
+        raise RuntimeError(f"{case_name}: the second result holds a simulation object.")
+    _case8_assert_no_output_directory(world.name)
+    _case8_assert_no_output_directory(CASE8_REFERENCE_WORLD_NAME)
+    _case8_print_success(
+        case_name,
+        "the same finished world evaluated twice",
+        second,
+        "The second run starts empty, replays again, and stores no reference World.",
+    )
+
+
+def _print_case8_summary() -> None:
+    print("")
+    print("=" * 72)
+    print("CASE 8 summary")
+    print("=" * 72)
+    print("  - The same physical route shares one reference replay.")
+    print("  - A different physical route gets its own replay.")
+    print("  - Link-name tuples are kept for audit and are not replay keys.")
+    print("  - Origin waiting is added only to that vehicle's CW_z.")
+    print("  - Bad input stops without an official result.")
+    print("  - A later evaluation does not keep the previous result.")
+    print("  - signalized_uxsim, fcfs, batch, and tvt_mp use the same calculation.")
+    print("  - true_vot here is a verification coefficient, not the formal ACWWT unit.")
+    print("  - Production implementation has not started.")
+    print("  - This script writes no files.")
+
+
+CASE8_CASE_NOTES: tuple[Case8CaseNote, ...] = (
+    Case8CaseNote(
+        name="CASE 8A: same physical route is shared",
+        purpose="Several finished vehicles with the same physical route share one replay.",
+        expected_relation="one physical key, one replay, the rest reuse; four method names do not change the formula",
+    ),
+    Case8CaseNote(
+        name="CASE 8B: same physics, different link names",
+        purpose="Keep more than one link-name tuple for one physical key.",
+        expected_relation="one replay, first-seen audit order, an exact repeat is not appended",
+    ),
+    Case8CaseNote(
+        name="CASE 8C: different physical routes stay separate",
+        purpose="Separate link order, length, u, and DELTAT.",
+        expected_relation="different keys and separate replays; DELTAT uses separate evaluations",
+    ),
+    Case8CaseNote(
+        name="CASE 8D: origin wait changes only CW_z",
+        purpose="Match the CASE 5 origin hold on one of two equal physical routes.",
+        expected_relation="shared T_min,z, CW_z 0 without the hold and 4 s with the hold",
+    ),
+    Case8CaseNote(
+        name="CASE 8E: bad input does not return an official result",
+        purpose="Stop for bad DELTAN, an empty route, an unfinished vehicle, bad length, bad u, bad true_vot, and a missing name.",
+        expected_relation="ValueError before an official summary, including before replay when the input is already invalid",
+    ),
+    Case8CaseNote(
+        name="CASE 8F: evaluations do not keep the previous result",
+        purpose="Run the same world twice and show that the second state starts empty.",
+        expected_relation="distinct dicts, a second replay, no reference World object, no file",
+    ),
+)
+
+
+def _run_case8_cases() -> None:
+    _validate_case8a()
+    _validate_case8b()
+    _validate_case8c()
+    _validate_case8d()
+    _validate_case8e()
+    _validate_case8f()
+    _print_case8_summary()
+
+
 def run_static_validation_only() -> None:
     print("Static validation (no World build, no simulation, no file I/O)")
     print("Contract: production unchanged; console-only validation script.")
@@ -2505,6 +4245,20 @@ def run_static_validation_only() -> None:
         print(f"  - {note.name}")
         print(f"      comparison: {note.comparison}")
         print(f"      expected: {note.expected_relation}")
+    print("Sharing cases (CASE 8 worlds are not built in this mode):")
+    print(f"  count: {len(CASE8_CASE_NOTES)}")
+    print("  Common to signalized UXsim, FCFS, BATCH, and TVT-MP.")
+    print("  method_name does not change T_min,z or CW_z.")
+    print("  A reference result stores numbers only. It does not store the reference World.")
+    print("  Each evaluation creates a new in-memory state.")
+    print("  CASE 1-7 expectations and checks are unchanged.")
+    print("  production is not modified.")
+    print("  tests are not modified.")
+    print("  this script writes no files.")
+    for note in CASE8_CASE_NOTES:
+        print(f"  - {note.name}")
+        print(f"      purpose: {note.purpose}")
+        print(f"      expected: {note.expected_relation}")
     print("Static validation OK")
 
 
@@ -2539,6 +4293,7 @@ def main() -> int:
         sensitivity_results.append(_validate_sensitivity_case(spec))
     _print_signature_sensitivity_summary(sensitivity_results)
     _run_identity_cases()
+    _run_case8_cases()
 
     print("")
     print("All cases passed.")
