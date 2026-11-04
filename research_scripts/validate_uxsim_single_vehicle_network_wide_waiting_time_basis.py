@@ -18,6 +18,10 @@ CW_z = actual travel_time - replay minimum travel_time.
 CASE 6A-6E are separate sensitivity worlds. They do not change CASE 1-5.
 They do not choose a production cache key. They only print which route
 attributes changed the replay travel_time in these single-vehicle trials.
+
+CASE 7A-7G check an in-memory physical route key. The key is
+(DELTAT, ((length, link.u), ...)) with link order kept. It does not round
+floats, include link names, or define a persistent cache.
 """
 
 from __future__ import annotations
@@ -1907,6 +1911,520 @@ def _print_signature_sensitivity_summary(
         print(f"    {result.limited_judgment}")
 
 
+@dataclass(frozen=True)
+class PhysicalLinkView:
+    """Plain link numbers for CASE 7. Not a UXsim Link."""
+
+    name: str
+    length: float
+    u: float
+
+
+@dataclass(frozen=True)
+class IdentityCaseNote:
+    name: str
+    comparison: str
+    expected_relation: str
+
+
+def _build_physical_route_key(deltat, route_links) -> tuple:
+    """Hash-ready physical key. Uses link.u, not link.free_flow_speed.
+
+    Floats are not rounded and are not turned into strings.
+    Link names are not included. Link order is kept.
+    """
+    pairs = []
+    for link in route_links:
+        length = float(link.length)
+        speed_u = float(link.u)
+        pairs.append((length, speed_u))
+    return (float(deltat), tuple(pairs))
+
+
+def _build_route_audit_identity(route_links) -> tuple[str, ...]:
+    """Link-name tuple for audit display. Not part of the physical key."""
+    names = []
+    for link in route_links:
+        names.append(str(link.name))
+    return tuple(names)
+
+
+def _format_physical_route_key_for_display(key) -> str:
+    """Human-readable text. Do not use this string as a dict key."""
+    deltat = key[0]
+    pairs = key[1]
+    parts = [f"DELTAT={deltat!r}"]
+    link_index = 1
+    for length, speed_u in pairs:
+        parts.append(
+            f"link{link_index}(length={length!r}, u={speed_u!r})"
+        )
+        link_index += 1
+    return " | ".join(parts)
+
+
+def _raise_identity_failure(case_name: str, message: str, **details) -> None:
+    lines = [f"{case_name}: {message}"]
+    for name, value in details.items():
+        lines.append(f"  {name} = {value!r}")
+    raise RuntimeError("\n".join(lines))
+
+
+def _print_identity_case(
+    case_name: str,
+    comparison: str,
+    key_left,
+    key_right,
+    audit_left,
+    audit_right,
+    dict_entry_count: int,
+    conclusion: str,
+) -> None:
+    same_key = key_left == key_right
+    same_hash = hash(key_left) == hash(key_right)
+    _print_case_header(case_name)
+    print(f"Comparison: {comparison}")
+    print("Physical key (display only; the tuple itself is the dict key):")
+    print(f"  left:  {_format_physical_route_key_for_display(key_left)}")
+    print(f"  right: {_format_physical_route_key_for_display(key_right)}")
+    print(f"Audit identity left:  {audit_left}")
+    print(f"Audit identity right: {audit_right}")
+    if same_key:
+        print("  physical keys: same")
+    else:
+        print("  physical keys: different")
+    if same_hash:
+        print("  hashes: same")
+    else:
+        print("  hashes: different")
+    print(f"  dict entry count: {dict_entry_count}")
+    print(f"Limited conclusion: {conclusion}")
+
+
+def _case7_equal_route(names: tuple[str, str, str]) -> list[PhysicalLinkView]:
+    speed = 60.0 / 3.6
+    first = PhysicalLinkView(names[0], 200.0, speed)
+    second = PhysicalLinkView(names[1], 200.0, speed)
+    third = PhysicalLinkView(names[2], 200.0, speed)
+    return [first, second, third]
+
+
+def _validate_case7a() -> None:
+    case_name = "CASE 7A: same numeric values"
+    route_left = _case7_equal_route(("l1", "l2", "l3"))
+    route_right = _case7_equal_route(("l1", "l2", "l3"))
+    key_left = _build_physical_route_key(1.0, route_left)
+    key_right = _build_physical_route_key(1.0, route_right)
+    audit_left = _build_route_audit_identity(route_left)
+    audit_right = _build_route_audit_identity(route_right)
+    memory = {}
+    memory[key_left] = "shared-replay"
+    entry_count = len(memory)
+    retrieved = None
+    if key_right in memory:
+        retrieved = memory[key_right]
+    _print_identity_case(
+        case_name,
+        "two separately built routes with DELTAT=1 and three 200 m, 60/3.6 links",
+        key_left,
+        key_right,
+        audit_left,
+        audit_right,
+        entry_count,
+        "The same stored numbers can share one in-memory dict entry.",
+    )
+    if key_left != key_right or hash(key_left) != hash(key_right):
+        _raise_identity_failure(
+            case_name,
+            "separately built equal routes did not produce the same key",
+            key_left=key_left,
+            key_right=key_right,
+            hash_left=hash(key_left),
+            hash_right=hash(key_right),
+            dict_entry_count=entry_count,
+        )
+    if entry_count != 1 or retrieved != "shared-replay":
+        _raise_identity_failure(
+            case_name,
+            "the second key did not read the value stored by the first key",
+            key_left=key_left,
+            key_right=key_right,
+            hash_left=hash(key_left),
+            hash_right=hash(key_right),
+            retrieved=retrieved,
+            dict_entry_count=entry_count,
+        )
+    print(f"PASS {case_name}")
+
+
+def _validate_case7b() -> None:
+    case_name = "CASE 7B: link names only"
+    route_left = _case7_equal_route(("l1", "l2", "l3"))
+    route_right = _case7_equal_route(("link_alpha", "link_beta", "link_gamma"))
+    key_left = _build_physical_route_key(1.0, route_left)
+    key_right = _build_physical_route_key(1.0, route_right)
+    audit_left = _build_route_audit_identity(route_left)
+    audit_right = _build_route_audit_identity(route_right)
+    memory = {}
+    memory[key_left] = "shared-replay"
+    entry_count = len(memory)
+    _print_identity_case(
+        case_name,
+        "same length and u, names l1/l2/l3 versus link_alpha/link_beta/link_gamma",
+        key_left,
+        key_right,
+        audit_left,
+        audit_right,
+        entry_count,
+        "Link names are not required to share a physical result. "
+        "The name tuple can still show which route was displayed.",
+    )
+    if key_left != key_right:
+        _raise_identity_failure(
+            case_name,
+            "physical keys differed when only link names differed",
+            key_left=key_left,
+            key_right=key_right,
+            hash_left=hash(key_left),
+            hash_right=hash(key_right),
+            audit_left=audit_left,
+            audit_right=audit_right,
+            dict_entry_count=entry_count,
+        )
+    if audit_left == audit_right:
+        _raise_identity_failure(
+            case_name,
+            "audit identities were the same after renaming every link",
+            audit_left=audit_left,
+            audit_right=audit_right,
+            key_left=key_left,
+            key_right=key_right,
+            dict_entry_count=entry_count,
+        )
+    print(f"PASS {case_name}")
+
+
+def _validate_case7c() -> None:
+    case_name = "CASE 7C: link order"
+    route_left = [
+        PhysicalLinkView("l1", 120.0, 10.0),
+        PhysicalLinkView("l2", 200.0, 20.0),
+        PhysicalLinkView("l3", 300.0, 15.0),
+    ]
+    route_right = [
+        PhysicalLinkView("l2", 200.0, 20.0),
+        PhysicalLinkView("l1", 120.0, 10.0),
+        PhysicalLinkView("l3", 300.0, 15.0),
+    ]
+    key_left = _build_physical_route_key(1.0, route_left)
+    key_right = _build_physical_route_key(1.0, route_right)
+    memory = {}
+    memory[key_left] = "order-left"
+    memory[key_right] = "order-right"
+    entry_count = len(memory)
+    _print_identity_case(
+        case_name,
+        "(120, 10), (200, 20), (300, 15) versus the first two links swapped",
+        key_left,
+        key_right,
+        _build_route_audit_identity(route_left),
+        _build_route_audit_identity(route_right),
+        entry_count,
+        "The same link conditions in a different order are different routes.",
+    )
+    if key_left == key_right or entry_count != 2:
+        _raise_identity_failure(
+            case_name,
+            "reordered links did not produce separate dict entries",
+            key_left=key_left,
+            key_right=key_right,
+            hash_left=hash(key_left),
+            hash_right=hash(key_right),
+            dict_entry_count=entry_count,
+        )
+    print(f"PASS {case_name}")
+
+
+def _validate_case7d() -> None:
+    case_name = "CASE 7D: DELTAT"
+    route = _case7_equal_route(("l1", "l2", "l3"))
+    key_left = _build_physical_route_key(1.0, route)
+    key_right = _build_physical_route_key(0.5, route)
+    memory = {}
+    memory[key_left] = "deltat-1"
+    memory[key_right] = "deltat-0.5"
+    entry_count = len(memory)
+    _print_identity_case(
+        case_name,
+        "same links with DELTAT 1.0 versus DELTAT 0.5",
+        key_left,
+        key_right,
+        _build_route_audit_identity(route),
+        _build_route_audit_identity(route),
+        entry_count,
+        "A different DELTAT must not share the stored replay result.",
+    )
+    if key_left == key_right or entry_count != 2:
+        _raise_identity_failure(
+            case_name,
+            "different DELTAT values produced the same dict entry",
+            key_left=key_left,
+            key_right=key_right,
+            hash_left=hash(key_left),
+            hash_right=hash(key_right),
+            dict_entry_count=entry_count,
+        )
+    print(f"PASS {case_name}")
+
+
+def _validate_case7e() -> None:
+    case_name = "CASE 7E: tiny length difference"
+    length_left = 200.0
+    length_right = 200.00000000000003
+    route_left = [PhysicalLinkView("l1", length_left, 10.0)]
+    route_right = [PhysicalLinkView("l1", length_right, 10.0)]
+    key_left = _build_physical_route_key(1.0, route_left)
+    key_right = _build_physical_route_key(1.0, route_right)
+    memory = {}
+    memory[key_left] = "length-left"
+    memory[key_right] = "length-right"
+    entry_count = len(memory)
+    rounded_left = round(length_left, 10)
+    rounded_right = round(length_right, 10)
+    _print_identity_case(
+        case_name,
+        "length 200.0 versus 200.00000000000003, other values unchanged",
+        key_left,
+        key_right,
+        _build_route_audit_identity(route_left),
+        _build_route_audit_identity(route_right),
+        entry_count,
+        "The formal key keeps the stored floats and does not round them.",
+    )
+    print(f"  stored length left:  {length_left!r}")
+    print(f"  stored length right: {length_right!r}")
+    print(
+        "  diagnostic only, not a formal key: "
+        f"round(length, 10) -> {rounded_left!r} and {rounded_right!r}"
+    )
+    if rounded_left == rounded_right and length_left != length_right:
+        print(
+            "  diagnostic: rounding to 10 decimal places would collapse "
+            "these different stored lengths."
+        )
+    if length_left == length_right or key_left == key_right or entry_count != 2:
+        _raise_identity_failure(
+            case_name,
+            "the unrounded physical key collapsed a tiny length difference",
+            length_left=length_left,
+            length_right=length_right,
+            key_left=key_left,
+            key_right=key_right,
+            hash_left=hash(key_left),
+            hash_right=hash(key_right),
+            dict_entry_count=entry_count,
+        )
+    print(f"PASS {case_name}")
+
+
+def _validate_case7f() -> None:
+    case_name = "CASE 7F: tiny speed difference"
+    speed_left = 60.0 / 3.6
+    speed_right = (60.0 / 3.6) + 1e-15
+    route_left = [PhysicalLinkView("l1", 200.0, speed_left)]
+    route_right = [PhysicalLinkView("l1", 200.0, speed_right)]
+    key_left = _build_physical_route_key(1.0, route_left)
+    key_right = _build_physical_route_key(1.0, route_right)
+    memory = {}
+    memory[key_left] = "speed-left"
+    memory[key_right] = "speed-right"
+    entry_count = len(memory)
+    stored_values_differ = speed_left != speed_right
+    _print_identity_case(
+        case_name,
+        "u = 60/3.6 versus (60/3.6)+1e-15, judged by stored float equality",
+        key_left,
+        key_right,
+        _build_route_audit_identity(route_left),
+        _build_route_audit_identity(route_right),
+        entry_count,
+        "The formal key follows the float Python actually stored. "
+        "A decimal spelling is not used as the decision.",
+    )
+    print(f"  stored u left:  {speed_left!r}")
+    print(f"  stored u right: {speed_right!r}")
+    if stored_values_differ:
+        print("  stored floats: different, so the formal keys must differ")
+        conclusion_ok = key_left != key_right and entry_count == 2
+    else:
+        print(
+            "  stored floats: same. Python absorbed 1e-15 into the same float. "
+            "This case does not claim they are different keys."
+        )
+        conclusion_ok = key_left == key_right and entry_count == 1
+    if not conclusion_ok:
+        _raise_identity_failure(
+            case_name,
+            "formal key did not follow stored float equality",
+            speed_left=speed_left,
+            speed_right=speed_right,
+            stored_values_differ=stored_values_differ,
+            key_left=key_left,
+            key_right=key_right,
+            hash_left=hash(key_left),
+            hash_right=hash(key_right),
+            dict_entry_count=entry_count,
+        )
+    print(f"PASS {case_name}")
+
+
+def _validate_case7g() -> None:
+    case_name = "CASE 7G: physical key uses link.u"
+    world = _make_world("case7g")
+    world.addNode("orig", 0.0, 0.0, signal=[0])
+    world.addNode("dest", 1.0, 0.0, signal=[0])
+    world.addLink(
+        "l1",
+        "orig",
+        "dest",
+        length=200.0,
+        free_flow_speed=SPEED_60KPH_M_PER_S,
+        number_of_lanes=1,
+    )
+    link = world.LINKS[0]
+    speed_before = float(link.u)
+    free_flow_before = float(link.free_flow_speed)
+    if free_flow_before != speed_before:
+        _raise_identity_failure(
+            case_name,
+            "initial free_flow_speed and u differ",
+            free_flow_speed=free_flow_before,
+            u=speed_before,
+        )
+    key_before = _build_physical_route_key(world.DELTAT, [link])
+    manual_before = (float(world.DELTAT), ((float(link.length), float(link.u)),))
+    new_speed = 10.0
+    link.change_free_flow_speed(new_speed)
+    speed_after = float(link.u)
+    free_flow_after = float(link.free_flow_speed)
+    key_after = _build_physical_route_key(world.DELTAT, [link])
+    manual_after = (float(world.DELTAT), ((float(link.length), float(link.u)),))
+    memory = {}
+    memory[key_before] = "before"
+    memory[key_after] = "after"
+    entry_count = len(memory)
+    _print_identity_case(
+        case_name,
+        "one validation Link before and after change_free_flow_speed(10.0); no simulation",
+        key_before,
+        key_after,
+        _build_route_audit_identity([link]),
+        _build_route_audit_identity([link]),
+        entry_count,
+        "The physical key reads link.u. Both attributes move together, "
+        "and the key changes when that stored speed changes.",
+    )
+    print(f"  before: free_flow_speed={free_flow_before!r} u={speed_before!r}")
+    print(f"  after:  free_flow_speed={free_flow_after!r} u={speed_after!r}")
+    if free_flow_after != new_speed or speed_after != new_speed:
+        _raise_identity_failure(
+            case_name,
+            "change_free_flow_speed did not update both attributes to the new value",
+            free_flow_speed=free_flow_after,
+            u=speed_after,
+            expected=new_speed,
+            key_before=key_before,
+            key_after=key_after,
+            dict_entry_count=entry_count,
+        )
+    if key_before != manual_before or key_after != manual_after:
+        _raise_identity_failure(
+            case_name,
+            "physical key was not built from DELTAT, length, and link.u",
+            key_before=key_before,
+            manual_before=manual_before,
+            key_after=key_after,
+            manual_after=manual_after,
+            dict_entry_count=entry_count,
+        )
+    if key_before == key_after or entry_count != 2:
+        _raise_identity_failure(
+            case_name,
+            "speed change did not produce a different physical key",
+            key_before=key_before,
+            key_after=key_after,
+            hash_before=hash(key_before),
+            hash_after=hash(key_after),
+            dict_entry_count=entry_count,
+        )
+    print(f"PASS {case_name}")
+
+
+IDENTITY_CASE_NOTES: tuple[IdentityCaseNote, ...] = (
+    IdentityCaseNote(
+        name="CASE 7A: same numeric values",
+        comparison="Two separately built copies of DELTAT=1 and three equal links.",
+        expected_relation="same physical key, same hash, one dict entry, second key reads the stored value",
+    ),
+    IdentityCaseNote(
+        name="CASE 7B: link names only",
+        comparison="Same length and u. Names l1/l2/l3 versus link_alpha/link_beta/link_gamma.",
+        expected_relation="same physical key, different audit identity",
+    ),
+    IdentityCaseNote(
+        name="CASE 7C: link order",
+        comparison="(120, 10), (200, 20), (300, 15) versus the first two pairs swapped.",
+        expected_relation="different physical keys and two dict entries",
+    ),
+    IdentityCaseNote(
+        name="CASE 7D: DELTAT",
+        comparison="Same links with DELTAT 1.0 versus 0.5.",
+        expected_relation="different physical keys and two dict entries",
+    ),
+    IdentityCaseNote(
+        name="CASE 7E: tiny length difference",
+        comparison="length 200.0 versus 200.00000000000003.",
+        expected_relation="unrounded keys differ; fixed-decimal rounding is diagnostic only",
+    ),
+    IdentityCaseNote(
+        name="CASE 7F: tiny speed difference",
+        comparison="u = 60/3.6 versus (60/3.6)+1e-15.",
+        expected_relation="follow stored float equality; do not decide from decimal spelling",
+    ),
+    IdentityCaseNote(
+        name="CASE 7G: physical key uses link.u",
+        comparison="Validation Link before and after change_free_flow_speed. No simulation.",
+        expected_relation="key uses link.u and changes when that speed changes",
+    ),
+)
+
+
+def _print_identity_summary() -> None:
+    print("")
+    print("=" * 72)
+    print("Physical route identity summary")
+    print("=" * 72)
+    print("  - Do not round numeric values.")
+    print("  - Include DELTAT.")
+    print("  - Keep link order.")
+    print("  - Use length and link.u.")
+    print("  - Keep link names out of the physical key.")
+    print("  - The key is a candidate for an in-memory dict inside one evaluation run.")
+    print("  - A persistent storage format is not chosen.")
+    print("  - Production implementation has not started.")
+
+
+def _run_identity_cases() -> None:
+    _validate_case7a()
+    _validate_case7b()
+    _validate_case7c()
+    _validate_case7d()
+    _validate_case7e()
+    _validate_case7f()
+    _validate_case7g()
+    _print_identity_summary()
+
+
 def run_static_validation_only() -> None:
     print("Static validation (no World build, no simulation, no file I/O)")
     print("Contract: production unchanged; console-only validation script.")
@@ -1976,6 +2494,17 @@ def run_static_validation_only() -> None:
     print("  4. not physical, but useful for audit or cache identity")
     print("  5. still unresolved")
     print("  No production cache key is implemented.")
+    print("Identity cases (CASE 7G World is not built in this mode):")
+    print(f"  count: {len(IDENTITY_CASE_NOTES)}")
+    print("  Formal physical key: (float(DELTAT), ((float(length), float(link.u)), ...)).")
+    print("  Link order is kept. Floats are not rounded. Link names are not in the physical key.")
+    print("  Display text is not used as a dict key.")
+    print("  CASE 1-6 expectations and checks are unchanged.")
+    print("  production is not modified; this script writes no files.")
+    for note in IDENTITY_CASE_NOTES:
+        print(f"  - {note.name}")
+        print(f"      comparison: {note.comparison}")
+        print(f"      expected: {note.expected_relation}")
     print("Static validation OK")
 
 
@@ -2009,6 +2538,7 @@ def main() -> int:
     for spec in SENSITIVITY_CASES:
         sensitivity_results.append(_validate_sensitivity_case(spec))
     _print_signature_sensitivity_summary(sensitivity_results)
+    _run_identity_cases()
 
     print("")
     print("All cases passed.")

@@ -1622,6 +1622,8 @@ TSE完全PDFまたは2009年overview chapter全文を別経路で入手した場
 
 **2026-11-04 追記（route signature 属性感度検証完了）:** **実装・評価側**の最新再開地点は **§21.9.2**。**詳細正本**は **§31.18.13**。
 
+**2026-11-04 追記（物理識別値・float 安全性検証完了）:** **実装・評価側**の最新再開地点は **§21.9.3**。**詳細正本**は **§31.18.14**。
+
 ### 21.9 ACWT・ACWWTの方式共通network定義への訂正
 
 **詳細技術正本:** `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_5.md` **§31.18**
@@ -1764,6 +1766,8 @@ TSE完全PDFまたは2009年overview chapter全文を別経路で入手した場
 
 **詳細正本:** `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_5.md` **§31.18.13**
 
+**最新注記（2026-11-04）:** **float key**（**物理識別値**）の **検証**は **完了**（**§21.9.3**、**§31.18.14**）。**下記 1〜15** は **float 検証前**の **再開順序**（**歴史的記録**）。**今後**は **§21.9.3** の **再開順序**を **優先**する。
+
 **次の再開順序:**
 
 1. **float key**（**丸め・正規化**）
@@ -1781,5 +1785,66 @@ TSE完全PDFまたは2009年overview chapter全文を別経路で入手した場
 13. **manual 一致**
 14. **3,000 台 output**
 15. **高速化調査**
+
+#### 21.9.3 同一走行条件の物理識別値とfloat安全性検証完了
+
+**検証スクリプト:** `research_scripts/validate_uxsim_single_vehicle_network_wide_waiting_time_basis.py`
+
+**実施:**
+
+- **CASE 7A〜7G** を **追加実行**
+- **CASE 1〜6** も **再合格**
+- **All cases passed**
+- **production**、**tests**、**当該 script 以外**は **未変更**
+- **永続保存形式**は **未確定**、**production 実装**は **未着手**
+
+**結果（要約）:**
+
+- **同じ数値** → **同じ物理識別値**（**7A**）
+- **Link 名だけ違う** → **物理識別値は同じ**、**audit identity は異なる**（**7B**）
+- **Link 順序が違う** → **別**（**7C**）
+- **DELTAT が違う** → **別**（**7D**）
+- **length 微小差** → **別**（**7E**；**round(10)** は **診断のみ**）
+- **speed 差**が **同じ Python float** に **吸収** → **同じ**（**7F**）
+- **物理 key** は **`link.u`**（**7G**）
+- **`round` しない**
+- **同一評価処理内 memory 辞書 key 候補**
+
+**正式候補:**
+
+```python
+(
+    float(W.DELTAT),
+    tuple(
+        (
+            float(link.length),
+            float(link.u),
+        )
+        for link in actual_route_links
+    ),
+)
+```
+
+**詳細正本:** `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_5.md` **§31.18.14**
+
+**次の再開順序:**
+
+1. **Link 名 audit identity**
+2. **DELTAN=1 validation**
+3. **reference 標準条件**
+4. **共有辞書**の **所有者・存続範囲**
+5. **保存値**
+6. **軽量 counter**
+7. **failure 診断**
+8. **replay helper**
+9. **重複経路** **小規模検証**
+10. **CW_z**
+11. **ACWT**
+12. **ACWWT**
+13. **Nonparticipating**
+14. **4 方式**
+15. **manual 一致**
+16. **3,000 台**
+17. **高速化**
 
 **歴史的記録:** §21.2、§21.4、§21.5、§21.7 の旧記述は **削除しない**。Visit 数ベース定義の最新参照先は **本 §21.9** および **§31.18**。
