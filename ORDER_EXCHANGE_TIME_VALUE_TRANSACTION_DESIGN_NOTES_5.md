@@ -11211,6 +11211,8 @@ T_{\min,z} = 12 \times \text{actual traveled Link count}_z
 - **Link 数 = Visit 数 + 1** のような **固定補正式を使わない**
 - **external Node が中継地点にならないと仮定しない**
 
+**最新参照（2026-11-04、不採用注記）:** 本節の **Σ(length/u)** および **T_{\min,z} = Σ length/u** は **定義検討過程の歴史的記録**である。**CASE 1〜3** では解析和だけでは **UXsim 最短旅行時間**と一致せず、**1 + Σ(length/u)** は **CASE 4** で **反証**された。**正式 T_{\min,z}** は **§31.18.12** の **reference replay**（**uxsim_reference_minimum_trip_time_s**）。本節を **最新定義として読まない**。
+
 #### 31.18.5 Vehicle単位の累積waiting time
 
 Vehicle **z** の **network 全体**における累積 waiting time を、
@@ -11402,3 +11404,257 @@ Vehicle **z** の true VOT を **C_z** とする。
 - **単車両・無交通 trial** で、**予定出発時刻**、**最初の Link 進入時刻**、**trip end 時刻**の **境界関係**を **実作動確認**する
 
 この検証前に、**T_{min,z} = Σ length/u** が **数値的に完全一致する**と **確定事項として扱わない**。
+
+**最新参照（2026-11-04）:** 本節で列挙した **単車両・無交通最小検証は完了**した。**詳細結果**は **§31.18.12**。**全 5 ケース合格**。**次の課題**は **reference replay helper** と **route signature / cache** 設計（§31.18.12.9）。
+
+#### 31.18.12 単車両・無交通reference replayによるT_min,z実作動検証
+
+**最新正本（T_{\min,z}）:** 本 **§31.18.12**。**検証スクリプト:** `research_scripts/validate_uxsim_single_vehicle_network_wide_waiting_time_basis.py`（**production・tests 非変更**、**output file なし**、**console 検証**）。
+
+##### 31.18.12.1 検証目的
+
+方式共通 **network-wide** 累積 waiting time の基礎式:
+
+\[
+\text{CW}_z = \text{TT}_z - T_{\min,z}
+\]
+
+について、**T_{\min,z}** を **どのように算定すべきか**を **実作動検証**した。
+
+**確認対象:**
+
+- `Vehicle.travel_time`
+- `Vehicle.traveled_route()`
+- `Vehicle.log_t_link`
+- `departure_time`
+- **最初の Link 進入時刻**
+- **trip end 時刻**
+- **Node 通過**
+- **external Node 中継**
+- **最終 OD Link**
+- **異質 Link**
+- **起点流入待ち**
+- **timestep 境界**
+- **`move_remain`**
+- **浮動小数点境界**
+
+**検証スクリプト:** `research_scripts/validate_uxsim_single_vehicle_network_wide_waiting_time_basis.py`
+
+**変更禁止（実施）:** **production**、**tests**、**既存 research script** は **変更していない**。**output file** は **生成せず**、**console 上**で検証した。
+
+##### 31.18.12.2 初回仮説とCASE 1による反証
+
+**初回仮説:**
+
+\[
+T_{\min,z} = \sum (\text{length} / \text{free\_flow\_speed})
+\]
+
+**CASE 1:**
+
+- **1 Link**
+- length **200 m**、free-flow speed **60/3.6 m/s**
+- **解析的自由流時間 12 秒**
+- **departure_time T=0**
+- **first Link entry T=1**（秒表記は log / traveled_route 上の観測）
+- **trip end T=13**
+- **`Vehicle.travel_time` = 13 秒**
+
+単純な **Σ(length/u)=12 秒** を使うと、
+
+\[
+\text{CW}_z = 13 - 12 = 1 \text{ 秒}
+\]
+
+となった。
+
+この **1 秒**は **混雑**や **Node 通過待ち**ではなく、UXsim の **処理順**により、**予定出発 T=0** の Vehicle が **T=0 末尾**に **home から wait** へ移り、**T=1** の **`Node.generate()`** で **最初の Link** へ進入する **起点流入境界**として生じた。
+
+したがって、**Σ(length/u) だけ**では **UXsim 上の最小旅行時間**を **常に表せない**。
+
+##### 31.18.12.3 第二仮説とCASE 4による反証
+
+**CASE 1〜3** の結果から、一時的に次を仮定した。
+
+\[
+T_{\min,z} = 1 \text{ 秒} + \sum (\text{length}/u)
+\]
+
+しかし **CASE 4** で **反証**された。
+
+**CASE 4:**
+
+- **3 Link**
+- Link 1: length **120 m**、speed **10 m/s**、解析時間 **12 秒**
+- Link 2: length **200 m**、speed **20 m/s**、解析時間 **10 秒**
+- Link 3: length **300 m**、speed **15 m/s**、解析時間 **20 秒**
+- **Σ(length/u)=42 秒**
+- departure **T=0**
+- first Link entry **T=1**
+- Link 2 entry **T=13**
+- Link 3 entry **T=23**
+- trip end **T=42**
+- **`Vehicle.travel_time`=42 秒**
+
+したがって、
+
+\[
+1 + \sum(\text{length}/u) = 43 \text{ 秒}
+\]
+
+ではなく、**実際の無交通旅行時間**は **42 秒**だった。
+
+**不採用:**
+
+\[
+T_{\min,z} = 1 + \sum(\text{length}/u)
+\]
+
+という **一般式**は **採用しない**。
+
+##### 31.18.12.4 CASE 4 trajectoryによる原因確認
+
+**CASE 4** の **trajectory trace**（`--case4-trajectory-trace`）では次を確認した。
+
+- **T=1** で **l1** へ進入し、**同じ timestep 内**に **x=10 m** まで進行
+- **T=13** で **l2** へ進入し、**同じ timestep 内**に **x=20 m** まで進行
+- **T=23** で **l3** へ進入し、**同じ timestep 内**に **x=15 m** まで進行
+- **T=42** で **l3 終端**へ到達し、**同じ timestep** に **trip end**
+- **Node 自体**に **固定通過時間はない**
+- **Link 進入 timestep 内の移動**、**move_remain**、**速度比換算**、**trip-end 境界**、**浮動小数点表現**が **UXsim 上の最短旅行時間**へ **影響**する
+
+**重要:**
+
+- **起点流入境界 1 秒**を **常に**解析自由流時間へ **加算してはならない**
+- **Node 数**や **Link 数**ごとの **固定補正**も **行わない**
+- **解析式**で UXsim の **離散時間挙動**を **完全再現しようとしない**
+
+##### 31.18.12.5 正式なT_min,z定義
+
+Vehicle **z** の **正式な T_{\min,z}** は、次の **UXsim reference replay** によって求める。
+
+**reference World 条件:**
+
+- 実 World で Vehicle **z** が **実際に通過したものと同一の Link 列**
+- **同じ Link 順序**
+- 各 Link の **length**、**free_flow_speed**、**jam_density**、**number_of_lanes**
+- **同じ DELTAT**、**同じ DELTAN**
+- **Vehicle 1 台**、**departure timestep 0**
+- **route を明示的に固定**
+- **他 Vehicle なし**
+- **signal なし**、**order-control なし**、**Node capacity なし**
+- **capacity_in / capacity_out** による **追加待ちなし**
+- **user_function なし**、**congestion なし**
+
+この reference World における **`Vehicle.travel_time`** を **uxsim_reference_minimum_trip_time_s** とし、**正式な T_{\min,z}** とする。
+
+\[
+T_{\min,z} = \text{uxsim\_reference\_minimum\_trip\_time\_s}(\text{actual\_route}_z)
+\]
+
+\[
+\text{CW}_z = \text{TT}_z - T_{\min,z}
+\]
+
+**解析値** **Σ(length / free_flow_speed)** は **参考値**として **保持してよい**が、**正式な T_{\min,z} として使用しない**。
+
+##### 31.18.12.6 Route signature
+
+将来の本実装では、Vehicle ごとに reference World を **個別実行せず**、**同一経路条件**を **route signature** でまとめる。
+
+**route signature 候補:**
+
+- **Link 名の順序**
+- 各 Link の **length**
+- 各 Link の **free_flow_speed**
+- 各 Link の **jam_density**
+- 各 Link の **number_of_lanes**
+- **DELTAT**
+- **DELTAN**
+
+**同一 signature** の Vehicle は **同じ reference replay 結果**を **共有**する。
+
+**留保（未確定）:**
+
+- 現在の **検証 script** では **memory 上**に signature を **表示しただけ**
+- **永続 cache** は **未実装**
+- 本実装の **cache key 構成**は **まだ最終確定していない**
+- reference World が **実 World の最小旅行時間**に **影響する全条件**を **保持しているか**、**実装前**に **追加確認**する
+- **不要な制御属性**を signature へ **混入させない**
+- **最小旅行時間**へ **影響する属性**を **欠落させない**
+
+##### 31.18.12.7 5ケースの確定結果
+
+| CASE | 概要 | analytical Σ(length/u) | replay T_{\min,z} | actual TT_z | CW_z | 結果 |
+|------|------|------------------------|-------------------|-------------|------|------|
+| **1** | 1 Link | **12 s** | **13 s** | **13 s** | **0 s** | **PASS** |
+| **2** | 3 Link・内部 Node | **36 s** | **37 s** | **37 s** | **0 s** | **PASS**（Node 通過ごとの固定追加時間 **なし**） |
+| **3** | external 途中経由・3 Link | **36 s** | **37 s** | **37 s** | **0 s** | **PASS**（intermediate external 前後・**最終 OD Link**・**traveled_route() 3 Link**） |
+| **4** | 異質 3 Link | **42 s** | **42 s** | **42 s** | **0 s** | **PASS**（**1+Σ** を **反証**） |
+| **5** | capacity_in 起点待ち・1 Link | **12 s** | **13 s** | **17 s** | **4 s** | **PASS** |
+
+**CASE 5 補足:**
+
+- **scheduled departure T=0**、**actual first Link entry T=5**、**reference first Link entry T=1**
+- **additional origin wait = 4 秒**（**起点 vertical queue 待ち**が **CW_z** へ **含まれる**）
+
+**全体:** **All cases passed**（検証 script 実行結果）。
+
+##### 31.18.12.8 ACWT・ACWWTへの反映
+
+**最新定義:**
+
+\[
+\text{TT}_z = \text{実 World の Vehicle.travel\_time}
+\]
+
+\[
+T_{\min,z} = \text{同一実走行経路の UXsim reference replay における Vehicle.travel\_time}
+\]
+
+\[
+\text{CW}_z = \text{TT}_z - T_{\min,z}
+\]
+
+\[
+\text{ACWT} = \frac{1}{N} \sum_z \text{CW}_z
+\]
+
+\[
+\text{ACWWT} = \frac{1}{N} \sum_z C_z \text{CW}_z
+\]
+
+**位置付け:**
+
+- **ACWT** は **active delay** を含む **Vehicle 当たり平均遅延**
+- **ACWT** は **ACWWT** の **前段**となる **基礎時間量**
+- **ACWWT** が **方式比較の最重要指標**
+- **signalized UXsim、FCFS、BATCH、TVT-MP、混在 network** へ **共通適用**
+- **order-control Visit 数**は **使わない**
+- **external Node、中継 external、最終 OD Link、order-control 対象外 Node** も **欠落しない**
+
+##### 31.18.12.9 次の実装課題
+
+1. **検証 script** の **static validation**、**全 5 ケース**、**failure history** を **正本化**（本 **§31.18.12**）
+2. **route signature** に必要な **Link・World 属性**を **読取り専用**で **確定**
+3. **reference replay helper** の **設計**
+4. **memory cache** の **key・value・lifecycle** 設計
+5. 実 World **Vehicle ごと**の **actual route 抽出**
+6. **route signature ごと**の **reference replay**
+7. Vehicle ごとの **TT_z、T_{\min,z}、CW_z** 算出
+8. 全 Vehicle の **ACWT** 算出
+9. **true VOT** を使った **ACWWT** 算出
+10. **Nonparticipating 固定 600 台**の **ACWT・ACWWT** 算出
+11. **FCFS、BATCH、TVT-MP、signalized UXsim** **共通検証**
+12. **小規模 trial** で **manual 再計算**と **一致確認**
+13. **その後**に **3,000 台 output** へ **適用**
+14. **評価指標実装後**に **高速化調査**へ進む
+
+**禁止:**
+
+- **Σ(length/u)** を **正式 T_{\min,z}** として **使用**
+- **1 + Σ(length/u)** を **正式 T_{\min,z}** として **使用**
+- **Visit 数**から **T_{\min,z}** を **推測**
+- Vehicle ごとに **無条件**で **reference replay** を **重複実行**
+- **route signature 検証前**に **cache** を **production** へ **実装**
+- **production** を **直接変更**して **定義検証**を **省略**

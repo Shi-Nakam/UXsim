@@ -1618,6 +1618,8 @@ TSE完全PDFまたは2009年overview chapter全文を別経路で入手した場
 
 **2026-11-04 追記:** **TVT-MP 実装・評価側**の最新再開地点は **§21.9**。**詳細設計正本**は **§31.18**。**§31.4〜§31.10** および **§21.2** 等の **Visit 数ベース定義**は **検討過程の歴史的記録**であり、**network-wide ACWT・ACWWT の最新定義として読まない**。
 
+**2026-11-04 追記（reference replay 検証完了）:** **実装・評価側**の最新再開地点は **§21.9.1**。**詳細正本**は **§31.18.12**（**T_{\min,z}** = **reference replay**）。
+
 ### 21.9 ACWT・ACWWTの方式共通network定義への訂正
 
 **詳細技術正本:** `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_5.md` **§31.18**
@@ -1662,5 +1664,70 @@ TSE完全PDFまたは2009年overview chapter全文を別経路で入手した場
 
 - **起点での network 進入待ち**が **`travel_time`** と **`CW_z`** へ **含まれる**こと
 - **`departure_time`** と **最初の Link 進入時刻**を **同一視せず**、**実データ**で確認する
+
+**最新注記（2026-11-04）:** **単車両・無交通検証は完了**。**最新結果**は **§21.9.1**。**下記 1〜7** は **検証前の再開順序**（**歴史的記録**）。**今後**は **§21.9.1** の **再開順序**を **優先**する。
+
+#### 21.9.1 単車両・無交通reference replay検証完了
+
+**検証スクリプト:** `research_scripts/validate_uxsim_single_vehicle_network_wide_waiting_time_basis.py`
+
+**実施:**
+
+- **production**、**tests** は **未変更**
+- **CASE 1〜5** を **実行**、**全ケース合格**
+- **output file なし**、**console 検証**
+
+**不採用（記録）:**
+
+- **Σ(length/u) 単独**は **CASE 1〜3** で **UXsim 最短旅行時間と不一致**（例: CASE 1 で **TT=13**、**Σ=12**）
+- **1 + Σ(length/u)** は **CASE 4** で **反証**（**TT=42**、**1+Σ=43**）
+- **Node 固定通過時間**が **原因ではない**
+- **UXsim 離散処理**、**Link 進入 timestep 内移動**、**move_remain**、**trip-end 境界**を **解析式だけ**で **完全再現しない**
+
+**正式 T_{\min,z}:**
+
+- **同一実走行経路**の **無交通 reference replay** における **`Vehicle.travel_time`**
+- **CW_z = TT_z − replay T_{\min,z}**
+
+**CASE 1〜5（確定）:**
+
+| CASE | Σ(length/u) | replay T_{\min,z} | TT_z | CW_z |
+|------|-------------|-------------------|------|------|
+| 1 | 12 s | 13 s | 13 s | 0 s |
+| 2 | 36 s | 37 s | 37 s | 0 s |
+| 3 | 36 s | 37 s | 37 s | 0 s |
+| 4 | 42 s | 42 s | 42 s | 0 s |
+| 5 | 12 s | 13 s | 17 s | **4 s**（**起点流入待ち 4 s** が **CW_z** へ **含まれる**） |
+
+**その他確認:**
+
+- **external 中継 Node** と **最終 OD Link** を **`traveled_route()`** が **保持**（CASE 3）
+
+**指標:**
+
+\[
+\text{ACWT} = \frac{1}{N} \sum_z \text{CW}_z,\quad
+\text{ACWWT} = \frac{1}{N} \sum_z C_z \text{CW}_z
+\]
+
+- **ACWWT** が **最重要指標**
+- **route signature** 単位で **reference 結果**を **共有**する方針（**cache 未実装**、script は **memory 表示のみ**）
+- **production 実装**は **未着手**
+
+**詳細正本:** `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_5.md` **§31.18.12**
+
+**次の再開順序:**
+
+1. **route signature** に必要な **属性の確定**
+2. **reference replay helper** 設計
+3. **memory cache** 設計
+4. **Vehicle 別 CW_z**
+5. **ACWT**
+6. **ACWWT**
+7. **Nonparticipating 固定 600 台**
+8. **4 方式共通検証**（FCFS、BATCH、TVT-MP、signalized UXsim）
+9. **小規模 manual 一致確認**
+10. **3,000 台 output** 適用
+11. **その後**に **高速化調査**
 
 **歴史的記録:** §21.2、§21.4、§21.5、§21.7 の旧記述は **削除しない**。Visit 数ベース定義の最新参照先は **本 §21.9** および **§31.18**。
