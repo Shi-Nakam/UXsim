@@ -13058,3 +13058,267 @@ Vehicle 別の最終 record や summary を研究 output へ保存するかは�
 15. 高速化
 
 **次の段階**は、**4 設計の独立確認**、**commit・push**、**実装場所候補の読取り専用調査**である。
+
+**最新参照（2026-11-04）:** **4 方式共通評価**の **実装場所**、**変更範囲**、**小規模検証方法**の **読取り専用調査**は **§31.18.19** で **完了**。**signalized UXsim、FCFS、BATCH、TVT-MP** へ **共通適用**する。**いずれか 1 方式の専用処理へ配置しない。** **独立した方式共通評価 module** が **有力**。**既存 validation script** を **拡張**する。**production 実装**は **未着手**。**次**は **具体的な部品設計**。
+
+#### 31.18.19 4方式共通評価の実装場所・変更範囲・小規模検証方法の読取り専用調査
+
+**位置付け:** **調査 1/3〜3/3 すべて完了**。**production ファイルは作成しない。** 本評価は **TVT-MP 専用ではない**。
+
+##### 31.18.19.1 調査目的と4方式共通性
+
+**対象方式:**
+
+- **signalized UXsim**
+- **FCFS**
+- **BATCH**
+- **TVT-MP**
+
+**目的:** 4 方式を **同じ network-wide 累積 waiting time 定義**で比較する。方式ごとに異なる delay 定義を使わない。方式固有の制御記録に依存しない。同じ Vehicle 集合について公平に比較する。**Nonparticipating 固定集合**にも同じ定義を使う。
+
+TVT-MP の評価研究で必要になった機能であるが、**TVT-MP だけへ適用する機能ではない。**
+
+**禁止:**
+
+- TVT-MP 専用評価として位置付ける
+- TVT-MP の取引処理、FCFS 専用処理、BATCH 専用処理、signalized UXsim 専用処理へ埋め込む
+- 方式ごとに別の ACWT・ACWWT 算定処理を持つ
+- **order-control Visit** の存在を前提とする
+- Buyer、Seller、Nonparticipating 等の **TVT-MP 固有 role** を、全 Vehicle 共通評価の **必須入力**にする
+
+**共通評価の入口**は、4 方式の **完走済み World** を **同じ形**で受け取れるものとする。方式固有情報は、共通の **CW_z、ACWT、ACWWT** を算出した **後**に、必要な部分集合や比較区分へ付加する。
+
+##### 31.18.19.2 Analyzerと既存評価の確認
+
+**原典確認済み（`uxsim/analyzer.py`）:**
+
+- UXsim の既存結果分析は **`Analyzer`** に集約されている
+- **`Analyzer`** は **World への参照**を保持する
+- **`Analyzer.__init__`** は **`out{W.name}` directory** を作成する
+- **`basic_analysis()`** は既存の **OD 単位 free travel time** を用いて delay を算出する
+- **`vehicle_trip_to_pandas()`** は Vehicle 名、起終点、出発時刻、最終状態、**travel_time**、平均速度、走行距離を出力する
+- **`vehicle_groups_to_pandas()`** も既存 **OD free travel time** を用いる
+
+**今回確定した同一実走行経路 reference replay による T_{\min,z}** は、既存 Analyzer の delay 計算とは **異なる**。**既存 Analyzer の delay 値を ACWT・ACWWT の正式値として流用しない。**
+
+##### 31.18.19.3 World・Analyzer接続の確認
+
+- 通常の World では **finalize 時**に **`Analyzer(W)`** が作成される
+- **`create_analyzer=False`** を使えば、内部仮想 World には Analyzer を作らないことができる
+- **reference World** は内部計算用であり、**Analyzer を必要としない**
+- reference World で Analyzer を作ることにより、**不要な output directory を作成すべきではない**
+- reference World は **4 方式の共通評価の内部**で使う補助 World であり、**いずれか 1 方式の Analyzer ではない**
+
+**`uxsim.py`:**
+
+- **simulation 本体**である
+- order-control 関連の production module を一部 import する
+- 今回の ACWT・ACWWT 評価は **simulation 進行処理ではなく、完走後の方式共通評価**である
+- **simulation 本体へ直接埋め込む必要はない**
+- 4 方式のどの World も、**simulation 終了後**に **同じ評価処理**へ渡す構造が望ましい
+- **simulation 進行中の方式固有制御**と、**完走後の方式共通評価**を **分離**する
+
+**package 公開（`uxsim/__init__.py`）:**
+
+- **`uxsim.py`、`utils.py`、`analyzer.py`、`scenario_reader_writer.py`** を公開している
+- 新しい評価機能を **`from uxsim import *`** で直ちに公開する必要があるかは **未確定**
+- 初期の小規模検証前に公開窓口を変更する必要はない
+- 4 方式の共通利用に適した公開方法は、小規模検証と正式 test 成立後に判断する
+
+**tests:**
+
+- 一般 UXsim の tests は **`from uxsim import *`** または **`import uxsim`** を用いる
+- Analyzer の **`basic_analysis()`** 等を既存 World から呼ぶ形が多い
+- order-control、TVT-MP、BATCH、FCFS 名を含む専用 test file は、今回の検索範囲では **存在しなかった**
+- 今回の研究機能は、まず **`research_scripts` の独立検証**で確認してきた
+- 将来の正式 test は、特定方式名ではなく **方式共通評価**であることが分かる名前にする
+
+**validation script:**
+
+- **`research_scripts`** 内の **`validate_*.py`** は、現時点では **`validate_uxsim_single_vehicle_network_wide_waiting_time_basis.py`** だけである
+- この script には **CASE 1〜7** までの reference replay 基礎検証が集約されている
+- 既存 CASE を保護したまま、共有動作の小規模検証を追加するのが自然である
+- 検証対象は TVT-MP だけではなく、**4 方式へ共通する reference replay 評価基盤**である
+
+##### 31.18.19.4 既存研究moduleと方式共通性
+
+**`uxsim` 直下**には order-control および TVT-MP 専用 module が多数ある。これらは特定制御方式の処理を担う。
+
+今回の ACWT・ACWWT は **4 方式へ共通適用**する。いずれか 1 方式の専用 module へ入れると、方式共通性を失う。
+
+**依存しないもの:**
+
+- TVT-MP の取引 Visit、Buyer、Seller、payment、compensation、Candidate
+- FCFS の順位処理
+- BATCH のバッチ形成や **t_trigger**
+- signalized UXsim の signal phase や信号制御記録
+
+**共通入力:** 完走済み World、**`Vehicle.travel_time`**、**`Vehicle.traveled_route()`**、Link 物理条件、**true VOT** 等。
+
+##### 31.18.19.5 採用する実装場所候補
+
+**採用候補:** signalized UXsim、FCFS、BATCH、TVT-MP の **4 方式に共通する独立評価 module** を **`uxsim` 直下へ新設**する。
+
+**ファイル名の有力候補:** **`uxsim/network_wide_waiting_time_evaluation.py`**
+
+**名称の要件:**
+
+- TVT-MP、order-control、FCFS、BATCH、signal の固有名を使わない
+- ACWT・ACWWT と **network-wide waiting time 評価**であることが分かる
+- reference replay だけに狭すぎず、Vehicle 別結果と集計結果も扱える
+- 初学者が目的を理解しやすい
+- **4 方式の共通評価**であることが分かる
+
+**正式なファイル名**は、具体設計時に最終確定する。**今回ファイルは作らない。**
+
+**独立 module を採用する理由:**
+
+- 4 方式へ共通適用でき、同じ入口と同じ定義で評価できる
+- simulation 本体から分離できる
+- いずれか 1 方式の制御処理、order-control Visit、TVT-MP の取引 role へ依存しない
+- Analyzer の既存 delay 定義と混同しない
+- reference World の生成と実行を明示的に隔離できる
+- output directory の自動作成を避けられる
+- 小規模検証後に公開方法を決められる
+- 方式ごとの重複実装を避けられる
+
+##### 31.18.19.6 不採用とする配置
+
+**`uxsim/uxsim.py` へ直接実装しない。** simulation 本体を大きくし、完走後評価と進行処理を混在させる。方式共通の補助評価のために core へ状態を足す必要はない。4 方式の進行処理と評価後処理の境界が曖昧になる。
+
+**`uxsim/analyzer.py` へ直接実装しない。** Analyzer 生成時に output directory を作る。既存 delay 定義と今回の reference replay 定義が異なる。reference World 自体に Analyzer を作らない方針と整合しない。Analyzer の責務を大きく増やし、既存 delay と ACWT・ACWWT を混同する危険がある。
+
+**将来:** 独立 module の安定後に、Analyzer から呼び出す **薄い窓口**を追加する可能性は残す。**初期実装では行わない。**
+
+**いずれか 1 方式の専用 module へ実装しない。** 対象は TVT-MP 専用、FCFS 専用、BATCH 専用、signalized UXsim 専用、order-control 共通処理のうち signalized UXsim へ適用できない場所である。ACWT・ACWWT は 4 方式の公平な共通比較指標であり、どの方式でも同じ **`Vehicle.travel_time`** と実走行経路から算出する。方式固有処理へ入れると、他方式で別実装が必要になり、定義差や計算差を生む。
+
+**`research_scripts` だけへ正式実装しない。** 最終的には 4 方式へ共通適用する再利用可能な評価機能である。research script だけでは重複実装を招き、Vehicle 別 **CW_z**、**ACWT**、**ACWWT** の一貫性を保証しにくい。方式ごとの trial script へ個別実装すると公平比較を損なう。
+
+**ただし:** production 実装前の **検証場所**として **`research_scripts` を使用する。**
+
+##### 31.18.19.7 変更範囲候補
+
+**初期の production 実装で変更する候補:**
+
+1. 新規の **4 方式共通評価 module**
+2. 新機能専用の **test file**
+3. 必要な場合だけ **package 公開用の最小変更**
+4. 詳細設計メモ
+5. 進捗メモ
+
+**初期段階では変更しない候補:**
+
+- **`uxsim/uxsim.py`**、**`uxsim/analyzer.py`**
+- signalized UXsim の信号制御、FCFS 制御、BATCH 制御、TVT-MP 制御・取引処理、order-control module
+- 既存 research output writer、既存 trial script、既存評価値、既存 Analyzer の delay
+- World の恒久属性
+
+**公開用の `__init__.py` 変更は、小規模検証前には行わない。** 独立 module を直接 import して検証できる。安定後に 4 方式からの利用方法を確定してから公開窓口を判断する。**4 方式の各 trial へ同じ評価コードをコピーしない。**
+
+##### 31.18.19.8 部品構成候補
+
+新しい独立 module 内で、将来次の責務を分ける候補とする。**class、dataclass、function 名は次の具体設計で確定する。今回 production file は作成しない。**
+
+**入力前提の確認:** 実 World の完走、**DELTAN=1**、Vehicle 状態、実走行経路、Link 値。4 方式共通で必要な入力だけを確認する。方式固有制御の存在を必須条件にしない。
+
+**実走行経路の識別:** **physical_route_key**、**route_audit_identity**。4 方式で同じ作成方法を使う。
+
+**reference World の構築:** 標準条件（**§31.18.17**）。直列 Node と Link、Vehicle 1 台、route 固定、実行時間上限。実 World の方式固有制御を持ち込まない。
+
+**reference replay の実行と確認:** 完走、route 一致、DELTAT 一致、有効な travel_time。評価対象方式に関係なく同じ検査を行う。
+
+**評価処理内の結果共有:** 新規物理条件だけ replay。合格結果だけ保存。audit identity、counter。4 方式間で同じ共有規則を使う。
+
+**Vehicle 別評価 record の共通部分:** actual travel time、**T_{\min,z}**、**CW_z**、true VOT、重み付き値、participation 区分。
+
+**方式固有情報:** 共通結果へ **後から付加**する。共通計算の成立条件にしない。signalized UXsim では取引 role がなくても評価可能。FCFS、BATCH でも TVT-MP 固有 field がなくても評価可能。TVT-MP では必要に応じて role 等を別列として追加可能。
+
+**集計 summary:** **ACWT**、**ACWWT**、Nonparticipating 固定集合、replay 実行回数、再利用回数、failure count、方式名、評価対象 Vehicle 集合の識別情報。
+
+##### 31.18.19.9 小規模検証方法
+
+production 実装前に、既存の次の script を拡張する方針を **採用候補**とする。
+
+**`research_scripts/validate_uxsim_single_vehicle_network_wide_waiting_time_basis.py`**
+
+**理由:** CASE 1〜7 の原典検証が既にある。reference replay の定義、属性感度、識別値安全性が同じ場所にある。既存 CASE を回帰確認できる。新しい検証結果を同じ console-only 方針で確認できる。file 出力を発生させない。production 変更前に設計の欠陥を発見できる。検証内容は 4 方式共通の評価基盤であり、特定方式の trial に依存しない。
+
+**新規の別 validation script を作る案は現時点で不採用**とする。基礎検証が分散し、CASE 1〜7 との関係が追いにくくなり、同じ helper や条件を重複定義しやすい。
+
+**ただし:** script が過度に大きくなり、目的が追えなくなる場合には分割を再検討する。分割する場合も、**方式別ではなく機能別**に分ける。
+
+##### 31.18.19.10 CASE 8系列候補
+
+既存 CASE 1〜7 を変更せず、将来 **CASE 8 系列**として次を追加する候補とする。具体的な CASE 数と統合方法は具体設計段階で絞り込む。無意味に CASE を増やさない。**CASE 8K** が他 CASE へ統合できる場合は、独立 CASE にしなくてよい。
+
+- **8A:** 同じ物理経路、同じ Link 名列の複数 Vehicle。replay は 1 回。2 台目以降は同じ結果を使う
+- **8B:** 同じ物理経路、異なる Link 名列。replay は 1 回。audit identity は複数保持
+- **8C:** 異なる Link 順序。replay は別々に実行
+- **8D:** 異なる DELTAT。同じ評価処理内では混在させない。別 World または別評価として扱う
+- **8E:** 1 台に起点待ち。同じ **T_{\min,z}** を使い、待ち時間だけ **CW_z** へ反映
+- **8F:** DELTAN 不適合。replay 開始前に停止
+- **8G:** 空経路、未完走、不正 Link 値のいずれか。正式結果を出さず停止
+- **8H:** counters。評価 Vehicle 数、一意な物理経路数、replay 実行数、再利用数、audit identity 数の関係
+- **8I:** 同一評価を 2 回実行。2 回目は空の共有状態から開始。前回結果を持ち越さない
+- **8J:** Reference World object が評価終了後の共有結果へ保持されていないこと
+- **8K:** 4 方式を模した完走済み World または等価な方式ラベル。方式固有の制御記録がなくても共通評価が成立する。同じ物理条件と旅行時間なら、方式名により計算式が変わらない。方式名は集計・監査用であり、**T_{\min,z}** 算定を変えない
+
+##### 31.18.19.11 tests方針
+
+検証 script で共有動作が合格するまで、**正式 tests は追加しない。**
+
+検証合格後の候補:
+
+- 新機能専用の test file を作る
+- 既存の一般テストファイルへ散在させない
+- test 名は方式共通評価であることを示す
+- TVT-MP、FCFS、BATCH、signal の固有名を使わない
+- 小さな World で短時間に完了する
+- file 出力を行わない
+- 既存 Analyzer を必要としない
+- 4 方式へ同じ入口を使用できることを確認する
+
+**test file 名の候補:** **`tests/test_network_wide_waiting_time_evaluation.py`**
+
+正式名は production module 名と合わせて決定する。
+
+##### 31.18.19.12 package公開方針
+
+**初期の小規模検証:** 新 module を直接 import する。**`uxsim/__init__.py` を変更しない。**
+
+**production 機能が安定した後:** 4 方式の共通評価として一般利用するなら **`uxsim/__init__.py`** から公開する可能性。Analyzer から薄い窓口を追加する可能性。research 用途だけなら明示的 import を維持する可能性。
+
+**公開方法によって 4 方式のうち一部だけが利用可能になる構造にしない。** 共通 module を正本とし、方式別の薄い呼出し口を作る場合も計算本体を複製しない。
+
+公開方法は、検証後の判断事項として残す。
+
+##### 31.18.19.13 調査1/3〜3/3の結論
+
+**1/3 実装場所:** 4 方式共通の独立評価 module が有力。Analyzer、simulation 本体、いずれか 1 方式の専用処理へ直接入れない。
+
+**2/3 変更範囲:** 新 module を中心に小さくする。既存機能の変更を避ける。公開窓口は検証後に判断する。正式 test は共有動作検証後に追加する。方式別の重複実装を作らない。
+
+**3/3 小規模検証:** 既存 validation script を拡張する。CASE 1〜7 を保護する。同一条件の共有、異条件の分離、audit identity、counter、失敗停止、評価間非持越しを確認する。signalized UXsim、FCFS、BATCH、TVT-MP で共通利用できることも確認する。
+
+##### 31.18.19.14 次の段階
+
+**調査 1/3〜3/3 は完了**した。**直ちに production 実装へ進まない。**
+
+1. 今回の調査結果を独立確認する
+2. メモ 2 本を **commit・push** する
+3. 4 方式共通 module の class、record、summary、helper の具体設計
+4. 変更影響範囲を確定する
+5. 既存 validation script への **CASE 8** 追加設計
+6. 小規模検証用実装
+7. **py_compile**、static validation、CASE 1〜8 実行
+8. 検証合格後に production 実装判断
+9. 正式 tests
+10. 公開方法
+11. Vehicle 別 **CW_z**
+12. **ACWT**
+13. **ACWWT**
+14. Nonparticipating 固定 600 台
+15. signalized UXsim、FCFS、BATCH、TVT-MP の **4 方式共通検証**
+16. manual 一致
+17. 3,000 台 output
+18. 高速化
