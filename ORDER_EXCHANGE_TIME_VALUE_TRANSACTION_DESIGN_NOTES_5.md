@@ -11583,6 +11583,8 @@ T_{\min,z} = \text{uxsim\_reference\_minimum\_trip\_time\_s}(\text{actual\_route
 - **不要な制御属性**を signature へ **混入させない**
 - **最小旅行時間**へ **影響する属性**を **欠落させない**
 
+**最新参照（2026-11-04）:** **route signature 候補属性**の **感度検証**は **§31.18.13** で **完了**。**現時点**の **物理的必須属性**は **Link 順序**、**length**、**free_flow_speed**、**DELTAT**。**最新 cache key 候補**は **§31.18.13.10**。**最終 cache 設計**は **未完了**（本節の **候補リスト**は **検討過程の歴史的記録**として **残す**）。
+
 ##### 31.18.12.7 5ケースの確定結果
 
 | CASE | 概要 | analytical Σ(length/u) | replay T_{\min,z} | actual TT_z | CW_z | 結果 |
@@ -11637,6 +11639,9 @@ T_{\min,z} = \text{同一実走行経路の UXsim reference replay における 
 
 1. **検証 script** の **static validation**、**全 5 ケース**、**failure history** を **正本化**（本 **§31.18.12**）
 2. **route signature** に必要な **Link・World 属性**を **読取り専用**で **確定**
+
+**最新注記（2026-11-04）:** **route signature 候補属性**の **感度検証**（**CASE 6A〜6E-2**）は **完了**（**§31.18.13**）。**次**は **float key**、**audit identity**、**DELTAN=1 validation**、**reference 標準条件**、**cache lifecycle** の **設計**（**§31.18.13.11**）。
+
 3. **reference replay helper** の **設計**
 4. **memory cache** の **key・value・lifecycle** 設計
 5. 実 World **Vehicle ごと**の **actual route 抽出**
@@ -11658,3 +11663,271 @@ T_{\min,z} = \text{同一実走行経路の UXsim reference replay における 
 - Vehicle ごとに **無条件**で **reference replay** を **重複実行**
 - **route signature 検証前**に **cache** を **production** へ **実装**
 - **production** を **直接変更**して **定義検証**を **省略**
+
+#### 31.18.13 Reference replay route signature属性感度検証
+
+**検証スクリプト:** `research_scripts/validate_uxsim_single_vehicle_network_wide_waiting_time_basis.py`（**CASE 1〜5** は **変更なし**。**console のみ**、**file 出力なし**）。
+
+##### 31.18.13.1 目的
+
+**同一実走行経路**の **無交通 UXsim reference replay** を **route signature 単位**で **共有**するため、**物理的 T_{\min,z}** へ **必要な属性**と **不要な属性**を **分離**した。
+
+**追加した感度 CASE:**
+
+- **CASE 6A:** jam_density
+- **CASE 6B:** number_of_lanes
+- **CASE 6C:** Link 名
+- **CASE 6D:** DELTAT
+- **CASE 6E-1:** DELTAN 変更、**REACTION_TIME 固定**
+- **CASE 6E-2:** DELTAN 変更、**DELTAT 固定**
+
+**全体:** **All cases passed**（**CASE 1〜5** も **再合格**）。
+
+##### 31.18.13.2 共通検証条件
+
+感度 CASE では **原則**として次を使用した。
+
+- **3 Link 直列**
+- 各 Link **length = 200 m**
+- 各 Link **free_flow_speed = 60/3.6 m/s**
+- **Vehicle 1 台**、**departure timestep = 0**、**route 固定**
+- **他 Vehicle なし**、**congestion なし**
+- **signal なし**、**order-control なし**、**Node flow_capacity なし**、**user_function なし**
+- **file 出力なし**
+
+**capacity 経由影響**を **除外**する CASE では、
+
+\[
+\text{NON\_BINDING\_CAPACITY} = 1000000.0
+\]
+
+を **capacity_in** と **capacity_out** へ **明示的に設定**した。
+
+これにより、
+
+- **自由走行・離散時間境界**への **直接影響**
+- **capacity 経由**の **間接影響**
+
+を **分離**した。
+
+##### 31.18.13.3 CASE 6A: jam_density
+
+**変更:** jam_density = **0.05**、**0.12**、**0.45**（Link ごと）
+
+**固定:** **length**、**free_flow_speed**、**number_of_lanes = 1**、**DELTAN = 1**、**REACTION_TIME = 1**、**DELTAT = 1**、**Link 順序**、**route**、**非拘束 capacity**
+
+**結果:**
+
+| 量 | 値 |
+|----|-----|
+| actual travel_time | **37 s** |
+| reference replay | **37 s** |
+| CW_z | **0 s** |
+| CASE 2 との差 | **0 s** |
+| 判定 | **PASS** |
+
+**限定的結論:** **単車両**、**leader なし**、**capacity 非拘束**の reference replay では、**jam_density** は **物理的 T_{\min,z}** を **変えなかった**。**jam_density** は **派生 capacity** へ **影響し得る**ため、reference World では **capacity_in / out** を **非拘束値**へ **固定**する。**この条件**では **jam_density** を **物理 cache key** へ **含める必要はない**。
+
+##### 31.18.13.4 CASE 6B: number_of_lanes
+
+**変更:** number_of_lanes = **2**、**3**、**2**（Link ごと）
+
+**固定:** **length**、**free_flow_speed**、**jam_density**、**DELTAT = 1**、**DELTAN = 1**、**route**、**非拘束 capacity**、**Vehicle 1 台**（**leader なし**）
+
+**結果:**
+
+| 量 | 値 |
+|----|-----|
+| actual travel_time | **37 s** |
+| reference replay | **37 s** |
+| CW_z | **0 s** |
+| CASE 2 との差 | **0 s** |
+| 判定 | **PASS** |
+
+**限定的結論:** **単車両**、**leader なし**、**capacity 非拘束**の reference replay では、**number_of_lanes** は **物理的 T_{\min,z}** を **変えなかった**。**number_of_lanes** は **capacity** や **leader spacing** へ **影響し得る**が、**今回の reference World** では **それらを除外**している。**この条件**では **number_of_lanes** を **物理 cache key** へ **含める必要はない**。
+
+##### 31.18.13.5 CASE 6C: Link名
+
+**変更:** **l1、l2、l3** を使わず、**link_alpha**、**link_beta**、**link_gamma** へ変更。**物理条件**は **CASE 2** と **同一**（**CASE 6C** は **UXsim 既定 capacity**、**NON_BINDING_CAPACITY なし**）。
+
+**結果:**
+
+| 量 | 値 |
+|----|-----|
+| actual travel_time | **37 s** |
+| reference replay | **37 s** |
+| CW_z | **0 s** |
+| CASE 2 との差 | **0 s** |
+| 判定 | **PASS** |
+
+**結論:**
+
+- **Link 名**は **物理的 T_{\min,z}** へ **影響しない**
+- **Link 名**は **物理 cache key** の **必須属性ではない**
+
+**ただし** Link 名は **監査情報**として **有用:**
+
+- **route 対応確認**
+- **debug**
+- **cache 衝突診断**
+- **人間による経路確認**
+- **出力監査**
+
+したがって **物理 signature** と **audit identity** を **分離**する。
+
+##### 31.18.13.6 CASE 6D: DELTAT
+
+**変更:** **DELTAN = 1** を維持、**REACTION_TIME = 0.5 s**、**DELTAT = 0.5 s**
+
+**結果:**
+
+| 量 | 値 |
+|----|-----|
+| actual travel_time | **36 s** |
+| 同一 DELTAT の reference replay | **36 s** |
+| CW_z | **0 s** |
+| DELTAT = 1 の **診断 reference**（**CW_z に不使用**） | **37 s** |
+| 判定 | **PASS** |
+
+**結論:**
+
+- **DELTAT** は **物理的 T_{\min,z}** へ **影響する**
+- **actual World** と **reference World** で **DELTAT** を **一致**させる **必要がある**
+- **DELTAT** は **物理 cache key** の **必須属性**
+
+**DELTAT** が **異なる reference 結果**を **CW_z 算出**へ **使用してはならない**。
+
+##### 31.18.13.7 CASE 6E-1: DELTAN変更、REACTION_TIME固定
+
+**条件:** **DELTAN = 2**、**REACTION_TIME = 1 s**、**DELTAT = 2 s**
+
+**結果:**
+
+| 量 | 値 |
+|----|-----|
+| actual travel_time | **36 s** |
+| reference replay | **36 s** |
+| CW_z | **0 s** |
+| 判定 | **PASS** |
+
+**解釈:**
+
+- **REACTION_TIME 固定**で **DELTAN** を変えたため **DELTAT も変化**した
+- **この結果**を **DELTAN 単独**の効果として **読まない**
+- **DELTAN 単独影響**は **CASE 6E-2** で **確認**する
+
+##### 31.18.13.8 CASE 6E-2: DELTAN変更、DELTAT固定
+
+**条件:** **DELTAN = 2**、**REACTION_TIME = 0.5 s**、**DELTAT = 1 s**、**capacity_in / out 非拘束**
+
+**結果:**
+
+| 量 | 値 |
+|----|-----|
+| actual travel_time | **37 s** |
+| reference replay | **37 s** |
+| CW_z | **0 s** |
+| CASE 2 との差 | **0 s** |
+| 判定 | **PASS** |
+
+**限定的結論:** **単車両**、**leader なし**、**capacity 非拘束**、**DELTAT 固定**の条件では、**DELTAN** は **物理的 T_{\min,z}** を **変えなかった**。
+
+**ただし** **DELTAN** は **platoon size** であり、**capacity check** や **leader spacing** へ **影響し得る**。**一般的な signature** から **完全に除外**できるかは **未確定**。
+
+**本研究**では **FCFS・BATCH・TVT-MP** が **DELTAN = 1** を **要求**するため、**当面**は次とする。
+
+- **評価対象 World** の **DELTAN = 1** を **前提条件**として **検証**
+- **reference World** も **DELTAN = 1**
+- **DELTAN** を **可変一般化しない**
+- **cache key 最小化**のため **無断で除外**するのではなく、**World 前提条件**として **固定**する
+
+##### 31.18.13.9 属性分類
+
+**1. 物理的 T_{\min,z} に必須と確認済み:**
+
+- **Link 順序**
+- 各 Link の **length**
+- 各 Link の **free_flow_speed**
+- **DELTAT**
+
+**2. 今回の reference 条件では物理的 T_{\min,z} を変えなかった:**
+
+- **jam_density**
+- **number_of_lanes**
+- **Link 名**
+- **DELTAN**（**DELTAT 固定・単車両・capacity 非拘束**に **限定**）
+
+**3. Reference World で待ち要因除外のため固定:**
+
+- **capacity_in = NON_BINDING_CAPACITY**
+- **capacity_out = NON_BINDING_CAPACITY**
+- **signal なし**、**order-control なし**、**Node flow_capacity なし**
+- **Node user_function なし**、**Link user_function なし**
+- **Vehicle 1 台**、**route 固定**
+
+**4. 物理計算には不要だが監査・cache 識別に有用:**
+
+- **Link 名列**
+
+**5. 未確定:**
+
+- **production 用 cache key** の **最終形式**
+- **float 値**の **正規化または丸め**
+- **cache lifecycle**
+- **Link 名**を **物理 key** と **別 audit field** へ持つ **具体的方法**
+- **DELTAN** を **1 以外**へ **一般化**する場合の **扱い**
+
+##### 31.18.13.10 物理cache key候補
+
+**現時点の有力候補:**
+
+```
+(
+    DELTAT,
+    (
+        (length_1, free_flow_speed_1),
+        (length_2, free_flow_speed_2),
+        ...
+    ),
+)
+```
+
+**重要:**
+
+- **Link 順序**を **維持**する
+- **Link 名**を **物理値**として **扱わない**
+- **float** を **無断で丸めない**
+- **actual World** から取得した **length** と **free_flow_speed** の **値**を **使用**する
+- **production 実装前**に、**float key** の **安定性**を **検討**する
+- **DELTAN = 1** を **World 前提条件**として **独立検証**する
+- **Link 名列**は **audit identity** として **別保持**する **候補**
+
+**本小節**で **cache** を **実装しない**。
+
+##### 31.18.13.11 次の作業
+
+1. **float 値**を **物理 cache key** へ使う **方法**を **確定**
+2. **audit identity** としての **Link 名列**の **保持方法**を **確定**
+3. **DELTAN = 1 前提**の **validation 方法**を **確定**
+4. **reference World 標準条件**を **確定**
+5. **cache key**、**cache value**、**cache lifecycle** を **設計**
+6. **reference replay helper** を **設計**
+7. **小規模 route signature 重複 case** で **cache hit** を **検証**
+8. **Vehicle 別 CW_z** 算出
+9. **ACWT** 算出
+10. **ACWWT** 算出
+11. **Nonparticipating 固定 600 台**
+12. **4 方式共通検証**
+13. **小規模 manual 一致確認**
+14. **3,000 台 output** 適用
+15. **その後**に **高速化調査**
+
+**禁止:**
+
+- **jam_density** や **number_of_lanes** を **根拠なく物理 key** へ **追加**
+- **Link 名**を **物理属性**として **扱う**
+- **DELTAT** を **key** から **落とす**
+- **float 値**を **根拠なく丸める**
+- **DELTAN 一般化**を **検証なし**に **採用**
+- **reference World** へ **capacity 待ち**を **残す**
+- **cache 設計前**に **production** へ **実装**

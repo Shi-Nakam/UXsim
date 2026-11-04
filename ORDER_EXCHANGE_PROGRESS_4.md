@@ -1620,6 +1620,8 @@ TSE完全PDFまたは2009年overview chapter全文を別経路で入手した場
 
 **2026-11-04 追記（reference replay 検証完了）:** **実装・評価側**の最新再開地点は **§21.9.1**。**詳細正本**は **§31.18.12**（**T_{\min,z}** = **reference replay**）。
 
+**2026-11-04 追記（route signature 属性感度検証完了）:** **実装・評価側**の最新再開地点は **§21.9.2**。**詳細正本**は **§31.18.13**。
+
 ### 21.9 ACWT・ACWWTの方式共通network定義への訂正
 
 **詳細技術正本:** `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_5.md` **§31.18**
@@ -1716,6 +1718,8 @@ TSE完全PDFまたは2009年overview chapter全文を別経路で入手した場
 
 **詳細正本:** `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_5.md` **§31.18.12**
 
+**最新注記（2026-11-04）:** **route signature 候補属性**の **感度検証**は **完了**（**§21.9.2**、**§31.18.13**）。**下記 1〜11** は **感度検証前**の **再開順序**（**歴史的記録**）。**今後**は **§21.9.2** の **再開順序**を **優先**する。
+
 **次の再開順序:**
 
 1. **route signature** に必要な **属性の確定**
@@ -1729,5 +1733,53 @@ TSE完全PDFまたは2009年overview chapter全文を別経路で入手した場
 9. **小規模 manual 一致確認**
 10. **3,000 台 output** 適用
 11. **その後**に **高速化調査**
+
+#### 21.9.2 Reference replay route signature属性感度検証完了
+
+**検証スクリプト:** `research_scripts/validate_uxsim_single_vehicle_network_wide_waiting_time_basis.py`
+
+**実施:**
+
+- **CASE 6A〜6E-2** を **追加実行**、**全ケース合格**
+- **CASE 1〜5** も **再合格**（**All cases passed**）
+- **production**、**tests**、**当該 script 以外**は **未変更**
+- **cache 未実装**、**console 検証**、**file 出力なし**
+
+**感度結果（要約）:**
+
+- **jam_density:** **非拘束 capacity** 条件では **物理 T_{\min,z} へ影響なし**（**6A**、replay **37 s**）
+- **number_of_lanes:** **leader なし・非拘束 capacity** では **影響なし**（**6B**、replay **37 s**）
+- **Link 名:** **物理影響なし**（**6C**）；**監査・debug・cache 衝突診断**には **有用**
+- **DELTAT:** **必須**（**6D**、actual/reference **36 s**、**DELTAT=1 診断 reference 37 s**）
+- **DELTAN:** **DELTAT 固定**・**非拘束 capacity** では **影響なし**（**6E-2**、**37 s**）；**6E-1** は **DELTAT も変化**するため **DELTAN 単独効果として読まない**
+- **本研究**では **DELTAN = 1** を **World 前提条件**として **維持**（**reference** も **DELTAN = 1**）
+
+**reference World 待ち要因除外（感度 CASE 共通方針）:**
+
+- **capacity_in / out = 1000000.0**（**NON_BINDING_CAPACITY**）を **設定する CASE**
+- **signal・order-control・Node flow_capacity・user_function なし**
+- **Vehicle 1 台**、**route 固定**
+
+**現時点の物理 cache key 候補:** **DELTAT** + **(length, free_flow_speed) の Link 順序列**（**Link 名は物理 key に含めない**）。**詳細**は **§31.18.13.10**。
+
+**詳細正本:** `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_5.md` **§31.18.13**
+
+**次の再開順序:**
+
+1. **float key**（**丸め・正規化**）
+2. **Link 名 audit identity**
+3. **DELTAN = 1 validation**
+4. **reference 標準条件**
+5. **cache 設計**（**key / value / lifecycle**）
+6. **replay helper 設計**
+7. **cache hit 小規模検証**
+8. **CW_z**
+9. **ACWT**
+10. **ACWWT**
+11. **Nonparticipating 固定 600 台**
+12. **4 方式**（FCFS、BATCH、TVT-MP、signalized UXsim）
+13. **manual 一致**
+14. **3,000 台 output**
+15. **高速化調査**
 
 **歴史的記録:** §21.2、§21.4、§21.5、§21.7 の旧記述は **削除しない**。Visit 数ベース定義の最新参照先は **本 §21.9** および **§31.18**。
