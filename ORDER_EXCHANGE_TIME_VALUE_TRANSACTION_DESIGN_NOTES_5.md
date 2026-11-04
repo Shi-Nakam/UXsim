@@ -13325,7 +13325,7 @@ production 実装前に、既存の次の script を拡張する方針を **採�
 
 **最新参照（2026-11-04）:** **4 方式共通評価**の **production 具体設計**は **§31.18.20** で **完了**。**production 実装開始まで残り 2 工程**。**次**は **2/3 CASE 8 小規模検証**。**production 未実装**。
 
-**最新契約（2026-11-04）:** **`true_vot_per_second`**、**`evaluation_cohort`**、**timestep 差を正本とする CW_z**、**Analyzer なし reference 専用 runner**、**同一 Vehicle plan の 4 方式 paired 比較**は **§31.18.22**。**追加確認 4/4 完了**。**最新正本**は **§31.18.22**。
+**最新契約（2026-11-04）:** **`true_vot_per_second`**、**`evaluation_cohort`**、**timestep 差を正本とする CW_z**、**Analyzer なし reference 専用 runner**、**同一 Vehicle plan の 4 方式 paired 比較**は **§31.18.22**。**追加確認 4/4 完了**。**§31.18.22** は **production 実装前の最終統合契約**として **歴史的に有効**。**production 実装後の現行状態**は **§31.18.23** を **優先**する。
 
 #### 31.18.20 4方式共通network-wide waiting time評価のproduction具体設計
 
@@ -13695,11 +13695,11 @@ CASE を増やしすぎず、次の **6 群**へ整理する。既存 CASE 1〜7
 - **3/3:** 検証結果の独立確認、production 実装可否判断。問題がなければ production 実装開始。問題があれば CASE 8 で判明した問題だけを修正して再確認
 - **その後:** production 実装開始
 
-**最新契約（2026-11-04）:** 本節 **§31.18.20** の **`true_vot`**、**`participation_category`**、秒差中心の **CW_z**、**`near_zero_negative_cumulative_waiting_time_count`**、reference runner 未確定は、**§31.18.22** で **読み替え**。**最新正本**は **§31.18.22**。**production 実装前の追加確認 4/4 完了**。**production 未実装**。
+**最新契約（2026-11-04）:** 本節 **§31.18.20** の **`true_vot`**、**`participation_category`**、秒差中心の **CW_z**、**`near_zero_negative_cumulative_waiting_time_count`**、reference runner 未確定は、**§31.18.22** で **読み替え**。**§31.18.22** は **production 実装前の最終契約**として **有効**。**production 実装・検証完了後**は **§31.18.23** を **優先**する。
 
 #### 31.18.22 production実装前追加確認4項目の最終統合契約
 
-**位置付け:** production 実装前に残っていた **追加確認 4 項目**を **すべて確定**し、**§31.18.20** の曖昧点を **統合**する。**新しい工程区分は追加しない**。**production 実装にはまだ着手しない**。
+**位置付け:** production 実装前に残っていた **追加確認 4 項目**を **すべて確定**し、**§31.18.20** の曖昧点を **統合**する。**新しい工程区分は追加しない**。**本節執筆時点では production 実装にはまだ着手しない**（**現行の実装・検証完了**は **§31.18.23** を **優先**する）。
 
 ##### 31.18.22.1 目的と追加確認4/4完了
 
@@ -14056,3 +14056,310 @@ cumulative_waiting_time_timesteps * DELTAT
 - 各方式の **制御処理**
 - 既存 **trial script**
 - 既存 **research output writer**
+
+**最新参照（2026-11-04、production 実装・独立検証完了）:** **4 方式共通 network-wide ACWT・ACWWT** の **production module** と **専用 test** は **§31.18.23**。**§31.18.22** は **実装前の最終契約**として **維持**する。**現行の実装内容・検証結果・未実装事項**は **§31.18.23** を **優先**する。
+
+#### 31.18.23 network-wide ACWT・ACWWT production moduleと専用testの実装・独立検証完了
+
+**位置付け:** **§31.18.22** で確定した **production 実装前の最終統合契約**に基づき、**方式共通評価 module** と **専用 test** を **新規作成**し、利用者による **Terminal 独立確認**まで **完了**した。**§31.18.22 の計算式・Reference World 条件・timestep 正本・true VOT 単位・evaluation cohort 契約は変更していない**。**新しい設計追加は行わない**。**実装済みコードと検証済み事実**を記録する。
+
+**§31.18.22 との関係:** **§31.18.22** は **production 着手前**の **最新正本**であった。**本節**は **実装後**の **最新正本**である。**矛盾時**は **§31.18.22 の契約を維持**し、**実装が §31.18.22 と一致した**ことを **独立検証**で **確認**した。**§31.18.20** 以前の **`true_vot`** / **`participation_category`** 読み替えは **§31.18.22** のまま **有効**。
+
+##### 31.18.23.1 実装範囲
+
+**新規作成のみ**（既存 production・test・trial・validation script・制御処理は **変更なし**）。
+
+- **`uxsim/network_wide_waiting_time_evaluation.py`**（**1,407 行**）
+- **`tests/test_network_wide_waiting_time_evaluation.py`**（**933 行**）
+- **合計 2,340 行**
+
+**行数が大きい理由:** **network-wide waiting time**、**CW_z**、**ACWT**、**ACWWT**、**Reference replay**、**Reference World**、**Reference 専用 runner**、入力 **validation**、**physical_route_key**、**route_audit_identity**、**true_vot_per_second**、**evaluation_cohort** 集計、**counter 整合**、**simulation object 非保持**、異常停止、**専用 test** の正常系・異常系を、**短縮や高度な Python 技巧より処理順序の明示**で記述したためである。**Python 初心者向け可読性**を **研究用コードの正しさ**と **並列**に **優先**した。
+
+**初期公開:** **`uxsim/__init__.py` からは公開しない**（**package 公開**は **未実装**）。
+
+##### 31.18.23.2 新規ファイル
+
+| ファイル | 役割 |
+|---|---|
+| `uxsim/network_wide_waiting_time_evaluation.py` | **4 方式共通** **production 実装** |
+| `tests/test_network_wide_waiting_time_evaluation.py` | **公開入口契約**の **専用 test**（**51 件**） |
+
+**最終 diff 確認時点:** **tracked 変更なし**。**新規未追跡**は **上記 2 ファイルのみ**（メモ更新前）。
+
+##### 31.18.23.3 公開入口
+
+**関数:** **`evaluate_network_wide_waiting_time`**
+
+**対象方式（監査用 `method_name`、計算式は共通）:**
+
+- **`signalized_uxsim`**
+- **`fcfs`**
+- **`batch`**
+- **`tvt_mp`**
+
+**主な引数:**
+
+- **`real_world`**
+- **`method_name`**
+- **`evaluated_vehicle_names`**
+- **`true_vot_per_second_by_vehicle_name`**
+- **`evaluation_cohort_by_vehicle_name`**
+- **optional** **`method_specific_participation_status_by_vehicle_name`**
+- **optional** **`vehicle_plan_digest`**
+- **optional** **`comparison_metadata`**
+
+**基本契約（実装済み）:**
+
+- **完走済み real World** のみ評価
+- **real World を変更しない**
+- **real World の simulation を再実行しない**
+- **評価ごとに新しい局所 `_EvaluationContext`**
+- **module global の可変 cache なし**
+- **World へ評価状態を保存しない**
+- **file 出力なし**
+- **大量 console 出力なし**
+- **Reference replay** は **同一評価内**の **physical_route_key** 共有のみ
+- **正式結果に simulation object を保持しない**
+
+**Vehicle 処理順:** **`evaluated_vehicle_names` の順**。**cohort 集計順**も **初出順**。
+
+##### 31.18.23.4 dataclassと内部context
+
+**公開・返却用（frozen dataclass 等）:**
+
+- **`ReferenceReplayResult`**
+- **`VehicleWaitingTimeRecord`**
+- **`EvaluationCounters`**
+- **`CohortWaitingTimeSummary`**
+- **`NetworkWideWaitingTimeSummary`**
+- **`NetworkWideWaitingTimeEvaluationResult`**
+
+**内部のみ:** **`_EvaluationContext`**（**呼出しごとに新規**。**module global・real World・次回評価へ保存しない**）。
+
+**返却の安全化（技巧のためではなく契約のため）:**
+
+- **frozen dataclass**
+- **tuple**
+- **`MappingProxyType`**（**Reference 結果辞書**、**audit identity 辞書**、**comparison_metadata** の **トップレベル変更防止**）
+
+##### 31.18.23.5 入力validation
+
+**ValueError（代表）:** **DELTAN** が **厳密な Python int の 1** でない（**`True` 拒否**）、**DELTAT** 不正、**method_name** 不正、**evaluated_vehicle_names** 空・重複・不存在、**true_vot_per_second** 不足・**None**・**bool**・非数値・非有限・負、**evaluation_cohort** 不足・空文字、**optional status** 指定時の不足、**未完走**、**空 route**、**Link** 不正、**length** / **link.u** 不正、**timestep** が **non-bool int** でない、**actual arrival < departure**。
+
+**RuntimeError（代表）:** **Reference** 未完走、**route** と **physical key** 不一致、**未検証 Reference**、**DELTAT** 不一致、**負の cumulative waiting timesteps**、**counter** / **summary** / **cohort** 矛盾、**simulation object 混入**。
+
+**途中失敗:** **暫定 summary や部分正式結果を返さない**。
+
+##### 31.18.23.6 physical_route_key
+
+```text
+(
+    float(DELTAT),
+    (
+        (float(link.length), float(link.u)),
+        ...
+    ),
+)
+```
+
+- **`Vehicle.traveled_route()`** を **actual route 正本**
+- **順序維持**、**float 丸めなし**、**Link 名・DELTAN・文字列 key・set 不使用**
+- **speed は `link.u`**
+
+##### 31.18.23.7 route_audit_identity
+
+```text
+(str(link.name), ...)
+```
+
+- **同一 actual route** から構築
+- **初出順**、**完全一致 tuple の重複登録なし**
+- **Link 名のみ異なる**場合も **Reference replay は再実行しない**
+
+##### 31.18.23.8 Reference replay共有
+
+- **同一評価内**、**同一 physical_route_key** で **Reference replay 1 回**
+- **2 台目以降**は **検証済み `ReferenceReplayResult` を再利用**
+- **失敗した Reference** は **共有 dict へ保存しない**
+- **評価間非持越し**（**global cache なし**）
+
+**counter（正常終了時整合）:** **`evaluated_vehicle_count`**、**`unique_physical_route_count`**、**`reference_replay_run_count`**、**`reference_reuse_count`**、**`unique_audit_identity_count`**、**`duplicate_audit_identity_observation_count`** 等（**§31.18.22** と同型）。**`reference_reuse_count = evaluated − unique physical`** 等を **終了時に検証**。
+
+##### 31.18.23.9 Reference World条件
+
+**§31.18.22** / **§31.18.17** と **一致**（実装済み）。
+
+- **`finalize_scenario(create_analyzer=False)`**
+- **`DELTAN=1`**、**`REACTION_TIME=real_world.DELTAT`**
+- **`random_seed=0`**、**`hard_deterministic_mode=True`**
+- **print/save/show/show_progress=0**
+- **直列 Node n+1**、**signal=[0]**、**order_control なし**、**flow_capacity なし**
+- **Link:** **lanes=1**、**jam_density=0.2**、**capacity_in/out=1000000.0**、**内部名 reference_link_***
+- **Vehicle 1 台**、**departure timestep=0**、**enforce_route**
+
+**引き継がないもの:** 信号・各方式制御・実 World 混雑・他 Vehicle・actual departure 等（**§31.18.22** 同様）。
+
+##### 31.18.23.10 Reference専用runner
+
+**通常 `exec_simulation()` は使用しない**（**Analyzer なし World** の **UXsim 正式制約**。**§31.18.22.2** の **原典確認結果**と **一致**）。
+
+**限定条件:** 一本道、**Vehicle 1 台**、route 固定、信号なし、order-control なし、他 Vehicle なし、**user_function なし**、**Reference replay 専用**。
+
+**主要更新順序（現行 `exec_simulation()` 原典と独立照合済み）:**
+
+1. **`Link.update()`**
+2. **`Node.generate()`**
+3. **`Node.update()`**
+4. **`Node.transfer()`**
+5. **`Vehicle.carfollow()`**
+6. **living Vehicle の `Vehicle.update()`**
+7. **route search** と **route preference 更新**
+8. **`World.TIME` 更新**
+
+**除外:** TVT-MP driver、downstream boundary observer、progress、World **user_function**、**simulation_terminated()**、**Analyzer.basic_analysis()** 等。
+
+**ループ範囲:** **`T=0` から `TSIZE-1`**（通常 **`exec_simulation()`** と **同じ実処理対象**）。**Reference Vehicle が `end` になった timestep で停止**。**off-by-one 修正は不要**（独立確認済み）。
+
+**完走上限（T_min,z 算定式ではない）:**
+
+```text
+sum(length / u) + (link_count + 2) * DELTAT + 60.0  [秒]
+```
+
+##### 31.18.23.11 Reference専用logging
+
+**誤解を避ける正確な記述:**
+
+- **「`log_t_link` だけを残す」ではない**
+- **UXsim 本体の通常 Vehicle 走行記録と `log_t_link` を維持**する **Reference 専用 `record_log`** へ **差し替え**
+- **`Vehicle.update()`** から **安全に呼べる**（**`create_analyzer=False`** の **Reference World** 用）
+- **除外するのは Analyzer への average_speed 関連書込みのみ**
+
+**維持する主な記録:**
+
+- **`log_t`**, **`log_state`**, **`log_link`**, **`log_x`**, **`log_s`**, **`log_v`**, **`log_lane`**, **`log_t_link`**
+
+**除外:**
+
+- **`W.analyzer.average_speed_count`**
+- **`W.analyzer.average_speed`**
+
+**理由:** **`Vehicle.traveled_route()`** は **`log_t_link`** を使用する（**UXsim 原典独立確認**）。**本体 `record_log()`** に **近い明示的処理**とした。
+
+##### 31.18.23.12 timestepを正本とするCW_z、ACWT、ACWWT
+
+**§31.18.22.6 と一致**（実装済み）。
+
+```text
+cumulative_waiting_time_timesteps
+=
+(actual_arrival_timestep - actual_departure_timestep)
+-
+(reference_arrival_timestep - reference_departure_timestep)
+
+cumulative_waiting_time_seconds
+=
+cumulative_waiting_time_timesteps * real_world.DELTAT
+```
+
+- **負の timestep 差** → **RuntimeError**（**tolerance なし**、**0 へ丸めない**）
+- **`near_zero_negative_cumulative_waiting_time_count` は作らない**
+- **`Vehicle.travel_time`** は **整合確認**のみ（**差分の正本にしない**）
+
+**true VOT:** **`true_vot_per_second`**。**秒値へ直接乗算**。**3600 換算なし**。**0 許容**。
+
+**ACWT / ACWWT:** 全体は **`evaluated_vehicle_count`** を分母。**cohort 別平均**は **その cohort の Vehicle 数**を分母。
+
+##### 31.18.23.13 evaluation cohort集計
+
+- **`evaluation_cohort`:** TVT-MP で割り当てた集合を **他方式でも同じ Vehicle 名**で追跡（例: **`tvt_participating_cohort`**、**`tvt_nonparticipating_cohort`**）
+- **`method_specific_participation_status`:** **任意**（共通式の **必須入力にしない**）
+- **summary:** 全体＋**cohort 別**（**vehicle_count**、**total/average CW**、**total/average weighted**）
+- **cohort 順:** **`evaluated_vehicle_names` 初出順**
+
+**nonparticipating 固定 Vehicle 集合**の **正式 4 方式比較**は **本節の scope 外**（**未実装**）。
+
+##### 31.18.23.14 simulation object非保持
+
+**正式結果に含めない:** Reference World/Vehicle/Node/Link、**Analyzer**、**real World**、actual Vehicle/Link、**`_EvaluationContext`**。
+
+**返却前検査:** **dataclass**、**Mapping**、**list**、**tuple** を辿り、**World / Vehicle / Node / Link / Analyzer** があれば **RuntimeError**。**id による循環検出**（**短縮のためではなく混入防止契約**）。
+
+##### 31.18.23.15 専用testの対象
+
+**ファイル:** **`tests/test_network_wide_waiting_time_evaluation.py`**
+
+**件数:** **51 passed**（**16.02 s**、利用者 **pytest -q**）
+
+**カバー（代表）:** Reference **共有**、**Link 名のみ差**、**audit identity**、**physical key 分離**（順序・length・u・**DELTAT**）、**CW_z=0**、**起点待ち 4 s**、**負 CW_z 停止**、**未検証 Reference 非包含**、**4 方式同一計算**、**true VOT**、**cohort**、入力 **validation**、**評価間非持越し**、**global cache なし**、**side effect なし**、**CASE 8 主要契約**（**script 実行はしない**）。
+
+##### 31.18.23.16 独立確認結果
+
+**利用者 Terminal 確認（Cursor 外）:**
+
+| 確認 | 結果 |
+|---|---|
+| **変更範囲** | tracked 変更なし。**新規未追跡 2 ファイルのみ**（メモ更新前） |
+| **`python -m py_compile`**（上記 2 module） | **成功** |
+| **`pytest -q` 専用 test** | **51 passed**, **16.02 s** |
+| **CASE 1〜8 validation script** | **All cases passed.** |
+
+##### 31.18.23.17 UXsim原典との照合結果
+
+**利用者が `Vehicle.traveled_route()`、`Vehicle.record_log()`、`World.finalize_scenario()`、`World.exec_simulation()` を独立確認:**
+
+1. **`traveled_route()`** は **`log_t_link`** を使用
+2. **`record_log()`** の **Analyzer 依存**は主に **average_speed** 書込み
+3. **`create_analyzer=False`** では **`W.analyzer` 属性を作らない**
+4. **Analyzer なし World** を **通常 `exec_simulation()`** で実行しては **ならない**
+5. **Reference 専用 runner** の更新順序は **現行 exec_simulation()** と **一致**
+6. **両者とも `T=0`〜`TSIZE-1`** を実処理対象
+7. **`end` で停止**する現方式に **off-by-one 修正不要**
+
+##### 31.18.23.18 Python初心者向け可読性の確認
+
+**独立評価:** **if / for / while / 中間変数**中心。**Vehicle 1 台処理**、**Reference World 構築**、**runner 更新順**、**CW_z 計算**、**集計**、**異常停止**、**test の準備→実行→期待**が **追える**。
+
+**局所的に高度:** **`MappingProxyType`**、**再帰的 simulation object 検査**、**循環 id 検出** → **安全契約のため**。**短縮再構成は行わない**。
+
+##### 31.18.23.19 CASE 8歴史的記述の扱い
+
+**`research_scripts/validate_uxsim_single_vehicle_network_wide_waiting_time_basis.py`** の **CASE 8 summary** に **`Production implementation has not started.`** が **残る**。
+
+- **CASE 8 script 作成時点**の **歴史的表示**
+- **今回 script は変更しない**（**CASE 1〜8 回帰**維持）
+- **現行状態**は **本 §31.18.23** および **進捗 §21.9.12** を **優先**
+
+##### 31.18.23.20 未実装事項
+
+**本節完了範囲外（完了扱いしない）:**
+
+- **`uxsim/__init__.py` package 公開**
+- **Analyzer 薄い呼出し口**
+- **CSV / JSON / DataFrame**、**research output 統合**
+- **既存 trial 組込み**
+- **3,000 台**からの **ACWT・ACWWT 正式算出**
+- **signalized UXsim / FCFS / BATCH / TVT-MP の正式 4 方式比較**
+- **nonparticipating 固定 Vehicle 集合**の **正式 4 方式比較**
+- **performance 最適化**、**並列化**、**persistent cache**
+
+##### 31.18.23.21 次の再開地点
+
+1. **メモ更新後**、利用者が **対象 4 ファイル**（**2 code + 2 memo**）を **Terminal で確認**
+2. **`py_compile`**
+3. **専用 pytest**
+4. **CASE 1〜8 回帰**
+5. **`git diff`**
+6. **`git add`**
+7. **cached diff 確認**
+8. **`commit`**（**document を含む**。メッセージは **利用者が diff 確認後に確定**）
+9. **commit 結果・最新 commit・残存変更**
+10. **別指示で push**
+11. **push 後 status・最新 commit・local/remote 一致**
+
+**commit 候補（利用者確定）:**
+
+- `uxsim/network_wide_waiting_time_evaluation.py`
+- `tests/test_network_wide_waiting_time_evaluation.py`
+- `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_5.md`
+- `ORDER_EXCHANGE_PROGRESS_4.md`

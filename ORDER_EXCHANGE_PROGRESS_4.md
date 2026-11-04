@@ -12,6 +12,7 @@
 - **2026-11-03 最新参照:** 3,000 台 full-completion trial の **確定結果**、**総合評価指標**、および **次の実装・高速化課題**について、TVT-MP 実装・評価側の最新再開地点は **§21**、詳細技術正本は `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_5.md` **§31**。
 - **§19・§30** は、長期 trial の **実行前・実行中** および **監査準備**の **歴史的記録**として維持する。
 - **文献調査側**の最新再開地点は **§20**。
+- **2026-11-04 追記（network-wide ACWT・ACWWT production 完了）:** **4 方式共通評価**の **production 実装・専用 test・独立検証**の **最新再開地点**は **§21.9.12**。**詳細技術正本**は `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_5.md` **§31.18.23**。**§31.18.22** と **§21.9.11** は **production 実装前の最終契約・再開地点**として **歴史的に有効**。**現行状態**は **§31.18.23** / **§21.9.12** を **優先**する。
 
 **検索語:** ORDER_EXCHANGE_PROGRESS_4、進捗第4巻、TVT-MP、横並び表示、事後分析、監査出力、full-run audit helper、nonparticipating 20％、全車完走、交通解消、3,000台、T=999、departure-end、4交差点、T=382、初回Actual arrival、Actual arrival上書き、Baseline arrival一致、first divergenceなし、T=402、一時skip、clearance、C順位183、Actual通過順位177、selected=False、baseline fallback、leading nonparticipating、順位確定源、完了、最新再開地点、Git対象、commit、push。
 
@@ -1636,7 +1637,9 @@ TSE完全PDFまたは2009年overview chapter全文を別経路で入手した場
 
 **2026-11-04 追記（production 実装前 1/3 完了）:** **最新再開地点**は **§21.9.9**。**詳細正本**は **§31.18.20**。**production 実装開始まで残り 2 工程**。**production 未実装**。
 
-**2026-11-04 追記（production 実装前追加確認 4/4 完了）:** **最新再開地点**は **§21.9.11**。**詳細正本**は **§31.18.22**。**production 実装前の追加確認は残件 0**。**production 未実装**。
+**2026-11-04 追記（production 実装前追加確認 4/4 完了）:** **最新再開地点**は **§21.9.11**。**詳細正本**は **§31.18.22**。**production 実装前の追加確認は残件 0**。**当時は production 未実装**（**現行**は **§21.9.12**）。
+
+**2026-11-04 追記（network-wide ACWT・ACWWT production module・専用 test 実装・独立検証完了）:** **最新再開地点**は **§21.9.12**。**詳細正本**は **§31.18.23**。
 
 ### 21.9 ACWT・ACWWTの方式共通network定義への訂正
 
@@ -2058,7 +2061,7 @@ TSE完全PDFまたは2009年overview chapter全文を別経路で入手した場
 
 **詳細正本:** `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_5.md` **§31.18.22**
 
-**確定（設計統合のみ。production 未実装）:**
+**確定（設計統合のみ。本節執筆時点では production 未実装）:**
 
 - **reference 専用 runner** が必要。**通常 `exec_simulation()`** は **Analyzer なし World** に **使用しない**
 - **true VOT** は **`true_vot_per_second`**。**CW_z 秒値へ直接乗算**。**3600 換算なし**
@@ -2071,12 +2074,74 @@ TSE完全PDFまたは2009年overview chapter全文を別経路で入手した場
 - **負の timestep 差**は **tolerance なし**で **停止**
 - **`near_zero_negative`** 区分は **廃止**
 
-**production 実装前:**
+**production 実装前（本節執筆時点）:**
 
 - **追加確認 4/4 完了**
 - **残件 0**
-- **production 未実装**
+- **production 未実装**（**完了後**は **§21.9.12**）
 
-**最新再開地点:** **§21.9.11**。**詳細正本**は **§31.18.22**。**次**は **独立確認**、**commit・push**、**production 実装**。
+**最新再開地点:** **§21.9.11**。**詳細正本**は **§31.18.22**。**当時の次**は **独立確認**、**commit・push**、**production 実装**（**歴史的記録**）。**production 実装・検証完了後**の **最新再開地点**は **§21.9.12**。**詳細正本**は **§31.18.23**。
 
 **歴史的記録:** §21.2、§21.4、§21.5、§21.7 の旧記述は **削除しない**。Visit 数ベース定義の最新参照先は **本 §21.9** および **§31.18**。
+
+#### 21.9.12 network-wide ACWT・ACWWT production moduleと専用testの実装・回帰確認完了
+
+**詳細技術正本:** `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_5.md` **§31.18.23**
+
+**新規作成（既存 production・test・trial・validation script は変更なし）:**
+
+- `uxsim/network_wide_waiting_time_evaluation.py`（**1,407 行**）
+- `tests/test_network_wide_waiting_time_evaluation.py`（**933 行**）
+
+**公開入口:** **`evaluate_network_wide_waiting_time`**
+
+**4 方式共通 module:** **`signalized_uxsim`**、**`fcfs`**、**`batch`**、**`tvt_mp`**。**`method_name`** は **監査のみ**。**CW_z**、**ACWT**、**ACWWT** の **式は共通**。
+
+**主要 production 契約（要点）:**
+
+- **完走済み real World**。**real World 非変更・再 simulation なし**
+- **評価ごと新規 context**。**global cache なし**。**World へ評価状態を保存しない**
+- **Reference replay** は **同一評価内**の **physical_route_key** 共有
+- **`create_analyzer=False`** の **Reference World** と **Reference 専用 runner**（**通常 `exec_simulation()` 不使用**）
+- **Reference 専用 logging:** **本体走行記録と `log_t_link` を維持**。**Analyzer average_speed 書込みのみ除外**（**「log_t_link だけ」ではない**）
+- **CW_z** は **整数 timestep 差**。**`true_vot_per_second`**。**`evaluation_cohort`** 集計
+- **正式結果に simulation object なし**。**file 出力なし**
+
+**独立確認（利用者 Terminal）:**
+
+| 項目 | 結果 |
+|---|---|
+| **`py_compile`**（2 module） | **成功** |
+| **専用 pytest** | **51 passed**（**16.02 s**） |
+| **CASE 1〜8** validation script | **All cases passed.** |
+| **UXsim 原典照合** | **`traveled_route` / `record_log` / finalize / exec_simulation** 確認 **完了** |
+| **可読性** | **初心者向け処理順**を **優先**。**修正必須の問題なし** |
+
+**CASE 8 script:** summary の **`Production implementation has not started.`** は **script 作成時点の歴史的表示**。**script は今回変更しない**。**現行**は **§31.18.23** / **本節**。
+
+**今回未実装（完了扱いしない）:**
+
+- **package 公開**、**Analyzer 呼出し口**、**CSV/JSON/DataFrame**、**trial 統合**
+- **3,000 台**からの **ACWT・ACWWT 正式算出**
+- **正式 4 方式比較**、**nonparticipating 固定 Vehicle 集合**の **正式比較**
+- **performance 最適化**、**並列化**、**persistent cache**
+
+**最新再開地点:** **本 §21.9.12**。**詳細契約**は **§31.18.23**。
+
+**次の直接作業（Git は Cursor 外・利用者が実施）:**
+
+1. **メモ更新後**、**4 ファイル**（**2 code + 2 memo**）を **Terminal で確認**
+2. **`py_compile`**
+3. **専用 pytest**
+4. **CASE 1〜8 回帰**
+5. **`git diff`**
+6. **`git add`**
+7. **cached diff 確認**
+8. **`commit`**（**document 含む**。メッセージは **diff 確認後に確定**）
+9. **commit 結果・最新 commit・残存変更**
+10. **別指示で push**
+11. **push 後 status・最新 commit・local/remote 一致**
+
+**commit 候補:** 上記 **4 ファイル**（**利用者が diff 確認後に確定**）。
+
+**歴史的記録:** §21.2、§21.4、§21.5、§21.7 の旧記述は **削除しない**。**§21.9.11** は **production 実装前**の **再開地点**として **維持**。
