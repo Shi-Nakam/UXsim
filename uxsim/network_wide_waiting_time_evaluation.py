@@ -1,8 +1,13 @@
 """
-Network-wide ACWT and ACWWT for a finished UXsim World.
+Network-wide waiting time for a finished UXsim World.
 
 The same entry point serves signalized UXsim, FCFS, BATCH, and TVT-MP.
-method_name is an audit label. It does not change CW_z, ACWT, or ACWWT.
+method_name is an audit label. It does not change the formulas.
+
+cumulative_waiting_time_* remains the route-conditional value
+(actual trip minus the free-flow time of the traveled route).
+average_waiting_time_s is the OD-based AWT
+(actual trip minus the OD minimum free-flow time).
 
 This module does not export itself from uxsim/__init__.py.
 It does not write files, and it does not keep a process-wide cache.
@@ -10,6 +15,7 @@ It does not write files, and it does not keep a process-wide cache.
 
 from __future__ import annotations
 
+import hashlib
 import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
@@ -36,6 +42,10 @@ _REFERENCE_FINISH_MARGIN_S = 60.0
 
 PhysicalRouteKey = tuple[float, tuple[tuple[float, float], ...]]
 RouteAuditIdentity = tuple[str, ...]
+OdKey = tuple[str, str]
+# (DELTAT, node_count, ((start_index, end_index, length, u), ...))
+NetworkFreeFlowSignature = tuple[float, int, tuple[tuple[int, int, float, float], ...]]
+_OD_REFERENCE_WORLD_NAME = "network_wide_waiting_time_od_reference"
 
 
 @dataclass(frozen=True)
@@ -60,11 +70,34 @@ class ReferenceReplayResult:
 
 
 @dataclass(frozen=True)
+class OdReferenceReplayResult:
+    """Numeric outcome of one OD free-flow reference replay.
+
+    od_minimum_free_flow_trip_time_s is the integer timestep difference times DELTAT.
+    The result does not keep a World, Vehicle, Node, Link, or Analyzer.
+    """
+
+    network_free_flow_signature_digest: str
+    origin_name: str
+    destination_name: str
+    od_reference_route_audit_identity: RouteAuditIdentity
+    od_reference_departure_timestep: int
+    od_reference_arrival_timestep: int
+    od_minimum_free_flow_trip_timesteps: int
+    od_minimum_free_flow_trip_time_s: float
+    od_reference_route_link_count: int
+    od_reference_world_deltat: float
+    od_reference_world_deltan: int
+    validation_passed: bool
+
+
+@dataclass(frozen=True)
 class VehicleWaitingTimeRecord:
     """One finished vehicle. Times in *_s fields are seconds.
 
-    cumulative_waiting_time_timesteps is the canonical CW_z.
-    cumulative_waiting_time_s is that integer times DELTAT.
+    cumulative_waiting_time_timesteps is the route-conditional waiting time.
+    It stays the actual trip minus the free-flow time of the traveled route.
+    od_based_waiting_time_timesteps is the OD-based waiting time.
     true_vot_per_second is a per-second coefficient. It is not divided by 3600.
     """
 
@@ -86,6 +119,40 @@ class VehicleWaitingTimeRecord:
     weighted_cumulative_waiting_time: float
     evaluation_cohort: str
     method_specific_participation_status: str | None
+    origin_name: str
+    destination_name: str
+    od_reference_signature_digest: str
+    od_reference_route_audit_identity: RouteAuditIdentity
+    od_reference_departure_timestep: int
+    od_reference_arrival_timestep: int
+    od_minimum_free_flow_trip_timesteps: int
+    od_minimum_free_flow_trip_time_s: float
+    od_based_waiting_time_timesteps: int
+    od_based_waiting_time_s: float
+    weighted_od_based_waiting_time: float
+    detour_time_timesteps: int
+    detour_time_s: float
+    weighted_detour_time: float
+
+    @property
+    def route_conditional_minimum_trip_timesteps(self) -> int:
+        return self.reference_minimum_trip_timesteps
+
+    @property
+    def route_conditional_minimum_trip_time_s(self) -> float:
+        return self.minimum_trip_time_s
+
+    @property
+    def route_conditional_waiting_time_timesteps(self) -> int:
+        return self.cumulative_waiting_time_timesteps
+
+    @property
+    def route_conditional_waiting_time_s(self) -> float:
+        return self.cumulative_waiting_time_s
+
+    @property
+    def weighted_route_conditional_waiting_time(self) -> float:
+        return self.weighted_cumulative_waiting_time
 
 
 @dataclass(frozen=True)
@@ -99,11 +166,23 @@ class EvaluationCounters:
     incomplete_vehicle_count: int
     validation_failure_count: int
     negative_cumulative_waiting_time_count: int
+    unique_od_reference_count: int
+    od_reference_replay_run_count: int
+    od_reference_reuse_count: int
+    unique_od_route_audit_identity_count: int
+    duplicate_od_route_audit_identity_observation_count: int
+    od_reference_validation_failure_count: int
+    negative_od_based_waiting_time_count: int
+    negative_detour_time_count: int
 
 
 @dataclass(frozen=True)
 class CohortWaitingTimeSummary:
-    """Totals for one evaluation_cohort, in first-seen vehicle order."""
+    """Totals for one evaluation_cohort, in first-seen vehicle order.
+
+    cumulative_* fields remain route-conditional totals.
+    average_waiting_time_s is the OD-based average for this cohort.
+    """
 
     evaluation_cohort: str
     vehicle_count: int
@@ -111,6 +190,30 @@ class CohortWaitingTimeSummary:
     average_cumulative_waiting_time_s: float
     total_weighted_cumulative_waiting_time: float
     average_weighted_cumulative_waiting_time: float
+    total_od_based_waiting_time_s: float
+    average_waiting_time_s: float
+    total_weighted_od_based_waiting_time: float
+    average_weighted_waiting_time: float
+    total_detour_time_s: float
+    average_detour_time_s: float
+    total_weighted_detour_time: float
+    average_weighted_detour_time: float
+
+    @property
+    def total_route_conditional_waiting_time_s(self) -> float:
+        return self.total_cumulative_waiting_time_s
+
+    @property
+    def route_conditional_average_waiting_time_s(self) -> float:
+        return self.average_cumulative_waiting_time_s
+
+    @property
+    def total_weighted_route_conditional_waiting_time(self) -> float:
+        return self.total_weighted_cumulative_waiting_time
+
+    @property
+    def route_conditional_average_weighted_waiting_time(self) -> float:
+        return self.average_weighted_cumulative_waiting_time
 
 
 @dataclass(frozen=True)
@@ -121,8 +224,32 @@ class NetworkWideWaitingTimeSummary:
     average_cumulative_waiting_time_s: float
     total_weighted_cumulative_waiting_time: float
     average_weighted_cumulative_waiting_time: float
+    total_od_based_waiting_time_s: float
+    average_waiting_time_s: float
+    total_weighted_od_based_waiting_time: float
+    average_weighted_waiting_time: float
+    total_detour_time_s: float
+    average_detour_time_s: float
+    total_weighted_detour_time: float
+    average_weighted_detour_time: float
     cohort_summaries: tuple[CohortWaitingTimeSummary, ...]
     counters: EvaluationCounters
+
+    @property
+    def total_route_conditional_waiting_time_s(self) -> float:
+        return self.total_cumulative_waiting_time_s
+
+    @property
+    def route_conditional_average_waiting_time_s(self) -> float:
+        return self.average_cumulative_waiting_time_s
+
+    @property
+    def total_weighted_route_conditional_waiting_time(self) -> float:
+        return self.total_weighted_cumulative_waiting_time
+
+    @property
+    def route_conditional_average_weighted_waiting_time(self) -> float:
+        return self.average_weighted_cumulative_waiting_time
 
 
 @dataclass(frozen=True)
@@ -131,6 +258,9 @@ class NetworkWideWaitingTimeEvaluationResult:
     summary: NetworkWideWaitingTimeSummary
     reference_results_by_physical_key: Mapping[PhysicalRouteKey, ReferenceReplayResult]
     audit_identities_by_physical_key: Mapping[PhysicalRouteKey, tuple[RouteAuditIdentity, ...]]
+    od_reference_results_by_od_key: Mapping[OdKey, OdReferenceReplayResult]
+    od_route_audit_identities_by_od_key: Mapping[OdKey, tuple[RouteAuditIdentity, ...]]
+    network_free_flow_signature_digest: str
     counters: EvaluationCounters
     vehicle_plan_digest: str | None
     comparison_metadata: Mapping | None
@@ -141,13 +271,26 @@ class _EvaluationContext:
     """State for a single call of evaluate_network_wide_waiting_time.
 
     Created inside that call. Not stored on the World and not reused.
+    The network signature is kept once here, not copied onto every vehicle.
     """
 
     real_deltat: float
     method_name: str
-    reference_results_by_physical_key: dict = field(default_factory=dict)
-    audit_identities_by_physical_key: dict = field(default_factory=dict)
-    vehicle_records: list = field(default_factory=list)
+    network_free_flow_signature: NetworkFreeFlowSignature
+    network_free_flow_signature_digest: str
+    reference_results_by_physical_key: dict[PhysicalRouteKey, ReferenceReplayResult] = field(
+        default_factory=dict
+    )
+    audit_identities_by_physical_key: dict[PhysicalRouteKey, list[RouteAuditIdentity]] = field(
+        default_factory=dict
+    )
+    od_reference_results_by_od_key: dict[OdKey, OdReferenceReplayResult] = field(
+        default_factory=dict
+    )
+    od_route_audit_identities_by_od_key: dict[OdKey, list[RouteAuditIdentity]] = field(
+        default_factory=dict
+    )
+    vehicle_records: list[VehicleWaitingTimeRecord] = field(default_factory=list)
     evaluated_vehicle_count: int = 0
     unique_physical_route_count: int = 0
     reference_replay_run_count: int = 0
@@ -157,6 +300,14 @@ class _EvaluationContext:
     incomplete_vehicle_count: int = 0
     validation_failure_count: int = 0
     negative_cumulative_waiting_time_count: int = 0
+    unique_od_reference_count: int = 0
+    od_reference_replay_run_count: int = 0
+    od_reference_reuse_count: int = 0
+    unique_od_route_audit_identity_count: int = 0
+    duplicate_od_route_audit_identity_observation_count: int = 0
+    od_reference_validation_failure_count: int = 0
+    negative_od_based_waiting_time_count: int = 0
+    negative_detour_time_count: int = 0
 
 
 def evaluate_network_wide_waiting_time(
@@ -178,8 +329,11 @@ def evaluate_network_wide_waiting_time(
     method_name is kept for audit. It does not change the formulas.
     Vehicles are processed in the order of evaluated_vehicle_names.
     Cohort summaries use that same first-seen order.
-    Reference replays are shared only inside this call, by physical route key.
-    One physical key stores one validated result. A failed replay is not stored.
+    Route-conditional replays are shared only inside this call, by physical route key.
+    OD references are shared only inside this call, by (origin_name, destination_name).
+    One key stores one validated result. A failed replay is not stored.
+    The network free-flow signature is built once for this call. The public result
+    keeps its digest, not the signature tuple.
     The returned object does not contain a World, Vehicle, Node, Link, or Analyzer.
 
     CW_z is an integer timestep difference. Seconds are that integer times DELTAT.
@@ -208,10 +362,13 @@ def evaluate_network_wide_waiting_time(
     )
     digest = _validate_vehicle_plan_digest(vehicle_plan_digest)
     metadata = _copy_comparison_metadata(comparison_metadata)
+    signature, signature_digest = _build_network_free_flow_signature(real_world)
 
     context = _EvaluationContext(
         real_deltat=real_world.DELTAT,
         method_name=method_name,
+        network_free_flow_signature=signature,
+        network_free_flow_signature_digest=signature_digest,
     )
     for vehicle_name in ordered_names:
         _evaluate_one_vehicle(
@@ -441,6 +598,7 @@ def _evaluate_one_vehicle(
     status_by_name: dict[str, str] | None,
 ) -> None:
     vehicle = _require_finished_vehicle(real_world, vehicle_name)
+    origin_name, destination_name = _require_single_trip_od(real_world, vehicle)
     if float(vehicle.W.DELTAT) != float(context.real_deltat):
         raise ValueError(
             "vehicle World DELTAT does not match the evaluation DELTAT. "
@@ -457,12 +615,19 @@ def _evaluate_one_vehicle(
         route_links,
         physical_key,
     )
+    od_key = (origin_name, destination_name)
+    od_result = _get_or_run_od_reference(
+        context,
+        real_world,
+        od_key,
+    )
     record = _build_vehicle_record(
         context,
         vehicle,
         physical_key,
         audit_identity,
         reference_result,
+        od_result,
         true_vot_per_second,
         evaluation_cohort,
         status_by_name,
@@ -488,6 +653,34 @@ def _require_finished_vehicle(real_world: World, vehicle_name: str) -> Vehicle:
             f"state={vehicle.state!r}."
         )
     return vehicle
+
+
+def _require_single_trip_od(real_world: World, vehicle: Vehicle) -> tuple[str, str]:
+    """Origin and destination come from the finished vehicle on this real World."""
+
+    if vehicle.mode != "single_trip":
+        raise ValueError(
+            "OD reference requires mode single_trip. "
+            f"vehicle={vehicle.name!r} mode={vehicle.mode!r}."
+        )
+    origin = vehicle.orig
+    destination = vehicle.dest
+    if not isinstance(origin, Node) or origin not in real_world.NODES:
+        raise ValueError(
+            "vehicle origin is not a Node in the real World. "
+            f"vehicle={vehicle.name!r} origin={origin!r}."
+        )
+    if not isinstance(destination, Node) or destination not in real_world.NODES:
+        raise ValueError(
+            "vehicle destination is not a Node in the real World. "
+            f"vehicle={vehicle.name!r} destination={destination!r}."
+        )
+    if origin is destination:
+        raise ValueError(
+            "vehicle origin and destination are the same node. "
+            f"vehicle={vehicle.name!r} node={origin.name!r}."
+        )
+    return origin.name, destination.name
 
 
 def _actual_route_links(vehicle: Vehicle) -> list:
@@ -543,6 +736,72 @@ def _require_positive_finite_number(
             f"value={raw_value!r}."
         )
     return float(raw_value)
+
+
+def _node_index(nodes: Sequence[Node], node: Node, vehicle_name: str) -> int:
+    for index, candidate in enumerate(nodes):
+        if candidate is node:
+            return index
+    raise ValueError(
+        "link endpoint is not in real_world.NODES. "
+        f"vehicle={vehicle_name!r} node={getattr(node, 'name', node)!r}."
+    )
+
+
+def _build_network_free_flow_signature(
+    real_world: World,
+) -> tuple[NetworkFreeFlowSignature, str]:
+    """One signature for this evaluation. Link names stay out of the physical rows."""
+
+    node_count = len(real_world.NODES)
+    link_rows = []
+    for link_index, link in enumerate(real_world.LINKS):
+        penalty = link.route_choice_penalty
+        if isinstance(penalty, bool) or not isinstance(penalty, (int, float)):
+            raise ValueError(
+                "route_choice_penalty is not a non-bool number. "
+                f"link={link.name!r} value={penalty!r}."
+            )
+        if float(penalty) != 0.0:
+            raise ValueError(
+                "nonzero route_choice_penalty is outside this OD reference scope. "
+                f"link={link.name!r} route_choice_penalty={penalty!r}."
+            )
+        if link.capacity_in == 0:
+            raise ValueError(
+                "capacity_in == 0 is a closed link and is outside this OD reference scope. "
+                f"link={link.name!r} capacity_in={link.capacity_in!r}."
+            )
+        length = _require_positive_finite_number(
+            link.length,
+            "link length",
+            "network",
+            link_index,
+            link.name,
+        )
+        speed_u = _require_positive_finite_number(
+            link.u,
+            "link u",
+            "network",
+            link_index,
+            link.name,
+        )
+        start_index = _node_index(real_world.NODES, link.start_node, "network")
+        end_index = _node_index(real_world.NODES, link.end_node, "network")
+        link_rows.append((start_index, end_index, length, speed_u))
+
+    signature = (float(real_world.DELTAT), node_count, tuple(link_rows))
+    lines = [f"DELTAT|{signature[0]!r}", f"NODE_COUNT|{node_count}"]
+    for node_index in range(node_count):
+        lines.append(f"NODE|{node_index}")
+    for link_index, row in enumerate(link_rows):
+        start_index, end_index, length, speed_u = row
+        lines.append(
+            f"LINK|{link_index}|{start_index}|{end_index}|{length!r}|{speed_u!r}"
+        )
+    payload = ("\n".join(lines) + "\n").encode("utf-8")
+    digest = hashlib.sha256(payload).hexdigest()
+    return signature, digest
 
 
 def _build_physical_route_key(deltat: float, route_links: Sequence) -> PhysicalRouteKey:
@@ -1007,12 +1266,361 @@ def _run_reference_replay(
     )
 
 
+def _od_reference_tmax_seconds(real_world: World) -> float:
+    """Safety budget for an unfinished OD reference. This is not T_min.
+
+    Trips longer than the default 600 s route-update interval are still allowed.
+    One vehicle on an empty static network keeps the same free-flow costs if
+    UXsim searches again. Changing that interval is a later study, not this module.
+    The 320-OD check covered trips of about 85 to 145 seconds, not trips over 600.
+    """
+
+    free_flow_sum = 0.0
+    for link in real_world.LINKS:
+        free_flow_sum = free_flow_sum + float(link.length) / float(link.u)
+    return (
+        free_flow_sum
+        + (len(real_world.LINKS) + 2) * float(real_world.DELTAT)
+        + _REFERENCE_FINISH_MARGIN_S
+    )
+
+
+def _build_od_reference_world(
+    real_world: World,
+    origin_name: str,
+    destination_name: str,
+) -> World:
+    """New nodes, links, and one vehicle. The real World is not shared."""
+
+    # duo_update_time stays at the UXsim default (600 s). This builder does not
+    # shorten it. A trip of 600 s or more is outside the 320-OD check, but that
+    # length alone is not a reason to stop: one vehicle on an empty static
+    # network still sees the same free-flow costs if UXsim searches again.
+    world = World(
+        name=_OD_REFERENCE_WORLD_NAME,
+        deltan=1,
+        reaction_time=real_world.DELTAT,
+        tmax=_od_reference_tmax_seconds(real_world),
+        random_seed=0,
+        print_mode=0,
+        save_mode=0,
+        show_mode=0,
+        show_progress=0,
+        hard_deterministic_mode=True,
+        vehicle_logging_timestep_interval=1,
+    )
+    if type(world.DELTAN) is not int or world.DELTAN != 1:
+        raise RuntimeError(
+            "OD reference World DELTAN is not the Python int 1. "
+            f"got {world.DELTAN!r}."
+        )
+    if world.DELTAT != real_world.DELTAT:
+        raise RuntimeError(
+            "OD reference World DELTAT does not match the real World. "
+            f"reference={world.DELTAT!r} real={real_world.DELTAT!r}."
+        )
+
+    for node_index, real_node in enumerate(real_world.NODES):
+        world.addNode(
+            real_node.name,
+            float(node_index),
+            0.0,
+            signal=[0],
+        )
+    for real_link in real_world.LINKS:
+        world.addLink(
+            real_link.name,
+            real_link.start_node.name,
+            real_link.end_node.name,
+            length=float(real_link.length),
+            free_flow_speed=float(real_link.u),
+            number_of_lanes=1,
+            jam_density=_REFERENCE_JAM_DENSITY,
+            jam_density_per_lane=None,
+            merge_priority=1.0,
+            signal_group=[0],
+            capacity_in=_NON_BINDING_CAPACITY,
+            capacity_out=_NON_BINDING_CAPACITY,
+        )
+    vehicle = world.addVehicle(
+        origin_name,
+        destination_name,
+        0,
+        name="od_reference_vehicle",
+        departure_time_is_time_step=1,
+        mode="single_trip",
+    )
+    if vehicle.specified_route is not None:
+        raise RuntimeError(
+            "OD reference vehicle must not start with specified_route. "
+            f"origin={origin_name!r} destination={destination_name!r}."
+        )
+    _require_reference_structure(world, real_world.DELTAT)
+    for link in world.LINKS:
+        if link.route_choice_penalty != 0:
+            raise RuntimeError(
+                "OD reference link route_choice_penalty is not 0. "
+                f"link={link.name!r} value={link.route_choice_penalty!r}."
+            )
+    return world
+
+
+def _od_traveled_link_names(vehicle: Vehicle) -> list[str]:
+    """Link names from traveled_route. An empty log is an empty route."""
+
+    if len(vehicle.log_t_link) == 0:
+        return []
+    route, _timestamps = vehicle.traveled_route(
+        include_arrival_time=False,
+        include_departure_time=False,
+    )
+    names = []
+    for link in route.links:
+        names.append(link.name)
+    return names
+
+
+def _validate_od_route(
+    world: World,
+    link_names: list[str],
+    origin_name: str,
+    destination_name: str,
+) -> None:
+    if len(link_names) == 0:
+        raise RuntimeError(
+            "OD reference route is empty. "
+            f"origin={origin_name!r} destination={destination_name!r}."
+        )
+    seen_link_names = []
+    visited_nodes = []
+    for index, link_name in enumerate(link_names):
+        if link_name not in world.LINKS_NAME_DICT:
+            raise RuntimeError(
+                "OD reference route uses a link that is not in the reference World. "
+                f"origin={origin_name!r} destination={destination_name!r} "
+                f"link={link_name!r}."
+            )
+        link = world.get_link(link_name)
+        if link.route_choice_penalty != 0:
+            raise RuntimeError(
+                "OD reference route link route_choice_penalty is not 0. "
+                f"link={link_name!r} value={link.route_choice_penalty!r}."
+            )
+        _require_positive_finite_number(
+            link.length,
+            "link length",
+            "od_reference_vehicle",
+            index,
+            link_name,
+        )
+        _require_positive_finite_number(
+            link.u,
+            "link u",
+            "od_reference_vehicle",
+            index,
+            link_name,
+        )
+        if link_name in seen_link_names:
+            raise RuntimeError(
+                "OD reference route repeats a link. "
+                f"origin={origin_name!r} destination={destination_name!r} "
+                f"link={link_name!r} route={link_names}."
+            )
+        seen_link_names.append(link_name)
+        if index == 0:
+            if link.start_node.name != origin_name:
+                raise RuntimeError(
+                    "OD reference route does not leave the origin. "
+                    f"origin={origin_name!r} start={link.start_node.name!r} "
+                    f"link={link_name!r}."
+                )
+            visited_nodes.append(link.start_node.name)
+        elif link.start_node.name != visited_nodes[-1]:
+            raise RuntimeError(
+                "OD reference route links are not connected. "
+                f"origin={origin_name!r} destination={destination_name!r} "
+                f"previous={visited_nodes[-1]!r} link={link_name!r} "
+                f"start={link.start_node.name!r}."
+            )
+        if link.end_node.name in visited_nodes:
+            raise RuntimeError(
+                "OD reference route repeats a node. "
+                f"origin={origin_name!r} destination={destination_name!r} "
+                f"node={link.end_node.name!r} route={link_names}."
+            )
+        visited_nodes.append(link.end_node.name)
+    if visited_nodes[-1] != destination_name:
+        raise RuntimeError(
+            "OD reference route does not reach the destination. "
+            f"destination={destination_name!r} final={visited_nodes[-1]!r} "
+            f"route={link_names}."
+        )
+
+
+def _run_od_reference_replay(
+    real_world: World,
+    od_key: OdKey,
+    signature_digest: str,
+    method_name: str,
+) -> OdReferenceReplayResult:
+    origin_name, destination_name = od_key
+    world = _build_od_reference_world(real_world, origin_name, destination_name)
+    vehicle = _run_reference_replay_steps(world)
+    if world.DELTAT != real_world.DELTAT:
+        raise RuntimeError(
+            "OD reference DELTAT changed during replay. "
+            f"method_name={method_name!r} "
+            f"reference={world.DELTAT!r} real={real_world.DELTAT!r}."
+        )
+    if type(world.DELTAN) is not int or world.DELTAN != 1:
+        raise RuntimeError(
+            "OD reference DELTAN is not the Python int 1 after replay. "
+            f"method_name={method_name!r} got {world.DELTAN!r}."
+        )
+    departure_timestep = _require_python_timestep(
+        vehicle.departure_time,
+        "OD reference departure timestep",
+        vehicle.name,
+        method_name,
+    )
+    arrival_timestep = _require_python_timestep(
+        vehicle.arrival_time,
+        "OD reference arrival timestep",
+        vehicle.name,
+        method_name,
+    )
+    if departure_timestep != 0:
+        raise RuntimeError(
+            "OD reference departure timestep must be 0. "
+            f"origin={origin_name!r} destination={destination_name!r} "
+            f"departure={departure_timestep}."
+        )
+    if arrival_timestep < departure_timestep:
+        raise RuntimeError(
+            "OD reference arrival timestep is earlier than departure. "
+            f"origin={origin_name!r} destination={destination_name!r} "
+            f"departure={departure_timestep} arrival={arrival_timestep}."
+        )
+    trip_timesteps = arrival_timestep - departure_timestep
+    minimum_trip_time_s = trip_timesteps * world.DELTAT
+    if not _seconds_match(float(vehicle.travel_time), minimum_trip_time_s):
+        raise RuntimeError(
+            "OD reference travel_time does not match timestep difference * DELTAT. "
+            f"origin={origin_name!r} destination={destination_name!r} "
+            f"travel_time={vehicle.travel_time!r} from_timesteps={minimum_trip_time_s!r}."
+        )
+    link_names = _od_traveled_link_names(vehicle)
+    _validate_od_route(world, link_names, origin_name, destination_name)
+    return OdReferenceReplayResult(
+        network_free_flow_signature_digest=signature_digest,
+        origin_name=origin_name,
+        destination_name=destination_name,
+        od_reference_route_audit_identity=tuple(link_names),
+        od_reference_departure_timestep=departure_timestep,
+        od_reference_arrival_timestep=arrival_timestep,
+        od_minimum_free_flow_trip_timesteps=trip_timesteps,
+        od_minimum_free_flow_trip_time_s=minimum_trip_time_s,
+        od_reference_route_link_count=len(link_names),
+        od_reference_world_deltat=world.DELTAT,
+        od_reference_world_deltan=world.DELTAN,
+        validation_passed=True,
+    )
+
+
+def _register_od_audit_identity(
+    context: _EvaluationContext,
+    od_key: OdKey,
+    audit_identity: RouteAuditIdentity,
+) -> None:
+    identities = context.od_route_audit_identities_by_od_key.get(od_key)
+    if identities is None:
+        identities = []
+        context.od_route_audit_identities_by_od_key[od_key] = identities
+    if audit_identity in identities:
+        context.duplicate_od_route_audit_identity_observation_count += 1
+        return
+    identities.append(audit_identity)
+    context.unique_od_route_audit_identity_count += 1
+
+
+def _reject_od_reference_result(
+    context: _EvaluationContext,
+    message: str,
+) -> None:
+    context.od_reference_validation_failure_count += 1
+    raise RuntimeError(message)
+
+
+def _get_or_run_od_reference(
+    context: _EvaluationContext,
+    real_world: World,
+    od_key: OdKey,
+) -> OdReferenceReplayResult:
+    stored = context.od_reference_results_by_od_key.get(od_key)
+    if stored is None:
+        result = _run_od_reference_replay(
+            real_world,
+            od_key,
+            context.network_free_flow_signature_digest,
+            context.method_name,
+        )
+        if not result.validation_passed:
+            _reject_od_reference_result(
+                context,
+                "OD reference replay did not pass validation and was not stored. "
+                f"method_name={context.method_name!r} od={od_key!r}.",
+            )
+        if result.network_free_flow_signature_digest != context.network_free_flow_signature_digest:
+            _reject_od_reference_result(
+                context,
+                "OD reference signature digest does not match this evaluation. "
+                f"method_name={context.method_name!r} od={od_key!r} "
+                f"result={result.network_free_flow_signature_digest!r} "
+                f"context={context.network_free_flow_signature_digest!r}.",
+            )
+        context.od_reference_results_by_od_key[od_key] = result
+        context.od_reference_replay_run_count += 1
+        context.unique_od_reference_count += 1
+        _register_od_audit_identity(
+            context,
+            od_key,
+            result.od_reference_route_audit_identity,
+        )
+        return result
+
+    if not stored.validation_passed:
+        _reject_od_reference_result(
+            context,
+            "stored OD reference result is not validated. "
+            f"method_name={context.method_name!r} od={od_key!r}.",
+        )
+    if stored.network_free_flow_signature_digest != context.network_free_flow_signature_digest:
+        _reject_od_reference_result(
+            context,
+            "stored OD reference signature digest does not match this evaluation. "
+            f"method_name={context.method_name!r} od={od_key!r}.",
+        )
+    if stored.origin_name != od_key[0] or stored.destination_name != od_key[1]:
+        raise RuntimeError(
+            "stored OD reference result is filed under a different OD. "
+            f"method_name={context.method_name!r} od={od_key!r}."
+        )
+    context.od_reference_reuse_count += 1
+    _register_od_audit_identity(
+        context,
+        od_key,
+        stored.od_reference_route_audit_identity,
+    )
+    return stored
+
+
 def _build_vehicle_record(
     context: _EvaluationContext,
     vehicle: Vehicle,
     physical_key: PhysicalRouteKey,
     audit_identity: RouteAuditIdentity,
     reference_result: ReferenceReplayResult,
+    od_result: OdReferenceReplayResult,
     true_vot_per_second: float,
     evaluation_cohort: str,
     status_by_name: dict[str, str] | None,
@@ -1055,12 +1663,43 @@ def _build_vehicle_record(
             f"vehicle={vehicle.name!r} method_name={context.method_name!r} "
             f"timesteps={cumulative_waiting_time_timesteps}."
         )
+    od_minimum_trip_timesteps = od_result.od_minimum_free_flow_trip_timesteps
+    od_based_waiting_time_timesteps = actual_trip_timesteps - od_minimum_trip_timesteps
+    detour_time_timesteps = reference_trip_timesteps - od_minimum_trip_timesteps
+    if od_based_waiting_time_timesteps < 0:
+        context.negative_od_based_waiting_time_count += 1
+        raise RuntimeError(
+            "OD-based waiting timesteps are negative and were not changed to 0. "
+            f"vehicle={vehicle.name!r} method_name={context.method_name!r} "
+            f"timesteps={od_based_waiting_time_timesteps}."
+        )
+    if detour_time_timesteps < 0:
+        context.negative_detour_time_count += 1
+        raise RuntimeError(
+            "detour timesteps are negative and were not changed to 0. "
+            f"vehicle={vehicle.name!r} method_name={context.method_name!r} "
+            f"timesteps={detour_time_timesteps}."
+        )
+    if od_based_waiting_time_timesteps != (
+        cumulative_waiting_time_timesteps + detour_time_timesteps
+    ):
+        raise RuntimeError(
+            "OD-based waiting timesteps do not equal route-conditional waiting "
+            "plus detour. "
+            f"vehicle={vehicle.name!r} method_name={context.method_name!r} "
+            f"od_based={od_based_waiting_time_timesteps} "
+            f"route_conditional={cumulative_waiting_time_timesteps} "
+            f"detour={detour_time_timesteps}."
+        )
 
     actual_travel_time_s = actual_trip_timesteps * context.real_deltat
     minimum_trip_time_s = reference_trip_timesteps * context.real_deltat
     cumulative_waiting_time_s = (
         cumulative_waiting_time_timesteps * context.real_deltat
     )
+    od_minimum_trip_time_s = od_minimum_trip_timesteps * context.real_deltat
+    od_based_waiting_time_s = od_based_waiting_time_timesteps * context.real_deltat
+    detour_time_s = detour_time_timesteps * context.real_deltat
     if not _seconds_match(float(vehicle.travel_time), actual_travel_time_s):
         raise RuntimeError(
             "actual travel_time does not match timestep difference * DELTAT. "
@@ -1076,10 +1715,35 @@ def _build_vehicle_record(
             f"stored={reference_result.minimum_trip_time_s!r} "
             f"from_timesteps={minimum_trip_time_s!r}."
         )
+    if od_result.od_reference_world_deltat != context.real_deltat:
+        raise RuntimeError(
+            "OD reference DELTAT does not match the real World. "
+            f"vehicle={vehicle.name!r} method_name={context.method_name!r} "
+            f"reference={od_result.od_reference_world_deltat!r} "
+            f"real={context.real_deltat!r}."
+        )
+    if not _seconds_match(od_result.od_minimum_free_flow_trip_time_s, od_minimum_trip_time_s):
+        raise RuntimeError(
+            "stored OD minimum trip time does not match OD timesteps * DELTAT. "
+            f"vehicle={vehicle.name!r} method_name={context.method_name!r} "
+            f"stored={od_result.od_minimum_free_flow_trip_time_s!r} "
+            f"from_timesteps={od_minimum_trip_time_s!r}."
+        )
 
     weighted_cumulative_waiting_time = (
         cumulative_waiting_time_s * true_vot_per_second
     )
+    weighted_od_based_waiting_time = od_based_waiting_time_s * true_vot_per_second
+    weighted_detour_time = detour_time_s * true_vot_per_second
+    if not _seconds_match(
+        weighted_od_based_waiting_time,
+        weighted_cumulative_waiting_time + weighted_detour_time,
+    ):
+        raise RuntimeError(
+            "weighted OD-based waiting does not equal weighted route-conditional "
+            "waiting plus weighted detour. "
+            f"vehicle={vehicle.name!r} method_name={context.method_name!r}."
+        )
     if status_by_name is None:
         participation_status = None
     else:
@@ -1103,6 +1767,20 @@ def _build_vehicle_record(
         weighted_cumulative_waiting_time=weighted_cumulative_waiting_time,
         evaluation_cohort=evaluation_cohort,
         method_specific_participation_status=participation_status,
+        origin_name=od_result.origin_name,
+        destination_name=od_result.destination_name,
+        od_reference_signature_digest=od_result.network_free_flow_signature_digest,
+        od_reference_route_audit_identity=od_result.od_reference_route_audit_identity,
+        od_reference_departure_timestep=od_result.od_reference_departure_timestep,
+        od_reference_arrival_timestep=od_result.od_reference_arrival_timestep,
+        od_minimum_free_flow_trip_timesteps=od_minimum_trip_timesteps,
+        od_minimum_free_flow_trip_time_s=od_minimum_trip_time_s,
+        od_based_waiting_time_timesteps=od_based_waiting_time_timesteps,
+        od_based_waiting_time_s=od_based_waiting_time_s,
+        weighted_od_based_waiting_time=weighted_od_based_waiting_time,
+        detour_time_timesteps=detour_time_timesteps,
+        detour_time_s=detour_time_s,
+        weighted_detour_time=weighted_detour_time,
     )
 
 
@@ -1121,6 +1799,22 @@ def _counters_from_context(context: _EvaluationContext) -> EvaluationCounters:
         negative_cumulative_waiting_time_count=(
             context.negative_cumulative_waiting_time_count
         ),
+        unique_od_reference_count=context.unique_od_reference_count,
+        od_reference_replay_run_count=context.od_reference_replay_run_count,
+        od_reference_reuse_count=context.od_reference_reuse_count,
+        unique_od_route_audit_identity_count=(
+            context.unique_od_route_audit_identity_count
+        ),
+        duplicate_od_route_audit_identity_observation_count=(
+            context.duplicate_od_route_audit_identity_observation_count
+        ),
+        od_reference_validation_failure_count=(
+            context.od_reference_validation_failure_count
+        ),
+        negative_od_based_waiting_time_count=(
+            context.negative_od_based_waiting_time_count
+        ),
+        negative_detour_time_count=context.negative_detour_time_count,
     )
 
 
@@ -1170,6 +1864,45 @@ def _require_counter_consistency(
             "is returned. "
             f"method_name={context.method_name!r}."
         )
+    if counters.negative_od_based_waiting_time_count != 0:
+        raise RuntimeError(
+            "a negative OD-based waiting timestep was counted, so no official "
+            "summary is returned. "
+            f"method_name={context.method_name!r}."
+        )
+    if counters.negative_detour_time_count != 0:
+        raise RuntimeError(
+            "a negative detour timestep was counted, so no official summary "
+            "is returned. "
+            f"method_name={context.method_name!r}."
+        )
+    if counters.od_reference_validation_failure_count != 0:
+        raise RuntimeError(
+            "od_reference_validation_failure_count is not 0, so no official "
+            "summary is returned. "
+            f"method_name={context.method_name!r}."
+        )
+    if counters.unique_od_reference_count != len(context.od_reference_results_by_od_key):
+        raise RuntimeError(
+            "unique OD reference count does not match stored OD results. "
+            f"method_name={context.method_name!r}."
+        )
+    if counters.od_reference_replay_run_count != counters.unique_od_reference_count:
+        raise RuntimeError(
+            "OD reference replay count does not match the unique OD count. "
+            f"method_name={context.method_name!r} "
+            f"replay={counters.od_reference_replay_run_count} "
+            f"unique={counters.unique_od_reference_count}."
+        )
+    expected_od_reuse = (
+        counters.evaluated_vehicle_count - counters.unique_od_reference_count
+    )
+    if counters.od_reference_reuse_count != expected_od_reuse:
+        raise RuntimeError(
+            "OD reference reuse count does not match vehicles minus unique ODs. "
+            f"method_name={context.method_name!r} "
+            f"reuse={counters.od_reference_reuse_count} expected={expected_od_reuse}."
+        )
     if counters.incomplete_vehicle_count != 0:
         raise RuntimeError(
             "an incomplete vehicle was counted, so no official summary is returned. "
@@ -1206,6 +1939,32 @@ def _require_counter_consistency(
             f"from_records={duplicate_from_records}."
         )
 
+    unique_od_from_store = 0
+    for identities in context.od_route_audit_identities_by_od_key.values():
+        unique_od_from_store += len(identities)
+    if unique_od_from_store != counters.unique_od_route_audit_identity_count:
+        raise RuntimeError(
+            "unique OD route audit identity count does not match stored identities. "
+            f"method_name={context.method_name!r}."
+        )
+    seen_od = {}
+    duplicate_od_from_records = 0
+    for record in context.vehicle_records:
+        od_key = (record.origin_name, record.destination_name)
+        seen_identities = seen_od.get(od_key)
+        if seen_identities is None:
+            seen_identities = []
+            seen_od[od_key] = seen_identities
+        if record.od_reference_route_audit_identity in seen_identities:
+            duplicate_od_from_records += 1
+        else:
+            seen_identities.append(record.od_reference_route_audit_identity)
+    if duplicate_od_from_records != counters.duplicate_od_route_audit_identity_observation_count:
+        raise RuntimeError(
+            "duplicate OD route audit observation count does not match the records. "
+            f"method_name={context.method_name!r}."
+        )
+
 
 def _build_summary(
     context: _EvaluationContext,
@@ -1219,6 +1978,13 @@ def _build_summary(
         )
     total_cw = 0.0
     total_weighted = 0.0
+    total_od_s = 0.0
+    total_weighted_od = 0.0
+    total_detour_s = 0.0
+    total_weighted_detour = 0.0
+    total_rc_steps = 0
+    total_od_steps = 0
+    total_detour_steps = 0
     cohort_order = []
     cohort_records = {}
     for record in context.vehicle_records:
@@ -1228,27 +1994,89 @@ def _build_summary(
                 f"vehicle={record.vehicle_name!r} "
                 f"method_name={context.method_name!r}."
             )
+        if record.od_based_waiting_time_timesteps < 0 or record.detour_time_timesteps < 0:
+            raise RuntimeError(
+                "official records must not contain a negative OD-based waiting "
+                "or detour timestep. "
+                f"vehicle={record.vehicle_name!r} "
+                f"method_name={context.method_name!r}."
+            )
         total_cw += record.cumulative_waiting_time_s
         total_weighted += record.weighted_cumulative_waiting_time
+        total_od_s += record.od_based_waiting_time_s
+        total_weighted_od += record.weighted_od_based_waiting_time
+        total_detour_s += record.detour_time_s
+        total_weighted_detour += record.weighted_detour_time
+        total_rc_steps += record.cumulative_waiting_time_timesteps
+        total_od_steps += record.od_based_waiting_time_timesteps
+        total_detour_steps += record.detour_time_timesteps
         cohort_bucket = cohort_records.get(record.evaluation_cohort)
         if cohort_bucket is None:
             cohort_order.append(record.evaluation_cohort)
             cohort_bucket = []
             cohort_records[record.evaluation_cohort] = cohort_bucket
         cohort_bucket.append(record)
+    if total_od_steps != total_rc_steps + total_detour_steps:
+        raise RuntimeError(
+            "overall OD-based waiting timesteps do not equal route-conditional "
+            "waiting plus detour. "
+            f"method_name={context.method_name!r}."
+        )
+    if not _seconds_match(total_weighted_od, total_weighted + total_weighted_detour):
+        raise RuntimeError(
+            "overall weighted OD-based waiting does not equal weighted "
+            "route-conditional waiting plus weighted detour. "
+            f"method_name={context.method_name!r}."
+        )
 
     cohort_summaries = []
     cohort_total_cw = 0.0
     cohort_total_weighted = 0.0
+    cohort_total_od_s = 0.0
+    cohort_total_weighted_od = 0.0
+    cohort_total_detour_s = 0.0
+    cohort_total_weighted_detour = 0.0
+    cohort_total_rc_steps = 0
+    cohort_total_od_steps = 0
+    cohort_total_detour_steps = 0
     cohort_vehicle_count = 0
     for cohort_name in cohort_order:
         records = cohort_records[cohort_name]
         cohort_count = len(records)
         cohort_cw = 0.0
         cohort_weighted = 0.0
+        cohort_od_s = 0.0
+        cohort_weighted_od = 0.0
+        cohort_detour_s = 0.0
+        cohort_weighted_detour = 0.0
+        cohort_rc_steps = 0
+        cohort_od_steps = 0
+        cohort_detour_steps = 0
         for record in records:
             cohort_cw += record.cumulative_waiting_time_s
             cohort_weighted += record.weighted_cumulative_waiting_time
+            cohort_od_s += record.od_based_waiting_time_s
+            cohort_weighted_od += record.weighted_od_based_waiting_time
+            cohort_detour_s += record.detour_time_s
+            cohort_weighted_detour += record.weighted_detour_time
+            cohort_rc_steps += record.cumulative_waiting_time_timesteps
+            cohort_od_steps += record.od_based_waiting_time_timesteps
+            cohort_detour_steps += record.detour_time_timesteps
+        if cohort_od_steps != cohort_rc_steps + cohort_detour_steps:
+            raise RuntimeError(
+                "cohort OD-based waiting timesteps do not equal route-conditional "
+                "waiting plus detour. "
+                f"method_name={context.method_name!r} cohort={cohort_name!r}."
+            )
+        if not _seconds_match(
+            cohort_weighted_od,
+            cohort_weighted + cohort_weighted_detour,
+        ):
+            raise RuntimeError(
+                "cohort weighted OD-based waiting does not equal weighted "
+                "route-conditional waiting plus weighted detour. "
+                f"method_name={context.method_name!r} cohort={cohort_name!r}."
+            )
         cohort_summaries.append(
             CohortWaitingTimeSummary(
                 evaluation_cohort=cohort_name,
@@ -1259,10 +2087,25 @@ def _build_summary(
                 average_weighted_cumulative_waiting_time=(
                     cohort_weighted / cohort_count
                 ),
+                total_od_based_waiting_time_s=cohort_od_s,
+                average_waiting_time_s=cohort_od_s / cohort_count,
+                total_weighted_od_based_waiting_time=cohort_weighted_od,
+                average_weighted_waiting_time=cohort_weighted_od / cohort_count,
+                total_detour_time_s=cohort_detour_s,
+                average_detour_time_s=cohort_detour_s / cohort_count,
+                total_weighted_detour_time=cohort_weighted_detour,
+                average_weighted_detour_time=cohort_weighted_detour / cohort_count,
             )
         )
         cohort_total_cw += cohort_cw
         cohort_total_weighted += cohort_weighted
+        cohort_total_od_s += cohort_od_s
+        cohort_total_weighted_od += cohort_weighted_od
+        cohort_total_detour_s += cohort_detour_s
+        cohort_total_weighted_detour += cohort_weighted_detour
+        cohort_total_rc_steps += cohort_rc_steps
+        cohort_total_od_steps += cohort_od_steps
+        cohort_total_detour_steps += cohort_detour_steps
         cohort_vehicle_count += cohort_count
 
     if cohort_vehicle_count != vehicle_count:
@@ -1280,6 +2123,46 @@ def _build_summary(
             "cohort weighted totals do not add up to the overall total. "
             f"method_name={context.method_name!r}."
         )
+    if not _seconds_match(cohort_total_od_s, total_od_s):
+        raise RuntimeError(
+            "cohort OD-based totals do not add up to the overall total. "
+            f"method_name={context.method_name!r}."
+        )
+    if not _seconds_match(cohort_total_weighted_od, total_weighted_od):
+        raise RuntimeError(
+            "cohort weighted OD-based totals do not add up to the overall total. "
+            f"method_name={context.method_name!r}."
+        )
+    if not _seconds_match(cohort_total_detour_s, total_detour_s):
+        raise RuntimeError(
+            "cohort detour totals do not add up to the overall total. "
+            f"method_name={context.method_name!r}."
+        )
+    if not _seconds_match(cohort_total_weighted_detour, total_weighted_detour):
+        raise RuntimeError(
+            "cohort weighted detour totals do not add up to the overall total. "
+            f"method_name={context.method_name!r}."
+        )
+    if cohort_total_od_steps != total_od_steps:
+        raise RuntimeError(
+            "cohort OD-based timestep totals do not add up to the overall total. "
+            f"method_name={context.method_name!r}."
+        )
+    if cohort_total_rc_steps != total_rc_steps:
+        raise RuntimeError(
+            "cohort route-conditional timestep totals do not add up to the overall total. "
+            f"method_name={context.method_name!r}."
+        )
+    if cohort_total_detour_steps != total_detour_steps:
+        raise RuntimeError(
+            "cohort detour timestep totals do not add up to the overall total. "
+            f"method_name={context.method_name!r}."
+        )
+    if cohort_total_od_steps != cohort_total_rc_steps + cohort_total_detour_steps:
+        raise RuntimeError(
+            "summed cohort timesteps do not keep the OD identity. "
+            f"method_name={context.method_name!r}."
+        )
 
     return NetworkWideWaitingTimeSummary(
         method_name=context.method_name,
@@ -1288,6 +2171,14 @@ def _build_summary(
         average_cumulative_waiting_time_s=total_cw / vehicle_count,
         total_weighted_cumulative_waiting_time=total_weighted,
         average_weighted_cumulative_waiting_time=total_weighted / vehicle_count,
+        total_od_based_waiting_time_s=total_od_s,
+        average_waiting_time_s=total_od_s / vehicle_count,
+        total_weighted_od_based_waiting_time=total_weighted_od,
+        average_weighted_waiting_time=total_weighted_od / vehicle_count,
+        total_detour_time_s=total_detour_s,
+        average_detour_time_s=total_detour_s / vehicle_count,
+        total_weighted_detour_time=total_weighted_detour,
+        average_weighted_detour_time=total_weighted_detour / vehicle_count,
         cohort_summaries=tuple(cohort_summaries),
         counters=counters,
     )
@@ -1312,6 +2203,24 @@ def _build_public_result(
     audit_identities = {}
     for physical_key, identities in context.audit_identities_by_physical_key.items():
         audit_identities[physical_key] = tuple(identities)
+
+    od_results = {}
+    for od_key, od_result in context.od_reference_results_by_od_key.items():
+        if not od_result.validation_passed:
+            raise RuntimeError(
+                "an OD reference result in the official result is not validated. "
+                f"method_name={context.method_name!r} od={od_key!r}."
+            )
+        if od_result.network_free_flow_signature_digest != context.network_free_flow_signature_digest:
+            raise RuntimeError(
+                "an OD reference result digest does not match the evaluation. "
+                f"method_name={context.method_name!r} od={od_key!r}."
+            )
+        od_results[od_key] = od_result
+
+    od_audit_identities = {}
+    for od_key, identities in context.od_route_audit_identities_by_od_key.items():
+        od_audit_identities[od_key] = tuple(identities)
 
     for record in context.vehicle_records:
         stored = reference_results.get(record.physical_route_key)
@@ -1340,6 +2249,36 @@ def _build_public_result(
                 f"vehicle={record.vehicle_name!r} "
                 f"method_name={context.method_name!r}."
             )
+        od_key = (record.origin_name, record.destination_name)
+        stored_od = od_results.get(od_key)
+        if stored_od is None:
+            raise RuntimeError(
+                "vehicle record has no OD reference result. "
+                f"vehicle={record.vehicle_name!r} "
+                f"method_name={context.method_name!r}."
+            )
+        if record.od_minimum_free_flow_trip_timesteps != stored_od.od_minimum_free_flow_trip_timesteps:
+            raise RuntimeError(
+                "vehicle OD timesteps do not match the stored replay. "
+                f"vehicle={record.vehicle_name!r} "
+                f"method_name={context.method_name!r}."
+            )
+        if record.od_reference_signature_digest != context.network_free_flow_signature_digest:
+            raise RuntimeError(
+                "vehicle OD signature digest does not match the evaluation. "
+                f"vehicle={record.vehicle_name!r} "
+                f"method_name={context.method_name!r}."
+            )
+        stored_od_identities = od_audit_identities.get(od_key)
+        if (
+            stored_od_identities is None
+            or record.od_reference_route_audit_identity not in stored_od_identities
+        ):
+            raise RuntimeError(
+                "vehicle OD route audit identity is not registered. "
+                f"vehicle={record.vehicle_name!r} "
+                f"method_name={context.method_name!r}."
+            )
 
     if summary.vehicle_count != len(context.vehicle_records):
         raise RuntimeError(
@@ -1361,6 +2300,9 @@ def _build_public_result(
         summary=summary,
         reference_results_by_physical_key=MappingProxyType(reference_results),
         audit_identities_by_physical_key=MappingProxyType(audit_identities),
+        od_reference_results_by_od_key=MappingProxyType(od_results),
+        od_route_audit_identities_by_od_key=MappingProxyType(od_audit_identities),
+        network_free_flow_signature_digest=context.network_free_flow_signature_digest,
         counters=counters,
         vehicle_plan_digest=vehicle_plan_digest,
         comparison_metadata=public_metadata,

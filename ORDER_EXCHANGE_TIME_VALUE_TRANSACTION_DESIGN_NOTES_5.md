@@ -14059,7 +14059,7 @@ cumulative_waiting_time_timesteps * DELTAT
 
 **最新参照（2026-11-04、Route-Conditional production 実装・独立検証完了）:** **4 方式共通 network-wide** の **実走行ルート基準** **production module** と **専用 test** は **§31.18.23**。**§31.18.22** は **実装前の最終契約**として **維持**する。**Route-Conditional 実装内容・51 test 回帰・未実装事項**は **§31.18.23** を **優先**する。
 
-**最新参照（2026-11-06、主指標 AWT・AWWT と OD 間最短自由流 Reference）:** **FCFS 3,000 台 Route-Conditional 実算**、**320 OD 検証**、**OD Reference・AWT・AWWT の production 実装前設計**は **§31.18.24**。**§31.18.23** / **§21.9.12** は **Route-Conditional production 完了時点**の **歴史的記録**として **有効**。**指標の正式整理**と **次の production 実装**は **§31.18.24** / **進捗 §21.9.13** を **優先**する。**主指標 AWT・AWWT の production は未実装**。
+**最新参照（2026-11-07、OD 基準 AWT・AWWT・OD Reference production と FCFS 3,000 台正式検証）:** **network-wide** の **OD 間最短自由流 Reference**、**主指標 AWT・AWWT**、**Route-Conditional 明示名称**、**detour**、**FCFS 3,000 台正式算出**、**route_pref 原典確認**は **§31.18.25**。**§31.18.23** と **§21.9.12** は **Route-Conditional production 完了**の **歴史**。**§31.18.24** と **§21.9.13** は **実装前設計と事前検証（320 OD・監査予測）**の **歴史**。**旧 ACWT・ACWWT** 表記は **Route-Conditional 指標**の **歴史的呼称**として **§31.18.23** 等に **残す**。
 
 #### 31.18.23 network-wide ACWT・ACWWT production moduleと専用testの実装・独立検証完了
 
@@ -14330,7 +14330,7 @@ cumulative_waiting_time_timesteps * real_world.DELTAT
 
 - **CASE 8 script 作成時点**の **歴史的表示**
 - **今回 script は変更しない**（**CASE 1〜8 回帰**維持）
-- **現行状態**は **本 §31.18.23** および **進捗 §21.9.12** を **優先**（**Route-Conditional production**）。**主指標 AWT・OD Reference 設計**は **§31.18.24** / **§21.9.13**。
+- **現行状態**は **本 §31.18.23** および **進捗 §21.9.12** を **優先**（**Route-Conditional production 単体**）。**OD 基準 AWT・AWWT・OD Reference・FCFS 正式検証の現行**は **§31.18.25** / **進捗 §21.9.14**。**実装前設計**は **§31.18.24** / **§21.9.13**（**歴史**）。
 
 ##### 31.18.23.20 未実装事項
 
@@ -14368,7 +14368,7 @@ cumulative_waiting_time_timesteps * real_world.DELTAT
 
 #### 31.18.24 OD間最短自由流Reference、AWT・AWWT、Route-Conditional指標の実装前設計確定
 
-**位置付け:** **§31.18.23** で **Route-Conditional**（実走行ルート基準）の **production module** と **専用 test 51 件**まで **完了**した。**本節**は、その上に **主指標 AWT・Average Waiting Time per Vehicle**、**AWWT・Average Weighted Waiting Time per Vehicle**、**補助指標 Route-Conditional AWT・Route-Conditional AWWT**、**迂回時間 detour time**、**OD 間最短自由流 Reference** を **production へ追加する前**の **設計正本**である。**production 実装は未着手**。**599.0436666666666 秒**等は **監査予測**であり **正式実装済み結果ではない**。
+**歴史的記録（執筆時点）:** **§31.18.23** で **Route-Conditional**（実走行ルート基準）の **production module** と **専用 test 51 件**まで **完了**した。**本節**は、その上に **主指標 AWT・Average Waiting Time per Vehicle**、**AWWT・Average Weighted Waiting Time per Vehicle**、**補助指標 Route-Conditional AWT・Route-Conditional AWWT**、**迂回時間 detour time**、**OD 間最短自由流 Reference** を **production へ追加する前**の **設計正本**であった。**production 実装後の現行**は **§31.18.25**。**599.0436666666666 秒**等は **監査予測**であり、**§31.18.25** で **正式結果**として **再確認**した。
 
 **Git 基準（Route-Conditional production）:** branch **`feature/intersection-order-control`**、commit **`89145c6`**（message: implement and document shared network-wide ACWT and ACWWT evaluation…）。**local/remote 一致確認済み**。**本節執筆時点**、**FCFS 3,000 台検証 script**、**320 OD 検証 script**、**research output** は **未 commit**（**既存多数の未追跡 file には触れない**）。
 
@@ -14590,12 +14590,225 @@ Route-Conditional: **27 replay ≈24.21 s**（FCFS 3,000）。OD 追加: **uniqu
 
 **変更しない予定:** `uxsim.py`、`Utilities.py`、既存 **51 test file**、既存 FCFS Route-Conditional script、**320 OD script**、既存 research output。
 
-##### 31.18.24.18 次の再開地点
+##### 31.18.24.18 次の再開地点（歴史的記録）
 
-**次の直接作業:** **OD 間最短自由流 Reference・AWT・AWWT・Route-Conditional 明示名称・detour** を **production へ追加する Cursor 実装指示全文**を作成する。
+**当時の次の直接作業:** **OD 間最短自由流 Reference・AWT・AWWT・Route-Conditional 明示名称・detour** を **production へ追加する**。
 
-**実装対象候補:** `uxsim/network_wide_waiting_time_evaluation.py`、`tests/test_network_wide_waiting_time_od_reference.py`（**既存 51 test 変更なし**）。
+**当時の実装対象候補:** `uxsim/network_wide_waiting_time_evaluation.py`、`tests/test_network_wide_waiting_time_od_reference.py`（**既存 51 test 変更なし**）。
 
-**利用者 Terminal 確認（実装後）:** py_compile、新規 OD test、既存 51 test、CASE 1〜8、**320 OD validation**、diff、**新 FCFS AWT 3,000 台**、メモ更新、commit 準備。
+**完了後:** **§31.18.25** / **進捗 §21.9.14** を **優先**する。
 
-**最新正本:** **本 §31.18.24**。**Route-Conditional production 完了**は **§31.18.23**。**進捗**は **§21.9.13**。
+**本節の位置付け:** **実装前設計の歴史**。**最新**は **§31.18.25**。**Route-Conditional production 完了**は **§31.18.23**。**進捗**は **§21.9.14**（**§21.9.13** は **320 OD 事前検証まで**）。
+
+#### 31.18.25 OD間最短自由流Reference・AWT・AWWT production実装とFCFS 3,000台正式検証完了
+
+**位置付け:** **`evaluate_network_wide_waiting_time`** に **OD 間最短自由流 Reference**、**主指標 AWT・AWWT**、**迂回**、**Route-Conditional 明示 property**、**Network free-flow signature**、**OD Reference counter** を **追加した production 実装**と、**専用 test**、**全回帰**、**FCFS 3,000 台正式算出**、**route_pref 原典確認**を **記録**する。**§31.18.24** は **実装前設計**、**本節**は **実装後・検証後**の **現行正本**である。
+
+##### 31.18.25.1 production 変更概要
+
+**更新 file:** `uxsim/network_wide_waiting_time_evaluation.py`
+
+**変更規模（記録時点）:** **952 insertions**、**10 deletions**、**変更後 2,349 行**。
+
+**維持:** 既存 **Route-Conditional**（実走行ルート基準）の **計算式と field**。次は **引き続き Route-Conditional 値**を表す。**名称・型・意味は変更していない**。
+
+- `cumulative_waiting_time_timesteps`
+- `cumulative_waiting_time_s`
+- `weighted_cumulative_waiting_time`
+- `average_cumulative_waiting_time_s`（summary：**Route-Conditional AWT** と **同値**。**主指標 AWT ではない**）
+- `average_weighted_cumulative_waiting_time`（summary：**Route-Conditional AWWT** と **同値**）
+
+**追加（代表）:** OD Reference、**od_based**、**detour**、**明示 property**、**Network signature digest**、**OD counter**、**負値停止**、**simulation object 非保持**。詳細は **§31.18.24** の設計と **本節以下**に **整合**。
+
+##### 31.18.25.2 指標と表現（分解の言い方）
+
+**Vehicle timestep 正本:**
+
+```text
+od_based_waiting_time_timesteps = actual_trip_timesteps - od_minimum_free_flow_trip_timesteps
+route_conditional_waiting_time_timesteps = actual_trip_timesteps - actual_route_free_flow_trip_timesteps
+detour_time_timesteps = actual_route_free_flow_trip_timesteps - od_minimum_free_flow_trip_timesteps
+```
+
+**恒等:** `od_based_waiting_time_timesteps = route_conditional_waiting_time_timesteps + detour_time_timesteps`
+
+**主指標（production field）:**
+
+- **AWT** = `average_waiting_time_s`（**OD 基準**）
+- **AWWT** = `average_weighted_waiting_time`（**OD 基準**。**true_vot_per_second × 秒**。**3600 換算なし**）
+
+**補助指標（property 経由で既存 cumulative と同値）:**
+
+- **Route-Conditional AWT** = `route_conditional_average_waiting_time_s`
+- **Route-Conditional AWWT** = `route_conditional_average_weighted_waiting_time`
+
+**分解の正しい言い方:** **AWT を Route-Conditional AWT と Average Detour Time に分解する**。**「AWT と Route-Conditional AWT へ分解する」**という **誤表現は用いない**。
+
+全体でも次を **成立**（秒・weighted は **§31.18.24** と同様の **tolerance** で **検証 script** が確認）:
+
+```text
+AWT = Route-Conditional AWT + Average Detour Time
+AWWT = Route-Conditional AWWT + Average Weighted Detour Time
+```
+
+**正式確認:** **表示済み平均の足し算ではなく**、**Vehicle 別整数 timestep** および **weighted 合計**から **再構成**して **summary** と **一致**すること（**FCFS 検証 script**）。
+
+##### 31.18.25.3 OD Reference production（要点）
+
+**各 unique OD** について **実 World と独立した Reference World**。**Vehicle 1 台**、**departure timestep 0**、**specified_route なし**、**enforce_route なし**、**UXsim 通常経路選択**、**hard_deterministic_mode=True**、**混雑なし**、**信号・order-control なし**、**capacity 非拘束**、**実 World と同じ DELTAT**、**既存 Reference 専用 runner 再利用**。**World / Vehicle / Node / Link / Analyzer は正式結果に保持しない**。
+
+**同一評価内共有 key:** `(origin_name, destination_name)`。**前回評価・module global・World 属性・persistent cache なし**。
+
+##### 31.18.25.4 Network free-flow signature
+
+評価開始時 **1 回**。**DELTAT**、**Node 安定順序と番号**、**Link 安定順序**、**start/end Node 番号**、**length**、**link.u**。**Link 名は物理 signature に含めず**、**監査 identity** で **分離**。**公開結果**には **SHA-256 digest** のみ。
+
+##### 31.18.25.5 現行適用範囲（初期 production）
+
+**single_trip**、有効な **`Vehicle.orig` / `Vehicle.dest`**、**origin ≠ destination**、**完走済み**、**static network**、**route_choice_penalty = 0**、**恒久的通行禁止 Link なし**（**`capacity_in == 0`**）、**正の有限** **length** と **link.u**。**`duo_update_time` = 600 秒は変更しない**。**OD Reference 旅行時間が 600 秒以上であることだけ**を理由に **停止しない**。**320 OD 検証**では **最大 145 秒**。**600 秒超 OD は未検証範囲**。
+
+##### 31.18.25.6 新規 OD 専用 test
+
+**file:** `tests/test_network_wide_waiting_time_od_reference.py`（**793 行**、**23 件**）。
+
+**結果（記録時点）:** **23 passed**、**約 21.52 s**。
+
+**初回不合格 2 件の原因と修正（test のみ）:** **Link 作成後**に **`capacity_in = 0`** としたため **`capacity_in_remain` 等**が **再初期化されず**、**起点待ちが発生しなかった**。**`addLink` 呼出し時**に **`capacity_in=0.0`** と **user_function** を **渡す**よう **test helper を修正**。**production は変更していない**。**修正後 23 件全合格**。
+
+**確認内容（代表）:** detour 0 / 正、**同一 OD 共有**、**異なる OD**、**cohort**、**AWT・AWWT** と **Route-Conditional**、**恒等関係**（Vehicle・全体・cohort・weighted）、**validation 異常系**、`specified_route` なし・**`enforce_route` 非使用**（**OD World**）、**runner と `exec_simulation` 一致**（**twin World**）、**signature digest**、**評価間非持越し**、**real World 非変更・再 simulation なし**、**file 出力なし**、**simulation object 非保持**、**true VOT = 0**、**既存 field の Route-Conditional 維持**。
+
+##### 31.18.25.7 既存回帰
+
+**`tests/test_network_wide_waiting_time_evaluation.py`:** **未変更**。**51 passed**、**約 20.05 s**。**合計 pytest 74 件合格**（**51 + 23**）。
+
+**CASE 1〜8 validation:** **All cases passed.**
+
+**320 OD validation:** **320/320** shortest cost match、**mismatch 0**、route identity **320/320**、Reference travel time **320/320**、**loop 0**、同率最短 **37/37** 時間一致、**All 320 OD pairs passed.**
+
+**production 変更後の 320 OD 出力:** 旧結果は **`research_outputs/trial/validate_uxsim_3000_vehicle_od_minimum_free_flow_reference_route_choice_before_awt_production`** へ **退避**。**新結果**は **元の directory 名**へ **出力**。
+
+##### 31.18.25.8 FCFS 3,000 台 AWT・AWWT 検証 script
+
+**file:** `research_scripts/run_fcfs_6x6_grid_3000_vehicle_awt_awwt_od_reference_validation.py`
+
+**位置付け:** 更新後 **production** で **同一 FCFS 3,000 台 World** の **主指標・Route-Conditional・迂回**を **正式算出**。**既存 Route-Conditional 検証 script** と **既存 output** は **変更しない**。
+
+**static validation:** **passed**
+
+**実行例:** `caffeinate -i python research_scripts/run_fcfs_6x6_grid_3000_vehicle_awt_awwt_od_reference_validation.py`
+
+**正常終了（記録時点）:** **済**
+
+##### 31.18.25.9 FCFS 3,000 台正式結果（主・補助・迂回）
+
+**主指標:**
+
+- **AWT:** **599.0436666666667 s**（`average_waiting_time_s`）
+- **AWWT:** **571.69001350099**（`average_weighted_waiting_time`）
+
+**補助指標:**
+
+- **Route-Conditional AWT:** **579.2676666666666 s**（`route_conditional_average_waiting_time_s`）
+- **Route-Conditional AWWT:** **553.3012723371289**（`route_conditional_average_weighted_waiting_time`）
+
+**迂回:**
+
+- **Average Detour Time:** **19.776 s**（`average_detour_time_s`）
+- **Average Weighted Detour Time:** **18.388741163860672**（`average_weighted_detour_time`）
+
+**Reference 平均:**
+
+- **Average OD minimum free-flow trip time:** **105.576 s**
+- **Average actual-route free-flow trip time:** **125.352 s**
+
+**恒等（表示差を除き Vehicle・全体・cohort・weighted で確認）:**
+
+```text
+599.0436666666667 = 579.2676666666666 + 19.776
+571.69001350099 = 553.3012723371289 + 18.388741163860672
+```
+
+##### 31.18.25.10 Reference 共有（counter）
+
+**OD Reference:** **unique 320**、**replay 320**、**reuse 2,680**
+
+**Route-Conditional（actual-route physical key）:** **unique 27**、**replay 27**、**reuse 2,973**
+
+**注:** **27** は **地理的に異なるルート本数ではない**。**DELTAT** と **実走行 Link 列の length・link.u・順序**が同じ **physical_route_key** の **固有数**。**Link 名**は **physical_route_key に含めず** **audit identity** で保持。**異なる OD** でも **同一 physical 列**なら **Route-Conditional Reference を共有**。**OD Reference** は **(origin, destination)** 単位で **共有**。
+
+##### 31.18.25.11 performance（記録時点）
+
+**FCFS simulation:** **約 6.446697834064253 s**
+
+**production evaluation:** **約 53.871755542000756 s**（**Route-Conditional のみ** **約 24.21 s** 時と比べ **OD Reference 320 回追加**）
+
+**script total:** **約 117.55838270799723 s**
+
+**初回 production:** **並列化なし**。
+
+##### 31.18.25.12 正式 output
+
+**directory:** `research_outputs/trial/fcfs_6x6_grid_3000_vehicle_awt_awwt_od_reference_validation_departure_999_seed_0_demand_seed_42_vot_seed_1_cohort_seed_3`
+
+**file:** `manifest.json`、`run_summary.txt`、`network_wide_waiting_time_vehicles.csv`、`network_wide_waiting_time_cohorts.csv`、`network_wide_waiting_time_summary.json`、`vehicle_vot_and_cohort.csv`、`vehicle_plan_audit.json`
+
+**確認（要点）:** evaluation **completed**、**full trip**、**traffic clearance**、**Vehicle rows 3,000**、**cohort rows 2**、**overall / cohort / weighted identity**、**7 file すべて存在**
+
+**manifest 表示用 key（例）:** `AWT_s`、`AWWT`、`route_conditional_AWT_s`、`route_conditional_AWWT`、`average_detour_time_s`、`average_weighted_detour_time`
+
+**production summary 正式 field（対応）:** `average_waiting_time_s`、`average_weighted_waiting_time`、`route_conditional_average_waiting_time_s`、`route_conditional_average_weighted_waiting_time`、`average_detour_time_s`、`average_weighted_detour_time`
+
+##### 31.18.25.13 route_pref 原典確認（実 World）
+
+**誤説明の訂正:** Vehicle ごとに **600 秒ごとに全体ルートを固定する**わけではない。
+
+**World デフォルト（本 FCFS 検証で明示変更しない）:**
+
+- `duo_update_time` = **600 s**
+- `duo_update_weight` = **0.5**
+- `route_choice_update_gradual` = **False**
+- `hard_deterministic_mode` = **False**
+
+**`RouteChoice.route_pref` の形:** **第 1 軸 = 目的地 Node**、**第 2 軸 = Network 内の Link**（**目的地ごとに各 Link の選好**）。**車両**は **`dest.id` に対応する行**を参照。**交差点**では **そのノードから出る Link** の **選好だけ**を使う。**`hard_deterministic_mode=False`** では **選好比率に応じた確率選択**。**`True`** では **最大選好の Link**。
+
+##### 31.18.25.14 route_pref の更新（600 秒ごとの `route_search_all`）
+
+**`route_search_all`:** 各 Link の **instantaneous travel time** から **全 Node 間の最短方向**を計算。**特定 Vehicle の目的地だけ**ではない。**T = 300** 出発の Vehicle でも **T = 0** に計算された **全 Node 間情報**を **利用し得る**。
+
+**`homogeneous_DUO_update`:** 目的地 **Node ごと**、**Link ごと**に、**最短方向 mask** を **`route_pref` へ反映**。
+
+**`route_choice_update_gradual=False` のとき:** `weight0 = DUO_UPDATE_WEIGHT = 0.5`。
+
+```text
+route_pref = old route_pref * (1 - weight) + weight * current_shortest_direction_mask
+```
+
+**初回**は **旧値が空**のため **weight 相当 1** で **現在の最短方向がそのまま入る**。**以降**は **旧値の半分**と **今回最短の半分**。**以前最短と今回最短の両方に正の選好が残り得る**。
+
+##### 31.18.25.15 route_pref の情報数（本 Network）
+
+**Node 60**、**Link 168**、**外部 24**、**内部十字路 36**。
+
+**実質的な選好パラメータ数（origin==destination を除く）:** **24 × 59 × 1 + 36 × 59 × 4 = 168 × 59 = 9,912**
+
+**コード上の `route_pref` 配列:** **60 × 168 = 10,080 要素**。**差 168** は **目的地 = 現在 Node** の **行**に対応し、**通常の次 Link 選択では使わない**と理解する。**「各 Node が 168 Link と接続」**の意味ではない。
+
+##### 31.18.25.16 本評価との関係
+
+**production 評価**と **FCFS 検証**では **`route_pref`・600 秒更新・確率的 Link 選択を変更していない**。**同一実 World 結果**に対し **AWT を分解**して評価した。
+
+```text
+AWT = Route-Conditional AWT + Average Detour Time
+```
+
+**経路選択条件の変更**による交通結果の差と、**評価指標の変更**による差を **混同しない**。**経路更新間隔の感度分析**は **実行時間短縮後の別作業**。
+
+##### 31.18.25.17 未実装事項
+
+**TVT-MP 3,000 台の AWT・AWWT 正式算出**、**signalized UXsim**、**BATCH**、**4 方式比較**、**経路更新間隔感度**、**route_pref 感度**、**production 最適化**、**並列化**、**persistent cache**、**package 公開**、**Analyzer 呼出し口**、**taxi**、**複数 destination**、**非ゼロ route_choice_penalty 一般化**、**通行禁止 Link 一般化** 等。
+
+##### 31.18.25.18 次の再開地点（メモ更新直後）
+
+**利用者 Terminal:** **`py_compile`**、**新規 23 test**、**既存 51 test**、**CASE 1〜8**、**320 OD validation**、**FCFS 3,000 台 AWT・AWWT 正式結果確認**、**git diff / add / commit**（**別指示で push**。**commit 名に document を含む**）。
+
+**最新正本:** **本 §31.18.25**。**実装前設計**は **§31.18.24**。**Route-Conditional production 単体の歴史**は **§31.18.23**。**進捗**は **§21.9.14**。
