@@ -14,7 +14,8 @@
 - **文献調査側**の最新再開地点は **§20**。
 - **2026-11-04 追記（network-wide Route-Conditional production 完了）:** **4 方式共通評価**の **Route-Conditional** **production 実装・専用 test・独立検証**の **歴史的再開地点**は **§21.9.12**。**詳細技術正本**は **§31.18.23**。**§31.18.22** と **§21.9.11** は **production 実装前**として **歴史的に有効**。
 - **2026-11-06 追記（主指標 AWT・AWWT・OD Reference 設計確定）:** **FCFS 3,000 台 Route-Conditional 実算**、**320 OD 検証**、**実装前の指標整理・OD Reference 設計**の **歴史的再開地点**は **§21.9.13**。**詳細技術正本**は **§31.18.24**（**実装前設計**）。**削除しない**。
-- **2026-11-07 追記（OD 基準 AWT・AWWT production・FCFS 正式算出・route_pref 原典）:** **network-wide** の **OD Reference・主指標 AWT・AWWT・迂回・恒等関係**の **production 実装後**の **最新再開地点**は **§21.9.14**。**詳細技術正本**は **§31.18.25**。**§31.18.23** / **§21.9.12** は **Route-Conditional のみ**。**§31.18.24** / **§21.9.13** は **実装前設計・320 OD 事前検証**。**旧 ACWT・ACWWT** は **Route-Conditional 指標の歴史的呼称**として **§31.18.23** 等に **残す**。
+- **2026-11-07 追記（OD 基準 AWT・AWWT production・FCFS 正式算出・route_pref 原典）:** **network-wide** の **OD Reference・主指標 AWT・AWWT・迂回・恒等関係**の **production 実装完了**の **歴史的再開地点**は **§21.9.14**。**詳細技術正本**は **§31.18.25**。**§31.18.23** / **§21.9.12** は **Route-Conditional のみ**。**§31.18.24** / **§21.9.13** は **実装前設計・320 OD 事前検証**。**旧 ACWT・ACWWT** は **Route-Conditional 指標の歴史的呼称**として **§31.18.23** 等に **残す**。
+- **2026-11-08 追記（baseline・Candidate 共通 snapshot 最適化・正式受入れ）:** **TVT-MP performance・production snapshot 経路**の **最新再開地点**は **§21.9.15**。**詳細技術正本**は **§31.19**（**§29** は **Candidate 集合内共有直列化**の **歴史正本**。**§31.15** は **~18 h 未解決時点**の **歴史**）。
 
 **検索語:** ORDER_EXCHANGE_PROGRESS_4、進捗第4巻、TVT-MP、横並び表示、事後分析、監査出力、full-run audit helper、nonparticipating 20％、全車完走、交通解消、3,000台、T=999、departure-end、4交差点、T=382、初回Actual arrival、Actual arrival上書き、Baseline arrival一致、first divergenceなし、T=402、一時skip、clearance、C順位183、Actual通過順位177、selected=False、baseline fallback、leading nonparticipating、順位確定源、完了、最新再開地点、Git対象、commit、push。
 
@@ -2189,7 +2190,7 @@ TSE完全PDFまたは2009年overview chapter全文を別経路で入手した場
 
 **当時の最新再開地点（歴史）:** **本 §21.9.13**。**詳細契約**は **§31.18.24**（**実装前**）。
 
-**現行の最新再開地点:** **§21.9.14** / **§31.18.25**。
+**現行の最新再開地点（AWT 完了後・本最適化前の当時記録）:** **§21.9.14** / **§31.18.25**。**現在地**は **§21.9.15** / **§31.19**。
 
 **歴史的記録:** **§21.9.12** は **Route-Conditional production module・51 test 完了**の記録として **削除しない**。**§31.18.23** 本文の **ACWT・ACWWT** 表記は **当時の Route-Conditional 指標**を指す。
 
@@ -2224,8 +2225,39 @@ TSE完全PDFまたは2009年overview chapter全文を別経路で入手した場
 
 **未実装:** TVT-MP 正式算出、**4 方式比較**、**経路更新間隔感度**、**その他 §31.18.25.17**。
 
-**最新再開地点:** **本 §21.9.14**。**詳細契約**は **§31.18.25**。
+**当時の最新再開地点（歴史）:** **本 §21.9.14**。**詳細契約**は **§31.18.25**。**baseline・Candidate 共通 snapshot 最適化・full-completion 正式受入れ**後の **最新再開地点**は **§21.9.15**。**詳細正本**は **§31.19**。
 
-**次の直接作業（メモ更新直後）:** 実装 **3 file** と **メモ 2 file** の **Terminal 確認**（**py_compile**、**pytest 74**、**CASE 1〜8**、**320 OD**、**FCFS 結果確認**、**git diff / add / commit**。**commit 名に document**。**別指示で push**。
+**次の直接作業（§21.9.14 執筆時点・歴史）:** 実装 **3 file** と **メモ 2 file** の **Terminal 確認**（**py_compile**、**pytest 74**、**CASE 1〜8**、**320 OD**、**FCFS 結果確認**、**git diff / add / commit**）。**現行の次作業**は **§21.9.15** を参照。
 
 **歴史的記録:** **§21.9.13**（**320 OD 事前検証・設計確定**）、**§31.18.24**（**実装前設計全文**）は **削除しない**。
+
+#### 21.9.15 baseline・Candidate共通snapshot高速化の正式受入れ
+
+**執筆日:** 2026-11-08
+
+**詳細技術正本:** `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_5.md` **§31.19**（**§29** = **Candidate 集合内共有直列化**。**本節** = **baseline と Candidate 集合の 2 回 dumps を 1 回に統合**）。
+
+**位置付け（非技術）:** 同一 real timestep の同一交通状態を、**baseline 全体予測**と **Candidate 局所予測**の **2 用途で二重保存**していた重複を除いた。**共有するのは immutable な snapshot bytes のみ**。**baseline / Candidate の World・mutable 状態は共有しない**。
+
+**完了した作業:**
+
+1. **T=0〜199 性能診断** — `research_scripts/diagnose_tvt_mp_6x6_grid_3000_vehicle_performance_first_200_timesteps.py`。**driver ~707 s**、**約 97%** が保存・複製・復元（**§31.19.6**）。
+2. **production 前 A/B** — `diagnostics/order_control/tvt_mp_baseline_candidate_shared_snapshot_ab.py`。**平均 ~35.6% 短縮**、**~1.55×**、**transactions 816** 維持、**全 run 完全一致**。**weakref 修正**（**diagnostic のみ**）。
+3. **production 実装** — `order_control_baseline_driver.py`、`order_control_tvt_mp_local_virtual_calculation_set.py`、`order_control_tvt_mp_candidate_local_state.py`（**`serialize_baseline_real_world_snapshot`**、**`build_baseline_fork_from_serialized_world`**、**`serialized_real_world_snapshot`**）。
+4. **関連 test 横断監査・更新** — **777 件合格**（**test を通すため production を旧方式へ戻していない**）。
+5. **T=0〜299 回帰** — `..._eval_300_timestep_baseline_candidate_shared_snapshot_validation.py`。**exec ~1021.93 s**、研究 CSV **完全一致**（**§29 後 ~1637.95 s から ~37.6% 短縮**）。
+6. **3,000 台・nonparticipating 20%・full-completion** — `..._full_completion_audit_baseline_candidate_shared_snapshot_validation.py`。**Reference** `..._candidate_limit_10_seed_0_vot_seed_1_nonparticipation_seed_3` と **研究・監査・VOT・manifest 研究 key 完全一致**。**`formal_production_acceptance_ready: true`**。**transactions 4298**、**exec ~34245.23 s**（旧 **65093.89 s**、**~47.39% 短縮・~1.90×**）。
+
+**正式受入れ判断:** **採用してよい**（A/B 両順序一致、**777 test**、T=0〜299・full-completion **first difference なし**、**研究結果不変**の **実装最適化**）。
+
+**AWT・AWWT:** 保存済み **~18 h Reference の正式 10 file** に **OD 基準 AWT・AWWT 出力なし**。**本比較では AWT・AWWT 一致を主張しない**。次は **TVT-MP 正式算出** → **3 方式比較**（**§31.19.12**）。
+
+**残る高速化候補:** snapshot からの不要履歴除外、局所復元縮小、bytes 増加抑制、等（**本最適化と混在させない・別作業**）。
+
+**変更・新規 file（commit 前・一覧）:** production **3**、test **7+**、diagnostic **2**（新）、validation script **2**（新）。**旧** `tvt_mp_candidate_shared_serialization_ab.py` は **現 production 再実行時は更新要**（**歴史有効**）。
+
+**失敗履歴:** **production 欠陥なし**。**diagnostic** object id。**test** 旧契約一括監査。**validation** REFERENCE 名・sys.modules・manifest key 等（**§31.19.14**）。
+
+**最新再開地点:** **本 §21.9.15**。**詳細正本**は **§31.19**。
+
+**次の直接作業（commit 前）:** メモ **2 file**・production・test・diagnostic・validation の **diff 確認**、**py_compile**・**関連 test**、**git diff --check**、**add**、**commit**（**document を commit 名に含む**。**research output は原則含めない**）。**push は別指示**。

@@ -1084,7 +1084,11 @@ def test_fork_result_does_not_include_plan_or_rank_ledger_fields():
         "registered_visit_count",
         "inlink_physical_orders",
         "downstream_boundary_result",
+        "serialized_real_world_snapshot",
     }
+    assert type(result.serialized_real_world_snapshot) is bytes
+    assert len(result.serialized_real_world_snapshot) > 0
+    assert "serialized_real_world_snapshot" not in repr(result)
 
 
 def test_tvt_driver_result_includes_inlink_physical_orders():

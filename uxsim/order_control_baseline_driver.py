@@ -1,15 +1,19 @@
 """
 Fixed-horizon full-World baseline driver for snapshot-fixed TVT research visits.
 
-Connects World.copy(), OrderControlBaselineCollector, snapshot registration, and a
-single fork-side exec_simulation() batch forward. Institutional TVT logic stays outside.
+Serializes the real World once, restores the baseline fork from those bytes,
+then connects OrderControlBaselineCollector, snapshot registration, and a
+single fork-side exec_simulation() batch forward. World.copy() is unchanged
+and is not used here. Institutional TVT logic stays outside.
 """
 
 from __future__ import annotations
 
 import copy
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+
+import dill as pickle
 
 from uxsim.order_control_baseline_collector import OrderControlBaselineCollector
 from uxsim.order_control_baseline_downstream_boundary import (
@@ -43,6 +47,10 @@ class OrderControlBaselineForkResult:
     downstream_boundary_result: (
         OrderControlBaselineDownstreamBoundaryResult | None
     )
+    # Bytes of the real World at baseline preparation, before this timestep's
+    # visit registration. Valid for this fork result only. Not a cache.
+    # repr is off so a printed result does not dump the World bytes.
+    serialized_real_world_snapshot: bytes | None = field(default=None, repr=False)
 
 
 @dataclass
@@ -59,6 +67,7 @@ class _BaselineForkPrepared:
     real_world_time_before: float
     real_world_collector_before: object
     real_world_downstream_boundary_observer_before: object
+    serialized_real_world_snapshot: bytes
 
 
 def _validate_and_freeze_target_node_names(target_node_names) -> tuple[str, ...]:
@@ -230,6 +239,88 @@ def _validate_real_world_unchanged(
         )
 
 
+def serialize_baseline_real_world_snapshot(real_W: World) -> bytes:
+    """Dump real_W once for this baseline decision.
+
+    The bytes are the World as it is at this call, before this timestep's
+    visit registration. real_W is not modified. The caller keeps the bytes
+    on the fork result and drops them when that decision ends.
+    """
+    if not isinstance(real_W, World):
+        raise ValueError(
+            "real_W must be a World; got "
+            f"type {type(real_W).__name__}."
+        )
+    serialized = pickle.dumps(real_W)
+    if type(serialized) is not bytes or len(serialized) == 0:
+        raise RuntimeError(
+            "Baseline real World snapshot must be non-empty bytes; got "
+            f"type {type(serialized).__name__}."
+        )
+    return serialized
+
+
+def build_baseline_fork_from_serialized_world(
+    real_W: World,
+    serialized_real_world_snapshot: bytes,
+) -> World:
+    """Load one independent baseline fork from snapshot bytes.
+
+    Rejects a non-bytes value, empty bytes, the real World object itself,
+    and a restored timestep that is not real_W.T. DELTAT, DELTAN, and TSIZE
+    must match the real World.
+    """
+    if not isinstance(real_W, World):
+        raise ValueError(
+            "real_W must be a World; got "
+            f"type {type(real_W).__name__}."
+        )
+    if type(serialized_real_world_snapshot) is not bytes:
+        raise ValueError(
+            "serialized_real_world_snapshot must be bytes; got "
+            f"type {type(serialized_real_world_snapshot).__name__}."
+        )
+    if len(serialized_real_world_snapshot) == 0:
+        raise ValueError(
+            "serialized_real_world_snapshot must be non-empty bytes."
+        )
+    fork_W = pickle.loads(serialized_real_world_snapshot)
+    if not isinstance(fork_W, World):
+        raise RuntimeError(
+            "Restored baseline fork must be a World; got "
+            f"type {type(fork_W).__name__}."
+        )
+    if fork_W is real_W:
+        raise RuntimeError(
+            "fork_W must be a distinct copy of real_W; got the same object."
+        )
+    if fork_W.T != real_W.T:
+        raise RuntimeError(
+            "fork_W.T must equal the real World timestep at the snapshot: "
+            f"real_W.T={real_W.T}, fork_W.T={fork_W.T}."
+        )
+    if fork_W.DELTAT != real_W.DELTAT or fork_W.DELTAN != real_W.DELTAN:
+        raise RuntimeError(
+            "Restored baseline fork DELTAT or DELTAN does not match real_W: "
+            f"fork=({fork_W.DELTAT!r}, {fork_W.DELTAN!r}), "
+            f"real=({real_W.DELTAT!r}, {real_W.DELTAN!r})."
+        )
+    if fork_W.TSIZE != real_W.TSIZE:
+        raise RuntimeError(
+            "Restored baseline fork TSIZE does not match real_W: "
+            f"fork_W.TSIZE={fork_W.TSIZE}, real_W.TSIZE={real_W.TSIZE}."
+        )
+    if fork_W.VEHICLES is real_W.VEHICLES or fork_W.NODES is real_W.NODES:
+        raise RuntimeError(
+            "Restored baseline fork shares the real World vehicle or node registry."
+        )
+    if fork_W.LINKS is real_W.LINKS:
+        raise RuntimeError(
+            "Restored baseline fork shares the real World link registry."
+        )
+    return fork_W
+
+
 def _build_empty_baseline_result(
     *,
     collector: OrderControlBaselineCollector,
@@ -237,6 +328,7 @@ def _build_empty_baseline_result(
     baseline_timestep_T: int,
     baseline_horizon_steps: int,
     inlink_physical_orders: tuple[OrderControlBaselineSnapshotInlinkPhysicalOrder, ...],
+    serialized_real_world_snapshot: bytes,
 ) -> OrderControlBaselineForkResult:
     return OrderControlBaselineForkResult(
         collector=collector,
@@ -248,6 +340,7 @@ def _build_empty_baseline_result(
         registered_visit_count=0,
         inlink_physical_orders=inlink_physical_orders,
         downstream_boundary_result=None,
+        serialized_real_world_snapshot=serialized_real_world_snapshot,
     )
 
 
@@ -261,6 +354,7 @@ def _build_completed_baseline_result(
     registered_visit_count: int,
     inlink_physical_orders: tuple[OrderControlBaselineSnapshotInlinkPhysicalOrder, ...],
     downstream_boundary_result: OrderControlBaselineDownstreamBoundaryResult,
+    serialized_real_world_snapshot: bytes,
 ) -> OrderControlBaselineForkResult:
     return OrderControlBaselineForkResult(
         collector=collector,
@@ -272,6 +366,7 @@ def _build_completed_baseline_result(
         registered_visit_count=registered_visit_count,
         inlink_physical_orders=inlink_physical_orders,
         downstream_boundary_result=downstream_boundary_result,
+        serialized_real_world_snapshot=serialized_real_world_snapshot,
     )
 
 
@@ -314,7 +409,11 @@ def _prepare_baseline_fork(
     )
     baseline_timestep_T = real_W.T
 
-    fork_W = real_W.copy()
+    serialized_real_world_snapshot = serialize_baseline_real_world_snapshot(real_W)
+    fork_W = build_baseline_fork_from_serialized_world(
+        real_W,
+        serialized_real_world_snapshot,
+    )
     # The copy keeps the real World's evaluation end. Clear it on the fork
     # only, before fork checks and before forward, so the fork can run the
     # full horizon on the internal margin and does not analyze there.
@@ -343,6 +442,7 @@ def _prepare_baseline_fork(
         real_world_downstream_boundary_observer_before=(
             real_world_downstream_boundary_observer_before
         ),
+        serialized_real_world_snapshot=serialized_real_world_snapshot,
     )
 
 
@@ -396,6 +496,7 @@ def _complete_baseline_fork_after_registration(
             baseline_timestep_T=prepared.baseline_timestep_T,
             baseline_horizon_steps=prepared.baseline_horizon_steps,
             inlink_physical_orders=inlink_physical_orders,
+            serialized_real_world_snapshot=prepared.serialized_real_world_snapshot,
         )
 
     _validate_remaining_baseline_steps(
@@ -444,6 +545,7 @@ def _complete_baseline_fork_after_registration(
         registered_visit_count=registered_visit_count,
         inlink_physical_orders=inlink_physical_orders,
         downstream_boundary_result=downstream_boundary_result,
+        serialized_real_world_snapshot=prepared.serialized_real_world_snapshot,
     )
 
 
@@ -454,10 +556,12 @@ def run_snapshot_fixed_baseline_fork(
     baseline_horizon_steps: int,
 ) -> OrderControlBaselineForkResult:
     """
-    Copy real_W, register snapshot-fixed visits on fork_W, and run one fixed horizon.
+    Serialize real_W once, restore fork_W from those bytes, register
+    snapshot-fixed visits on fork_W, and run one fixed horizon.
 
-    Does not modify real_W. Does not return fork_W. Raises on invalid input or
-    internal inconsistency; does not return partial results on failure.
+    Does not modify real_W. Does not return fork_W. The snapshot bytes are
+    returned on the fork result for this decision only. Raises on invalid
+    input or internal inconsistency; does not return partial results on failure.
     """
     prepared = _prepare_baseline_fork(
         real_W,
@@ -527,7 +631,8 @@ def run_snapshot_fixed_baseline_fork_with_tvt_rank_ledger_registration(
     rank_states_by_node_name: Mapping[str, OrderControlTvtNodeRankState],
 ) -> OrderControlBaselineForkResult:
     """
-    Copy real_W, register snapshot-fixed visits on fork_W, and run one fixed horizon.
+    Serialize real_W once, restore fork_W from those bytes, register
+    snapshot-fixed visits on fork_W, and run one fixed horizon.
 
     Before baseline virtual simulation, validates the caller-owned rank ledgers,
     copies them independently, and attaches that pre-registration copy to the

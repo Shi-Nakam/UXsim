@@ -11006,7 +11006,7 @@ Vehicle **z** の実走行 Link 数を **L_z**、累積 waiting time を **CW_z*
 - **console log** が **約 5 時間更新されない区間**があった。
 - **macOS sample** では主負荷が **`_pickle.load`** と **Python GC**。
 - **pickle 復元**と **GC** が **大きな負荷**であることは **確認**。
-- **正規の共有直列化復元**を **多数回**行っているのか、**想定外の反復経路**かは **実行中には未判定**。
+- **正規の共有直列化復元**を **多数回**行っているのか、**想定外の反復経路**かは **実行中には未判定**（**2026-11-08 時点で §31.19 により原因確定・本最適化で受入れ済み**。本 §31.15 は **当時の未解決記録**として **維持**）。
 - **py-spy** は macOS で **root** が必要。
 - **sudo py-spy** は **Anaconda Python 3.13** process を認識できず、`Failed to find a python interpreter in the .data section` で **失敗**。
 - **Python 関数単位**の **実行中 stack** は **取得できなかった**。
@@ -11054,8 +11054,8 @@ Vehicle **z** の実走行 Link 数を **L_z**、累積 waiting time を **CW_z*
 - Buyer・Seller の **正式集計単位**
 - **12 L + cumulative waiting time** が旅行時間へ **厳密一致**すること
 - TVT-MP が **一般に FCFS より常に 11.45% 優れる**こと
-- **pickle 負荷**が **想定外反復**によると **確定**したこと
-- **次の高速化方法**が **確定**したこと
+- **pickle 負荷**が **想定外反復**によると **確定**したこと（**§31.15 執筆時点**。**§29〜§31.15 経路の重複保存**は **§31.19 で確定・解消**。以降の未確定は **§31.19.13**）
+- **次の高速化方法**が **確定**したこと（**§31.15 執筆時点**。**baseline・Candidate共通snapshot**は **§31.19**。**さらなる候補**は **§31.19.13**）
 
 ### 31.18 ACWT・ACWWTの方式共通network定義への訂正
 
@@ -14059,6 +14059,8 @@ cumulative_waiting_time_timesteps * DELTAT
 
 **最新参照（2026-11-04、Route-Conditional production 実装・独立検証完了）:** **4 方式共通 network-wide** の **実走行ルート基準** **production module** と **専用 test** は **§31.18.23**。**§31.18.22** は **実装前の最終契約**として **維持**する。**Route-Conditional 実装内容・51 test 回帰・未実装事項**は **§31.18.23** を **優先**する。
 
+**最新参照（2026-11-08、baseline・Candidate 共通 snapshot 最適化・full-completion 正式受入れ）:** **TVT-MP performance 正本**・**約 18 時間問題の解決**・**3,000 台 full-completion 完全一致**は **§31.19**。**進捗**は **§21.9.15**。**§29** は **Candidate 集合内共有直列化**の **歴史正本**（**本最適化と混同しない**）。**§31.15** は **未解決だった当時の記録**。
+
 **最新参照（2026-11-07、OD 基準 AWT・AWWT・OD Reference production と FCFS 3,000 台正式検証）:** **network-wide** の **OD 間最短自由流 Reference**、**主指標 AWT・AWWT**、**Route-Conditional 明示名称**、**detour**、**FCFS 3,000 台正式算出**、**route_pref 原典確認**は **§31.18.25**。**§31.18.23** と **§21.9.12** は **Route-Conditional production 完了**の **歴史**。**§31.18.24** と **§21.9.13** は **実装前設計と事前検証（320 OD・監査予測）**の **歴史**。**旧 ACWT・ACWWT** 表記は **Route-Conditional 指標**の **歴史的呼称**として **§31.18.23** 等に **残す**。
 
 #### 31.18.23 network-wide ACWT・ACWWT production moduleと専用testの実装・独立検証完了
@@ -14811,4 +14813,197 @@ AWT = Route-Conditional AWT + Average Detour Time
 
 **利用者 Terminal:** **`py_compile`**、**新規 23 test**、**既存 51 test**、**CASE 1〜8**、**320 OD validation**、**FCFS 3,000 台 AWT・AWWT 正式結果確認**、**git diff / add / commit**（**別指示で push**。**commit 名に document を含む**）。
 
-**最新正本:** **本 §31.18.25**。**実装前設計**は **§31.18.24**。**Route-Conditional production 単体の歴史**は **§31.18.23**。**進捗**は **§21.9.14**。
+**最新正本:** **§31.19**（**baseline・Candidate 共通 snapshot 最適化・full-completion 受入れ**）。**OD 基準 AWT・AWWT・FCFS 正式算出**は **本 §31.18.25**。**実装前設計**は **§31.18.24**。**Route-Conditional production 単体の歴史**は **§31.18.23**。**進捗**は **§21.9.15**（**§21.9.14** は **歴史**）。
+
+### 31.19 baseline・Candidate共通snapshot production最適化と3,000台full-completion完全一致検証
+
+**執筆日:** 2026-11-08
+
+**検索語:** baseline・Candidate共通snapshot、共有dumps、serialize_baseline_real_world_snapshot、build_baseline_fork_from_serialized_world、serialized_real_world_snapshot、§29、Candidate独立性、T=0〜199診断、A/B、35.6%短縮、47.39%短縮、816取引、4298取引、full-completion、formal_production_acceptance_ready、777 test、weakref、18時間、9時間半。
+
+##### 31.19.1 位置付け（§29との関係）
+
+**§29** は **Candidate 集合内**で **同一 real World を FIFO True Candidate ごとに dumps していた重複**を除いた **第1段階**である。
+
+| 段階 | dumps（real World） | loads |
+|------|---------------------|-------|
+| §29 前 | Candidate ごとに dumps | Candidate ごとに loads |
+| §29 後 | Candidate **集合**ごとに dumps **1 回** | Candidate ごとに loads **1 回**（**独立 World**） |
+| **本 §31.19 前** | **baseline dumps 1 回** + **Candidate 集合 dumps 1 回** | baseline loads **1 回** + Candidate ごとに loads |
+| **本 §31.19 後** | **baseline・Candidate 共通 dumps 1 回** | baseline loads **1 回** + Candidate ごとに loads |
+
+**Candidate 間独立性**（§29 以降の契約）は **維持**する。**正式 driver 経路**では **baseline 由来の snapshot bytes** を Candidate 側でも使い、**Candidate 集合 module による 2 回目の dumps は行わない**。**§29 の実装を失敗時 fallback として残したわけではない**。
+
+単独 API **`serialize_tvt_mp_candidate_real_world_snapshot`**（`order_control_tvt_mp_candidate_local_state`）は **後方互換 test 等**のため **残す**。**正式 driver 経路では使用しない**。
+
+##### 31.19.2 非技術的な最適化の説明
+
+**同一 real timestep** の **同一交通状態**を、従来は次の **2 用途**で **別々に保存**していた。
+
+1. **通常順位のまま** Network 全体を進める **baseline 予測**
+2. **順位を変更した Candidate** の **局所仮想予測**
+
+**変更後:**
+
+1. **baseline 準備時**に交通状態を **1 回だけ**保存（**immutable な snapshot bytes**）
+2. **baseline 予測**はその bytes から **全体 World** を復元
+3. **Candidate 予測**も **同じ bytes** から **Candidate ごとに独立 World** を復元し、**対象 Node の順位を Candidate 順位へ変更**して **局所仮想計算**
+4. **次の real timestep** へ **bytes を持ち越さない**
+
+**共有するのは bytes のみ**。**共有しない:** baseline World、Candidate local World、Node、Link、Vehicle、registry、mutable な仮想計算状態。
+
+##### 31.19.3 production 変更（要点）
+
+**変更 module:**
+
+- `uxsim/order_control_baseline_driver.py`
+- `uxsim/order_control_tvt_mp_local_virtual_calculation_set.py`
+- `uxsim/order_control_tvt_mp_candidate_local_state.py`（**docstring・単独 API**。**正式 driver は 2 回目 dumps なし**）
+
+**明示的 helper・結果 field（実装原文どおり）:**
+
+- `serialize_baseline_real_world_snapshot(real_W) -> bytes`
+- `build_baseline_fork_from_serialized_world(real_W, serialized_real_world_snapshot) -> World`
+- `OrderControlBaselineForkResult.serialized_real_world_snapshot: bytes | None`（`repr=False`）
+
+**契約:**
+
+- baseline 準備で **dumps 1 回**、**同じ bytes** から baseline fork を **loads 復元**（**正式 driver で `World.copy` は使用しない**。`World.copy` **API 自体は未変更**）
+- bytes を **baseline 結果の連鎖**で Candidate 集合へ **明示受渡し**
+- Candidate 集合側で **新しい dumps なし**。**不足・空 bytes・stale timestep** は **停止**。**黙って再 serialize する fallback なし**
+- **module global cache なし**、**World 属性 cache なし**、**persistent cache なし**、**timestep 間持越しなし**
+
+##### 31.19.4 snapshot 取得時点と正本
+
+**snapshot** は **real timestep の TVT-MP driver 開始後**、次 **より前**に取得する。
+
+- 当該 timestep の **新しい未確定 Visit 登録**
+- **既着未確定 Visit** の確定
+- **先頭非参加 Visit** の確定
+
+**取得前の主な処理:** driver 開始 timestep の記録、対象 Node の rank state 未作成なら **空 rank state** 作成。
+
+**取得後**、実 World の **交通状態・時刻・Vehicle 位置・Link 状態・traffic RNG・order-control RNG** は、**Candidate 側が bytes を受け取るまで** **変更されない**（**主に rank ledger が変わる**）。
+
+**正本:**
+
+- **Candidate binding 順位:** 後段から渡される **`binding rank sequence`**
+- **baseline:** baseline collector、baseline fork result
+- **Candidate 復元 World 内の古い rank ledger** を **新しい正本として使わない**
+
+##### 31.19.5 変更していない研究条件
+
+baseline horizon **30**、Candidate Visit 上限 **10**、decision window **6**（production `_DECISION_WINDOW_STEPS`）、Vehicle 数・Network・plan・参加・非参加集合・各 seed・VOT・route choice・RNG・Candidate 形成以降の **FIFO・経済・選択・payment・rank・passage・audit・full completion・traffic clearance** 等、**§31.1 full-completion 条件**と **§29 benchmark 条件**の **研究契約**（**本最適化は実装経路のみ**）。
+
+##### 31.19.6 約18時間 trial と T=0〜199 原因確定
+
+**保存済み旧 full-completion**（§31.1）: `exec_simulation` **65093.892005 s**、wall-clock **約 18 h 5 min**、`final World.T` **2035**、**約 31.99 s / real timestep**。**macOS sample** で **`_pickle.load` と GC** が主負荷（**deadlock ではない**）。**当時は反復経路未判定**（§31.15）。
+
+**診断 script:** `research_scripts/diagnose_tvt_mp_6x6_grid_3000_vehicle_performance_first_200_timesteps.py`（**T=0〜199**、production **未変更** wrapper）。
+
+| 項目 | 秒 |
+|------|-----|
+| simulation loop | 707.807 |
+| driver total | 707.086 |
+| baseline prepare（**内訳 World.copy 200 回**） | 326.042（copy **326.039**） |
+| baseline forward | 14.950 |
+| Candidate serialize **157 回** | 273.654 |
+| Candidate loads **834 回** | 86.391 |
+| Candidate local calculation 全体 | 364.734 |
+| audit wrapper | 0.018 |
+
+**結論:** 最初の 200 timestep の **約 97%** が **World 全体の保存・複製・復元**。**baseline forward 自体 ~15 s**。**局所仮想交通計算は主因ではない**。**serialized bytes 平均 ~38.1 MB、最大 ~46.7 MB**。**T=150〜199** で driver **~300 s**、平均 **~44.2 MB**。**登録 Visit 0 は 200 回中 2 回**のみ（copy 前スキップは **本条件では主短縮策ではない**）。
+
+##### 31.19.7 production 前 A/B（T=0〜299）
+
+**diagnostic:** `diagnostics/order_control/tvt_mp_baseline_candidate_shared_snapshot_ab.py`
+
+- **方式 A:** baseline dumps + Candidate 集合 dumps + Candidate loads
+- **方式 B:** **共通 dumps 1 回**、baseline loads + Candidate loads、**Candidate 専用 dumps 0**
+
+**Round 1:** A **1643.501 s** → B **1063.882 s**。**Round 2:** B **1081.948 s** → A **1690.198 s**。**平均短縮 ~593.93 s（~35.6%、~1.55×）**。**transactions 816**、Candidate loads **2132**、B で **shared bytes reuse 268**、**Candidate 専用 serialize 0**。**全 run・全 round 完全一致**（`first difference` **なし**）。
+
+**A/B 初回失敗（diagnostic のみ）:** `A Candidate local World is the baseline fork World`。**id() 再利用誤判定**。**weakref 比較へ修正**。**production 欠陥ではない**。
+
+##### 31.19.8 関連 test 横断監査（777 件）
+
+production 方式変更後に古くなった前提（**World.copy patch**、**集合 module 旧 serialize**、**helper identity**、**invalid 入力で helper 先行停止**、**fork result field 契約**）を **一括監査・更新**。**test を通すため production を旧方式へ戻していない**。**World 独立性・real World 不変・RNG・順位・payment・passage 検査を維持**。
+
+| file（代表） | 件数 |
+|--------------|-----:|
+| tests_order_control_baseline_driver.py | 74 |
+| tests_order_control_tvt_mp_local_virtual_calculation_set.py | 44 |
+| tests_order_control_baseline_downstream_boundary_driver.py | 15 |
+| tests_order_control_tvt_baseline_driver_registration.py | 35 |
+| tests_order_control_tvt_baseline_fork_alignment.py | 25 |
+| tests_order_control_tvt_baseline_alignment.py | 25 |
+| tests_order_control_tvt_mp_evaluation_end.py | 38 |
+| tests_order_control_tvt_mp_physical_transfer.py | 82 |
+| その他関連（driver・atomic・final・payment 等） | 残り |
+| **合計** | **777** |
+
+##### 31.19.9 T=0〜299 production 回帰
+
+**script:** `research_scripts/run_tvt_mp_6x6_grid_3000_vehicle_200m_60kph_eval_300_timestep_baseline_candidate_shared_snapshot_validation.py`
+
+**結果:** exec **1021.933 s**（§29 最適化後 **~1637.95 s** から **~37.6% 短縮**）、**transactions 816**、`final World.T` **300**、研究 CSV **scenario_name 以外完全一致**。validation script の **REFERENCE 名全文検索誤判定**・**Python 3.13 sys.modules 登録不足**は **script 側修正**（**simulation / production 問題ではない**）。
+
+##### 31.19.10 3,000 台 nonparticipating 20% full-completion 完全一致
+
+**新 validation script:** `research_scripts/run_tvt_mp_6x6_grid_3000_vehicle_nonparticipating_20_full_completion_audit_baseline_candidate_shared_snapshot_validation.py`
+
+**Reference:** `research_outputs/trial/tvt_mp_6x6_grid_3000_vehicle_nonparticipating_20_full_completion_audit_candidate_limit_10_seed_0_vot_seed_1_nonparticipation_seed_3`
+
+**新 output:** `..._baseline_candidate_shared_snapshot_validation_..._nonparticipation_seed_3`
+
+**条件:** §31.1 と同一（**3,000 台・20%・T=0〜999 departure・full completion・audit** 等）。**完走・traffic clearance**。`final World.T` **2035**、evaluation end **2034**。**transactions 4298**、**Visits 11871**、**FIFO violation 0**。
+
+**比較:** 研究 CSV 5（**scenario_name 除外**）、監査 CSV 2、**vehicle_vot.csv** **全列完全一致**。**manifest 研究結果 key 完全一致**（**`production_unchanged_by_script`**、**`fcfs_pretrial_completion_timestep_not_assumed`（2296）**、**`formal_output_file_names`** を **比較対象に含める**）。**`full_completion_reference_match: true`**、**`formal_production_acceptance_ready: true`**。**first difference なし**。
+
+**除外（比較対象外）:** scenario_name、timing、output path/bytes、CSV SHA-256、**本 run 専用 snapshot 有効 flag**、AWT・AWWT 未比較注記。**`shared_serialization_production_is_active`** は **Reference に存在する場合のみ**従来どおり比較。
+
+##### 31.19.11 性能（参考）と正式受入れ
+
+| | 旧 Reference | 新 run |
+|--|--:|--:|
+| exec_simulation (s) | 65093.892 | 34245.226 |
+| wall-clock | ~18 h 5 min | ~9 h 31 min |
+| speedup | — | **~1.901×** |
+| runtime reduction | — | **~47.39%** |
+| 平均 s / timestep（2035 除算） | ~31.99 | **~16.83** |
+
+**性能は受入れ条件ではない**。**受入れ条件**は **保存済み研究結果との完全一致**。
+
+**正式採用してよい**（根拠）: A/B 両順序一致、関連 **777 test**、T=0〜299 一致、full-completion で **研究 CSV 5 件・監査 CSV 2 件・VOT 台帳・manifest 研究結果 key** が **完全一致**（**first difference なし**）、**正式出力 10 ファイル**に加えて **比較結果 JSON・txt** を生成したが **run_summary.txt 全体の一致は受入れ条件ではない**、**研究結果を変えず重複保存を除いた実装最適化**であること。
+
+##### 31.19.12 AWT・AWWT
+
+保存済み **~18 h trial の正式 10 file** に **OD 基準 AWT・AWWT 出力はない**。**本 Reference 比較では AWT・AWWT・Route-Conditional・detour の一致を主張しない**。交通・取引・Visit・順位・payment・passage・Vehicle・最終時刻の **完全一致は確認済み**。
+
+**次工程:** 高速化後 World または保存情報から **TVT-MP AWT・AWWT 正式算出** → **signalized UXsim・FCFS・TVT-MP 3 方式比較**。**新 run は script 終了後 World を file 保存していない**ため、**既存 output のみで足りるか先に確認**。必要なら **full-completion script へ AWT・AWWT 統合設計**または **同条件再実行**。
+
+##### 31.19.13 残る高速化候補（本最適化と混在させない）
+
+1. snapshot から **仮想計算に不要な過去ログ・履歴**の安全除外
+2. Candidate **全 World 復元**の **局所状態への縮小**
+3. **ログ・履歴**による bytes 増加抑制
+4. Candidate なし時の省略
+5. baseline **安全な早期終了**
+6. **GC** 確認
+7. **並列化**
+
+**優先調査候補:** 仮想計算で使わない過去記録の **結果不変**除外。**別作業**・**小規模 A/B**・**T=0〜299**・**必要なら full-completion 一致**を要求。
+
+**歴史的 diagnostic:** `diagnostics/order_control/tvt_mp_candidate_shared_serialization_ab.py` は **正式 Candidate 集合が baseline snapshot 必須**へ変わったため **現 production で再実行時は更新が必要**（**過去診断結果は歴史として有効**）。
+
+##### 31.19.14 主要 file・失敗履歴
+
+**production・test・新 diagnostic・新 validation** は **§31.19 執筆時点の workspace 変更一覧**（**commit 前**）。**production 欠陥として確認されたもの: なし**。**diagnostic:** weakref 修正。**test:** 横断監査・一括修正（**初期の個別修正ループは終了**）。**validation script:** REFERENCE 名検査、sys.modules、削除禁止 AST、manifest key 除外の誤り、等。
+
+##### 31.19.15 次の再開地点
+
+**最新 performance・TVT-MP snapshot 受入れ正本: 本 §31.19**。**進捗: §21.9.15**。
+
+**利用者 Terminal（commit 前）:** メモ 2 file・production・test・diagnostic・validation の **diff 確認**、**py_compile**・**関連 test**・**git diff --check**・**add**・**commit**（**document を commit 名に含む**。**push は別指示**）。**research output は原則 commit しない**。**旧 Candidate 共有 A/B diagnostic の互換更新**を **commit 同梱するか判断**。
+
+**§31.18.25** は **AWT・AWWT production 実装完了**の **歴史正本**。**§31.15** は **約 18 h 未解決時点**の **歴史**。**§29** は **Candidate 集合内共有直列化**の **歴史正本**。

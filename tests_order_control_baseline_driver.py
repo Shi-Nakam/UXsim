@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import copy
 from unittest.mock import patch
 
 from uxsim import World
@@ -1595,7 +1596,9 @@ def test_world_copy_propagates_original_exception():
     W.T = 10
     before = _real_world_snapshot(W)
     with patch.object(
-        UxsimWorld, "copy", side_effect=RuntimeError("copy failed for test")
+        baseline_driver_module,
+        "serialize_baseline_real_world_snapshot",
+        side_effect=RuntimeError("baseline snapshot failed for test"),
     ):
         try:
             run_snapshot_fixed_baseline_fork(
@@ -1604,7 +1607,7 @@ def test_world_copy_propagates_original_exception():
                 baseline_horizon_steps=1,
             )
         except RuntimeError as exc:
-            assert str(exc) == "copy failed for test"
+            assert str(exc) == "baseline snapshot failed for test"
         else:
             raise AssertionError("Expected RuntimeError")
     _assert_real_world_unchanged(W, before)
@@ -1616,7 +1619,15 @@ def test_world_copy_propagates_original_exception():
 def test_runtime_error_when_copy_returns_same_object():
     W = _build_time_value_junction_world()
     W.T = 10
-    with patch.object(UxsimWorld, "copy", return_value=W):
+
+    def return_same_world(real_W, serialized_real_world_snapshot):
+        return real_W
+
+    with patch.object(
+        baseline_driver_module,
+        "build_baseline_fork_from_serialized_world",
+        return_same_world,
+    ):
         _expect_runtime_error(
             lambda: run_snapshot_fixed_baseline_fork(
                 W,
@@ -1632,7 +1643,15 @@ def test_runtime_error_when_fork_timestep_mismatch_after_copy():
     W.T = 10
     bad_fork = W.copy()
     bad_fork.T = 99
-    with patch.object(UxsimWorld, "copy", return_value=bad_fork):
+
+    def return_bad_fork(real_W, serialized_real_world_snapshot):
+        return bad_fork
+
+    with patch.object(
+        baseline_driver_module,
+        "build_baseline_fork_from_serialized_world",
+        return_bad_fork,
+    ):
         _expect_runtime_error(
             lambda: run_snapshot_fixed_baseline_fork(
                 W,
@@ -1648,7 +1667,15 @@ def test_runtime_error_when_fork_collector_non_none_after_copy():
     W.T = 10
     bad_fork = W.copy()
     bad_fork._order_control_baseline_collector = OrderControlBaselineCollector()
-    with patch.object(UxsimWorld, "copy", return_value=bad_fork):
+
+    def return_bad_fork(real_W, serialized_real_world_snapshot):
+        return bad_fork
+
+    with patch.object(
+        baseline_driver_module,
+        "build_baseline_fork_from_serialized_world",
+        return_bad_fork,
+    ):
         _expect_runtime_error(
             lambda: run_snapshot_fixed_baseline_fork(
                 W,
@@ -2043,6 +2070,108 @@ def test_inlink_physical_orders_unchanged_after_baseline_forward():
     )
 
 
+def test_baseline_snapshot_is_created_once_and_stays_off_the_world():
+    W = _build_time_value_junction_world(tmax=300)
+    snapshot_T = 60
+    W.T = snapshot_T
+    vehicle = W.addVehicle("orig", "dest", 0, name="snapshot_once_vehicle")
+    _advance_until_on_inlink(vehicle, "in")
+    _place_arrived_vehicle_at_snapshot(
+        W,
+        vehicle,
+        inlink_name="in",
+        target_node_name="junction",
+        outlink_name="out",
+        arrival_timestep=10,
+        snapshot_timestep=snapshot_T,
+    )
+    traffic_before = copy.deepcopy(W.rng.bit_generator.state)
+    order_before = copy.deepcopy(W.order_control_rng.bit_generator.state)
+    dumps = {"n": 0}
+    original_dumps = baseline_driver_module.pickle.dumps
+
+    def counting_dumps(world):
+        dumps["n"] += 1
+        return original_dumps(world)
+
+    with patch.object(baseline_driver_module.pickle, "dumps", counting_dumps):
+        result = run_snapshot_fixed_baseline_fork(
+            W,
+            target_node_names=["junction"],
+            baseline_horizon_steps=3,
+        )
+    assert dumps["n"] == 1
+    snapshot = result.serialized_real_world_snapshot
+    assert type(snapshot) is bytes
+    assert len(snapshot) > 0
+    assert "serialized_real_world_snapshot" not in repr(result)
+    assert W.rng.bit_generator.state == traffic_before
+    assert W.order_control_rng.bit_generator.state == order_before
+    for value in vars(W).values():
+        assert value is not snapshot
+    fork = baseline_driver_module.build_baseline_fork_from_serialized_world(W, snapshot)
+    assert fork is not W
+    assert fork.T == W.T
+    assert fork.VEHICLES is not W.VEHICLES
+    assert fork.get_node("junction") is not W.get_node("junction")
+    assert fork.get_link("in") is not W.get_link("in")
+    assert fork.VEHICLES[vehicle.name] is not vehicle
+
+
+def test_baseline_snapshot_helpers_reject_bad_inputs_and_keep_rng():
+    W = _build_time_value_junction_world()
+    W.T = 10
+    traffic_before = copy.deepcopy(W.rng.bit_generator.state)
+    order_before = copy.deepcopy(W.order_control_rng.bit_generator.state)
+    snapshot = baseline_driver_module.serialize_baseline_real_world_snapshot(W)
+    assert W.rng.bit_generator.state == traffic_before
+    assert W.order_control_rng.bit_generator.state == order_before
+    saved = snapshot
+    W.T = 11
+    try:
+        baseline_driver_module.build_baseline_fork_from_serialized_world(W, snapshot)
+        raise AssertionError("expected RuntimeError for stale timestep")
+    except RuntimeError as exc:
+        assert "fork_W.T" in str(exc)
+    assert snapshot is saved
+    W.T = 10
+    try:
+        baseline_driver_module.build_baseline_fork_from_serialized_world(W, "not-bytes")
+        raise AssertionError("expected ValueError for non-bytes")
+    except ValueError as exc:
+        assert "bytes" in str(exc)
+    try:
+        baseline_driver_module.build_baseline_fork_from_serialized_world(W, b"")
+        raise AssertionError("expected ValueError for empty bytes")
+    except ValueError as exc:
+        assert "non-empty" in str(exc)
+    assert W.rng.bit_generator.state == traffic_before
+    assert W.order_control_rng.bit_generator.state == order_before
+
+
+def test_zero_visit_baseline_still_creates_one_snapshot():
+    W = _build_time_value_junction_world()
+    W.T = 4
+    dumps = {"n": 0}
+    original_dumps = baseline_driver_module.pickle.dumps
+
+    def counting_dumps(world):
+        dumps["n"] += 1
+        return original_dumps(world)
+
+    with patch.object(baseline_driver_module.pickle, "dumps", counting_dumps):
+        result = run_snapshot_fixed_baseline_fork(
+            W,
+            target_node_names=["junction"],
+            baseline_horizon_steps=2,
+        )
+    assert result.registered_visit_count == 0
+    assert result.fork_steps_executed == 0
+    assert dumps["n"] == 1
+    assert type(result.serialized_real_world_snapshot) is bytes
+    assert len(result.serialized_real_world_snapshot) > 0
+
+
 TESTS = [
     test_accepts_list_target_node_names,
     test_accepts_tuple_target_node_names,
@@ -2115,6 +2244,9 @@ TESTS = [
     test_generic_api_passes_false_and_result_collector_mode_is_false,
     test_prepare_baseline_fork_rejects_non_bool_mode,
     test_inlink_physical_orders_unchanged_after_baseline_forward,
+    test_baseline_snapshot_is_created_once_and_stays_off_the_world,
+    test_baseline_snapshot_helpers_reject_bad_inputs_and_keep_rng,
+    test_zero_visit_baseline_still_creates_one_snapshot,
 ]
 
 

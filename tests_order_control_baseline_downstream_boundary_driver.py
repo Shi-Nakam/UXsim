@@ -24,6 +24,7 @@ from uxsim.order_control_baseline_driver import (
     run_snapshot_fixed_baseline_fork,
     run_snapshot_fixed_baseline_fork_with_tvt_rank_ledger_registration,
 )
+import uxsim.order_control_baseline_driver as baseline_driver_module
 from uxsim.order_control_tvt_node_rank_state import OrderControlTvtNodeRankState
 from uxsim.uxsim import World as UxsimWorld
 
@@ -272,16 +273,23 @@ def _rank_states_for_nodes(node_names):
     }
 
 
-def _capturing_copy_patch():
+def _capturing_fork_restore_patch():
     captured_forks = []
-    original_copy = UxsimWorld.copy
+    original_build = baseline_driver_module.build_baseline_fork_from_serialized_world
 
-    def capturing_copy(self):
-        fork_W = original_copy(self)
+    def capturing_build(real_W, serialized_real_world_snapshot):
+        fork_W = original_build(real_W, serialized_real_world_snapshot)
         captured_forks.append(fork_W)
         return fork_W
 
-    return patch.object(UxsimWorld, "copy", capturing_copy), captured_forks
+    return (
+        patch.object(
+            baseline_driver_module,
+            "build_baseline_fork_from_serialized_world",
+            capturing_build,
+        ),
+        captured_forks,
+    )
 
 
 def _assert_three_level_frozen_boundary(boundary):
@@ -329,7 +337,7 @@ def test_empty_baseline_returns_none_boundary_without_observer_or_forward():
     W = _build_junction_world()
     W.T = 15
     before = _real_world_snapshot(W)
-    copy_patch, captured_forks = _capturing_copy_patch()
+    copy_patch, captured_forks = _capturing_fork_restore_patch()
     with copy_patch:
         with patch(
             "uxsim.order_control_baseline_driver."
@@ -361,7 +369,7 @@ def test_nonempty_baseline_connects_observer_to_fork_only_and_returns_frozen_res
     snapshot_T = 20
     _place_arrived_at_junction(W, vehicle_name="through_vehicle", snapshot_timestep=snapshot_T)
     before = _real_world_snapshot(W)
-    copy_patch, captured_forks = _capturing_copy_patch()
+    copy_patch, captured_forks = _capturing_fork_restore_patch()
     horizon = 8
     with copy_patch:
         result = run_snapshot_fixed_baseline_fork(
@@ -641,8 +649,16 @@ def test_runtime_error_when_fork_observer_non_none_after_copy():
     bad_fork = W.copy()
     leftover_observer = object()
     bad_fork._order_control_baseline_downstream_boundary_observer = leftover_observer
+
+    def return_bad_fork(real_W, serialized_real_world_snapshot):
+        return bad_fork
+
     try:
-        with patch.object(UxsimWorld, "copy", return_value=bad_fork):
+        with patch.object(
+            baseline_driver_module,
+            "build_baseline_fork_from_serialized_world",
+            return_bad_fork,
+        ):
             run_snapshot_fixed_baseline_fork(
                 W,
                 target_node_names=["junction"],
@@ -669,7 +685,7 @@ def test_registration_failure_does_not_start_forward_or_connect_observer():
         snapshot_timestep=snapshot_T,
     )
     before = _real_world_snapshot(W)
-    copy_patch, captured_forks = _capturing_copy_patch()
+    copy_patch, captured_forks = _capturing_fork_restore_patch()
     with copy_patch:
         with patch.object(
             OrderControlBaselineDownstreamBoundaryObserver,
@@ -745,6 +761,9 @@ def test_completed_and_empty_fork_result_field_contract():
         baseline_horizon_steps=4,
     )
     assert empty_result.downstream_boundary_result is None
+    assert type(empty_result.serialized_real_world_snapshot) is bytes
+    assert len(empty_result.serialized_real_world_snapshot) > 0
+    assert "serialized_real_world_snapshot" not in repr(empty_result)
 
     completed_world = _build_through_world()
     _place_arrived_at_junction(
@@ -766,6 +785,9 @@ def test_completed_and_empty_fork_result_field_contract():
         OrderControlBaselineDownstreamBoundaryObserver,
     )
     assert not hasattr(completed, "fork_W")
+    assert type(completed.serialized_real_world_snapshot) is bytes
+    assert len(completed.serialized_real_world_snapshot) > 0
+    assert "serialized_real_world_snapshot" not in repr(completed)
 
     try:
         OrderControlBaselineForkResult(

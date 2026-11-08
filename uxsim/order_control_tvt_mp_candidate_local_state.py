@@ -807,10 +807,11 @@ def build_tvt_mp_candidate_local_state_from_serialized_world(
 ) -> OrderControlTvtMpCandidateLocalState:
     """Build one candidate local state from a shared serialized snapshot.
 
-    The bytes may be reused for every FIFO True candidate in one call of
-    evaluate_tvt_mp_candidate_local_virtual_calculations. Each call loads a
-    new World. Candidates must not share that World, its nodes, links, or
-    vehicles. Input checks run before pickle.loads.
+    The bytes may be reused for every FIFO True candidate in one decision.
+    Each call loads a new World. Candidates must not share that World, its
+    nodes, links, or vehicles. The binding rank sequence argument is the
+    rank source of truth. This function does not read the restored World's
+    rank ledger as a new source of truth. Input checks run before pickle.loads.
     """
     real_world, sequence, real_world_timestep_T = _validated_real_world_and_sequence(
         real_W,

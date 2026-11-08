@@ -12,6 +12,7 @@ from unittest.mock import patch
 
 from uxsim.analyzer import Analyzer
 from uxsim.order_control_baseline_driver import run_snapshot_fixed_baseline_fork
+import uxsim.order_control_baseline_driver as baseline_driver_module
 from uxsim.order_control_tvt_mp_actual_passage import (
     OrderControlTvtMpActualPassageCommonFrozenInput,
     OrderControlTvtMpActualPassageMonetaryFrozenInput,
@@ -1269,14 +1270,14 @@ def test_fork_clears_evaluation_end_and_runs_full_horizon():
     )
     world.order_control_tvt_evaluation_end_timestep = 9
     copied = []
-    original_copy = World.copy
+    original_build = baseline_driver_module.build_baseline_fork_from_serialized_world
     termination_calls = []
     analysis_calls = []
     original_terminated = World.simulation_terminated
     original_analysis = Analyzer.basic_analysis
 
-    def capture_copy(world):
-        fork = original_copy(world)
+    def capture_fork(real_W, serialized_real_world_snapshot):
+        fork = original_build(real_W, serialized_real_world_snapshot)
         copied.append(fork)
         return fork
 
@@ -1288,7 +1289,11 @@ def test_fork_clears_evaluation_end_and_runs_full_horizon():
         analysis_calls.append(1)
         return original_analysis(analyzer)
 
-    with patch.object(World, "copy", capture_copy):
+    with patch.object(
+        baseline_driver_module,
+        "build_baseline_fork_from_serialized_world",
+        capture_fork,
+    ):
         with patch.object(World, "simulation_terminated", tracking_terminated):
             with patch.object(Analyzer, "basic_analysis", tracking_analysis):
                 result = run_snapshot_fixed_baseline_fork(
@@ -1314,14 +1319,18 @@ def test_zero_visits_still_skip_forward_after_fork_release():
     world.T = 9
     world.order_control_tvt_evaluation_end_timestep = 9
     copied = []
-    original_copy = World.copy
+    original_build = baseline_driver_module.build_baseline_fork_from_serialized_world
 
-    def capture_copy(world):
-        fork = original_copy(world)
+    def capture_fork(real_W, serialized_real_world_snapshot):
+        fork = original_build(real_W, serialized_real_world_snapshot)
         copied.append(fork)
         return fork
 
-    with patch.object(World, "copy", capture_copy):
+    with patch.object(
+        baseline_driver_module,
+        "build_baseline_fork_from_serialized_world",
+        capture_fork,
+    ):
         result = run_snapshot_fixed_baseline_fork(
             world,
             target_node_names=["junction"],

@@ -24,7 +24,6 @@ from uxsim.order_control_tvt_candidate_visit_set import (
 from uxsim.order_control_tvt_mp_candidate_local_state import (
     build_tvt_mp_candidate_local_state,
     build_tvt_mp_candidate_local_state_from_serialized_world,
-    serialize_tvt_mp_candidate_real_world_snapshot,
 )
 from uxsim.order_control_tvt_mp_candidate_local_virtual_calculation import (
     OrderControlTvtMpCandidateLocalVirtualCalculationResult,
@@ -85,9 +84,11 @@ def evaluate_tvt_mp_candidate_local_virtual_calculations(
 
     Node order and candidate order come from the saved FIFO inspection
     result. FIFO False candidates are not copied and are not executed.
-    When at least one FIFO True candidate exists, real_W is serialized once
-    after the input checks. Each FIFO True candidate then loads its own
-    World from those bytes. The bytes live only in this call.
+    When at least one FIFO True candidate exists, each candidate loads its
+    own World from the baseline fork result's snapshot bytes. This function
+    does not serialize real_W again. The binding rank sequence built for
+    each candidate is the rank source of truth. The rank ledger inside a
+    restored World is not used as a new source of truth.
     """
     real_world = _require_real_world(real_W)
     fifo_set = _require_fifo_inspection_set_result(fifo_inspection_set_result)
@@ -98,8 +99,9 @@ def evaluate_tvt_mp_candidate_local_virtual_calculations(
 
     serialized_real_world = None
     if _fifo_set_has_fifo_true_candidate(fifo_set):
-        serialized_real_world = serialize_tvt_mp_candidate_real_world_snapshot(
-            real_world
+        serialized_real_world = _require_baseline_snapshot_bytes(
+            real_world,
+            fork_result,
         )
 
     node_results: list[OrderControlTvtNodeMpLocalVirtualCalculationResult] = []
@@ -212,6 +214,30 @@ def _require_python_int_timestep(
             f"{type(value).__name__} with value {value!r}."
         )
     return value
+
+
+def _require_baseline_snapshot_bytes(
+    real_world: World,
+    fork_result: OrderControlBaselineForkResult,
+) -> bytes:
+    """Return this decision's baseline snapshot, or stop.
+
+    The formal driver path does not serialize the real World again when
+    the baseline bytes are missing.
+    """
+    snapshot = fork_result.serialized_real_world_snapshot
+    if type(snapshot) is not bytes or len(snapshot) == 0:
+        raise RuntimeError(
+            "Baseline serialized_real_world_snapshot is missing for a FIFO "
+            "True candidate. The formal driver does not serialize real_W again."
+        )
+    if fork_result.baseline_timestep_T != real_world.T:
+        raise RuntimeError(
+            "Baseline snapshot timestep does not match real_W.T: "
+            f"baseline_timestep_T={fork_result.baseline_timestep_T!r}, "
+            f"real_W.T={real_world.T!r}."
+        )
+    return snapshot
 
 
 def _require_real_world_matches_baseline(

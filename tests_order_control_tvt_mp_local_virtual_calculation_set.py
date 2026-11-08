@@ -68,6 +68,10 @@ from uxsim.order_control_tvt_mp_general_trade_rank import (
 from uxsim.order_control_tvt_mp_local_binding_rank_sequence import (
     OrderControlTvtMpLocalBindingRankSequence,
 )
+import uxsim.order_control_tvt_mp_candidate_local_state as local_state_mod
+from uxsim.order_control_tvt_mp_candidate_local_state import (
+    serialize_tvt_mp_candidate_real_world_snapshot,
+)
 from uxsim.order_control_tvt_mp_local_virtual_calculation_set import (
     OrderControlTvtMpLocalVirtualCalculationSetResult,
     OrderControlTvtNodeMpLocalVirtualCalculationResult,
@@ -665,7 +669,6 @@ class _StageHarness:
         self.local_states = []
         self.calc_states = []
         self.original_world_copy = World.copy
-        self.serialize_calls = 0
 
     def binding(self, fifo_set, ticket, rank_state):
         self.binding_calls.append((fifo_set, ticket, rank_state))
@@ -720,10 +723,6 @@ class _StageHarness:
             resolved=resolved,
         )
 
-    def serialize(self, real_W):
-        self.serialize_calls += 1
-        return b"one-decision-snapshot"
-
     def world_copy(self, world):
         copied = self.original_world_copy(world)
         self.copied_worlds.append(copied)
@@ -745,11 +744,6 @@ def _patched_stage_apis(harness: _StageHarness):
         ),
         patch.object(
             set_mod,
-            "serialize_tvt_mp_candidate_real_world_snapshot",
-            harness.serialize,
-        ),
-        patch.object(
-            set_mod,
             "initialize_tvt_mp_candidate_local_virtual_calculation_state",
             harness.init,
         ),
@@ -763,7 +757,27 @@ def _patched_stage_apis(harness: _StageHarness):
         yield harness
 
 
-def _evaluate(world, fifo_set, rank_states):
+def _fork_result_of(fifo_set):
+    return (
+        fifo_set.general_trade_rank_set_result
+        .concrete_buyer_candidate_set_result
+        .inlink_candidate_physical_order_result
+        .candidate_visit_set_result
+        .right_of_entry_selection_result
+        .leading_confirmation_result
+        .arrived_confirmation_result
+        .alignment_fork_result
+        .fork_result
+    )
+
+
+def _evaluate(world, fifo_set, rank_states, *, attach_snapshot=True):
+    if attach_snapshot and _fork_result_of(fifo_set).serialized_real_world_snapshot is None:
+        snapshot = serialize_tvt_mp_candidate_real_world_snapshot(world)
+        fifo_set = _replace_fork(
+            fifo_set,
+            serialized_real_world_snapshot=snapshot,
+        )
     return evaluate_tvt_mp_candidate_local_virtual_calculations(
         world,
         fifo_set,
@@ -960,7 +974,12 @@ def test_set_result_keeps_input_fifo_object_and_has_no_forbidden_fields():
         node_specs=[_not_generated_node_spec("merge", _NORMAL_NOT_GENERATED[0])],
         downstream_boundary_result=None,
     )
-    result = _evaluate(world, fifo_set, {})
+    snapshot = serialize_tvt_mp_candidate_real_world_snapshot(world)
+    fifo_set = _replace_fork(
+        fifo_set,
+        serialized_real_world_snapshot=snapshot,
+    )
+    result = _evaluate(world, fifo_set, {}, attach_snapshot=False)
     assert result.fifo_inspection_set_result is fifo_set
     node_fields = set(_field_names(OrderControlTvtNodeMpLocalVirtualCalculationResult))
     set_fields = set(_field_names(OrderControlTvtMpLocalVirtualCalculationSetResult))
@@ -1055,7 +1074,12 @@ def test_rejects_non_fifo_result_without_copying():
     harness = _StageHarness()
     with _patched_stage_apis(harness):
         try:
-            _evaluate(world, object(), _rank_states("merge"))
+            _evaluate(
+                world,
+                object(),
+                _rank_states("merge"),
+                attach_snapshot=False,
+            )
             raise AssertionError("expected ValueError")
         except ValueError as error:
             assert "FifoInspectionSetResult" in str(error)
@@ -1210,7 +1234,6 @@ def test_normal_not_generated_statuses_return_empty_without_rank_boundary_or_cop
         assert node_result.candidate_local_virtual_calculation_results == ()
         assert harness.binding_calls == []
         assert harness.copied_worlds == []
-        assert harness.serialize_calls == 0
         assert harness.init_calls == []
 
 
@@ -1228,7 +1251,6 @@ def test_complete_with_zero_candidates_is_empty_and_does_not_require_rank_or_bou
     assert node_result.candidate_local_virtual_calculation_results == ()
     assert harness.binding_calls == []
     assert harness.copied_worlds == []
-    assert harness.serialize_calls == 0
 
 
 def test_complete_all_fifo_false_is_empty_and_keeps_false_on_fifo_result():
@@ -1236,14 +1258,13 @@ def test_complete_all_fifo_false_is_empty_and_keeps_false_on_fifo_result():
     fifo_set = _one_true_merge_chain(fifo=False, downstream_boundary_result=None)
     harness = _StageHarness()
     with _patched_stage_apis(harness):
-        result = _evaluate(world, fifo_set, {})
+        result = _evaluate(world, fifo_set, {}, attach_snapshot=False)
     node_result = result.node_local_virtual_calculation_results[0]
     assert node_result.candidate_local_virtual_calculation_results == ()
     assert _fifo_tickets(fifo_set)[0].preserves_inlink_fifo is False
     assert result.fifo_inspection_set_result is fifo_set
     assert harness.binding_calls == []
     assert harness.copied_worlds == []
-    assert harness.serialize_calls == 0
     assert harness.run_calls == []
 
 
@@ -1790,7 +1811,8 @@ def test_production_source_keeps_required_shape_and_forbids_out_of_scope_work():
     assert "for candidate_fifo_inspection_result in" in source_text
     assert "build_tvt_mp_local_binding_rank_sequence" in source_text
     assert "build_tvt_mp_candidate_local_state_from_serialized_world" in source_text
-    assert "serialize_tvt_mp_candidate_real_world_snapshot" in source_text
+    assert "serialized_real_world_snapshot" in source_text
+    assert "serialize_tvt_mp_candidate_real_world_snapshot(" not in source_text
     assert "initialize_tvt_mp_candidate_local_virtual_calculation_state" in source_text
     assert "run_tvt_mp_candidate_local_virtual_calculation(" in source_text
     lowered = source_text.lower()
@@ -1828,13 +1850,23 @@ def test_end_to_end_one_resolved_candidate_on_horizon_one_and_multiple():
             ],
             horizon=horizon,
         )
+        snapshot = serialize_tvt_mp_candidate_real_world_snapshot(world)
+        fifo_set = _replace_fork(
+            fifo_set,
+            serialized_real_world_snapshot=snapshot,
+        )
         fingerprint = _world_fingerprint(world)
         collector_before = collector.get_baseline_visit_snapshot(
             visit_keys[0][0],
             visit_keys[0][1],
         )
         rank_before = rank_states["merge"].k_confirmed()
-        result = _evaluate(world, fifo_set, rank_states)
+        result = _evaluate(
+            world,
+            fifo_set,
+            rank_states,
+            attach_snapshot=False,
+        )
         kept = result.node_local_virtual_calculation_results[0].candidate_local_virtual_calculation_results
         assert len(kept) == 1
         assert kept[0].resolved is True
@@ -1873,15 +1905,11 @@ def test_end_to_end_one_unresolved_candidate_is_kept():
 
 def test_end_to_end_mixed_true_false_and_independent_copies():
     restored = []
-    serialize_calls = {"n": 0}
+    dumps_calls = {"n": 0}
     copy_calls = {"n": 0}
     original_build = set_mod.build_tvt_mp_candidate_local_state_from_serialized_world
-    original_serialize = set_mod.serialize_tvt_mp_candidate_real_world_snapshot
     original_copy = World.copy
-
-    def counting_serialize(real_W):
-        serialize_calls["n"] += 1
-        return original_serialize(real_W)
+    original_dumps = local_state_mod.pickle.dumps
 
     def counting_build(real_W, sequence, serialized_real_world):
         state = original_build(real_W, sequence, serialized_real_world)
@@ -1891,6 +1919,10 @@ def test_end_to_end_mixed_true_false_and_independent_copies():
     def counting_copy(world):
         copy_calls["n"] += 1
         return original_copy(world)
+
+    def counting_dumps(value):
+        dumps_calls["n"] += 1
+        return original_dumps(value)
 
     world, fifo_set, rank_states, collector, visit_keys, created = _prepare_end_to_end_buyers(
         [
@@ -1912,20 +1944,22 @@ def test_end_to_end_mixed_true_false_and_independent_copies():
         horizon=1,
         fifo_flags=(True, False),
     )
+    snapshot = serialize_tvt_mp_candidate_real_world_snapshot(world)
+    fifo_set = _replace_fork(fifo_set, serialized_real_world_snapshot=snapshot)
     fingerprint = _world_fingerprint(world)
     rng_before = copy.deepcopy(world.rng.bit_generator.state)
     order_rng_before = copy.deepcopy(world.order_control_rng.bit_generator.state)
     with (
-        patch.object(set_mod, "serialize_tvt_mp_candidate_real_world_snapshot", counting_serialize),
         patch.object(
             set_mod,
             "build_tvt_mp_candidate_local_state_from_serialized_world",
             counting_build,
         ),
         patch.object(World, "copy", counting_copy),
+        patch.object(local_state_mod.pickle, "dumps", counting_dumps),
     ):
-        result = _evaluate(world, fifo_set, rank_states)
-    assert serialize_calls["n"] == 1
+        result = _evaluate(world, fifo_set, rank_states, attach_snapshot=False)
+    assert dumps_calls["n"] == 0
     assert len(restored) == 1
     assert copy_calls["n"] == 0
     kept = result.node_local_virtual_calculation_results[0].candidate_local_virtual_calculation_results
@@ -1945,15 +1979,11 @@ def test_end_to_end_mixed_true_false_and_independent_copies():
 
 def test_end_to_end_two_true_candidates_use_separate_copies_and_keep_identity_order():
     restored = []
-    serialize_calls = {"n": 0}
+    dumps_calls = {"n": 0}
     copy_calls = {"n": 0}
     original_build = set_mod.build_tvt_mp_candidate_local_state_from_serialized_world
-    original_serialize = set_mod.serialize_tvt_mp_candidate_real_world_snapshot
     original_copy = World.copy
-
-    def counting_serialize(real_W):
-        serialize_calls["n"] += 1
-        return original_serialize(real_W)
+    original_dumps = local_state_mod.pickle.dumps
 
     def counting_build(real_W, sequence, serialized_real_world):
         state = original_build(real_W, sequence, serialized_real_world)
@@ -1963,6 +1993,10 @@ def test_end_to_end_two_true_candidates_use_separate_copies_and_keep_identity_or
     def counting_copy(world):
         copy_calls["n"] += 1
         return original_copy(world)
+
+    def counting_dumps(value):
+        dumps_calls["n"] += 1
+        return original_dumps(value)
 
     world, fifo_set, rank_states, collector, visit_keys, created = _prepare_end_to_end_buyers(
         [
@@ -1984,20 +2018,22 @@ def test_end_to_end_two_true_candidates_use_separate_copies_and_keep_identity_or
         horizon=1,
         fifo_flags=(True, True),
     )
+    snapshot = serialize_tvt_mp_candidate_real_world_snapshot(world)
+    fifo_set = _replace_fork(fifo_set, serialized_real_world_snapshot=snapshot)
     fingerprint = _world_fingerprint(world)
     rng_before = copy.deepcopy(world.rng.bit_generator.state)
     order_rng_before = copy.deepcopy(world.order_control_rng.bit_generator.state)
     with (
-        patch.object(set_mod, "serialize_tvt_mp_candidate_real_world_snapshot", counting_serialize),
         patch.object(
             set_mod,
             "build_tvt_mp_candidate_local_state_from_serialized_world",
             counting_build,
         ),
         patch.object(World, "copy", counting_copy),
+        patch.object(local_state_mod.pickle, "dumps", counting_dumps),
     ):
-        result = _evaluate(world, fifo_set, rank_states)
-    assert serialize_calls["n"] == 1
+        result = _evaluate(world, fifo_set, rank_states, attach_snapshot=False)
+    assert dumps_calls["n"] == 0
     assert len(restored) == 2
     assert copy_calls["n"] == 0
     assert restored[0] is not restored[1]
@@ -2227,6 +2263,97 @@ def test_end_to_end_resolved_and_unresolved_mix_on_one_node():
     assert kept[0].resolved is True
     assert kept[1].resolved is False
     assert outcomes == [True, False]
+
+
+def test_fifo_true_candidates_reuse_one_baseline_snapshot_without_another_dump():
+    received = []
+    original_build = set_mod.build_tvt_mp_candidate_local_state_from_serialized_world
+
+    def counting_build(real_W, sequence, serialized_real_world):
+        received.append(serialized_real_world)
+        return original_build(real_W, sequence, serialized_real_world)
+
+    world, fifo_set, rank_states, _collector, _visit_keys, _created = _prepare_end_to_end_buyers(
+        [
+            {
+                "name": "buyer_a",
+                "origin": "orig_a",
+                "dest": "dest",
+                "inlink": "in_a",
+                "route": "out",
+            },
+            {
+                "name": "buyer_b",
+                "origin": "orig_b",
+                "dest": "dest",
+                "inlink": "in_b",
+                "route": "out",
+            },
+        ],
+        horizon=1,
+        fifo_flags=(True, True),
+    )
+    snapshot = serialize_tvt_mp_candidate_real_world_snapshot(world)
+    fifo_set = _replace_fork(fifo_set, serialized_real_world_snapshot=snapshot)
+    dumps = {"n": 0}
+    original_dumps = local_state_mod.pickle.dumps
+
+    def counting_dumps(value):
+        dumps["n"] += 1
+        return original_dumps(value)
+
+    with (
+        patch.object(
+            set_mod,
+            "build_tvt_mp_candidate_local_state_from_serialized_world",
+            counting_build,
+        ),
+        patch.object(local_state_mod.pickle, "dumps", counting_dumps),
+    ):
+        _evaluate(world, fifo_set, rank_states, attach_snapshot=False)
+    assert dumps["n"] == 0
+    assert len(received) == 2
+    assert received[0] is snapshot
+    assert received[1] is snapshot
+    assert len(snapshot) > 0
+
+
+def test_missing_baseline_snapshot_stops_without_reserialize():
+    world = _plain_world()
+    fifo_set = _one_true_merge_chain()
+    dumps_calls = {"n": 0}
+    original_dumps = local_state_mod.pickle.dumps
+
+    def counting_dumps(value):
+        dumps_calls["n"] += 1
+        return original_dumps(value)
+
+    with patch.object(local_state_mod.pickle, "dumps", counting_dumps):
+        try:
+            _evaluate(
+                world,
+                fifo_set,
+                _rank_states("merge"),
+                attach_snapshot=False,
+            )
+            raise AssertionError("expected RuntimeError")
+        except RuntimeError as error:
+            assert "does not serialize" in str(error)
+    assert dumps_calls["n"] == 0
+
+
+def test_zero_fifo_true_candidates_do_not_require_baseline_snapshot():
+    world = _plain_world()
+    empty = _build_fifo_chain(
+        node_specs=[_complete_node_spec("merge", [])],
+        downstream_boundary_result=None,
+    )
+    result = _evaluate(world, empty, {}, attach_snapshot=False)
+    assert (
+        result.node_local_virtual_calculation_results[0]
+        .candidate_local_virtual_calculation_results
+        == ()
+    )
 
 
 # ---------------------------------------------------------------------------

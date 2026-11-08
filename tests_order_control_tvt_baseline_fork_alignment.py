@@ -960,7 +960,11 @@ def test_does_not_modify_existing_result_types():
         "final_fork_timestep",
         "registered_visit_count",
         "inlink_physical_orders",
+        "serialized_real_world_snapshot",
     }
+    assert type(result.fork_result.serialized_real_world_snapshot) is bytes
+    assert len(result.fork_result.serialized_real_world_snapshot) > 0
+    assert "serialized_real_world_snapshot" not in repr(result.fork_result)
     alignment_field_names = {
         field.name for field in dataclasses.fields(result.alignment_results[0])
     }

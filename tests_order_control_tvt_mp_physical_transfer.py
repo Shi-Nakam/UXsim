@@ -15,6 +15,7 @@ import numpy as np
 import uxsim.order_control_tvt_mp_physical_transfer as physical_transfer
 from uxsim.order_control_baseline_collector import OrderControlBaselineCollector
 from uxsim.order_control_baseline_driver import run_snapshot_fixed_baseline_fork
+import uxsim.order_control_baseline_driver as baseline_driver_module
 from uxsim.order_control_tvt_mp_actual_passage import (
     OrderControlTvtMpActualNodePassageRecord,
     OrderControlTvtMpActualPassageCommonFrozenInput,
@@ -952,14 +953,18 @@ def test_zero_visits_skip_forward_and_fork_does_not_terminate():
     world.T = 9
     world.order_control_tvt_evaluation_end_timestep = 9
     copied = []
-    original_copy = World.copy
+    original_build = baseline_driver_module.build_baseline_fork_from_serialized_world
 
-    def capture_copy(real_world):
-        fork = original_copy(real_world)
+    def capture_fork(real_W, serialized_real_world_snapshot):
+        fork = original_build(real_W, serialized_real_world_snapshot)
         copied.append(fork)
         return fork
 
-    with patch.object(World, "copy", capture_copy):
+    with patch.object(
+        baseline_driver_module,
+        "build_baseline_fork_from_serialized_world",
+        capture_fork,
+    ):
         result = run_snapshot_fixed_baseline_fork(
             world,
             target_node_names=["junction"],
