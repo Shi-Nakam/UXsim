@@ -15,7 +15,9 @@
 - **2026-11-04 追記（network-wide Route-Conditional production 完了）:** **4 方式共通評価**の **Route-Conditional** **production 実装・専用 test・独立検証**の **歴史的再開地点**は **§21.9.12**。**詳細技術正本**は **§31.18.23**。**§31.18.22** と **§21.9.11** は **production 実装前**として **歴史的に有効**。
 - **2026-11-06 追記（主指標 AWT・AWWT・OD Reference 設計確定）:** **FCFS 3,000 台 Route-Conditional 実算**、**320 OD 検証**、**実装前の指標整理・OD Reference 設計**の **歴史的再開地点**は **§21.9.13**。**詳細技術正本**は **§31.18.24**（**実装前設計**）。**削除しない**。
 - **2026-11-07 追記（OD 基準 AWT・AWWT production・FCFS 正式算出・route_pref 原典）:** **network-wide** の **OD Reference・主指標 AWT・AWWT・迂回・恒等関係**の **production 実装完了**の **歴史的再開地点**は **§21.9.14**。**詳細技術正本**は **§31.18.25**。**§31.18.23** / **§21.9.12** は **Route-Conditional のみ**。**§31.18.24** / **§21.9.13** は **実装前設計・320 OD 事前検証**。**旧 ACWT・ACWWT** は **Route-Conditional 指標の歴史的呼称**として **§31.18.23** 等に **残す**。
-- **2026-11-08 追記（baseline・Candidate 共通 snapshot 最適化・正式受入れ）:** **TVT-MP performance・production snapshot 経路**の **最新再開地点**は **§21.9.15**。**詳細技術正本**は **§31.19**（**§29** は **Candidate 集合内共有直列化**の **歴史正本**。**§31.15** は **~18 h 未解決時点**の **歴史**）。
+- **2026-11-08 追記（baseline・Candidate 共通 snapshot 最適化・正式受入れ）:** **TVT-MP performance・production snapshot 経路**の **歴史的再開地点**は **§21.9.15**。**詳細技術正本**は **§31.19**（**§29** は **Candidate 集合内共有直列化**の **歴史正本**。**§31.15** は **~18 h 未解決時点**の **歴史**）。
+- **2026-11-09 追記（signalized UXsim 3,000 台 OD 基準 AWT・AWWT 正式算出・3 方式暫定比較）:** **signalized UXsim 主指標正式結果**・**FCFS・TVT-MP との暫定比較**・**次の TVT-MP VOT 五分位・取引経験別分解**の **最新再開地点**は **§21.9.17**。**詳細技術正本**は **§31.21**。**TVT-MP 正式結果・FCFS 比較**は **§31.20** / **§21.9.16**（**歴史**）。**共通評価関数・FCFS 正式値**は **§31.18.25**。
+- **2026-11-09 追記（TVT-MP 3,000 台 OD 基準 AWT・AWWT 正式算出・FCFS 比較）:** **TVT-MP 主指標正式結果**・**FCFS 比較**の **歴史的再開地点**は **§21.9.16**。**詳細技術正本**は **§31.20**。**共通評価関数・FCFS 正式値**は **§31.18.25**。
 
 **検索語:** ORDER_EXCHANGE_PROGRESS_4、進捗第4巻、TVT-MP、横並び表示、事後分析、監査出力、full-run audit helper、nonparticipating 20％、全車完走、交通解消、3,000台、T=999、departure-end、4交差点、T=382、初回Actual arrival、Actual arrival上書き、Baseline arrival一致、first divergenceなし、T=402、一時skip、clearance、C順位183、Actual通過順位177、selected=False、baseline fallback、leading nonparticipating、順位確定源、完了、最新再開地点、Git対象、commit、push。
 
@@ -2223,7 +2225,7 @@ TSE完全PDFまたは2009年overview chapter全文を別経路で入手した場
 
 **route_pref 原典:** **§31.18.25.13〜.15**（**600 秒ごと全 Node 間最短**、**homogeneous DUO_update**、**確率的出口選択**（**`hard_deterministic_mode=False`**）、**情報数 9,912**、**配列 10,080**）。**本評価は実 World の route 条件を変更していない**。
 
-**未実装:** TVT-MP 正式算出、**4 方式比較**、**経路更新間隔感度**、**その他 §31.18.25.17**。
+**未実装（§21.9.14 執筆時点）:** TVT-MP 正式算出、**4 方式比較**等（**TVT-MP AWT・AWWT 算出完了は §21.9.16** / **§31.20**）。
 
 **当時の最新再開地点（歴史）:** **本 §21.9.14**。**詳細契約**は **§31.18.25**。**baseline・Candidate 共通 snapshot 最適化・full-completion 正式受入れ**後の **最新再開地点**は **§21.9.15**。**詳細正本**は **§31.19**。
 
@@ -2250,7 +2252,7 @@ TSE完全PDFまたは2009年overview chapter全文を別経路で入手した場
 
 **正式受入れ判断:** **採用してよい**（A/B 両順序一致、**777 test**、T=0〜299・full-completion **first difference なし**、**研究結果不変**の **実装最適化**）。
 
-**AWT・AWWT:** 保存済み **~18 h Reference の正式 10 file** に **OD 基準 AWT・AWWT 出力なし**。**本比較では AWT・AWWT 一致を主張しない**。次は **TVT-MP 正式算出** → **3 方式比較**（**§31.19.12**）。
+**AWT・AWWT（§21.9.15 時点）:** 保存済み Reference に **OD 基準 AWT・AWWT 出力なし**。**当時**は **TVT-MP 正式算出が次工程**。**算出完了**は **§21.9.16** / **§31.20**。
 
 **残る高速化候補:** snapshot からの不要履歴除外、局所復元縮小、bytes 増加抑制、等（**本最適化と混在させない・別作業**）。
 
@@ -2258,6 +2260,58 @@ TSE完全PDFまたは2009年overview chapter全文を別経路で入手した場
 
 **失敗履歴:** **production 欠陥なし**。**diagnostic** object id。**test** 旧契約一括監査。**validation** REFERENCE 名・sys.modules・manifest key 等（**§31.19.14**）。
 
-**最新再開地点:** **本 §21.9.15**。**詳細正本**は **§31.19**。
+**当時の最新再開地点（歴史）:** **本 §21.9.15**。**詳細正本**は **§31.19**。**TVT-MP AWT・AWWT 正式算出後**の **最新再開地点**は **§21.9.16**（**§31.20**）。
 
-**次の直接作業（commit 前）:** メモ **2 file**・production・test・diagnostic・validation の **diff 確認**、**py_compile**・**関連 test**、**git diff --check**、**add**、**commit**（**document を commit 名に含む**。**research output は原則含めない**）。**push は別指示**。
+**次の直接作業（§21.9.15 執筆時点・歴史）:** commit 前 diff 等。**現行**は **§21.9.16**。
+
+#### 21.9.16 TVT-MP AWT・AWWT正式算出完了と次の分析課題
+
+**執筆日:** 2026-11-09
+
+**詳細技術正本:** `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_5.md` **§31.20**（**評価関数・FCFS:** **§31.18.25**。**高速化受入れ:** **§31.19**）。
+
+**完了:** `research_scripts/run_tvt_mp_6x6_grid_3000_vehicle_awt_awwt_od_reference_validation.py` で **完走後 1 回** `evaluate_network_wide_waiting_time`（**`tvt_mp`**）。出力 `.../tvt_mp_6x6_grid_3000_vehicle_awt_awwt_od_reference_validation_departure_999_seed_0_demand_seed_42_vot_seed_1_nonparticipation_seed_3` に **vehicles / cohorts / summary.json** を追加。**TVT-MP 正式 10 file 維持**。**旧 Reference** と **研究・監査・VOT・manifest 一致**（**AWT file は Reference 比較外**）。
+
+**TVT-MP 全体（3,000）:** **AWT 458.570 s**、**AWWT 440.371**（**秒ではない**）、Route-Conditional AWT **445.522 s**、Route-Conditional AWWT **429.624**、Average Detour **13.048 s**、VOT-weighted Average Detour **10.746**（**単位は §31.20.6**。**詳細・合計は §31.20.6**）。
+
+**cohort:** 参加 2,400 — AWT **461.023 s**、AWWT **453.387**；非参加 600 — AWT **448.757 s**、AWWT **388.305**（**§31.20.7**）。
+
+**FCFS 比較（同条件）:** AWT **599.044 → 458.570**（**約 23.45% 短縮**）、AWWT **571.690 → 440.371**（**約 22.97% 短縮**）。detour 平均 **約 34.0%** 短縮（**表は §31.20.10**）。
+
+**未解決点:** **AWWT 改善率が AWT を上回らなかった**（全体・参加 cohort）。**VOT 選別効果は集計で未確認**。**制度失敗・production 欠陥等は断定しない**（**§31.20.12**）。
+
+**性能（参考）:** exec **~34,757.75 s**、評価 **~39.79 s**、AWT 書出し **~0.071 s**、script total **~34,819.61 s**。
+
+**次の順序（§21.9.16 執筆時点・歴史）:** 1 本メモ更新 → 2 **signalized UXsim** 正式 sim・AWT・AWWT → 3 **TVT-MP VOT 五分位分析** → 4 設計判断 → 5 **3 方式比較**（**§31.20.14**）。
+
+**当時の最新再開地点（歴史）:** **本 §21.9.16**。**signalized UXsim 完了後**の **最新再開地点**は **§21.9.17**（**§31.21**）。
+
+**当時の直接作業（歴史）:** signalized UXsim **AWT・AWWT script 設計**（**完了: §21.9.17**）。
+
+#### 21.9.17 signalized UXsim AWT・AWWT正式算出完了とTVT-MP分解分析への移行
+
+**執筆日:** 2026-11-09
+
+**詳細技術正本:** `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_5.md` **§31.21**（**TVT-MP・FCFS 比較:** **§31.20**。**評価関数・FCFS:** **§31.18.25**）。
+
+**完了:** `research_scripts/run_signalized_uxsim_6x6_grid_3000_vehicle_awt_awwt_od_reference_validation.py` で **完走・交通解消後 1 回** `evaluate_network_wide_waiting_time`（**`signalized_uxsim`**、**method-specific participation status なし**）。出力 `.../signalized_uxsim_6x6_grid_3000_vehicle_awt_awwt_od_reference_validation_departure_999_seed_0_demand_seed_42_vot_seed_1_cohort_seed_3_signal_59_0_59_0`。**信号:** **`[59,0,59,0]`**、API cycle **118**、offset **0 / 29.5 / 59 / 88.5**、実効 **60/1/60/1**（**§31.21.4〜6**）。**`--validate-signal-timing-only`** 合格。
+
+**full-completion:** **3,000** 台 **`end`**、**`World.T` 2117**、evaluation end **2116**、safe cap **12,000**（**2117 は事前仮定ではない**）。
+
+**signalized 全体（3,000）:** **AWT 391.899 s**、**AWWT 396.730**（**秒ではない**）、Route-Conditional AWT **377.283 s**、Route-Conditional AWWT **381.559**、Average Detour **14.616 s**、VOT-weighted Average Detour **15.171**（**§31.21.9**）。
+
+**cohort:** 参加 2,400 — AWT **392.889 s**、AWWT **398.548**；非参加 600 — AWT **387.94 s**、AWWT **389.461**（**§31.21.10**。**共通比較 cohort**）。
+
+**3 方式暫定比較（同 plan・seed・cohort）:** FCFS AWT **599.044 s** → TVT-MP **458.570 s** → signalized **391.899 s**。**AWWT** FCFS **571.690** → TVT-MP **440.371** → signalized **396.730**。**signalized は TVT-MP より AWT 約 14.54%・AWWT 約 9.91% 低い**（**単一 seed・需要条件。一般化しない**。§31.21.13）。
+
+**分布:** **到着時刻**・**OD waiting** の **中央値・95%・99%** は signalized < TVT-MP、**最大のみ**わずかに大きい（末尾に長い値。**§31.21.14**）。**各方式の分布統計の比較**。**Vehicle 別 paired 比較（早着・遅着台数）は未集計**。**個別優劣割合は Vehicle 単位分析で確認**（**§31.21.15**）。
+
+**AWWT 注意:** signalized では **AWWT > AWT**。**TVT-MP では AWWT < AWT**。**FCFS からの改善率で AWWT 優位は未確認**（**§31.21.16**・**§31.20.12**）。
+
+**性能（参考）:** exec **~4.61 s**、評価 **~39.72 s**、書出し **~0.080 s**、script total **~58.65 s**。
+
+**次の順序:** 1 **TVT-MP VOT 五分位・取引経験別分解 analysis script 設計**（**§31.21.17**・**§31.20.13**）→ 2 原因確認後の設計判断 → 3 **3 方式比較表の整理**（必要時）。
+
+**最新再開地点:** **本 §21.9.17**。**詳細正本**は **§31.21**。
+
+**次の直接作業:** **TVT-MP 分解 analysis script 設計**。**その前**に **signalized script**・**TVT-MP script**・**本メモ**の確認と **必要な commit・push**（**§31.21.18**）。
