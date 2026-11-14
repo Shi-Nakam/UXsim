@@ -2,6 +2,8 @@
 
 作成日: 2026-10-08
 
+- **2026-11-14 最新参照:** TVT-MP **clearance=0** 正式実行、participating **VOT・取引role・Q5・Top 1%**、buyer局所効果とFCFS比旅行全体効果の分離、nonparticipating 600台のFCFS比較、**30反復** seed設計、**最初の経路分岐**乱数監査の **最新正本**は **§32**。進捗の最新再開地点は `ORDER_EXCHANGE_PROGRESS_4.md` **§21.9.19**。**§31.22** / **§21.9.18** は TVT-MP clearance=0 実行前の **歴史的記録**として維持する。旧節の「未実行」は現在の未実行を意味しない。**次の直接作業**は seed・経路選択乱数の **読取り専用原典監査**である。
+
 ## 1. 本文書の位置づけ
 
 本書は、TVT-MPの内部実装設計に関する詳細設計メモ第5巻である。
@@ -15177,6 +15179,8 @@ evaluated **3,000**、incomplete **0**、unique OD Reference **320** / replay **
 
 **検索語:** signalized UXsim AWT、AWWT、run_signalized_uxsim_6x6_grid_3000_vehicle_awt_awwt_od_reference_validation、391.899、59 0 59 0、3方式比較、final World.T 2117、validate-signal-timing-only。
 
+**最新参照（2026-11-12 追記）:** 本節は **signalized 全赤あり `[59, 0, 59, 0]`** を正式算出した **当時の記録**である。その後の **TVT-MP VOT 効果**の **buyer のみ悪化 17 台**原因分析、**FCFS clearance=0** 候補、**signalized 全赤なし** 候補、**主条件未確定**・**感度分析未確定**の条件再評価は **§31.22** を **優先参照**する。**本節の数値と当時の正式条件記述は削除しない。**
+
 ##### 31.21.1 位置付け
 
 **FCFS・TVT-MP** と同一の **3,000 台 Vehicle plan、OD、departure、true VOT、seed、evaluation cohort（2,400 / 600）** で、**UXsim 標準信号制御**（**order control 不使用**）を **全車完走・交通解消**まで実行した。**完走直後の実 World** に **`evaluate_network_wide_waiting_time`**（**§31.18.25**）を **1 回**接続。**`method_name`** は **`signalized_uxsim`**。**`method_specific_participation_status_by_vehicle_name` は渡さない**（全 Vehicle で **None**）。**cohort** は **共通比較群**（**TVT-MP 制度参加を意味しない**）。**評価関数は実 World を再 simulation せず読み取るのみ**。
@@ -15247,6 +15251,8 @@ evaluated **3,000**、incomplete **0**、unique OD Reference **320** / replay **
 
 **offset 値:** **0**、**29.5**、**59**、**88.5** timestep。隣接交差点は周期上 **29.5** timestep ずつ位相がずれる。
 
+**6×6 実分布（最新参照・§31.22.14）:** 本項は offset **値**を記録した当時の記述であり、**各 offset が 9 交差点ずつ**と読める場合がある。**offset 式は変更していない**。`GRID_SIZE=6` では `((row + column) % 4)` の出現回数は均等ではなく、実件数は **0.0: 9**、**29.5: 10**、**59.0: 9**、**88.5: 8**（合計 **36**）。**古い文言は削除しない。**
+
 ##### 31.21.6 原典確認と信号時系列検査
 
 **原典:** `uxsim/uxsim.py` — phase 変更 **`signal_t > signal[signal_phase]`**、その後 **`signal_t += DELTAT`**、`cycle_length = sum(signal)`。
@@ -15272,6 +15278,8 @@ evaluated **3,000**、incomplete **0**、unique OD Reference **320** / replay **
 - **`[59, 1, 59, 1]`** — 実効 **青 60・全赤 2**（歴史探索）
 
 **正式条件は `[59, 0, 59, 0]` のみ**（**§31.20.14** と同一）。
+
+**当時の記録（2026-11-12 追記）:** 上記「正式条件は `[59, 0, 59, 0]` のみ」は **§31.21 執筆時点**の **正式比較条件**であった。**後の候補条件再評価**（**全赤なし `[59, 59]`**、**clearance=0** 等）と、**どれが主条件か未確定**であることは **§31.22** を参照。**本項の古い文言は削除しない。**
 
 ##### 31.21.8 full-completion 結果
 
@@ -15400,8 +15408,1503 @@ signalized は **final World.T が TVT-MP より 82 timestep 長い**一方、**
 
 **各区分:** true VOT 五分位、台数、平均 VOT、平均 waiting、平均短縮、短縮・悪化割合、相関、buyer/seller 回数、OD、経路、detour、必要なら payment 等。**設計変更は原因分析後のみ**。
 
+**当時の再開地点（歴史・2026-11-12 追記）:** 本 §31.21.17 は **signalized 全赤あり正式算出直後**の再開地点である。**VOT 分解後の buyer のみ悪化 17 台原因分析**と **clearance・signal 候補条件再評価**は **§31.22** で完了・継続した。**現在の直接作業**は **§31.22.18**。
+
 ##### 31.21.18 次の再開地点
 
-**最新 signalized UXsim 正式結果・3 方式暫定比較正本: 本 §31.21**。**進捗: §21.9.17**。**TVT-MP・FCFS 比較: §31.20**。**評価関数・FCFS: §31.18.25**。**snapshot: §31.19**。
+**当時の最新 signalized UXsim 正式結果・3 方式暫定比較正本: 本 §31.21**。**当時の進捗: §21.9.17**。**TVT-MP・FCFS 比較: §31.20**。**評価関数・FCFS: §31.18.25**。**snapshot: §31.19**。
 
-**直接作業:** **TVT-MP VOT 五分位・取引経験別分解 analysis script 設計**。**その前**に **signalized script**・**TVT-MP script**・メモの確認と **必要な commit・push**。
+**当時の直接作業:** **TVT-MP VOT 五分位・取引経験別分解 analysis script 設計**。**その前**に **signalized script**・**TVT-MP script**・メモの確認と **必要な commit・push**。
+
+**最新参照（2026-11-12 追記）:** **§31.22** / 進捗 **§21.9.18**。**直接作業:** **§31.22.18**。
+
+### 31.22 TVT-MP VOT効果の17台原因分析とclearance・signal候補条件再評価
+
+**執筆日:** 2026-11-12
+
+**進捗メモ:** `ORDER_EXCHANGE_PROGRESS_4.md` **§21.9.18**。
+
+**検索語:** AWWTがAWTより改善しない、VOT効果、buyerのみ悪化17台、経路差、route choice、seed交絡、確率的経路選択、往復、再訪、共通Link、方式固有Link、clearance=0、clearance=1、次timestep、全赤あり、全赤なし、offset 0、signalized比較、TVT-MP clearance=0未実行、主条件未確定、感度分析未確定。
+
+**単位注記（§31.20.6・§31.21.9 と同一）:** **AWT**、**Route-Conditional AWT**、**Average Detour Time** の単位は **秒 (s)**。**AWWT**、**Route-Conditional AWWT**、**VOT-weighted Average Detour Time** は **秒ではない**。各 Vehicle の **待ち時間 (s) × true_vot_per_second** を Vehicle 数で平均した加重平均である。**AWWT を秒と表記しない。**
+
+##### 31.22.1 背景と分析目的
+
+**FCFS から TVT-MP への改善率**（同一 plan・seed・cohort、clearance=1、**§31.20.10 / §31.20.12**）は、**AWT 約 23.45%**、**AWWT 約 22.97%** であった。期待していた関係は、「高 VOT 車がより大きく改善されるなら **AWWT 改善率が AWT 改善率より大きくなる**」というものであった。観測では **AWWT が AWT より改善しない**。この **VOT 効果**が集計上確認できなかった原因を、**設計変更前**に切り分けるため、全体・参加車・buyer 経験車・seller 経験車等の **VOT 五分位分析**へ進んだ（方針は **§31.20.13 / §31.21.17**）。
+
+その分解から、**buyer のみ経験しながら FCFS より悪化した対象車両**が抽出され、そのうち **17 台**を個別原因分析対象とした。目的は、**TVT-MP の buyer 優先効果が実現していないのか**、それとも **経路差・混雑・seller 以外の交通状態変化**によって局所的利益が失われたのかを調べることであった。
+
+**本 17 台分析は単一 seed の探索的事例分析**である。**VOT と効果の集団的相関の正式判定ではない。** 単一 seed の今回結果だけで **VOT 効果**や方式の一般的優劣を確定しない。
+
+**対象 17 台（Vehicle 名）:**
+
+- `veh_1781`
+- `veh_2172`
+- `veh_1402`
+- `veh_1618`
+- `veh_1812`
+- `veh_2838`
+- `veh_2975`
+- `veh_1947`
+- `veh_1502`
+- `veh_1896`
+- `veh_2647`
+- `veh_989`
+- `veh_2525`
+- `veh_1705`
+- `veh_1649`
+- `veh_524`
+- `veh_124`
+
+##### 31.22.2 TVT-MP timing trace診断の実装とproduction一致
+
+**新規 script:** `research_scripts/diagnose_tvt_mp_6x6_grid_3000_vehicle_buyer_only_worsened_17_timing_trace.py`
+
+**出力 directory:** `research_outputs/diagnostic/tvt_mp_6x6_grid_3000_vehicle_buyer_only_worsened_17_timing_trace_seed_0_vot_seed_1_nonparticipation_seed_3`
+
+**実行条件:** 6×6 grid、**3,000 台**、traffic seed **0**、demand seed **42**、VOT seed **1**、nonparticipation / cohort seed **3**、**full completion**、**traffic clearance**、**TVT-MP clearance=1 の既存条件**。
+
+| 項目 | 値 |
+|------|-----:|
+| execution time | 34526.48409558297 秒 |
+| final `World.T` | 2035 |
+| evaluation end timestep | 2034 |
+
+**Reference 完全一致:**
+
+| 項目 | 値 |
+|------|-----|
+| `transaction_count` | 4298 |
+| `visit_count` | 11871 |
+| FIFO violation total | 0 |
+| AWT | 458.56966666666665 秒 |
+| AWWT | 440.37078581524503（**秒ではない**） |
+| `full_reference_match` | true |
+| raw_trace | complete |
+| reference inputs | complete |
+| derived tables | complete |
+| failure marker | なし |
+
+**保存した主要出力:**
+
+- `raw_trace/raw_vehicle_histories.json`
+- `raw_trace/node_arrivals.json`
+- `raw_trace/wait_events.json`
+- `raw_trace/snapshots.json`
+- `raw_trace/raw_trace_complete.json`
+- `target_vehicle_first_link_entry_timing.csv`
+- `target_vehicle_link_timeline.csv`
+- `target_vehicle_node_timeline.csv`
+- `target_vehicle_node_wait_reasons.csv`
+- `target_vehicle_post_buyer_segments.csv`
+- `diagnostic_summary.json`
+- `run_status.json`
+- `run_summary.txt`
+
+**復旧設計:** **raw trace を派生表作成前に確定**した。後処理失敗時に **3,000 台 simulation を再実行せず**、保存済み raw trace から派生表を復旧できるようにした。
+
+##### 31.22.3 FCFS側Apple-to-Apple診断
+
+TVT-MP 17 台の経路・時刻を **同一 Vehicle の FCFS 実現**と直接比較するため、FCFS 側に **route timing** と **node arrival timing** の 2 本を追加した。どちらも **formal FCFS Reference 完全一致**を確認したうえで対象 17 台だけを切り出す。
+
+**1. route timing**
+
+**script:** `research_scripts/diagnose_fcfs_6x6_grid_3000_vehicle_buyer_only_worsened_17_route_timing.py`
+
+**出力:** `research_outputs/diagnostic/fcfs_6x6_grid_3000_vehicle_buyer_only_worsened_17_route_timing_seed_0_demand_seed_42`
+
+| 項目 | 値 |
+|------|-----|
+| full completion | true |
+| traffic clearance | true |
+| formal FCFS Reference | 完全一致 |
+| target Link timeline rows | 172 |
+| `exec_simulation_seconds` | 24.453667167108506 |
+| `script_total_seconds` | 78.40309520880692 |
+
+**目的:** 17 台の実走行 Link 列、各 Link 進入時刻、次 Link 進入または trip end までの時間、Link 自由流時間、自由流超過時間、route summary。
+
+**2. node arrival timing**
+
+**script:** `research_scripts/diagnose_fcfs_6x6_grid_3000_vehicle_buyer_only_worsened_17_node_arrival_timing.py`
+
+**出力:** `research_outputs/diagnostic/fcfs_6x6_grid_3000_vehicle_buyer_only_worsened_17_node_arrival_timing_seed_0_demand_seed_42`
+
+| 項目 | 値 |
+|------|-----|
+| full completion | true |
+| traffic clearance | true |
+| formal FCFS Reference | 完全一致 |
+| target Link timeline rows | 172 |
+| target Node timeline rows | 155 |
+| `exec_simulation_seconds` | 19.676356208976358 |
+| `script_total_seconds` | 61.74956245790236 |
+
+**目的:** Link 進入時刻、Link 終端内部交差点への到着時刻、次 Link 進入による交差点通過時刻、Link 進入から交差点到着までの自由流超過、交差点到着後の待ち。**合計が既存 route timing の自由流超過と一致すること**を確認する。
+
+**arrival 記録の一意 key:** `(vehicle_name, node_name, visit_id)`。
+
+**Link との対応:** `(inlink_name, node_name)` ごとの記録順消費。Vehicle 全体の cursor では対応付けない。
+
+**記録順:** original `record_order_control_node_arrival` を **先に呼び**、同一 Visit の再登録は **重複保存しない**。
+
+##### 31.22.4 出発時点の差の否定
+
+TVT-MP の 17 台は、最初の Link へ入るまで **15 台が 1 秒**、`veh_524` と `veh_2172` が **2 秒**であった。FCFS 側も **Vehicle 単位で同じ**であった。
+
+全 17 台で、**scheduled departure から最初の Link 進入までの TVT-MP−FCFS 差は 0 秒**である。よって 17 台の FCFS 比悪化は、**出発地点の generation queue 待ちでは説明できない**。
+
+##### 31.22.5 route比較の主要結果
+
+17 台の個別旅行時間差 **TVT-MP−FCFS**（秒）は次である。正の値は TVT-MP の方が長い。
+
+| Vehicle | TVT-MP−FCFS（秒） |
+|---------|------------------:|
+| `veh_1781` | +449 |
+| `veh_2172` | +375 |
+| `veh_1402` | +340 |
+| `veh_1618` | +292 |
+| `veh_1812` | +291 |
+| `veh_2838` | +276 |
+| `veh_2975` | +249 |
+| `veh_1947` | +131 |
+| `veh_1502` | +127 |
+| `veh_1896` | +123 |
+| `veh_2647` | +121 |
+| `veh_989` | +109 |
+| `veh_2525` | +60 |
+| `veh_1705` | +29 |
+| `veh_1649` | +19 |
+| `veh_524` | +19 |
+| `veh_124` | +2 |
+| **合計** | **+3012** |
+
+**重要:** 17 台の出発から到着までの正式な総旅行時間差は **3012 秒**である。**3352 秒ではない。** **3363 秒**は別範囲の自由流超過時間差である。**3507 秒**は別範囲の自由流時間差を加えた値である。これらを **3012 秒と混同しない。**
+
+**経路差:**
+
+- `veh_124` のみ両方式で **全 Link 列が同一**。
+- 残る **16 台は経路が異なる**。
+- **13 台**は共通 prefix を走っている間、TVT-MP の方が FCFS より早かったが、**経路分岐後に差を失って最終的に悪化**した。
+- 経路分岐前から TVT-MP が遅かったのは `veh_1402`、`veh_2647`、`veh_1705`。
+- `veh_1705` は分岐後に **121 秒取り戻した**が、分岐前の **150 秒遅れ**を相殺できず最終 **29 秒悪化**。
+- `veh_124` は全経路同一で最終 **2 秒悪化**。
+
+##### 31.22.6 共通Link対方式固有Linkの重複なし分解
+
+**最重要結果。** 同じ Vehicle が両方式で実際に通った **同一 Link 通行 98 件**と、方式ごとに異なる Link 部分を **重複なし**に分解する。正本の恒等式は次である。
+
+```text
+3012 = -413 + 3425
+3425 = 144 + 3281
+```
+
+**同じ Vehicle が両方式で実際に通った同一 Link 通行 98 件（共通Link）:**
+
+| 内訳 | TVT-MP−FCFS（秒） |
+|------|------------------:|
+| Link 進入から交差点到着まで | −284 |
+| 交差点到着後の待ち | −129 |
+| **合計** | **−413** |
+
+すなわち共通 Link 部分の TVT-MP−FCFS は **−413 秒**（TVT-MP の方が短い）。
+
+**方式固有Link部分:**
+
+| 内訳 | TVT-MP−FCFS（秒） |
+|------|------------------:|
+| TVT-MP 側だけの Link と FCFS 側だけの Link の自由流時間差 | +144 |
+| 自由流超過時間差 | +3281 |
+| **合計** | **+3425** |
+
+**完全分解:** **−413 + 3425 = 3012 秒**。
+
+**結論:** 17 台は、**同一 Vehicle・同一 Link** で比較すると全体として TVT-MP の方が速かった。最終悪化は、主として **方式ごとに異なる経路部分（方式固有Link）** で生じた。**「同じ Link で TVT-MP の処理が全般に遅かった」とは結論づけられない。**
+
+**Vehicle 別の共通 Link 合計（TVT-MP−FCFS、秒）:**
+
+| Vehicle | 共通 Link 合計（秒） |
+|---------|---------------------:|
+| `veh_1402` | +285 |
+| `veh_1812` | +143 |
+| `veh_1705` | +134 |
+| `veh_2647` | +37 |
+| `veh_124` | +2 |
+| `veh_1649` | −21 |
+| `veh_1947` | −21 |
+| `veh_2975` | −46 |
+| `veh_2838` | −61 |
+| `veh_1896` | −67 |
+| `veh_2525` | −74 |
+| `veh_524` | −81 |
+| `veh_1502` | −93 |
+| `veh_2172` | −102 |
+| `veh_1781` | −112 |
+| `veh_989` | −152 |
+| `veh_1618` | −184 |
+
+**`veh_1618` の再訪処理:** `h_2_3_2` は TVT-MP で **2 回**、FCFS で **1 回**通過した。共通比較には **1 回目同士のみ**を含め、余分な TVT-MP 再訪 1 回は **方式固有部分**へ含めた。
+
+##### 31.22.7 往復・再訪
+
+具体例（単一 seed の実現結果）:
+
+- `veh_2172`: `v_0_1_3` と `v_1_0_3` の **往復**を複数回含む。
+- `veh_1618`: `h_2_2_3` の後に `h_2_3_2` を通る後戻りを含み、`h_2_3_2` を TVT-MP で **2 回**通る（**再訪**）。
+- `veh_2647`: `h_5_3_2` の後に `h_5_2_3` を通る後戻り。
+- `veh_989`: `h_2_3_2` の後に `h_2_2_3` を通る後戻り。
+
+**断定しない:** 往復・再訪が TVT-MP の order exchange 自体によるものとは言わない。UXsim の `route_pref` 履歴性、**確率的経路選択**（確率的出口選択）、交通状態変化、**方式間の乱数消費順の差（seed交絡）** が関係し得る。単一 seed の実現結果である。
+
+##### 31.22.8 Link上時間と交差点到着後待ち
+
+比較範囲を混同しない。
+
+**経路分岐後の方式別経路全体を比較した旧集計（veh_124 以外は異なる Link・交差点を含む）:**
+
+| 内訳 | TVT-MP−FCFS（秒） |
+|------|------------------:|
+| 自由流超過差 | +3363 |
+| Link 進入から交差点到着まで | +3597 |
+| 交差点到着後の待ち | −234 |
+| 合計 | +3363 |
+
+この集計は **同一 Link の直接比較ではない。** **3363 秒**を **総旅行時間差 3012 秒**と混同しない。正本は **3012 = −413 + 3425** である。
+
+**同一 Vehicle・同一 Link の 98 件比較:**
+
+| 内訳 | TVT-MP−FCFS（秒） |
+|------|------------------:|
+| Link 進入から交差点到着まで | −284 |
+| 交差点到着後待ち | −129 |
+| 合計 | −413 |
+
+したがって、**「TVT-MP では同じ Link 上で余計に時間がかかった」とは言えない。** 方式固有経路部分で事後的に大きな時間が生じたことは確認済みである。その経路が **分岐判断時点で合理的に見えたか**は **未確認**である。
+
+##### 31.22.9 上位交差点と前方車両分析の限界
+
+旧集計で追加自由流超過時間が大きかった Link 終端交差点:
+
+| 交差点 | 旧集計 TVT-MP−FCFS（秒） |
+|--------|------------------------:|
+| `g_2_3` | +865 |
+| `g_4_1` | +795 |
+| `g_4_2` | +504 |
+| `g_1_3` | +464 |
+| `g_1_4` | +331 |
+
+これは方式ごとに異なる経路を含むので、**同一交差点の制御性能を直接比較した値ではない。** TVT-MP 側でその交差点を通ったが FCFS 側では通っていない Vehicle を含む。**上位交差点自体が TVT-MP で悪いと断定しない。**
+
+**既存 raw trace:**
+
+- `snapshots.json` **459** 件
+- `wait_events.json` **459** 件
+- 記録 Vehicle **25** 台
+- `vehicles_ahead` が非空の記録 **0** 件
+- 上位 5 交差点の snapshot **94** 件
+- primary reason は `clearance_not_satisfied`、`other_or_unclassified`、`downstream_entry_space_insufficient` を含む
+
+**未確認の理由（今回の場合）:** **既存保存出力に前方車両名・全前方車両の停止履歴がない。** 少数の前方車両が長時間止めたのか、多数車両が継続的に混雑したのかは **判定不能**である。「入手済み原文に記載なし」という一般句ではなく、**保存出力の不足**が理由である。
+
+**判断:** この前方車両別寄与を調べるための **追加 TVT-MP 実行は行わない**と利用者が判断した。
+
+##### 31.22.10 seed・確率的経路選択と正式判定方法
+
+既存メモの seed 設計課題を参照する。`hard_deterministic_mode=False` では `route_pref` 重みに基づく **確率的経路選択**（確率的出口選択）がある。
+
+FCFS と TVT-MP で交通状態、Node 到着イベント、乱数消費順が変わると、同じ traffic seed でも **同一 Vehicle に同一経路選択乱数が割り当てられる保証はない（seed交絡）**。`route_pref` の履歴性により、分岐時点の最良 Link 以外にも正の選択確率が残り得る。
+
+既存出力には、各分岐時点の候補 outlink 別 `route_pref`、各候補の混雑評価、使用乱数値がない。よって、16 台が FCFS と異なる経路を選んだ理由が、次のどれかを **既存出力だけで分離できない。**
+
+1. 当時 TVT-MP で相対的に良いと評価されたため
+2. `route_pref` 履歴のため
+3. 確率選択の実現値のため
+4. 方式間乱数消費順のずれのため
+
+**正式判定方針:**
+
+- 単一 seed の 17 台をもって **VOT 効果不成立**と結論しない。
+- VOT が高いほど buyer になる効果が大きく、最終時間短縮が大きいかという集団的関係は、**seed 設計改善後の複数 seed 実行を総合して判断する。**
+- seed 設計改善は、方式間個別比較の不要な乱数列交絡を減らす。
+- 複数 seed 実行は、特定の確率実現への依存を平均化する。
+- **両者は代替関係ではなく併用する。**
+
+##### 31.22.11 clearance=0とclearance=1の正確な意味
+
+**clearance=0 は、時間差が文字どおり 0 であることを意味しない。** 「clearance なし」「安全時間なし」と単純化しない。正確には **追加 clearance 0、直前通過の次timestepから通過可能**である。
+
+**order-control では 1 timestep 当たり最大 1 台**を通過させる。
+
+- **clearance=0:** 異方向切替時も、直前通過の **次timestep** から次車が通過可能。
+- **clearance=1:** 異方向切替時、直前通過の次の timestep は通過不可で、**次の次の timestep** から通過可能。
+- 同一 inlink 方向の連続通過は、この異方向 clearance では止めない。
+
+**方式固有の利点（signalized比較）:**
+
+- **FCFS・TVT-MP** は到着に応じた逐次処理による **タイミング上の利点**を持つ。
+- **signalized UXsim** は青方向の対向双方向を同時処理でき、1 timestep に最大 2 台が進入し得るという **容量上の利点**を持つ。これは対向双方向が同時に進入し得るという **モデル上の容量上の利点**であり、**常に毎 timestep 2 台通るという意味ではない。**
+- 研究比較は、この異なる利点を持つ方式間の比較である。
+
+**UXsim の抽象度:**
+
+- UXsim はメタ・マクロシミュレータであり、交差点内の詳細軌道を逐一再現しない。
+- 先行車が交差点を完全退出してから次車が進入する必要はなく、衝突軌道でなければ複数車両が交差点内に同時存在し得るという **将来自動運転前提**を置く。
+- 方向別の必要時間差をミクロに 0 秒または 3 秒として扱う代わりに、代表的・平均的サービス間隔として捉える考え方を検討している。
+- 直感例として、非衝突関係 **0、0**、衝突し得る関係 **3** timestep なら、等重み平均は **1** timestep。
+- これはミクロな安全性証明ではなく、UXsim の抽象度に対応するマクロな仮定である。
+- **3 timestep** は約 10 m 四方の交差点で衝突点をずらすための代表値という考え方であり、**確定済み物理定数とは扱わない。**
+- 需要方向別重みを用いた厳密な加重平均は **未実施**。
+
+##### 31.22.12 FCFS clearance=0候補条件
+
+**新規 script:** `research_scripts/run_fcfs_6x6_grid_3000_vehicle_awt_awwt_od_clearance_0_trial.py`
+
+**出力 directory:** `research_outputs/trial/fcfs_6x6_grid_3000_vehicle_awt_awwt_od_clearance_0_trial_departure_999_seed_0_demand_seed_42_vot_seed_1_cohort_seed_3`
+
+**実装方針:** production は変更せず、基礎 FCFS **clearance=1** script を明示的に複製し、`FCFS_CLEARANCE_TIMESTEPS = 0` だけを交通条件として変更した **独立 trial** である。
+
+| 項目 | 値 |
+|------|-----|
+| vehicles | 3000 |
+| participating | 2400 |
+| nonparticipating | 600 |
+| full completion | true |
+| traffic clearance | true |
+| final `World.T` | 5000 |
+| AWT | 21.738666666666667 秒 |
+| AWWT | 21.428271940078936（**秒ではない**） |
+| Route-Conditional AWT | 20.682666666666666 秒 |
+| Route-Conditional AWWT | 20.49196621389738（**秒ではない**） |
+| average detour time | 1.056 秒 |
+| weighted average detour | 0.9363057261815481（**秒ではない**） |
+| average OD minimum free-flow trip time | 105.576 秒 |
+| average actual-route free-flow trip time | 106.632 秒 |
+| unique physical route count | 12 |
+| unique OD reference count | 320 |
+| `exec_simulation_seconds` | 2.3289343749638647 |
+| `script_total_seconds` | 62.582330292090774 |
+| formal output success | true |
+| AWT identity | passed |
+| AWWT identity | passed |
+| OD unique / replay / reuse | 320 / 320 / 2680 |
+| actual-route unique / replay / reuse | 12 / 12 / 2988 |
+
+**Vehicle-level waiting distribution:**
+
+| 項目 | 値 |
+|------|-----|
+| count | 3000 |
+| mean | 21.738667 秒 |
+| median | 9 秒 |
+| p75 | 25 秒 |
+| p90 | 66 秒 |
+| p95 | 100 秒 |
+| p99 | 124 秒 |
+| maximum | 202 秒 |
+| zero wait | 79 台 |
+| waiting ≤ 10 秒 | 1623 台 |
+| waiting ≤ 30 秒 | 2365 台 |
+| waiting > 60 秒 | 331 台 |
+| waiting > 120 秒 | 37 台 |
+
+Vehicle-level 平均が AWT を再現した。AWT の大幅低下は CSV 集計ミスではない。**clearance=1** の FCFS AWT **599.0436666666667 秒**から非常に大きく低下した。低下の理由として非線形な混雑解消の可能性は示せるが、**断定しない。**
+
+**位置づけは未確定:** **clearance=0** と **clearance=1** のどちらを主条件または感度分析とするかは **未確定**である。**主条件未確定**、**感度分析未確定**。
+
+**TVT-MP の発動機会:** FCFS clearance=0 で TVT-MP の発動機会がなくなったと断定しない。60 秒超待ち **331 台**、120 秒超 **37 台**が存在する。局所待ちは残る。ただし **TVT-MP clearance=0** で実際に何件の取引が成立し、VOT に応じた再配分が可能かは **未実行・未確認**（**TVT-MP clearance=0未実行**）。この結果は TVT-MP clearance=0 の長時間実行価値を示すが、その実行可否は **signal 候補条件確認後**に判断する。
+
+##### 31.22.13 signalized UXsim全赤あり候補条件の既存結果
+
+**既存 script:** `research_scripts/run_signalized_uxsim_6x6_grid_3000_vehicle_awt_awwt_od_reference_validation.py`
+
+**既存出力:** `research_outputs/trial/signalized_uxsim_6x6_grid_3000_vehicle_awt_awwt_od_reference_validation_departure_999_seed_0_demand_seed_42_vot_seed_1_cohort_seed_3_signal_59_0_59_0`
+
+| 項目 | 値 |
+|------|-----|
+| signal setting | `[59, 0, 59, 0]` |
+| API cycle | 118 |
+| effective phase durations | `[60, 1, 60, 1]` |
+| effective cycle length | 122 |
+| full completion | true |
+| traffic clearance | true |
+| final `World.T` | 2117 |
+| evaluation end timestep | 2116 |
+| AWT | 391.899 秒 |
+| AWWT | 396.73046930775473（**秒ではない**） |
+| Route-Conditional AWT | 377.283 秒 |
+| Route-Conditional AWWT | 381.5590786870213（**秒ではない**） |
+| average detour | 14.616 秒 |
+| offset values | 0、29.5、59、88.5 |
+| group | 0 east-west、2 north-south |
+
+全赤 phase は API 値 **0** でも実効 **1 timestep** ずつ存在する。
+
+**既存 §31.21** は **当時の正本として維持**する。最新の候補条件比較は **本 §31.22** を参照する。
+
+##### 31.22.14 signalized UXsim全赤なし候補条件
+
+**新規 script:** `research_scripts/run_signalized_uxsim_6x6_grid_3000_vehicle_awt_awwt_od_no_all_red_trial.py`
+
+**出力:** `research_outputs/trial/signalized_uxsim_6x6_grid_3000_vehicle_awt_awwt_od_no_all_red_trial_departure_999_seed_0_demand_seed_42_vot_seed_1_cohort_seed_3_signal_59_59`
+
+**信号:**
+
+| 項目 | 値 |
+|------|-----|
+| `SIGNAL_SETTING` | `(59, 59)` |
+| 相数 | 2 相 |
+| phase 0 | east-west、group **0** |
+| phase 1 | north-south、group **1** |
+| effective phase durations | 60、60 |
+| API cycle | 118 |
+| effective cycle | 120 |
+| `all_red_phase_count` | 0 |
+| `has_all_red_interval` | false |
+| opposing directions may enter simultaneously | true |
+| maximum simultaneous entries under signal | 2 |
+| offset interval | 29.5 |
+| offset values | 0、29.5、59、88.5 |
+| order control | 不使用 |
+
+**signal timing validation:**
+
+- static contract validation passed
+- two-phase no-all-red timing validation passed
+- phase **0 と 1 のみ**
+- effective **60、60**
+- offset **0.0:** initial phase **0**、`signal_t` **0.0**
+- offset **29.5:** initial phase **1**、`signal_t` **29.5**
+- offset **59.0:** initial phase **1**、`signal_t` **0.0**
+- offset **88.5:** initial phase **0**、`signal_t` **29.5**
+
+**6×6 offset 交差点数（offset 式は変更していない）:**
+
+| offset | 交差点数 |
+|-------:|--------:|
+| 0.0 | 9 |
+| 29.5 | 10 |
+| 59.0 | 9 |
+| 88.5 | 8 |
+| **合計** | **36** |
+
+既存全赤ありメモ（**§31.21.5**）で offset が各 9 交差点ずつと読める箇所がある場合、その記述は **当時の記録として維持**し、**6×6 実分布は 9 / 10 / 9 / 8** であると本項および **§31.21.5 追記**を参照する。**実装本体の offset 割当てを 9 件ずつへ均等化していない。**
+
+**全赤なし結果:**
+
+| 項目 | 値 |
+|------|-----|
+| vehicles | 3000 |
+| full completion | true |
+| traffic clearance | true |
+| final `World.T` | 2262 |
+| evaluation end timestep | 2261 |
+| AWT | 435.9433333333333 秒 |
+| AWWT | 433.70148368735846（**秒ではない**） |
+| Route-Conditional AWT | 410.22333333333336 秒 |
+| Route-Conditional AWWT | 406.1463840853087（**秒ではない**） |
+| average detour | 25.72 秒 |
+| weighted average detour | 27.555099602048944（**秒ではない**） |
+| participating AWT | 437.40875 秒 |
+| participating AWWT | 440.6331813076503（**秒ではない**） |
+| nonparticipating AWT | 430.08166666666665 秒 |
+| nonparticipating AWWT | 405.9746932061888（**秒ではない**） |
+| unique physical route count | 34 |
+| unique OD reference count | 320 |
+| `exec_simulation_seconds` | 4.862294499995187 |
+| network-wide evaluation seconds | 43.1933462920133 |
+| `script_total_seconds` | 62.38961166702211 |
+
+##### 31.22.15 全赤あり対全赤なしの候補条件比較
+
+| 指標 | 全赤あり `[59, 0, 59, 0]` | 全赤なし `[59, 59]` | 差（全赤なし−全赤あり） |
+|------|-------------------------:|-------------------:|------------------------:|
+| AWT（秒） | 391.899 | 435.9433333333333 | **+44.04433333333327** |
+| AWWT（秒ではない） | 396.73046930775473 | 433.70148368735846 | **+36.97101437960373** |
+
+**割合:** AWT **約 +11.24%**、AWWT **約 +9.32%**。
+
+**解釈（断定しない）:**
+
+- 全赤は 60 秒青ごとに実効 **1 秒のみ**であり、全赤除去の直接的容量効果だけから大幅改善を期待する条件ではなかった。
+- 実測では **全赤なし 2 相候補の方が悪化**した。
+- 微小な timing 差が、車群形成、下流青への到達、spillback、**route choice** 等を通じて非線形に増幅された可能性がある。**未確認であり断定しない。**
+- 全赤あり 4 相と全赤なし 2 相では、phase 構造、group 番号、effective cycle、同じ offset 値が表す初期 phase が変わる。
+- よって「全赤を除くと 11% 悪化する」という一般結論にしない。
+- 「異なる signal timing 候補条件の **単一 seed 実測結果**」として扱う。
+
+##### 31.22.16 次のsignal切り分けtrial
+
+利用者が次の 2 条件を有用と判断した。
+
+1. **全赤あり** `[59, 0, 59, 0]`、全 36 交差点 **offset 0**
+2. **全赤なし** `[59, 59]`、全 36 交差点 **offset 0**
+
+**目的:** 段階的 offset **0 / 29.5 / 59 / 88.5** との相互作用を外した条件で、2 候補の差を見る。全赤除去効果と 2 相化効果を完全分離できるとは記述しない。**offset 相互作用を減らした限定的比較**である。両 trial は約 1 分程度で完了する見込みだが、実測前に固定値として扱わない。
+
+**現時点では未作成・未実行**である。
+
+##### 31.22.17 条件の研究上の位置づけは未確定
+
+| 条件 | 状態 |
+|------|------|
+| FCFS clearance=1 | 実行済み |
+| FCFS clearance=0 | 実行済み |
+| TVT-MP clearance=1 | 実行済み |
+| TVT-MP clearance=0 | **未作成・未実行** |
+| signalized UXsim 全赤あり | 実行済み |
+| signalized UXsim 全赤なし | 実行済み |
+
+**重要:**
+
+- どれが **主条件**か **未確定**。
+- どれが **感度分析**か **未確定**。
+- **clearance=0 が主条件、clearance=1 が感度分析**とは書かない。
+- **全赤なしが主条件、全赤ありが感度分析**とも書かない。
+- **offset 0** の追加 2 trial と、必要なら **TVT-MP clearance=0** 結果を見て判断する。
+- clearance=1 で TVT-MP が signalized より劣ったから clearance=0 へ都合よく変更した、という扱いにならないよう、物理的意味・UXsim の抽象度・方式固有の利点を明示する（**§31.22.11**）。
+- 同時に、結果を見て条件を選ぶ可能性があるため、**候補条件をすべて明示**し、**既存結果を削除しない。**
+
+##### 31.22.18 現在の次作業と再開地点
+
+**順序:**
+
+1. 本 **§31.22** と進捗 **§21.9.18** のメモ更新
+2. signalized 全赤あり `[59, 0, 59, 0]`・全交差点 **offset 0** trial の設計・実行
+3. signalized 全赤なし `[59, 59]`・全交差点 **offset 0** trial の設計・実行
+4. 4 つの signal 候補条件を比較（全赤あり・段階 offset、全赤なし・段階 offset、全赤あり・offset 0、全赤なし・offset 0）
+5. 結果を見て **TVT-MP clearance=0** の 9 時間超 full-completion 実行へ進むか判断
+6. seed 設計改善
+7. **VOT と効果の正式判定**は、seed 設計改善後の複数 seed 比較で行う
+
+**重要:**
+
+- **TVT-MP clearance=0** は、現時点で **未作成・未実行**。
+- 9 時間超の長時間実行へ直ちに進むとは確定していない。
+- 前方車両別寄与の追加 TVT-MP 診断は行わない。
+- 新規 5 script は **未追跡・未 commit**。メモ 2 ファイルは **追跡済みファイルに未 commit の変更あり**。
+- 既存 output directory は Git 対象外かどうかを勝手に判断せず、**Git 操作は利用者が行う。**
+
+**最新再開地点:** 本 **§31.22**。**進捗:** **§21.9.18**。**直接作業:** 全赤あり **offset 0** と全赤なし **offset 0** の 2 trial 設計。
+
+---
+
+## 32. TVT-MP clearance=0正式実行、VOT選別・buyer局所効果・nonparticipating外部効果分析、および30反復seed設計原典監査への移行（2026-11-14）
+
+**執筆日:** 2026-11-14
+
+**進捗参照:** `ORDER_EXCHANGE_PROGRESS_4.md` **§21.9.19**
+
+**既存の歴史参照（削除・書換えしない）:**
+
+- **§31.20:** TVT-MP **clearance=1** AWT・AWWT正式結果
+- **§31.21:** signalized UXsim正式結果
+- **§31.22:** clearance・signal候補再評価開始時点の歴史的記録。当時は signalized offset 0 の 2 trial 未作成・未実行、**TVT-MP clearance=0未作成・未実行**、長期実行へ進むか未決定、直接作業は signalized offset 0 trial 設計。これらは **当時の記録**である。**現在の未実行を意味しない。** 最新状態は **本 §32** を優先する。
+- **§26:** deterministic tiebreaker、乱数源分離、common random numbers、legacy mode 等の既存 **未採用** 設計。本節は §26 を覆さない。30 反復の研究目的、最初の経路分岐監査、keyed randomization 採否基準は本節へ記録する。
+- 進捗 **§21.9.18:** TVT-MP clearance=0 実行前の歴史的再開地点
+
+**単位注記（本節全体）:**
+
+- **AWT**、**Route-Conditional AWT**、**Average Detour Time** は **秒**
+- **AWWT**、**Route-Conditional AWWT**、**VOT-weighted Average Detour Time** は **秒ではない**
+- **AWWT を秒と記載しない**
+
+**検索語:** TVT-MP clearance=0、clearance=1、追加clearance、3,000台、full completion、traffic clearance、transaction 2421、Visit 5457、AWT 21.676、AWWT 20.427812923323355、VOT五分位、Spearman、Pearson、buyerのみ、sellerのみ、buyer・seller双方、取引未経験、Q5、Top 5%、Top 1%、最上位1%、buyer局所効果、FCFS比旅行全体効果、同一ルート、異経路、局所baseline、counterfactual、nonparticipating 600台、trade scope 112台、nonparticipating Visit 129件、局所外部効果、30反復、日々の交通変動、OD seed、departure seed、VOT seed、participation seed、traffic seed、route choice、seed交絡、乱数消費順、最初の経路分岐、common random numbers、keyed randomization、Vehicle plan SHA256、paired difference、原典監査、未採用、未実装、可逆性。
+
+### 32.1 本節と旧節の関係
+
+**本 §32 が最新正本である。**
+
+**§31.22** および進捗 **§21.9.18** は、TVT-MP clearance=0 正式実行前の **歴史的記録**として維持する。当時の次を削除しない。
+
+- signalized offset 0 の 2 trial は未作成・未実行
+- TVT-MP clearance=0 は未作成・未実行
+- TVT-MP clearance=0 長期実行へ進むか未決定
+- 直接作業は signalized offset 0 trial 設計
+
+**最新状態:**
+
+- TVT-MP clearance=0 正式 trial は **実行済み・独立確認済み**
+- participating / Top 1% / buyer Visit / nonparticipating 分析は **完了**
+- 最新の直接作業は **seed・経路選択乱数の読取り専用原典監査**
+- 旧節の「未実行」は **現在の未実行ではない**
+
+**断定しないこと（本節全体）:**
+
+- clearance=0 が主条件
+- clearance=1 が感度分析
+- Top 1% は一般に悪化する
+- buyer 取引が失敗した
+- TVT-MP 概念が破綻した
+- production 欠陥がある
+- seed 交絡が実際に原因である
+- keyed randomization が必須
+- current traffic seed が不正
+- route 差が全て乱数差である
+- route 差が全て交通状態差である
+- nonparticipating 車は制度的に犠牲になった
+- 30 反復であらゆる交通状態へ一般化できる
+
+**維持する限定:**
+
+- 単一 seed の実測
+- 設定した network、需要規模、生成規則、VOT 分布、参加率の範囲
+- 局所 baseline と FCFS 実走行は別 counterfactual
+- 複数 seed と seed 設計改善は併用する
+- 原典監査後に実装判断する
+
+### 32.2 TVT-MP clearance=0正式trial
+
+**script:** `research_scripts/run_tvt_mp_6x6_grid_3000_vehicle_awt_awwt_od_clearance_0_trial.py`
+
+**output directory:** `research_outputs/trial/tvt_mp_6x6_grid_3000_vehicle_awt_awwt_od_clearance_0_trial_departure_999_seed_0_demand_seed_42_vot_seed_1_nonparticipation_seed_3`
+
+#### 32.2.1 主要条件
+
+| 項目 | 値 |
+|------|-----|
+| Vehicle | 3,000 台 |
+| participating | 2,400 台 |
+| nonparticipating | 600 台 |
+| departure | T=0..999 |
+| traffic seed | 0 |
+| demand seed | 42 |
+| VOT seed | 1 |
+| nonparticipation seed | 3 |
+| TVT-MP clearance | 0 |
+| candidate Visit上限 | 10 |
+| baseline horizon | 30 |
+| decision window | 6 |
+| internal TSIZE | 5031 |
+| full completion | 要求・達成 |
+| traffic clearance | 要求・達成 |
+| order-control | 1 timestep 最大 1 台 |
+
+**clearance の意味（§31.22.11 と同一。時間差が文字どおり 0 ではない）:**
+
+- **clearance=0:** 異方向切替後の **次 timestep** から通過可能
+- **clearance=1:** 異方向切替後の **次 timestep を空け**、その次から通過可能
+- 同一 inlink 方向の連続通過は、この異方向 clearance では止めない
+
+#### 32.2.2 事前検証
+
+- `py_compile` passed
+- static contract validation passed
+- small-scale clearance=0 validation passed
+- small-scale probe は異方向 2 台が downstream へ timestep **2** と **3** に進入
+- 同一 timestep 通過なし
+- **bare `visit_id` の World 全体一意性検査は誤りだった**
+- `visit_id` は異なる Vehicle 間で同値になり得る
+- small-scale validation は ledger 構造・型・正の `visit_id`・利用可能なら `(vehicle_name, visit_id)` の **bucket 内複合 key** を確認する
+- production の Visit ID 生成や full-run audit は **変更していない**
+
+#### 32.2.3 長時間実行前の独立確認
+
+clearance=1 基礎 script との差分を確認し、長時間 run の call order を AST で確認した。
+
+**call order:**
+
+1. `_refuse_existing_output_directory`
+2. `run_until_full_completion`
+3. `verify_full_completion`
+4. `verify_network_wide_waiting_time_result`
+5. `finalize_tvt_mp_full_run_audit`
+6. 再度 `_refuse_existing_output_directory`
+7. `mkdir`
+8. `write_manifest_json`
+
+- clearance=1 Reference 比較関数は `_run_trial` から呼ばれない
+- output 上書き防止を維持
+- production 取引・順位・候補計算ロジックを **変更していない**
+
+#### 32.2.4 正式結果
+
+| 項目 | 値 |
+|------|-----|
+| full trip completion | true |
+| traffic clearance | true |
+| final `World.T` | 1167 |
+| evaluation end timestep | 1166 |
+| final actual passage timestep | 1092 |
+| transaction count | 2421 |
+| Visit count | 5457 |
+| transaction audit rows | 2421 |
+| visit audit rows | 5457 |
+| buyer audit rows | 2600 |
+| seller audit rows | 2728 |
+| nonparticipating audit rows | 129 |
+| actual arrival saved rows | 5457 |
+| FIFO violation total | 0 |
+| same-inlink max party | 2 |
+| same-inlink max buyer | 1 |
+| same-inlink max seller | 2 |
+| same-inlink max nonparticipating | 1 |
+| audit CSV validation | passed |
+| `exec_simulation_seconds` | 10206.084451 |
+| script total seconds | 10255.949481 |
+| output directory bytes | 9150569 |
+
+**transaction 2421 件** は今回の正式出力の取り違え防止用である。**production の一般契約ではない。**
+
+**clearance=1 Reference equality comparison は実施していない。**
+
+#### 32.2.5 待ち時間結果
+
+| 指標 | 値 | 単位 |
+|------|-----|------|
+| AWT | 21.676 | 秒 |
+| AWWT | 20.427812923323355 | **秒ではない** |
+| Route-Conditional AWT | 20.812 | 秒 |
+| Route-Conditional AWWT | 19.63439179086984 | **秒ではない** |
+| Average Detour Time | 0.864 | 秒 |
+| VOT-weighted Average Detour Time | 0.7934211324535114 | **秒ではない** |
+| participating AWT | 21.855416666666667 | 秒 |
+| participating AWWT | 19.849627026151364 | **秒ではない** |
+| nonparticipating AWT | 20.958333333333332 | 秒 |
+| nonparticipating AWWT | 22.74055651201141 | **秒ではない** |
+| average OD minimum free-flow trip time | 105.576 | 秒 |
+| average actual-route free-flow trip time | 106.44 | 秒 |
+| unique physical route count | 10 | — |
+| unique OD reference count | 320 | — |
+| actual-route replay / reuse | 10 / 2990 | — |
+| OD replay / reuse | 320 / 2680 | — |
+
+**恒等:**
+
+```text
+21.676 = 20.812 + 0.864
+20.427812923323355 = 19.63439179086984 + 0.7934211324535114
+total OD waiting 65028 / 3000 = 21.676
+total Route-Conditional waiting 62436 / 3000 = 20.812
+total detour 2592 / 3000 = 0.864
+```
+
+#### 32.2.6 独立出力確認
+
+- 必須 13 file 存在
+- CSV 行数が manifest 件数と一致
+- clearance=0
+- full completion true
+- traffic clearance true
+- FIFO violation 0
+- `transactions_by_node` 合計が 2421
+- manifest と summary の主要値一致
+- clearance=1 比較未実施を確認
+
+### 32.3 clearance=0の研究上の位置づけ
+
+**確定:**
+
+- clearance=0・3,000 台は、VOT 選別、buyer/seller role、局所取引実現を見通しよく確認できる **低混雑の機構確認条件**として有用
+- FCFS clearance=0 の AWT は **21.738666666666667 s**
+- TVT-MP clearance=0 の AWT は **21.676 s**
+- 参加車平均 FCFS 比 waiting saving は **0.1133333333 s**
+- Q5 平均 saving は **1.947916667 s**
+- この効果量は総旅行時間および主要性能評価としては **小さい**
+- clearance=0・3,000 台を **当然の中心シナリオとはしない**
+
+**現在の判断:**
+
+- **clearance=1・3,000 台を中心シナリオの第一候補とする考えが再び有力**
+- clearance=0 を性能評価の中心候補にするなら、Vehicle 投入数等を増やし、十分な混雑を生じさせる **別シナリオが必要**
+- clearance=0 高需要条件は **まだ設計・実行していない**
+- 主条件と感度分析の最終確定は **未完了**
+- 結果を見て都合よく条件を選んだと解釈されないよう、候補条件、物理的意味、UXsim の抽象度、既存結果を全て記録する
+
+**clearance=1 の既存結果（比較用。正本は §31.20）:**
+
+| 指標 | FCFS clearance=1 | TVT-MP clearance=1 |
+|------|-----------------:|-------------------:|
+| AWT | 599.0436666666667 s | 458.56966666666665 s |
+| AWWT（秒ではない） | 571.69001350099 | 440.37078581524503 |
+
+- AWT 改善率: 約 **23.45%**
+- AWWT 改善率: 約 **22.97%**
+- **AWWT 改善率が AWT 改善率を上回らなかった**
+- clearance=1 では超混雑、経路差、往復、再訪等により VOT と最終便益の関係が明瞭でなかった（§31.22 の 17 台分析は歴史記録として維持）
+
+**clearance=0 が主条件、clearance=1 が感度分析、とは書かない。逆も書かない。**
+
+### 32.4 participating Vehicle 2,400台のVOTと最終短縮
+
+**FCFS比 `waiting_saving` の定義:**
+
+```text
+waiting_saving
+= FCFS od_based_waiting_time_s
+  - TVT-MP od_based_waiting_time_s
+```
+
+正なら TVT-MP で改善、0 なら同一、負なら悪化。
+
+Vehicle ごとに次の恒等も確認した（tolerance `1e-9`）。
+
+```text
+waiting_saving
+= route_conditional_waiting_saving
+  - detour_difference
+
+travel_time_saving
+= waiting_saving
+```
+
+#### 32.4.1 clearance=1（比較用）
+
+| 項目 | 値 |
+|------|-----|
+| participating | 2400 |
+| mean FCFS waiting | 605.25 s |
+| mean TVT waiting | 461.0229167 s |
+| mean saving | 144.2270833 s |
+| median saving | 88.5 s |
+| improved / equal / worsened | 1793 / 20 / 587 |
+| improved rate | 74.708333% |
+| VOT vs saving Spearman rho | 0.030141370 |
+| Spearman p | 0.139894059 |
+| Pearson r | -0.012591011 |
+| Pearson p | 0.537542044 |
+
+VOT 五分位平均 saving:
+
+| 五分位 | mean saving (s) |
+|--------|----------------:|
+| Q1 | 141.614583 |
+| Q2 | 137.683333 |
+| Q3 | 147.554167 |
+| Q4 | 132.827083 |
+| Q5 | 161.456250 |
+
+完全単調ではない。**clearance=1 では VOT と最終短縮の明瞭な順位相関を確認できなかった。**
+
+#### 32.4.2 clearance=0
+
+| 項目 | 値 |
+|------|-----|
+| participating | 2400 |
+| mean FCFS waiting | 21.96875 s |
+| mean TVT waiting | 21.85541667 s |
+| mean saving | 0.1133333333 s |
+| median saving | 0 |
+| improved / equal / worsened | 1029 / 277 / 1094 |
+| improved rate | 42.875% |
+| Spearman rho | 0.202602054 |
+| Spearman p | 1.19087058e-23 |
+| Pearson r | 0.032320243 |
+| Pearson p | 0.113432688 |
+
+- Spearman は **弱いが明瞭な正の順位関係**
+- Pearson は有意な線形関係を示さない
+- **p 値が小さいことと効果量が強いことを混同しない**
+- N=2400 が大きいため、弱い相関でも p 値が非常に小さくなり得る
+
+**VOT 五分位:**
+
+| 五分位 | mean saving (s) | median | improved |
+|--------|----------------:|-------:|----------|
+| Q1 | -1.256250 | -1 | 146/480 = 30.416667% |
+| Q2 | -1.404167 | -1 | 164/480 = 34.166667% |
+| Q3 | 0.364583 | 0 | 208/480 = 43.333333% |
+| Q4 | 0.914583 | 0 | 236/480 = 49.166667% |
+| Q5 | 1.947917 | 1 | 275/480 = 57.291667% |
+
+- 改善率は Q1 から Q5 へ **単調増加**
+- 平均 saving は Q1 から Q2 でわずかに低下するため **完全単調ではない**
+- Q2 から Q5 は増加
+- Q5−Q1 mean saving 差: **3.204167 s**
+
+**解釈:**
+
+- clearance=0 では VOT 順位が高いほど最終短縮順位も高くなる傾向が clearance=1 より明瞭
+- ただし **最終旅行全体の短縮は buyer 局所効果と同一ではない**
+- 単一 seed のため一般化しない
+
+### 32.5 参加車の排他的取引経験分類
+
+**analysis script:** `research_scripts/analyze_tvt_mp_clearance_0_vot_trade_role_and_q5.py`
+
+参加 Vehicle 2400 台を次へ **排他的** に分類した。
+
+| 分類 | 定義 | 件数 |
+|------|------|-----:|
+| buyerのみ | `buyer_count > 0` かつ `seller_count == 0` | 712 |
+| sellerのみ | `buyer_count == 0` かつ `seller_count > 0` | 739 |
+| buyer・seller双方 | `buyer_count > 0` かつ `seller_count > 0` | 716 |
+| 取引未経験 | `buyer_count == 0` かつ `seller_count == 0` | 233 |
+| 合計 | | 2400 |
+
+**VOT と role 選別:**
+
+| 項目 | Q1 | Q5 |
+|------|----:|----:|
+| buyer経験率 | 79/480 = 16.46% | 417/480 = 86.88% |
+| seller経験率 | 425/480 = 88.54% | 85/480 = 17.71% |
+| 取引未経験率 | 39/480 = 8.12% | 53/480 = 11.04% |
+
+| 相関 | rho | p |
+|------|----:|--:|
+| VOT vs `buyer_count` | 0.5461134458 | 1.133661e-186 |
+| VOT vs `seller_count` | -0.5883832968 | 1.460434e-223 |
+
+**機械判定:**
+
+- buyer 経験率は Q1 から Q5 へ単調非減少
+- seller 経験率は Q1 から Q5 へ単調非増加
+- 平均 `buyer_count` は単調非減少
+- 平均 `seller_count` は単調非増加
+- 改善率は単調非減少
+- 取引未経験率は **完全単調ではない**
+- 平均 `waiting_saving` は Q1 から Q2 で隣接違反
+
+**研究上の解釈:**
+
+- 高 VOT 車を buyer へ、低 VOT 車を seller へ選別する機構は **明瞭に作動**
+- **role 選別の成功と FCFS 比旅行全体の改善保証は別問題**
+- 単一 seed であり、相関係数・割合を一般化しない
+
+### 32.6 Q5および最上位層
+
+Q5 は participating 2400 台を `(true_vot_per_second, vehicle_name)` 昇順で並べた末尾 480 台。Q5-Top 5% は Q5 の末尾 120 台。Q5-Top 1% は Q5 の末尾 24 台であり、**Top 5% の部分集合**である。排他分割ではない。
+
+#### 32.6.1 Q5全体 480台
+
+| 項目 | 値 |
+|------|-----|
+| VOT範囲 | 1.104687601 .. 39.77987347 |
+| buyer経験 | 417 = 86.88% |
+| seller経験 | 85 = 17.71% |
+| buyerのみ | 342 = 71.25% |
+| sellerのみ | 10 = 2.08% |
+| buyer・seller双方 | 75 = 15.62% |
+| 取引未経験 | 53 = 11.04% |
+| `buyer_count`合計 | 923 |
+| `buyer_count`平均 | 1.922916667 |
+| `seller_count`合計 | 93 |
+| `seller_count`平均 | 0.19375 |
+| mean saving | 1.947916667 s |
+| median saving | 1 s |
+| improved / equal / worsened | 275 / 54 / 151 |
+| improved rate | 57.29% |
+
+#### 32.6.2 Q5-Top 5% 120台
+
+| 項目 | 値 |
+|------|-----|
+| buyer経験 | 113/120 = 94.17% |
+| seller経験 | 6/120 = 5.00% |
+| buyerのみ | 107/120 = 89.17% |
+| sellerのみ | 0 |
+| buyer・seller双方 | 6 |
+| 取引未経験 | 7 |
+| mean `buyer_count` | 2.141666667 |
+| mean `seller_count` | 0.05 |
+| mean saving | 1.758333333 s |
+| median saving | 2 s |
+| improved / equal / worsened | 77 / 7 / 36 |
+| improved rate | 64.17% |
+
+#### 32.6.3 Q5-Top 1% 24台
+
+| 項目 | 値 |
+|------|-----|
+| VOT範囲 | 11.13007859 .. 39.77987347 |
+| mean VOT | 20.39900495 |
+| median VOT | 16.44086155 |
+| buyer経験 | 24/24 = 100% |
+| seller経験 | 0 |
+| buyerのみ | 24/24 = 100% |
+| 取引未経験 | 0 |
+| `buyer_count`合計 | 53 |
+| mean `buyer_count` | 2.208333333 |
+| median `buyer_count` | 2 |
+| mean saving | **-1.375 s** |
+| median saving | -0.5 s |
+| improved / equal / worsened | 11 / 1 / 12 |
+| improved rate | 45.83% |
+
+**重要な解釈:**
+
+- 最上位 1% を buyer へ選別する機構は **非常に明瞭**
+- それでも最終 FCFS 比で **平均悪化**
+- **「Top 1% が一般に悪化する」とは結論しない**
+- 24 台という小標本かつ単一 seed の事例
+- 「高 VOT・buyer のみでも最終旅行全体の FCFS 比短縮は保証されない事例がある」とする
+
+### 32.7 最上位1%のroute比較
+
+**analysis script:** `research_scripts/analyze_tvt_mp_clearance_0_top_1_percent_fcfs_tvt_route_comparison.py`
+
+- 対象 24 台は全車 buyer のみ、`seller_count` 合計 0
+- exact same route: **15 台**
+- different route: **9 台**
+
+| 区分 | 台数 | improved / equal / worsened | mean saving (s) | 合計 saving (s) |
+|------|-----:|-----------------------------|----------------:|----------------:|
+| 同一ルート | 15 | 7 / 1 / 7 | 0.06666666667 | 約 +1 |
+| 異経路 | 9 | 4 / 0 / 5 | -3.777777778 | 約 -34 |
+| 全24台 | 24 | 11 / 1 / 12 | -1.375 | -33 |
+
+- mean Route-Conditional waiting saving: **-1.375 s**
+- mean detour difference: **0**
+- `buyer_count` vs `waiting_saving`: rho=**-0.1139121299**、p=**0.5961170**
+
+**解釈:**
+
+- Top 1% 全体の平均悪化は数値上、主として異経路 9 台に集中
+- ただし同一ルートでも **7 台悪化**しているため、経路差だけでは全てを説明できない
+- 既存正式出力には FCFS と TVT を Node 単位で直接対応させる通過時刻がない
+- 再実行による Node 別診断は現時点では行わないと判断
+- 保存済み Visit audit による buyer 局所効果確認へ進んだ
+
+### 32.8 同一ルート悪化7台のbuyer Visit
+
+**analysis script:** `research_scripts/analyze_tvt_mp_clearance_0_top_1_percent_same_route_worsened_buyer_visits.py`
+
+**対象条件（Vehicle 名は手書き固定ではなく、保存済み出力から自動抽出）:**
+
+- VOT Top 1%
+- `buyer_count > 0`
+- `seller_count == 0`
+- FCFS と TVT の `route_audit_identity` 完全一致
+- `waiting_saving < 0`
+
+対象が 7 台でなければ分析は停止する。本保存出力では次の 7 台であった。
+
+- `veh_1503`
+- `veh_627`
+- `veh_1402`
+- `veh_484`
+- `veh_1020`
+- `veh_1274`
+- `veh_1229`
+
+**buyer Visit 総数:** 14
+
+**14 Visit すべて:**
+
+- `predicted_time_saving > 0`
+- `actual_time_saving > 0`
+- `candidate_minus_actual = 0`
+- class A `predicted_and_actual_improvement`
+- `satisfaction_status` satisfied
+- assigned rank と actual passage rank 一致
+- formal next と actual next 一致
+- predicted next と actual next 一致
+- same-inlink FIFO preserved
+- predicted improvement だが actual improvement なし: **0**
+- actual worsening Visit: **0**
+- unavailable: **0**
+
+時間差の定義:
+
+```text
+predicted_time_saving = baseline_passage_timestep - candidate_passage_timestep
+actual_time_saving    = baseline_passage_timestep - actual_passage_timestep
+candidate_minus_actual = candidate_passage_timestep - actual_passage_timestep
+```
+
+正は baseline または candidate より早い。
+
+| 集計 | 値 |
+|------|-----|
+| predicted_time_saving合計 | 18 timestep |
+| actual_time_saving合計 | 18 timestep |
+| mean | 1.285714286 |
+| median | 1 |
+| candidate_minus_actual合計 | 0 |
+| 最終 waiting_saving合計 | -20 s |
+| 最終 mean waiting_saving | -2.857142857 s |
+| 最終 median | -4 s |
+
+**Vehicle 別:**
+
+| Vehicle | buyer局所短縮合計 | 最終 waiting_saving (s) |
+|---------|------------------:|------------------------:|
+| `veh_1503` | +2 | -5 |
+| `veh_627` | +3 | -1 |
+| `veh_1402` | +2 | -4 |
+| `veh_484` | +2 | -1 |
+| `veh_1020` | +3 | -4 |
+| `veh_1274` | +5 | -4 |
+| `veh_1229` | +1 | -1 |
+
+**counterfactual の区別:**
+
+- buyer Visit の baseline は各 TVT 意思決定時点の **局所 baseline**
+- FCFS 実走行全体は **別 World**
+- buyer Visit の `actual_time_saving` 合計と FCFS 比 final `waiting_saving` を **等しいと要求しない**
+- buyer 局所短縮は 14 件全てで実現
+- 同一ルートでも、TVT World 内の別地点・別時間帯の交通状態差によって局所利益以上の遅れが生じ得る
+- 高 VOT・buyer であることは局所優先を与えるが、FCFS に対する旅行全体短縮を保証しない
+- これは直ちに **production 欠陥**や **概念破綻**を意味しない
+- FCFS と TVT は他車の取引によって車群、待ち行列、到着時刻が異なる **別 World**
+- ただし複数 seed で現象の頻度と大きさを評価する必要がある
+
+分類ラベル（script 内明示。本事例は全 7 台が局所実現かつ最終悪化）:
+
+- `LOCAL_BUYER_EFFECT_REALIZED_BUT_TRIP_WORSENED`
+- `LOCAL_BUYER_EFFECT_NOT_REALIZED`
+- `MIXED_LOCAL_BUYER_EFFECT`
+- `UNAVAILABLE`
+
+### 32.9 nonparticipating Vehicle 600台
+
+**analysis script:** `research_scripts/analyze_tvt_mp_clearance_0_nonparticipating_fcfs_vs_tvt.py`
+
+#### 32.9.1 入力成立
+
+- nonparticipating **600 台**
+- `buyer_count=0`
+- `seller_count=0`
+- `transaction_count=nonparticipating_count`
+- `buyer_evaluated_count=0`
+- `seller_evaluated_count=0`
+- TVT と FCFS で cohort、VOT、OD、departure、OD minimum 一致
+- Vehicle 単位 waiting 分解恒等成立
+
+#### 32.9.2 全体
+
+| 項目 | 値 |
+|------|-----|
+| FCFS mean actual travel time | 124.7983333 s |
+| TVT mean actual travel time | 124.9383333 s |
+| mean travel_time_saving | -0.14 s |
+| FCFS mean OD waiting | 20.81833333 s |
+| TVT mean OD waiting | 20.95833333 s |
+| mean waiting_saving | -0.14 s |
+| median | 0 |
+| minimum | -77 |
+| maximum | 70 |
+| improved / equal / worsened | 250 / 76 / 274 |
+| improved rate | 41.6667% |
+| equal rate | 12.6667% |
+| worsened rate | 45.6667% |
+| FCFS Route-Conditional mean | 19.53833333 s |
+| TVT Route-Conditional mean | 20.07833333 s |
+| mean Route-Conditional saving | -0.54 s |
+| FCFS mean detour | 1.28 s |
+| TVT mean detour | 0.88 s |
+| mean detour difference | -0.4 s |
+| detour increase / equal / decrease | 8 / 575 / 17 |
+| exact same route | 373/600 = 62.1667% |
+| different route | 227/600 = 37.8333% |
+
+- mean travel time worsening は FCFS mean travel time の約 **0.112%**
+- mean waiting worsening は FCFS mean waiting の約 **0.672%**
+
+#### 32.9.3 participatingとの比較
+
+| cohort | mean waiting_saving (s) |
+|--------|------------------------:|
+| participating | +0.1133333333 |
+| nonparticipating | -0.14 |
+| 差（nonparticipating − participating） | -0.2533333333 |
+
+- 改善率と悪化率は両 cohort でほぼ同じ
+- nonparticipating に **大きな平均損失は確認されない**
+- ただし単一 seed なので一般化しない
+- **nonparticipating 車は制度的に犠牲になった、とは書かない**
+
+#### 32.9.4 VOT
+
+- VOT vs `waiting_saving` Spearman rho=**-0.03107352246**、p=**0.4474106235**
+- 有意な順位関係なし
+- VOT 五分位結果は非単調
+- nonparticipating は VOT による直接優遇の対象ではなく、この結果は設計と整合
+
+#### 32.9.5 trade scope経験
+
+`nonparticipating_count` は、その Vehicle が trade scope へ **nonparticipating party** として含まれた回数である。buyer・seller にはならない。
+
+| 回数 | 台数 | mean saving (s) |
+|------|-----:|----------------:|
+| 0回 | 488 | +0.1413934426 |
+| 1回 | 96 | -1.09375 |
+| 2回 | 15 | -2.8 |
+| 3回 | 1 | -6 |
+
+- 経験者: **112 台**
+- 延べ nonparticipating Visit: **129 件**
+- 112 台と 129 件の差は重複 Visit による
+- 内訳: 96 台×1回=96、15 台×2回=30、1 台×3回=3。合計 **112 台・129 件**
+- `nonparticipating_count` vs `waiting_saving`: rho=**-0.0582748857**、p=**0.1539629219**
+- 小標本区分があるため、経験回数増加で不利益増加と **断定しない**
+
+#### 32.9.6 Visit audit局所外部効果
+
+- `role=nonparticipating`: **129 行**
+- actual observed: 129
+- predicted observed: 129
+- `candidate_minus_actual`: 全 129 件 **0**
+- `baseline_minus_candidate`: 0 が 127、負が 2、正が 0、合計 **-2 timestep**
+- `baseline_minus_actual` も同じ
+- FIFO false: **0**
+- 直接的局所外部効果はほとんど 0
+- 最終 FCFS 比の Vehicle 効果をこの 2 timestep だけで説明しない
+- 局所 baseline と FCFS 実走行は異なる counterfactual
+- 既存出力だけでは FCFS と TVT の Node 別時刻比較はできない
+
+#### 32.9.7 経路
+
+| 区分 | 台数 | mean saving (s) |
+|------|-----:|----------------:|
+| same route | 373 | -0.6032171582 |
+| different route | 227 | +0.6211453744 |
+
+- 同一経路の detour difference は 0
+- 異経路では mean Route-Conditional saving **-0.436123348 s**、mean detour difference **-1.057268722 s**
+- TVT 側 detour 短縮が最終 saving を改善方向へ動かした
+- nonparticipating 平均差の中心は **同一経路上の交通状態差**
+
+### 32.10 30反復の研究目的
+
+**確定:** 30 反復の目的は、同一の固定交通を 30 回繰り返すことではない。
+
+各反復を、同じネットワーク・同じシナリオ定義の下で発生する **独立した一日の交通実現**として扱う。
+
+**シナリオとして固定する候補:**
+
+- network
+- Vehicle 投入台数
+- departure time window
+- OD 生成規則
+- VOT 分布
+- nonparticipation 率
+- clearance
+- TVT-MP 設定
+- candidate Visit 上限
+- baseline horizon
+- 比較方式
+
+**反復ごとに変える外生実現:**
+
+- OD
+- departure time
+- VOT assignment
+- participating / nonparticipating assignment
+- traffic・route-choice 関連乱数
+
+**目標:**
+
+- 日々異なる OD、出発時刻、VOT、参加構成、交通状態を含める
+- 想定した生成分布とシナリオ範囲内で、平均的に期待できる効果と日間変動を評価する
+- 「どんな交通状態でも」と一般化せず、「設定した分布・需要規模・ネットワーク範囲内」と限定する
+
+**同一反復内:**
+
+- FCFS と TVT-MP へ同じ Vehicle 名、OD、departure time、VOT、cohort を与える
+- 比較方式だけを変える
+- 同じ日の FCFS 対 TVT として対応差を計算する
+
+**主分析候補:**
+
+```text
+ΔAWT[r]  = TVT AWT[r]  - FCFS AWT[r]
+ΔAWWT[r] = TVT AWWT[r] - FCFS AWWT[r]
+```
+
+負なら TVT が小さい。30 個の **paired difference** について mean、variance、standard deviation、median、minimum、maximum、95% confidence interval、改善反復数を示す。
+
+厳密な Vehicle-level paired interpretation や route-level paired interpretation は、経路選択乱数対応の **原典監査後**に確定する。
+
+**30 反復は現在の seed 体制でも必要である。** seed 体制改善は 30 反復の代替ではなく、各反復の方式差をより純粋に解釈するための **追加統制**である。複数 seed と seed 設計改善は併用する。
+
+### 32.11 seed系列分離の候補
+
+現時点の設計候補。**未確定・未実装。** 既存 **§26** の deterministic tiebreaker、乱数源分離、common random numbers、legacy mode を参照し、重複を最小化する。本節は §26 の未採用状態を覆さない。
+
+**系列候補:**
+
+- `od_seed`
+- `departure_seed`
+- `vot_seed`
+- `participation_seed`
+- `traffic_seed`
+- 必要な場合だけ tiebreaker 関連 seed
+
+**seed 用途を分ける目的:**
+
+- OD 生成の乱数消費数変更が VOT へ波及しない
+- departure 生成変更が participation へ波及しない
+- participation 変更が traffic route-choice 乱数へ波及しない
+- 各外生要因を個別に再現・監査できる
+- 同一反復の FCFS と TVT で外生条件を対応させる
+
+**未確定:**
+
+- 具体的な seed 生成方式
+- NumPy `SeedSequence` 等の採否
+- traffic seed の内部分離
+- route-choice RNG の変更要否
+- tiebreaker の決定論化
+- legacy mode の具体化
+- production 統合
+- 30 反復 seed 台帳
+- 30 反復実行 script・集計器
+
+### 32.12 Vehicle plan SHA256
+
+誤解が生じないよう明示する。
+
+- SHA256 は **seed ではない**
+- SHA256 と SHA257 という連番ではない
+- SHA256 は入力 data から作る **指紋**
+- 同じ Vehicle plan なら同じ SHA256 値
+- OD や departure time 等が違えば異なる SHA256 文字列
+- 例として異なる反復の双方が SHA256 方式を使うが、hash 値は異なる
+- 反復間で Vehicle plan が異なるなら SHA256 が異なるのは **正常**
+- 同一反復内の FCFS と TVT-MP では同じ Vehicle plan を必要とするため SHA256 **一致を要求する**
+- 同様に VOT assignment、participation assignment 等も hash で監査できる
+- hash は同一入力確認用であり、結果を生成する seed ではない
+
+### 32.13 最初の経路分岐とseed交絡
+
+今回の主要問題。**seed 交絡が実際に原因であるとはまだ断定しない。** current traffic seed が不正であるとも書かない。route 差が全て乱数差であるとも、全て交通状態差であるとも書かない。
+
+**懸念:**
+
+同じ traffic seed を FCFS と TVT-MP へ与えても、両方式で乱数呼出順・回数が変われば、同じ Vehicle の経路選択へ同じ乱数値が割り当てられる保証はない可能性がある。
+
+TVT-MP では以下が差を生み得る。
+
+- order exchange
+- Node 到着時刻の変化
+- Vehicle 処理順
+- route choice 呼出機会
+- World copy
+- baseline 仮想 World
+- Candidate 仮想 World
+- tiebreaker 付与
+- 別 Vehicle の乱数消費
+
+**研究上の主要な考え:**
+
+- 同一 Vehicle の FCFS 対 TVT 経路比較では、**最初の経路分岐の理由が重要**
+- 最初の分岐時に同じ乱数入力、同じ候補 Link 順序、対応可能な選択機会であり、交通状態・route preference・候補コストが異なるため別 Link を選んだなら、方式による交通状態差として説明しやすい
+- 最初の分岐時に使った乱数値自体が異なるなら、交通状態差と乱数列割当て差を分離できず、Vehicle 単位の説明力が弱い
+- 最初に経路が分岐した後は、到達 Node、時刻、候補集合、交通状態が異なる別軌道になる
+- したがって分岐後の全乱数を一対一対応させることは **必須としない**
+- **最初の対応可能な経路分岐までの乱数対応を主要監査対象とする**
+
+**最初の分岐監査に必要な情報候補（監査設計候補。実装済みと書かない）:**
+
+- `replicate_id`
+- method
+- `vehicle_name`
+- `route_choice_index`
+- decision node
+- decision timestep
+- ordered candidate link names
+- candidate route preferences または cost
+- random draw
+- selected link
+- 分岐前 route history
+
+### 32.14 keyed randomizationの位置づけ
+
+- keyed randomization は **未採用**
+- **未実装**
+- production 変更は行っていない
+- 現行 UXsim の原典監査前に採用を決めない
+- **必須であるとは書かない**
+
+**採否基準:**
+
+- 現行 seed 方式で、最初の対応可能な経路分岐まで同一 Vehicle へ同じ乱数入力を保証できるなら、keyed randomization は **不要**
+- 保証できない場合、Vehicle 名・route choice index・replicate ID 等に紐づけた keyed randomization を検討する
+- keyed randomization を導入しても、候補集合・コストが異なれば別経路になるのは正常
+- 経路を方式間で強制的に同一化しない
+- 正当な交通状態差による経路分岐を消さない
+- UXsim 本来の route choice 挙動を不必要に変更しない
+- 導入は高難度であり、既存挙動、再現性、回帰、分布を検証する必要がある
+
+**難易度:**
+
+- 現時点では seed 改変全体を「普通に高い」と評価
+- 用途別 seed 分離だけで目的を達成できれば「中くらい」へ下がり得る
+- keyed randomization や route-choice 本体変更が必要なら「極めて高い寄り」へ上がり得る
+
+**可逆性:**
+
+- 読取り専用原典監査を先に行う
+- 既存 production を直接破壊的に変更しない
+- 新 branch または独立 trial で実装
+- 既存 seed 方式を **legacy/default** 経路として残す
+- 新方式は明示設定でのみ有効化する候補
+- 既存 Reference・固定 seed 回帰を維持
+- 問題時は新規変更を破棄し、既存正常 commit へ戻せる
+- Git 操作は利用者のみが行う
+
+§26 の legacy mode 候補（`legacy_sequential` / `dedicated_rng` / `deterministic_visit_key`）は本節の候補と併読する。本節は §26 の未採用状態を変更しない。
+
+### 32.15 次の読取り専用原典監査
+
+**次作業は実装ではない。読取り専用原典監査である。** production 変更をしない。
+
+最低限確認する事項:
+
+1. UXsim の route choice で乱数を使用する具体的箇所
+2. `route_pref` 更新と outlink 選択の処理
+3. `hard_deterministic_mode=False` 時の確率選択
+4. candidate outlink の列挙順
+5. 同一 Vehicle の route choice 機会を何で識別できるか
+6. route choice index を安定的に定義できるか
+7. `W.rng`、`order_control_rng`、Python `random`、NumPy RNG 等の使い分け
+8. Vehicle 初回 tiebreaker と再訪 tiebreaker の乱数源
+9. FCFS と TVT-MP で route-choice 乱数の呼出順・回数が変わり得る箇所
+10. World copy 時の RNG state コピー方法
+11. baseline 仮想 World・Candidate 仮想 World の RNG state
+12. 仮想 World 内の乱数消費が実 World の RNG state へ波及するか
+13. copy された RNG object が共有参照か独立コピーか
+14. 仮想計算結果から実 World へ戻される乱数関連 state の有無
+15. 最初の経路分岐まで既存方式で同一乱数入力を保証できるか
+16. 保証できない場合、最小の監査追加だけで原因識別できるか
+17. keyed randomization が本当に必要か
+18. production 変更なしの独立診断で確認可能か
+19. 既存 §26 設計と最新要件の整合
+20. 実装する場合の回帰範囲・legacy mode・移行手順
+
+**未確認理由:** 原典コードの該当箇所をまだ読取り監査していない。
+
+現時点では次が未確認である。
+
+- 原典コード未監査
+- route choice の乱数呼出箇所・順序は未確認
+- World copy の RNG 共有・独立性は未確認
+- 最初の分岐まで同じ乱数値が保証されるか未確認
+- keyed randomization の必要性は未確認
+- production 改修要否は未確認
+
+「資料未入手」ではない。**原典コードの該当箇所をまだ読取り監査していない。**
+
+### 32.16 最新再開地点
+
+**確定:**
+
+- clearance=0 正式 trial 実行・独立確認完了
+- participating VOT・role・Q5・Top 1% 分析完了
+- Top 1% route 比較完了
+- 同一ルート悪化 7 台の buyer Visit 局所実現確認完了
+- nonparticipating 600 台分析完了
+- 30 反復の研究目的確定
+- 最初の分岐における seed 交絡問題を次の監査対象とすることを確定
+
+**未確定:**
+
+- clearance=1 または clearance=0 高需要のどちらを中心シナリオとするか
+- clearance=0 高需要条件
+- seed 系列の具体的実装
+- route choice RNG 対応方法
+- keyed randomization 採否
+- production 変更要否
+- 30 反復 seed 台帳
+- 30 反復実行 script・集計器
+- 正式な paired interpretation の範囲
+
+**次の直接作業:**
+
+- UXsim route choice、RNG、World copy、TVT baseline / Candidate 仮想 World に関する **読取り専用原典監査**
+- production 変更をしない
+- 原典監査結果を詳細設計メモへ追記してから、実装要否を判断する
+
+**進捗:** `ORDER_EXCHANGE_PROGRESS_4.md` **§21.9.19**
+
+**Git 操作は利用者が行う。**
