@@ -21,6 +21,7 @@
 - **2026-11-12 追記（clearance・signal候補再評価開始）:** **buyerのみ悪化17台**・**FCFS clearance=0**・**signalized全赤なし**の **歴史的再開地点**は **§21.9.18**。**詳細技術正本**は **§31.22**。当時は **TVT-MP clearance=0未実行**。**削除しない。**
 - **2026-11-14 最新参照:** TVT-MP **clearance=0正式分析完了**、participating **VOT・role・Q5・Top 1%**、buyer局所効果、nonparticipating 600台、**30反復**の日々変動目的、**最初の経路分岐**乱数監査の **最新再開地点**は **§21.9.19**。**詳細正本**は `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_5.md` **§32**。**次作業**は **読取り専用原典監査**。**§21.9.18** / **§31.22** は実行前の **歴史**。
 - **2026-11-14 追記（route-choice乱数原典監査完了）:** 全体判定 **NOT_GUARANTEED_BY_CURRENT_CODE**、仮想World **NO_DIRECT_VIRTUAL_TO_REAL_RNG_CONTAMINATION_FOUND**、keyed randomization **暫定分類2**、**4方式共通seed/RNG基盤**の **最新再開地点**は **§21.9.20**。**詳細正本**は **§32.17〜§32.19**。**次の利用者判断**は、production変更なしの最小診断を先に行うか、共通基盤の詳細設計を先に行うか。**§21.9.19** は原典監査前の **歴史**。
+- **2026-11-14 追記（route-choice RNG診断の第一層・第二層反証完了）:** production変更なしの **route-choice RNG診断**を実装し、第一層と第二層の不変性反証が完了した。**最新再開地点**は **§21.9.21**。**詳細正本**は `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_5.md` **§32.20**。**§21.9.20** と **§32.17〜§32.19** は診断実装前の **歴史**。**production seed/RNG改修は未着手**。**seed改善は未完成**。keyed randomization は **暫定分類2・未採用・未実装**。**次作業**は、限定した 3,000台 FCFS対TVT-MP route-choice RNG監査の設計。
 
 **検索語:** ORDER_EXCHANGE_PROGRESS_4、進捗第4巻、TVT-MP、横並び表示、事後分析、監査出力、full-run audit helper、nonparticipating 20％、全車完走、交通解消、3,000台、T=999、departure-end、4交差点、T=382、初回Actual arrival、Actual arrival上書き、Baseline arrival一致、first divergenceなし、T=402、一時skip、clearance、C順位183、Actual通過順位177、selected=False、baseline fallback、leading nonparticipating、順位確定源、完了、最新再開地点、Git対象、commit、push、TVT-MP clearance=0、transaction 2421、Visit 5457、AWT 21.676、AWWT 20.427812923323355、Top 1%、buyer局所効果、nonparticipating 600台、30反復、最初の経路分岐、keyed randomization、暫定分類2、原典監査、§21.9.19、§32、NOT_GUARANTEED_BY_CURRENT_CODE、NO_DIRECT_VIRTUAL_TO_REAL_RNG_CONTAMINATION_FOUND、4方式共通seed/RNG基盤、§21.9.20、§32.17。
 
@@ -2497,6 +2498,8 @@ TSE完全PDFまたは2009年overview chapter全文を別経路で入手した場
 
 **歴史:** **§21.9.19** および **§32.1〜§32.16** は原典監査前の記録として維持する。当時の「まだ読取り監査していない」は当時の事実である。最新状態は **本 §21.9.20**。
 
+**2026-11-14 最新参照:** 本節は診断実装前の歴史的記録である。当時の未設計・未実装・未検証は当時の事実である。**§21.9.21** および詳細 **§32.20** で、production変更なし診断の実装と第一層・第二層の結果不変性反証が完了した。production seed/RNG 改修はなお未着手である。最新再開地点は **§21.9.21**。
+
 **検索語:** NOT_GUARANTEED_BY_CURRENT_CODE、NO_DIRECT_VIRTUAL_TO_REAL_RNG_CONTAMINATION_FOUND、keyed randomization暫定分類2、4方式共通seed/RNG基盤、Node.generate、route_next_link_choice、初回arrival tiebreaker、用途別RNG、BATCH改修前先行。
 
 **完了:** FCFS対TVT-MP route-choice乱数対応の読取り専用原典監査。production・script・tests・output は未変更。診断 script と seed/RNG 実装は未着手。
@@ -2545,3 +2548,41 @@ TSE完全PDFまたは2009年overview chapter全文を別経路で入手した場
 **最新再開地点:** **本 §21.9.20**。**詳細正本:** **§32.17〜§32.19**。
 
 **Git 操作は利用者が行う。**
+
+#### 21.9.21 production変更なしroute-choice RNG診断の実装と二層不変性反証完了
+
+**執筆日:** 2026-11-14
+
+**詳細正本:** `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_5.md` **§32.20**
+
+**歴史:** **§21.9.20** は診断実装前の記録である。当時の「未設計・未実装・未検証」は当時の事実である。最新状態は本 **§21.9.21** である。
+
+**目的:** FCFS対TVT-MP の最初の経路分岐が seed差か、交通状態・preference 差かを監査するため、追加 random draw なしの route-choice RNG診断基盤を作った。これは seed改善の完成ではない。
+
+**新規 3 ファイル:**
+
+- `research_scripts/route_choice_rng_diagnostic.py`
+- `research_scripts/run_route_choice_rng_diagnostic_invariance_two_route.py`
+- `research_scripts/run_route_choice_rng_diagnostic_invariance_12_vehicle_tvt_mp.py`
+
+**第一層:** 4 case が成功した。pあり、p省略、候補1件、複数候補、origin 拒否と再試行、in-trip 再抽選を含む。全 case で formal snapshot、rng、`order_control_rng` が完全一致した。第一層の代表件数は、two-route case の event 7件、blocked origin の event 29件、in-trip retry の event 31件である。第二層の 80件、4,950回、1,512回とは別の結果である。
+
+**第二層:** 12台 TVT-MP。transaction 2件。Visit 8件。buyer 2件。seller 6件。diagnostic event 80件。real origin draw 12件。real in-trip draw 68件。virtual `Node.generate` 4,950回。virtual `route_next_link_choice` 1,512回。proxy pickle rejection 0回。研究 bundle、full-run audit、Vehicle、Link、rng、`order_control_rng` が完全一致した。method 復元は成功した。baseline World と Candidate local World の pickle 経路で、proxy 混入は観測されなかった。これは当該反証条件の結果であり、全状況での絶対証明ではない。
+
+**明確な未完了:**
+
+- production seed/RNG 改修は未着手である。
+- seed改善は未完成である。
+- keyed randomization は未採用・未実装であり、暫定分類2を維持する。
+- 4方式共通 seed/RNG 基盤は未実装である。signalized UXsim、FCFS、BATCH、TVT-MP への共通実装には進んでいない。
+- 3,000台への診断適用は未実施である。
+- 最初の対応可能な経路分岐の event pairing は未実装である。
+- 現行共有 RNG stream が過去の経路差の実原因かは未判定である。common random numbers は未実装である。
+
+**次の作業:** 既知の buyer-only 悪化 Vehicle 群、または代表 Vehicle を対象とした、限定 3,000台 FCFS対TVT-MP route-choice RNG監査を設計する。実装前に、対象 Vehicle、停止条件、ログ上限、性能見積りを決める。production、Vehicle plan、seed、VOT、出発時刻は変更しない。新規診断 script として実装する。この次作業は未着手である。30反復の本番設計へはまだ進まない。
+
+**最新再開地点:** 本 **§21.9.21**。**詳細正本:** **§32.20**。
+
+**Git 操作は利用者が行う。commit／push はまだ行わない。**
+
+**検索語:** route-choice RNG診断、第一層、第二層、結果不変性、12台TVT-MP、baseline World、Candidate local World、pickle混入、proxy pickle rejection 0、transaction 2、Visit 8、buyer 2、seller 6、virtual Node.generate 4950、virtual route_next_link_choice 1512、seed改善未完成、keyed randomization未実装、最初の経路分岐、次の作業

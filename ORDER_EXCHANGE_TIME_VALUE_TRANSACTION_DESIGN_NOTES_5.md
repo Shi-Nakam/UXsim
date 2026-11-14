@@ -4,6 +4,7 @@
 
 - **2026-11-14 最新参照:** TVT-MP **clearance=0** 正式実行、participating **VOT・取引role・Q5・Top 1%**、buyer局所効果とFCFS比旅行全体効果の分離、nonparticipating 600台のFCFS比較、**30反復** seed設計、**最初の経路分岐**乱数監査の **最新正本**は **§32**。進捗の最新再開地点は `ORDER_EXCHANGE_PROGRESS_4.md` **§21.9.19**。**§31.22** / **§21.9.18** は TVT-MP clearance=0 実行前の **歴史的記録**として維持する。旧節の「未実行」は現在の未実行を意味しない。**次の直接作業**は seed・経路選択乱数の **読取り専用原典監査**である。
 - **2026-11-14 追記（route-choice乱数原典監査完了）:** FCFS対TVT-MP **route-choice乱数対応**の原典監査結果、全体判定 **NOT_GUARANTEED_BY_CURRENT_CODE**、仮想World判定 **NO_DIRECT_VIRTUAL_TO_REAL_RNG_CONTAMINATION_FOUND**、**4方式共通seed/RNG基盤**方針の **最新正本**は **§32.17〜§32.19**。進捗の最新再開地点は **§21.9.20**。**§32.1〜§32.16** / **§21.9.19** は原典監査前の **歴史**。keyed randomization は **暫定分類2・未採用・未実装**。診断の安全性・結果不変性・必要情報取得を検証後に確定する。
+- **2026-11-14 追記（route-choice RNG診断の第一層・第二層反証完了）:** production変更なしの **route-choice RNG診断**を実装し、第一層と第二層の不変性反証が完了した。**最新正本**は **§32.20**。進捗の最新再開地点は `ORDER_EXCHANGE_PROGRESS_4.md` **§21.9.21**。**§32.17〜§32.19** と **§21.9.20** は診断実装前の **歴史的記録**。**production seed/RNG改修は未着手**。**seed改善は未完成**。keyed randomization は **暫定分類2・未採用・未実装**。**次の直接作業**は、3,000台へ全面適用せず、限定した FCFS対TVT-MP route-choice RNG監査を設計すること。
 
 ## 1. 本文書の位置づけ
 
@@ -17211,6 +17212,8 @@ file: `uxsim/order_control_tvt_mp_candidate_selection.py`
 
 production ファイルを変更しない診断には **設計可能性**がある。ただし具体的方法は **未確定・未実装・未検証**である。単純な method 前後 wrapper だけで十分とは **確認されていない**。診断なし／ありの正式結果完全一致を小規模 trial で確認するまで、原因識別可能性を確定しない。診断 script はまだ **未作成・未実装**。3,000 台再実行へ直ちに進まない。
 
+**2026-11-14 最新参照:** 本節は診断実装前の歴史的記録である。透過 proxy と diagnostic wrapper は後に **§32.20** で実装し、第一層・第二層で診断なし／ありの完全一致が成立した。production seed/RNG 改修はなお未着手。最新結果は **§32.20**。
+
 記録候補: method、`vehicle_name`、route-choice ordinal、origin choice または in-trip choice、decision Node、decision timestep、ordered candidate Link names、preference vector、normalized probability、RNG state fingerprint immediately before draw、selected Link、RNG state fingerprint immediately after draw、分岐前 route history、arrival tiebreaker event、method 名。
 
 **重要な禁止:**
@@ -17266,6 +17269,8 @@ production ファイルを変更しない診断には **設計可能性**があ�
 #### 32.17.11 keyed randomizationの位置づけ更新
 
 **暫定分類2:** 現行方式では最初の分岐まで同一乱数入力は保証されない。production ファイルを変更しない診断により原因識別できる設計可能性はある。ただし診断方法自体が **未設計・未実装・未検証**であり、診断なし／ありの結果完全一致も未確認である。したがって keyed randomization が必須とは現時点で判断しない。最小診断が結果不変で成立することを確認した後に、分類2を確定する。診断が安全に成立しない、または必要情報を取得できない場合は、分類3または別設計へ再評価する。
+
+**2026-11-14 最新参照:** 本節記録時には診断は未実装だった。**§32.20** で第一層・第二層の結果不変性が成立し、「診断が安全に成立するか」という保留条件は小規模反証の範囲で満たされた。3,000台の最初の分岐監査は未実施である。keyed randomization の必要性は未判定であり、**暫定分類2**、未採用・未実装を維持する。最新結果は **§32.20**。
 
 維持事項:
 
@@ -17435,6 +17440,8 @@ paired interpretation:
 
 **既存 §32.16** は原典監査前の再開地点として維持する。最新再開地点は **本 §32.19**。進捗は **§21.9.20**。
 
+**2026-11-14 最新参照:** 本節は診断実装前の再開地点である。以下の未確定一覧と旧「次の直接作業」は、当時の歴史的記録として削除しない。診断方式、結果不変性、pickle 互換性は **§32.20** で第一層・第二層まで反証済みである。用途別 RNG、`SeedSequence`、legacy mode、keyed randomization、4方式共通 runner 等は引き続き未実装である。最新再開地点は **§32.20**、進捗は **§21.9.21**。
+
 **確定:**
 
 - 原典監査完了
@@ -17473,6 +17480,8 @@ paired interpretation:
 - BATCH 固有の最終乱数契約
 - 30 反復 seed 台帳
 
+**歴史的記録:** 次の利用者判断は、診断実装前の分岐である。現在の次作業ではない。最新の次作業は **§32.20.12**。
+
 **次の直接作業（利用者判断が必要な分岐）:**
 
 1. production 変更なしの最小 route-choice RNG 診断を先に設計するか
@@ -17481,3 +17490,343 @@ paired interpretation:
 今回のメモ更新では、診断 script 作成や seed/RNG 実装へ進まない。production、research script、tests、既存 output は未変更。
 
 **Git 操作は利用者が行う。**
+
+### 32.20 production変更なしroute-choice RNG診断の実装と第一層・第二層不変性反証
+
+**執筆日:** 2026-11-14
+
+**§32.17〜§32.19** は、原典監査の後、診断実装の前の歴史的記録である。最新の診断設計、反証結果、再開地点は本 **§32.20** である。進捗は `ORDER_EXCHANGE_PROGRESS_4.md` **§21.9.21** である。
+
+**production seed/RNG 改修は未着手**である。**seed改善は未完成**である。本節は、seed改善が完成した記録ではない。route-choice RNG診断基盤は、production を変更しない新規 research script として実装済みである。第一層不変性検証と第二層 TVT-MP 不変性検証は成功した。keyed randomization は **暫定分類2**、未採用・未実装である。4方式共通 seed/RNG 基盤は未実装である。3,000台 FCFS／TVT-MP への実診断適用、最初の対応可能な経路分岐の event pairing、現行共有 RNG stream が実際の経路差へ与えた影響の判定は、いずれも未実施である。現時点の全体分類は **暫定分類2** を維持する。
+
+#### 32.20.1 背景と目的
+
+3,000台 clearance=0 の FCFS対TVT-MP 比較では、高 VOT 層、特に上位 1% でも FCFS より旅行時間が悪化する Vehicle が確認された。FCFS と TVT-MP は別 World である。交通状態差による経路分岐と遅延は起こり得る。
+
+最初の経路分岐が、純粋な交通状態差ではなく、共有された可変長 RNG stream の消費位置差による場合、個別 Vehicle 比較と論文上の因果解釈が弱くなる。production の seed 改修へ進む前に、各 route-choice draw の候補、確率、選択結果、RNG state の前後を、追加 random draw なしで観測できる診断基盤を設計し、反証した。
+
+この route-choice RNG診断は、seed改善そのものではない。現行挙動の原因を監査するための基盤である。
+
+#### 32.20.2 production原典で確認したroute-choice draw
+
+**`Node.generate`**
+
+- generation queue から出発させるとき、outlink 候補と preference を作る。
+- `hard_deterministic_mode=False` では、preference 合計が正なら `W.rng.choice(outlinks, p=normalized preference)` を呼ぶ。
+- 合計が 0 なら `W.rng.choice(outlinks)` を呼び、`p` は省略される。
+- outlink の受入れ可否を判定する前に choice を行う。
+- 受入れに失敗しても、その draw は消費済みである。
+- Vehicle は `generation_queue` に残り、`Node.generate` は break する。
+- 1回の `Node.generate` は、outlink の lane 合計回数まで loop する。そのため複数 Vehicle の choice が発生し得る。
+
+**`Vehicle.route_next_link_choice`**
+
+- `Vehicle.update` で Link 終端へ到達したときに呼ばれる。
+- 通常経路では、1呼出しにつき `W.rng.choice` は最大 1 回である。
+- `specified_route`、`hard_deterministic_mode=True`、outlink なし等では、draw しない場合がある。
+- current production での呼出元は `Vehicle.update` 内の 2 か所である。
+- `route_next_link_choice` の直後に `record_order_control_node_arrival` が呼ばれる。
+- arrival tiebreaker 用の random draw は、診断 proxy が外れた後に行われる。
+
+#### 32.20.3 一時RNG proxyとdiagnostic wrapperの確定設計
+
+`W.rng` は `np.random.Generator` である。`Generator.choice` は instance 属性として直接差し替えられない。`World.copy`、baseline snapshot、Candidate local World の生成は、pickle による World 複製である。proxy を `World.rng` へ常設すると、pickle へ混入する危険がある。採用した方式は、対象 method の実行中だけ `World.rng` を一時 proxy へ置き換える方式である。
+
+proxy 契約:
+
+- 元 Generator を明示的に保持する。
+- `choice` だけを実装する。
+- `__getattr__` による `random`、`uniform`、`shuffle` 等の自動転送はしない。
+- 元 `Generator.choice` を、各 event につきちょうど 1 回だけ呼ぶ。
+- choice の前後に `bit_generator.state` を `copy.deepcopy` で読み取る。
+- state を canonical JSON へ変換し、SHA-256 fingerprint を作る。
+- state 観測では `random`、`choice`、`uniform` 等を追加で呼ばない。
+- proxy が pickle されようとした場合は `RuntimeError` とし、拒否回数を記録する。
+- `finally` で `World.rng` を元 Generator object そのものへ戻す。
+- method wrapper も、保存済みの元 method へ逆順で復元する。
+- 正常終了と例外の双方で、context と Generator を復元する。
+- 診断状態は World へ追加せず、外部 session object に保持する。
+- real World は object identity で判別する。
+- baseline World と Candidate local World では、元 production method を 1 回呼ぶ。その呼出しは実 World 用 event へ記録しない。
+
+実装ファイルは `research_scripts/route_choice_rng_diagnostic.py` である。
+
+#### 32.20.4 event schema、ordinal、decision location
+
+実装済み field:
+
+- `run_method`
+- `world_kind`
+- `event_kind`
+- `vehicle_name`
+- `route_choice_ordinal`
+- `attempt_ordinal_at_location`
+- `decision_timestep`
+- `decision_node_name`
+- `current_link_name`
+- `ordered_candidate_link_names`
+- `raw_preference_vector`
+- `normalized_probability_vector`
+- `probability_mode`
+- `rng_state_fingerprint_before`
+- `selected_link_name`
+- `rng_state_fingerprint_after`
+- `specified_route_used`
+- `hard_deterministic_mode`
+- `links_prefer_names`
+- `links_avoid_names`
+- `choice_called`
+- `origin_admission`
+- `route_history_before`
+- `rng_state_canonical_json_before`
+- `rng_state_canonical_json_after`
+- `recomputed_normalized_probability_vector`
+- `provided_probability_matches_recomputed`
+
+ordinal:
+
+- `route_choice_ordinal` は、Vehicle ごとの実 draw 通算順である。
+- origin と in-trip を通す。
+- origin 拒否後の再試行と、Link 終端の再抽選も、各 draw として増える。
+- draw なし event では増えない。
+
+decision location は、vehicle、event kind、decision Node、current Link、route history である。`attempt_ordinal_at_location` は、同じ decision location での再抽選回数である。
+
+FCFS対TVT-MP の最終対応規則を、単純な `(vehicle_name, route_choice_ordinal)` だけに固定しない。decision location が同じ event を対応可能候補とし、その上で attempt、RNG state、候補、p、選択結果を比較する。最終比較規則はまだ未実装である。同一 `Node.generate` 呼出し内の複数 choice を示す generate call ID は未実装である。第一層の同一 timestep・同一 Node の複数 origin draw は、間接指標である。
+
+#### 32.20.5 UXsim timestep内のDUO route preference更新
+
+1 timestep 内の順は、Link.update、Node.generate、Node.transfer、carfollow、Vehicle.update、その後の route search と route preference 更新である。`departure_time=0` の Vehicle は、T=0 の `Vehicle.update` で wait となり `generation_queue` へ入る。初回 origin choice は T=1 の `Node.generate` である。
+
+T=0 末尾では `route_search_all`、`homogeneous_DUO_update`、各 living Vehicle の `route_pref_update` が実行される。homogeneous DUO では、`addVehicle` 時に渡した明示 `route_pref` が `W.ROUTECHOICE.route_pref[dest.id]` で全置換される。明示 `route_pref` を 0 にしても、有限経路では T=1 の choice 時点で正の preference になり得る。
+
+当初の第一層 trial で p 省略を期待した設計が失敗した原因は、この T=0 末尾の DUO 上書きを見落としていたことである。coverage minimum を単に緩めず、case ごとの担当現象を実挙動へ合わせて再設計した。
+
+#### 32.20.6 第一層の小規模不変性反証
+
+ファイル: `research_scripts/run_route_choice_rng_diagnostic_invariance_two_route.py`
+
+最終 4 case:
+
+**A. `two_route_multiple_origin_choice_case`**
+
+- Vehicle 3台
+- diagnostic event 7件
+- origin draw 4件
+- in-trip draw 3件
+- pあり 7件
+- p省略 0件
+- 候補1件 3件
+- 複数候補 4件
+- origin rejected 1件
+- retry location 1件
+- same timestep／same Node origin pair group 1件
+- 同一 `Node.generate` 呼出し内の複数 choice は、直接証明ではなく間接指標である
+
+**B. `single_candidate_case`**
+
+- Vehicle 1台
+- diagnostic event 2件
+- origin 1件
+- in-trip 1件
+- pあり 2件
+- p省略 0件
+- 候補1件 2件
+
+**C. `blocked_origin_retry_case`**
+
+- 唯一の outlink は `capacity_in=0`
+- route search 上は無限旅行時間になる
+- preference 合計は 0 になり、p は省略される
+- origin 受入れは拒否される
+- 同じ decision location で毎 timestep 再試行する
+- Vehicle が完走しないことは、この case では正常である
+- diagnostic event 29件
+- origin draw 29件
+- p省略 29件
+- 候補1件 29件
+- rejected 29件
+- retry location 1件
+
+**D. `in_trip_retry_case`**
+
+- 下流 2 Link は `capacity_in=0.01`
+- `capacity_in` が正なので、route search 上は有限である
+- `DELTAN=1`、`DELTAT=1` であり、試験期間中は `capacity_in_remain` が 1 未満である
+- pありの複数候補 choice を行うが、transfer はできない
+- Link 終端で毎 timestep 再抽選する
+- diagnostic event 31件
+- origin draw 1件
+- in-trip draw 30件
+- pあり 31件
+- p省略 0件
+- 候補1件 1件
+- 複数候補 30件
+- retry location 1件
+
+全 4 case で `formal_snapshot_match=True`、`final_rng_state_match=True`、`final_order_control_rng_state_match=True` であった。
+
+第一層 summary:
+
+- `all_cases_passed=True`
+- `production_files_modified=False`
+- `existing_outputs_modified=False`
+- `keyed_randomization_used=False`
+- `simulation_result_invariance_confirmed=True`
+
+比較対象は、World.T、TIME、Vehicle 最終状態・位置・旅行時間・`log_t_link`、Link の `cum_arrival`、`cum_departure`、`traveltime_actual`、`vehicles_enter_log`、`capacity_in`、`capacity_in_remain`、実 World rng、`order_control_rng` である。実行時間等は除外した。比較は完全一致であり、tolerance と丸めはない。
+
+#### 32.20.7 第一層で発見・修正した反証trial側の欠陥
+
+次は production 欠陥ではなく、主として反証 trial と validation 設計の欠陥だった。修正後に第一層は全 case 成功した。
+
+- static validation が `CASE_NAMES` の `ast.Name` を認識できなかった。
+- `route_pref` helper が Link object ではなく Link ID を key にしていた。
+- attempt ordinal validation が、attempt 番号を含む key で group 化していた。
+- blocker Vehicle を手動配置する初期案は、通常の Link 進入時の台帳更新を完全再現しないため廃止した。
+- 拒否と再試行は、正式な `capacity_in` 設定へ変更した。
+- p省略が 0 件だった原因は、T=0 末尾の DUO `route_pref` 全置換を見落とした scenario 設計不良である。
+- case ごとの担当 coverage を再整理した。
+- retry location は、decision location 単位で数えるよう修正した。
+
+#### 32.20.8 第二層12台TVT-MP不変性反証
+
+ファイル: `research_scripts/run_route_choice_rng_diagnostic_invariance_12_vehicle_tvt_mp.py`
+
+目的は、既存 12台 single cross intersection の TVT-MP 条件を再現し、baseline World と Candidate local World の pickle 経路を含め、診断なしと診断ありの正式結果を完全一致で比較することである。
+
+条件:
+
+- traffic seed 0
+- VOT seed 1
+- 12台
+- departure timestep 5、9、13
+- 各時刻の順は north、east、south、west
+- OD-only
+- 全車 participating
+- Link 200 m
+- 60 km/h
+- 単車線
+- evaluation end 299
+- internal TSIZE 330
+- baseline horizon 30
+- Candidate 上限 10
+- clearance 1
+- `order_control_type` は `time_value`
+- VOT 生成式と Vehicle 対応順は既存 trial と同一
+
+実測:
+
+- Vehicle 12台
+- transaction 2件
+- Visit 8件
+- buyer 2件
+- seller 6件
+- diagnostic event 80件
+- real origin draw 12件
+- real in-trip draw 68件
+- virtual `Node.generate` pass 4,950回
+- virtual `Vehicle.route_next_link_choice` pass 1,512回
+- proxy pickle rejection 0回
+
+完全一致:
+
+- `formal_research_bundle_match=True`
+- `full_run_audit_match=True`
+- `vehicle_state_match=True`
+- `link_state_match=True`
+- `final_rng_state_match=True`
+- `final_order_control_rng_state_match=True`
+- `method_restoration_passed=True`
+
+第二層 summary:
+
+- `layer_2_all_passed=True`
+- `baseline_candidate_pickle_path_exercised=True`
+- `proxy_pickle_contamination_not_observed=True`
+- `production_files_modified=False`
+- `existing_outputs_modified=False`
+- `keyed_randomization_used=False`
+- `layer_1_and_layer_2_invariance_confirmed=True`
+
+比較対象は、研究 bundle の transactions、visits、vehicles、nodes、scenario、full-run audit の transaction rows と visit rows、Vehicle 最終状態、Link 最終状態、World 状態、actual passage registry の finalized timestep、transaction 数、Visit 数、decision timestep、VOT plan、実 World rng の canonical JSON と SHA-256、`order_control_rng` の canonical JSON と SHA-256 である。tolerance と丸めはない。NaN 同士だけを同一扱いとする。
+
+audit 契約は、transaction 最低 1件、buyer Visit 最低 1件、seller Visit 最低 1件、nonparticipating 0件、audit と研究出力の行数一致、FIFO 確認、必須の経済値・順位・arrival／passage 確認である。実測の 2件、8件、2件、6件は、この最低契約を満たした観測値であり、事前に固定した期待件数ではない。
+
+#### 32.20.9 baseline／Candidate pickle非混入の反証結果
+
+実 timestep では、TVT driver が `Node.generate` より前に完了する。対象の 2 method 内に、pickle、`World.copy`、TVT driver、`exec_simulation` の呼出しはない。proxy は対象 method の実行中だけ `World.rng` へ載る。baseline／Candidate snapshot の時点では、元 Generator へ戻っている。proxy が pickle されると `RuntimeError` になる。
+
+第二層では、baseline／Candidate 経路を実際に通した。virtual `Node.generate` は 4,950回、virtual `route_next_link_choice` は 1,512回、proxy pickle rejection は 0回であった。研究結果、audit、Vehicle、Link、両 RNG state は完全一致した。
+
+これは、第一層と第二層の反証条件で混入が観測されず、完全一致が成立した、という記録である。全状況で proxy が絶対に pickle されない、という数学的証明ではない。
+
+#### 32.20.10 確定事項、既知の限界、断定禁止
+
+確定した範囲:
+
+- production 変更なしの diagnostic wrapper と一時 RNG proxy は、第一層 4 case と第二層 12台 TVT-MP で、追加 draw なしに route choice を記録した。
+- その範囲で、診断なしと診断ありの正式結果、実 World rng、`order_control_rng` は完全一致した。
+- 第二層の反証条件では、proxy pickle rejection は 0回であった。
+
+既知の限界:
+
+- 同一 `Node.generate` 呼出し内の複数 choice を示す generate call ID は未実装である。第一層の同一 timestep・同一 Node 指標は間接指標である。
+- `vehicles_enter_log` は、同一 Link・同一時刻の複数 Vehicle を完全保存できず、後の Vehicle で上書きされ得る。比較には Vehicle の `log_t_link` と `cum_arrival` 等も含めた。
+- 診断の logging 処理で draw 後に例外が出た場合、simulation は停止する。
+- diagnostic session は同時に 1 つだけである。
+- 現行実装は小規模反証用である。3,000台での性能負荷とログ量は未評価である。
+- FCFS、signalized UXsim、BATCH への同一診断適用は未確認である。
+- FCFS対TVT-MP の event pairing と、最初の対応可能な経路分岐の抽出は未実装である。
+- 現行共有 RNG stream が比較解釈へ与える実際の影響は未判定である。
+- keyed randomization の必要性は未判定である。
+- production seed 改修の必要範囲も未判定である。
+
+断定しないこと:
+
+- seed改善が完了したこと。
+- common random numbers が実装済みであること。
+- keyed randomization が不要と確定したこと。
+- 現行共有 RNG stream が悪化原因であること。
+- FCFS対TVT-MP の経路分岐が seed差であること。
+- 3,000台へ安全に全面適用できること。
+- proxy が全状況で絶対に pickle されないこと。
+- 同一 `Node.generate` 内の複数 choice を直接証明したこと。
+- 第一層・第二層の成功範囲を越えた一般化。
+
+#### 32.20.11 現時点の設計判断
+
+- production は変更しない。
+- keyed randomization へ進まない。分類は **暫定分類2**、未採用・未実装のまま維持する。
+- 4方式共通 seed/RNG production 基盤へ進まない。signalized UXsim、FCFS、BATCH、TVT-MP の共通基盤は未実装である。
+- まず診断基盤を用い、FCFS対TVT-MP の最初の対応可能な経路分岐を監査する。
+- 3,000台へ全面適用する前に、診断対象 Vehicle、停止条件、ログ上限、性能負荷を設計する。
+- event 対応では、Vehicle 名だけでなく decision location と attempt を使う。
+- 最初の対応可能な decision location で、RNG state fingerprint、候補 Link、raw preference、normalized probability、selected Link を比較する。
+- state が既に異なる場合、それを単純に seed差と断定しない。
+- 候補や確率が異なる場合は、交通状態と DUO route preference の差を含む。
+- 候補と確率が同じでも RNG state が異なる場合は、共有 stream の消費位置差が疑われる。
+- RNG state、候補、確率、選択結果が同じなら、その event の分岐は seed差ではない。
+- 監査結果を見てから、legacy mode、用途別 RNG、common random numbers、keyed randomization の必要性を判断する。
+
+#### 32.20.12 最新再開地点と次の作業
+
+次の直接作業は、第一層・第二層で成立した診断 module を前提に、3,000台 clearance=0 の FCFS対TVT-MP 比較へ全面適用せず、既知の buyer-only 悪化 Vehicle 群または代表 Vehicle を対象とした限定 route-choice RNG診断を設計することである。
+
+目的は、両方式で最初に対応可能な decision location を特定し、その場所で RNG state、候補、preference、p、選択 Link を比較することである。既存の 3,000台 formal output、Vehicle plan、seed、VOT、出発時刻は変更しない。production は変更しない。新規診断 script として作る。実装前に、対象 Vehicle、停止条件、ログ上限、性能見積りを確定する。この限定診断の設計、実装、実行は未着手である。
+
+明記:
+
+- production seed/RNG 改修は未着手である。
+- seed改善は未完成である。
+- keyed randomization は暫定分類2、未採用・未実装である。
+- 4方式共通 seed/RNG 基盤は未実装である。
+- 30反復の本番設計へはまだ進まない。
+
+**進捗:** **§21.9.21**
+
+**Git 操作は利用者が行う。commit／push はまだ行わない。**
+
+#### 32.20.13 検索語
+
+route-choice RNG診断、seed改善、RNG監査、最初の経路分岐、FCFSとTVT-MPの経路分岐、seed差、追加random draw、RNG proxy、diagnostic wrapper、Node.generate、Vehicle.route_next_link_choice、decision location、route_choice_ordinal、attempt_ordinal_at_location、raw preference、normalized probability、RNG state fingerprint、baseline World、Candidate local World、pickle混入、第一層、不変性反証、第二層、12台TVT-MP、formal snapshot、full-run audit、common random numbers、keyed randomization、暫定分類2、4方式共通seed、signalized UXsim、FCFS、BATCH、TVT-MP、未実装、未実行、未完了、次の作業
