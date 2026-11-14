@@ -3,6 +3,7 @@
 作成日: 2026-10-08
 
 - **2026-11-14 最新参照:** TVT-MP **clearance=0** 正式実行、participating **VOT・取引role・Q5・Top 1%**、buyer局所効果とFCFS比旅行全体効果の分離、nonparticipating 600台のFCFS比較、**30反復** seed設計、**最初の経路分岐**乱数監査の **最新正本**は **§32**。進捗の最新再開地点は `ORDER_EXCHANGE_PROGRESS_4.md` **§21.9.19**。**§31.22** / **§21.9.18** は TVT-MP clearance=0 実行前の **歴史的記録**として維持する。旧節の「未実行」は現在の未実行を意味しない。**次の直接作業**は seed・経路選択乱数の **読取り専用原典監査**である。
+- **2026-11-14 追記（route-choice乱数原典監査完了）:** FCFS対TVT-MP **route-choice乱数対応**の原典監査結果、全体判定 **NOT_GUARANTEED_BY_CURRENT_CODE**、仮想World判定 **NO_DIRECT_VIRTUAL_TO_REAL_RNG_CONTAMINATION_FOUND**、**4方式共通seed/RNG基盤**方針の **最新正本**は **§32.17〜§32.19**。進捗の最新再開地点は **§21.9.20**。**§32.1〜§32.16** / **§21.9.19** は原典監査前の **歴史**。keyed randomization は **暫定分類2・未採用・未実装**。診断の安全性・結果不変性・必要情報取得を検証後に確定する。
 
 ## 1. 本文書の位置づけ
 
@@ -16906,5 +16907,577 @@ TVT-MP では以下が差を生み得る。
 - 原典監査結果を詳細設計メモへ追記してから、実装要否を判断する
 
 **進捗:** `ORDER_EXCHANGE_PROGRESS_4.md` **§21.9.19**
+
+**Git 操作は利用者が行う。**
+
+### 32.17 FCFS対TVT-MP route-choice乱数対応の原典監査結果
+
+**執筆日:** 2026-11-14
+
+**進捗参照:** `ORDER_EXCHANGE_PROGRESS_4.md` **§21.9.20**
+
+**既存記録との関係:** 本 §32.1〜§32.16 および進捗 **§21.9.19** は、原典監査前の記録として **削除・書換えしない**。当時の「原典コードの該当箇所をまだ読取り監査していない」は **当時の事実**である。監査結果の正本は **本 §32.17**、4方式共通方針は **§32.18**、監査後の再開地点は **§32.19**。
+
+**関連既存 commit:** `88d99e5`
+`document 3000-vehicle clearance-0 FCFS-TVT results, single-seed top-1% worsening with TVT, and seed audit plan`
+
+**検索語:** NOT_GUARANTEED_BY_CURRENT_CODE、NO_DIRECT_VIRTUAL_TO_REAL_RNG_CONTAMINATION_FOUND、keyed randomization暫定分類2、W.rng、order_control_rng、Node.generate、route_next_link_choice、record_order_control_node_arrival、route_search_all、DUO noise、_transfer_normal_merge、World.copy、pickle.dumps、pickle.loads、最初の経路分岐、common random numbers、production変更なし診断。
+
+#### 32.17.1 監査目的
+
+同じ初期 traffic seed を使用した FCFS と TVT-MP で、同一 Vehicle の **最初の対応可能な経路分岐**時に、同じ route-choice random draw が使われることが現行コードで保証されるかを確認した。
+
+区別したかった原因は次の2つである。
+
+1. 同じ乱数入力の下で、交通状態、route preference、候補 Link の weight 等が異なったため、別 Link を選択した
+2. 実 World の逐次乱数 stream の消費順・回数が方式間でずれ、同一 Vehicle が異なる random draw を受けたため、別 Link を選択した
+
+最初の経路分岐後は、経路、到達 Node、到達時刻、候補集合、route-choice 回数、交通状態が異なる別軌道へ進む。したがって研究上の主要監査対象は **最初の対応可能な経路分岐まで**とする。分岐後の全乱数を方式間で一対一対応させることは必須としない。
+
+**断定しないこと:** seed 交絡が過去の特定 Vehicle の経路差の実原因だったこと、全ての経路差が乱数差だったこと、全ての経路差が交通状態差だったこと、keyed randomization が必須であること、production 欠陥が確認されたこと。今回確定したのは、現行コードによる同一 draw の **一般保証がない**ことと、診断・共通基盤設計が必要なことである。
+
+#### 32.17.2 Executive conclusion
+
+**全体判定:** `NOT_GUARANTEED_BY_CURRENT_CODE`
+
+意味:
+
+- baseline／Candidate 仮想 World の乱数消費が、実 World の `W.rng` を直接進める経路は確認されなかった
+- 仮想 World から実 World への明示的な RNG または RNG state の書戻しも確認されなかった
+- ただし実 World では、複数の処理が同一の逐次 `W.rng` stream を消費する
+- FCFS と TVT-MP で交通イベント順、待ち時間、到着順、通過順、経路選択回数が変わると、同一 Vehicle が受け取る `W.rng` 上の乱数値も変わり得る
+- 同じ初期 `random_seed` だけでは、同一 Vehicle の最初の対応可能な経路分岐時に同じ random draw が使われることは保証されない
+
+**仮想 World 判定:** `NO_DIRECT_VIRTUAL_TO_REAL_RNG_CONTAMINATION_FOUND`
+
+この表現は「検索・原典確認範囲で直接汚染経路が確認されなかった」という意味で用いる。あらゆる将来コードや未読外部処理を含む絶対証明ではない。
+
+**keyed randomization の現時点の分類:** **暫定分類2**
+
+- 現行方式では同じ乱数入力が保証されない
+- production ファイルを変更しない診断により原因識別できる **設計可能性**はある
+- ただし診断方法自体が **未設計・未実装・未検証**である
+- 診断の安全性・結果不変性・必要情報取得を検証後に分類を確定する
+- したがって keyed randomization が必須とは現時点で判断しない
+- **未採用・未実装**の状態を維持する
+- 経路を方式間で強制同一化しない
+
+#### 32.17.3 実Worldの経路選択
+
+**A. origin outlink choice**
+
+| 項目 | 値 |
+|------|-----|
+| file | `uxsim/uxsim.py` |
+| class | `Node` |
+| method | `generate` |
+| 主要行 | 356〜424、特に 384〜424 |
+
+事実:
+
+- `hard_deterministic_mode=False` では `W.rng.choice` を使用する
+- outlink 受入れ可否を判定する **前** に `choice` を行う
+- 選択した outlink が受入れ不能でも、`choice` による乱数消費は既に発生している
+- 受入れ不能ならその Node からの流入処理を `break` する
+- 次 timestep に再試行されるため、出発待ちが方式間で異なれば乱数消費回数も変わり得る
+- 1 Node・1 timestep では outlink lane 合計を上限として loop する
+
+**B. in-trip next-link choice**
+
+| 項目 | 値 |
+|------|-----|
+| file | `uxsim/uxsim.py` |
+| class | `Vehicle` |
+| methods | `update`、`route_next_link_choice` |
+| 主要行 | `update` 3174〜3220、`route_next_link_choice` 3738〜3764 |
+
+事実:
+
+- Vehicle が Link 終端に達し、destination でない場合、`route_next_link_choice` を呼ぶ
+- `hard_deterministic_mode=False` では `W.rng.choice` を使用する
+- Vehicle が Link 終端から通過できず、次 timestep でも終端に残れば、次 timestep にも `route_next_link_choice` を再度呼び得る
+- `Node._finish_node_transfer` で `incoming_vehicles` が各 timestep に clear される
+- 待機中の再登録に伴い、次 Link が毎 timestep 再抽選され得る
+- したがって経路選択回数は、通過待ち timestep 数に依存し得る
+
+**C. ordered candidate outlinks**
+
+事実:
+
+- 既定では `Node.outlinks.values()` の登録順
+- `links_prefer` との交差がある場合は Link 名昇順へ sort
+- `links_avoid` との交差がある場合も除外後に Link 名昇順へ sort
+- `specified_route` の場合は固定 route を用い、通常の確率選択を行わない
+
+解釈:
+
+- 静的 network と同一 prefer/avoid 条件なら候補 Link 順は方式間で一致しやすい
+- 今回の主要問題は候補順だけでなく、choice 直前の `W.rng` state と preference vector も方式間で異なり得ることである
+
+**D. route-choice ordinal**
+
+事実:
+
+- 現行 production には `route_choice_index` という既存 field はない
+- `order_control_visit_id` は Node Visit 用であり、route-choice 回数ではない
+- `log_t_link` は Link 進入履歴を記録するが、Link 終端待機中の毎 timestep 再抽選は記録しない
+- 最初の分岐診断には診断側で route-choice ordinal を数える必要がある
+
+#### 32.17.4 同一W.rngを消費する処理
+
+**World 初期化**
+
+| 項目 | 値 |
+|------|-----|
+| file | `uxsim/uxsim.py` |
+| class | `World` |
+| method | `__init__` |
+| 主要行 | 4152〜4158 |
+
+事実:
+
+- `W.rng = np.random.default_rng(seed=random_seed)`
+- `W.order_control_rng` は同じ `random_seed` を基に `SeedSequence.spawn` で生成される別 Generator
+- `W.random_seed` へ初期 seed を保存する
+
+**実 World で同じ `W.rng` を消費する主要処理:**
+
+1. origin outlink choice
+2. in-trip next-link choice
+3. `RouteChoice.route_search_all` の DUO noise（`uxsim/uxsim.py` 3995〜4024、特に 4014）
+4. 通常 merge の outlink shuffle（`Node._transfer_normal_merge` 2328）
+5. 通常 merge の Vehicle choice（同 2348）
+6. Vehicle initial color（3109）
+7. order-control 初回 arrival tiebreaker
+8. 一部の自動 name 変更（auto_rename、3140）
+9. demand helper
+
+**方式比較への影響:**
+
+- Vehicle color は通常 simulation 開始前であり、同じ Vehicle 生成条件なら対応しやすい
+- demand helper は Vehicle plan 生成時の処理であり、同一 plan を方式間で共有すれば simulation 途中の交絡とは区別できる
+- origin choice、in-trip choice、DUO noise、通常 merge、初回 arrival tiebreaker は simulation 途中の stream 位置をずらし得る
+- **signalized UXsim** では通常 merge を使用し得る
+- FCFS、BATCH、TVT-MP の order-control eligible Node では `Node.transfer` の方式分岐により通常 merge とは別処理へ進む
+- したがって 4 方式間では、方式固有の通過処理だけでなく、通常 merge を使うか否か自体も `W.rng` 消費差を生み得る
+
+#### 32.17.5 order-control arrival tiebreaker
+
+| 項目 | 値 |
+|------|-----|
+| file | `uxsim/uxsim.py` |
+| class | `Vehicle` |
+| method | `record_order_control_node_arrival` |
+| 主要行 | 3570〜3640、特に 3614〜3627 |
+
+事実:
+
+- 同一 Visit 内の再登録では `arrival_time` 設定済みなら return し、追加乱数を消費しない
+- Vehicle がその Node へ初めて到着する Visit では `W.rng.random` を使用する
+- 再訪 Visit では `W.order_control_rng.random` を使用する
+- `route_next_link_choice` の直後に `record_order_control_node_arrival` が呼ばれる
+- 初回到着では route choice と arrival tiebreaker が同じ `W.rng` stream を連続して消費し得る
+- `W.order_control_rng` の分離は再訪 tiebreaker だけに効く
+- 初回 tiebreaker と route choice の交絡は現行コードで残る
+
+研究上の意味:
+
+- 最初の経路分岐以前でも、他車の初回 Node 到着順が方式間で変われば、その後の route-choice draw の stream 位置がずれ得る
+- 同じ traffic seed だけでは **strict common random numbers** にならない
+
+#### 32.17.6 World copyと仮想World
+
+**A. `World.copy`**
+
+| 項目 | 値 |
+|------|-----|
+| file | `uxsim/uxsim.py` |
+| method | `World.copy` |
+| 主要行 | 5654〜5663 |
+
+事実: dill による `pickle.dumps`／`pickle.loads` で World を複製する。
+
+**B. baseline fork**
+
+file: `uxsim/order_control_baseline_driver.py`
+
+主要機能: `serialize_baseline_real_world_snapshot`、`build_baseline_fork_from_serialized_world`、`_prepare_baseline_fork`、`_complete_baseline_fork_after_registration`
+
+主要行候補: 242〜320、412 前後、470〜528、552 以降
+
+事実:
+
+- `real_W` を `pickle.dumps` して bytes 化
+- `pickle.loads` で `fork_W` を作成
+- `fork_W is real_W` を拒否
+- Vehicle、Node、Link registry 共有も拒否
+- `fork_W.exec_simulation` だけを baseline horizon 分進める
+- `real_W` の `T`、`TIME`、collector、observer の不変確認を行う
+- 現行の `real_W` unchanged validation は RNG state 自体を明示比較していない
+
+**C. Candidate local World**
+
+files:
+
+- `uxsim/order_control_tvt_mp_candidate_local_state.py`
+- `uxsim/order_control_tvt_mp_local_virtual_calculation_set.py`
+- `uxsim/order_control_tvt_mp_candidate_local_vehicle_advance.py`
+
+事実:
+
+- baseline fork result が保持する serialized real World snapshot bytes を使用する
+- 各 Candidate は `pickle.loads` により独立した local World を作る
+- Candidate 間で World object を共有しない
+- Candidate rollback は `local_world.rng` と `local_world.order_control_rng` の state を保存・復元する
+- rollback は local World 内だけを対象とする
+- 仮想 World の RNG state を `real_W` へ書き戻す処理は確認されなかった
+
+**D. 独立 Terminal probe（補助確認）**
+
+- dill で複製した NumPy Generator は別 object
+- 複製直後は同じ state
+- copy 側で draw しても real 側 state は変わらない
+- 同じ snapshot から作った複数 copy は同じ初期 state を持つが、互いに独立して進む
+
+**仮想 World 判定:** `NO_DIRECT_VIRTUAL_TO_REAL_RNG_CONTAMINATION_FOUND`
+
+限定:
+
+- 現行原典と確認済み driver 経路において、直接共有・書戻しが確認されなかったという判定
+- baseline unchanged validation に RNG state 比較がないこと自体は改善候補になり得るが、現行 pickle 構造から直ちに直接汚染があるとは言えない
+
+#### 32.17.7 TVT-MP driverの実World RNG直接消費
+
+| 項目 | 値 |
+|------|-----|
+| file | `uxsim/order_control_tvt_mp_driver.py` |
+| method | `run_tvt_mp_driver` |
+| 主要行 | 76〜180 |
+
+確認対象の段階: baseline fork、arrived confirmation、leading nonparticipating confirmation、right-of-entry selection、candidate generation、FIFO inspection、local virtual calculation、economics、candidate selection、payment、final rank、atomic apply。
+
+確認結果:
+
+- 読取りおよび検索範囲では `real_W.rng` または `real_W.order_control_rng` を直接 draw する処理は見つからなかった
+- 仮想 World 内部の RNG state 操作は local World を対象とする
+- Candidate 最終同率選択は `real_W.rng` を使わず、seed 材料から局所 Generator を作る
+- 実 World RNG への明示的な書戻し代入は検索結果 0 件
+
+ただし、全将来コードや外部 `user_function` まで含む絶対否定とはせず、今回確認した production 経路での結論とする。
+
+#### 32.17.8 Candidate最終同率選択
+
+file: `uxsim/order_control_tvt_mp_candidate_selection.py`
+
+主要箇所: `select_tvt_mp_candidates`、`_build_seed_material_integers`、`_build_local_selection_rng`、`_select_index_with_local_rng`
+
+主要行候補: 76〜106、844〜955
+
+事実:
+
+- `real_W.rng` と `real_W.order_control_rng` を使用しない
+- `World.random_seed`、`World.T`、Node 名、sorted candidate identity 等を seed 材料へ含める
+- NumPy `SeedSequence` と `default_rng` で一時的な局所 Generator を作る
+- 同率候補選択は global sequential `W.rng` stream へ影響しない
+- これは route choice 全体の keyed randomization ではなく、Candidate 同率選択だけの局所設計である
+
+#### 32.17.9 最初の経路分岐までの保証判定
+
+| 項目 | 判定 |
+|------|------|
+| 同一 Vehicle 名 | 同一 plan・同一生成順なら `GUARANTEED`。auto rename 等の例外あり |
+| 分岐前 route history | `CONDITIONALLY_GUARANTEED` |
+| 同じ route-choice 回数 | `NOT_GUARANTEED` |
+| 同じ decision Node | 分岐前 route history 一致時のみ `CONDITIONALLY_GUARANTEED` |
+| 同じ ordered candidate Link list | 静的 network・同一 prefer/avoid なら `CONDITIONALLY_GUARANTEED` |
+| 同じ route preference vector | `NOT_GUARANTEED` |
+| choice 直前の同じ `W.rng` state | `NOT_GUARANTEED` |
+| 同じ random draw | `NOT_GUARANTEED` |
+| 同じ selected Link | `NOT_GUARANTEED` |
+
+**全体判定:** `NOT_GUARANTEED_BY_CURRENT_CODE`
+
+補足:
+
+- 両方式の実 World 履歴が bit 単位で同一の区間では、同じ初期 seed から始まった `W.rng` state も一致し得る
+- しかしこれは現行コードによる一般保証ではなく、履歴同一性という条件付き結果
+- 最初の順位変更、待ち時間差、到着順差、merge 差、初回 tiebreaker 発生順差等の後は保証できない
+- 最初の route 分岐時には、異なる preference と異なる draw の両方が原因候補になり得る
+- どちらが起きたかは現行正式出力だけでは分離できない
+
+#### 32.17.10 production変更なしの最小診断
+
+**目的:** 最初の対応可能な経路分岐が、(1) 同じ `W.rng` state／同じ draw の下で preference 等が異なった結果か、(2) `W.rng` stream 位置が既に異なっていた結果か、を識別する。
+
+production ファイルを変更しない診断には **設計可能性**がある。ただし具体的方法は **未確定・未実装・未検証**である。単純な method 前後 wrapper だけで十分とは **確認されていない**。診断なし／ありの正式結果完全一致を小規模 trial で確認するまで、原因識別可能性を確定しない。診断 script はまだ **未作成・未実装**。3,000 台再実行へ直ちに進まない。
+
+記録候補: method、`vehicle_name`、route-choice ordinal、origin choice または in-trip choice、decision Node、decision timestep、ordered candidate Link names、preference vector、normalized probability、RNG state fingerprint immediately before draw、selected Link、RNG state fingerprint immediately after draw、分岐前 route history、arrival tiebreaker event、method 名。
+
+**重要な禁止:**
+
+- 記録用に追加の random draw を発生させない
+- `random()` を別途呼んで値を確認しない
+- production method の choice は実際に 1 回だけ実行する
+- simulation 結果を変えない
+
+**A. `Node.generate`**
+
+- 1 回の `Node.generate` 呼出し中に、outlink lane 数や generation queue の状態に応じて複数回の `W.rng.choice` が呼ばれ得る
+- `Node.generate` 全体の前後 RNG state だけでは、個々の origin choice 直前・直後の state を分離できない
+- 受入れ失敗時に選択された outlink は、method 終了後の通常状態から直接取得できない場合がある
+- したがって、`Node.generate` の外側を単純に wrapper 化するだけで完全な event 記録が可能とは **未確認**
+- method 全体の前後 state だけでは不足する可能性が高い
+- 個々の choice を追加 draw なしで捕捉する方法を設計する必要がある
+
+**B. `Vehicle.route_next_link_choice`**
+
+- 1 回の呼出しで通常 1 回の route choice を行うため、`Node.generate` より単純である
+- ただし method 外側の wrapper から、production method 内部で実際に用いられた ordered outlinks、preference vector、normalized probability を直接取得できるとは限らない
+- 診断側で同じ式を再計算する場合、それが実際の choice 瞬間と完全に同じ入力だったことを保証する必要がある
+- したがって `Node.generate` と `Vehicle.route_next_link_choice` では必要な診断方法が異なり得る
+
+**C. `W.rng.choice` の直接監査**
+
+- NumPy `Generator.choice` を直接 monkey-patch できるかは **未確認**
+- 代替として、`W.rng` を透過 proxy object で一時的に包む案があり得る
+- ただし proxy が NumPy Generator 互換性、pickle、World copy、object 参照、実行順、結果を変えないことは **未検証**
+- 呼出元を route choice、merge、DUO 等へ分類する diagnostic context も必要になる可能性がある
+
+**D. 診断結果不変性**
+
+- RNG state を読むだけなら通常は乱数を消費しない
+- しかし wrapper、proxy、method 差替え、追加ログが simulation の処理順、object 参照、pickle、性能、出力を変えないことは **未検証**
+- RNG fingerprint 読取りだけで simulation 結果が変わらないことを検証する
+- 小規模 trial により、診断なしと診断ありで正式結果が完全一致することを確認する必要がある
+
+設計上の **未確定候補**（いずれも現時点では採用していない）:
+
+- 透過 RNG proxy
+- 診断 context
+- 診断側 method 差替え
+- またはこれらの組合せ
+- `W.rng.choice` だけを無差別に捕捉するより、route-choice event の context を method 単位で与える方が呼出元識別には有力
+- ただし method wrapper だけで個々の draw 情報を完全取得できるとは **未確認**
+- 最初の分岐だけ出力し、その後の大量ログを抑制できる候補
+- FCFS と TVT-MP を同じ診断枠で別実行し、event key で対応させる候補。event key の具体的定義は **未確定**
+
+既存正式出力には RNG state、preference vector、route-choice ordinal がないため、診断には再実行が必要。いきなり 3,000 台の長時間正式 run を行わず、まず小規模 trial で診断なし／ありの正式結果完全一致を確認する候補とする。
+
+#### 32.17.11 keyed randomizationの位置づけ更新
+
+**暫定分類2:** 現行方式では最初の分岐まで同一乱数入力は保証されない。production ファイルを変更しない診断により原因識別できる設計可能性はある。ただし診断方法自体が **未設計・未実装・未検証**であり、診断なし／ありの結果完全一致も未確認である。したがって keyed randomization が必須とは現時点で判断しない。最小診断が結果不変で成立することを確認した後に、分類2を確定する。診断が安全に成立しない、または必要情報を取得できない場合は、分類3または別設計へ再評価する。
+
+維持事項:
+
+- 未採用
+- 未実装
+- 経路を方式間で強制同一化しない
+- 正当な交通状態差による経路分岐を消さない
+- 診断なしに keyed randomization へ進まない
+
+再評価条件（以上の場合に限り、分類3または別設計へ再評価する余地がある）:
+
+- 診断で最初の経路分岐の多くが choice 直前 `W.rng` state 不一致に起因すると確認された場合
+- 用途別 RNG 分離後も、route-choice 自身の呼出回数差が最初の対応可能な分岐以前に stream 対応を失わせる場合
+- 4 方式共通の paired comparison に必要な説明力を、診断だけでは確保できない場合
+- production 変更なし診断が結果不変で成立しない場合
+- 個々の route-choice draw を追加消費なしで捕捉できない場合
+- method wrapper、RNG proxy、診断 context 等のいずれでも必要な event 対応を安全に構築できない場合
+
+#### 32.17.12 §26との整合
+
+§26 の既存記録は削除・書換えない。
+
+- §26 と今回の監査結果に直接矛盾はない
+- §26 は主として arrival tiebreaker、deterministic tiebreaker、dedicated RNG、legacy mode を中心に設計している
+- §26 自身も、tiebreaker だけの分離では strict common random numbers にならないと記録している
+- 今回の監査により、route choice、DUO noise、merge、初回 arrival tiebreaker が同一 `W.rng` を共有する影響が具体化した
+- §26 の方式・用途別乱数 stream 分離案は、4 方式共通 seed/RNG 基盤の有力な叩き台として利用できる
+- `legacy_sequential`／`dedicated_rng`／`deterministic_visit_key` は主に arrival tiebreaker mode 候補であり、route-choice RNG mode と混同しない
+- 今回の不足は「最初の対応可能な経路分岐までの draw 対応」を明示契約としていなかったこと
+- 古い記述を削除せず、最新の参照先を **§32.17〜§32.19** とする
+
+### 32.18 signalized UXsim・FCFS・BATCH・TVT-MP共通seed/RNG基盤の設計方針
+
+**執筆日:** 2026-11-14
+
+seed 改善を FCFS 対 TVT-MP だけの応急処置として設計しない。signalized UXsim、FCFS、BATCH、TVT-MP の 4 方式を方式設定だけで切り替えられる共通実験基盤として設計する。方式別 script へ独立した seed ロジックを重複実装しない。World 共通の seed/RNG 基盤を作り、各方式が必要な RNG を参照する構造を基本候補とする。**未確定・未実装。**
+
+#### 32.18.1 4方式切替構造
+
+| 項目 | 値 |
+|------|-----|
+| file | `uxsim/uxsim.py` |
+| class | `Node` |
+| method | `transfer` |
+| 主要行 | 2390〜2418 |
+
+既存構造:
+
+- `order_control_type == "fcfs"` → `transfer_fcfs_clearance()`
+- `order_control_type == "batch"` → `transfer_batch()`
+- `order_control_type == "time_value"` → `transfer_tvt_mp_passage_attempts()`
+- それ以外 → `_transfer_normal_merge()`
+
+signalized UXsim は、order-control 方式分岐ではなく通常 merge と signal 設定を使用する。
+
+方式切替は既存 `Node.transfer` 構造を維持する。seed 改善のために `Node.transfer` の方式分岐を壊さない。
+
+#### 32.18.2 共通scenario／外生条件層
+
+反復ごとに独立化する候補:
+
+- `od_seed`
+- `departure_seed`
+- `vot_seed`
+- `participation_seed`
+
+必要に応じて: scenario master seed、`replicate_id`
+
+同一反復内では、4 方式へ次を共通に与える。Vehicle 名、Vehicle 生成順、OD、departure time、VOT assignment、participating/nonparticipating assignment、network、需要規模、その他の外生条件。
+
+監査: Vehicle plan SHA256、VOT assignment SHA256、participation assignment SHA256、network signature、seed manifest。SHA256 は seed ではなく入力指紋である（§32.12）。
+
+#### 32.18.3 simulation内部の用途別RNG層
+
+候補:
+
+- `route_choice_rng`
+- `duo_noise_rng`
+- `merge_rng`
+- `arrival_tiebreaker_rng`
+- 必要な方式固有 `method_rng`
+
+目的:
+
+- 初回 arrival tiebreaker の発生回数差が route choice stream をずらさない
+- merge 処理の乱数消費が route choice stream をずらさない
+- DUO noise が他用途の stream 位置に依存しない
+- 方式固有処理の乱数を共通 stream へ混入させない
+- 各乱数用途を個別に再現・監査できる
+
+**重要な限定:**
+
+- 用途別 RNG 分離だけでは、同じ `route_choice_rng` を逐次消費する限り、方式間で route-choice 呼出回数が異なれば stream はずれ得る
+- したがって用途別分離は有力だが、strict common random numbers を自動的に完成させるものではない
+- keyed randomization の必要性は現時点では **暫定分類2** であり、診断方法の成立確認後に再評価する
+- route choice を方式間で強制同一化しない
+
+#### 32.18.4 BATCH大幅改修との順序
+
+利用者は BATCH 処理の大幅な手直しを予定している。今回の判断: **4 方式共通 seed/RNG 基盤は、BATCH 大幅改修より先に設計・実装してよい。**
+
+BATCH 改修前に進めてよい共通部分:
+
+- scenario seed 分離
+- Vehicle plan 生成・hash 監査
+- `route_choice_rng`
+- `duo_noise_rng`
+- `merge_rng`
+- `arrival_tiebreaker_rng`
+- `method_rng` の共通受皿候補
+- legacy mode
+- seed・RNG 設定の manifest 保存
+- 方式切替で同一 scenario を共有する runner 基盤
+
+BATCH 改修後に完成させる部分:
+
+- BATCH 固有の同順位処理
+- batch 対象選択に乱数が必要か
+- batch 再形成に関する乱数
+- Level 2／Level 1 fallback 固有の乱数
+- BATCH 固有 keyed randomization
+- BATCH の正式回帰期待値
+- 30 反復の正式 BATCH 結果
+
+理由: BATCH の大幅改修で処理順、候補集合、呼出回数が変わり得る。現在 BATCH 固有乱数契約を完成させると手戻りになる可能性がある。4 方式共通基盤だけを先に整備すれば、BATCH 改修後に接続できる。BATCH には共通基盤との接続口を用意するが、現時点で固有 contract を固定しない。
+
+#### 32.18.5 30反復との関係
+
+- 30 反復は依然として必要
+- 30 反復は日々異なる OD、departure time、VOT、participation、交通状態を表す
+- seed/RNG 改善は 30 反復の代替ではない
+- seed/RNG 改善は、同一反復内の 4 方式差をより明確に解釈するための統制
+- **現行 seed 体制のまま 30 反復本番へ直ちに進まない**
+- 4 方式共通 seed/RNG 基盤の設計・小規模検証後に 30 反復へ進む
+- BATCH 正式評価は BATCH 大幅改修後
+- 「現行 seed のまま 30 反復を実行してはいけない」という一般論にはしない。今回の判断は、**本番 30 反復を現行 seed のまま直ちに開始しない**ことである
+
+paired interpretation:
+
+- scenario 外生条件は同一反復内で対応させる
+- strict な Vehicle-level route-choice paired interpretation は、RNG 基盤と診断結果を踏まえて範囲を確定する
+- method-level の AWT・AWWT 対応差と、Vehicle-level route 差の説明可能性を区別する
+
+#### 32.18.6 難易度と可逆性
+
+難易度:
+
+- 4 方式共通の用途別 RNG 基盤は「普通に高い」
+- scenario seed 分離だけなら中程度に近い可能性がある
+- World 共通 RNG 分離、legacy 互換、manifest、回帰を含めると普通に高い
+- route-choice keyed randomization まで必要なら極めて高い寄り
+- BATCH 固有部分は大幅改修後に再判定
+
+可逆性:
+
+- legacy mode を維持する
+- 既存 `W.rng` sequential 挙動を再現可能にする
+- 新方式は明示設定でのみ有効化する候補
+- 独立 branch または段階的 commit で進める
+- 既存 Reference・固定 seed 回帰を維持する
+- 問題時は既存正常 commit へ戻せる
+- Git 操作は利用者が行う
+
+### 32.19 原典監査後の確定事項・未確定事項・次作業
+
+**執筆日:** 2026-11-14
+
+**既存 §32.16** は原典監査前の再開地点として維持する。最新再開地点は **本 §32.19**。進捗は **§21.9.20**。
+
+**確定:**
+
+- 原典監査完了
+- 仮想 World から実 World への直接 RNG 汚染は確認されなかった（`NO_DIRECT_VIRTUAL_TO_REAL_RNG_CONTAMINATION_FOUND`）
+- 現行コードでは最初の分岐時の同一 random draw は保証されない
+- 全体判定は `NOT_GUARANTEED_BY_CURRENT_CODE`
+- keyed randomization は現時点で **暫定分類2**
+- 未採用・未実装
+- production 変更なし診断の安全性・結果不変性・必要情報取得を確認後に分類を確定する
+- 4 方式共通 seed/RNG 基盤として設計する
+- seed 改善は BATCH 大幅改修前に共通部分を先行してよい
+- BATCH 固有部分は改修後に完成させる
+- 現行 seed のまま 30 反復本番へ直ちに進まない
+- clearance=1 または clearance=0 高需要の中心シナリオは **依然未確定**（§32.16 の未確定を覆さない）
+
+**未確定:**
+
+- production 変更なしの最小診断 script を作成するか
+- 診断対象を小規模だけにするか、3,000 台対象 Vehicle まで行うか
+- production 変更なし診断の具体方式
+- `Node.generate` の複数 choice を個別に捕捉する方法
+- `Vehicle.route_next_link_choice` 内の実入力取得方法
+- RNG proxy の必要性・安全性
+- diagnostic context の設計
+- event key の定義
+- 診断なし／ありの結果完全一致
+- pickle／World copy との互換性
+- 用途別 RNG の具体的 API
+- RNG 名と seed 生成方式
+- `SeedSequence` の採否
+- legacy mode の具体的設定名
+- route-choice keyed randomization 採否
+- baseline `real_W` unchanged validation へ RNG fingerprint を追加するか
+- 4 方式共通 runner の構造
+- manifest field
+- BATCH 固有の最終乱数契約
+- 30 反復 seed 台帳
+
+**次の直接作業（利用者判断が必要な分岐）:**
+
+1. production 変更なしの最小 route-choice RNG 診断を先に設計するか
+2. または 4 方式共通 seed/RNG 基盤の詳細設計を先に固めるか
+
+今回のメモ更新では、診断 script 作成や seed/RNG 実装へ進まない。production、research script、tests、既存 output は未変更。
 
 **Git 操作は利用者が行う。**

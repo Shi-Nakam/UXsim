@@ -20,8 +20,9 @@
 - **2026-11-09 追記（TVT-MP 3,000 台 OD 基準 AWT・AWWT 正式算出・FCFS 比較）:** **TVT-MP 主指標正式結果**・**FCFS 比較**の **歴史的再開地点**は **§21.9.16**。**詳細技術正本**は **§31.20**。**共通評価関数・FCFS 正式値**は **§31.18.25**。
 - **2026-11-12 追記（clearance・signal候補再評価開始）:** **buyerのみ悪化17台**・**FCFS clearance=0**・**signalized全赤なし**の **歴史的再開地点**は **§21.9.18**。**詳細技術正本**は **§31.22**。当時は **TVT-MP clearance=0未実行**。**削除しない。**
 - **2026-11-14 最新参照:** TVT-MP **clearance=0正式分析完了**、participating **VOT・role・Q5・Top 1%**、buyer局所効果、nonparticipating 600台、**30反復**の日々変動目的、**最初の経路分岐**乱数監査の **最新再開地点**は **§21.9.19**。**詳細正本**は `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_5.md` **§32**。**次作業**は **読取り専用原典監査**。**§21.9.18** / **§31.22** は実行前の **歴史**。
+- **2026-11-14 追記（route-choice乱数原典監査完了）:** 全体判定 **NOT_GUARANTEED_BY_CURRENT_CODE**、仮想World **NO_DIRECT_VIRTUAL_TO_REAL_RNG_CONTAMINATION_FOUND**、keyed randomization **暫定分類2**、**4方式共通seed/RNG基盤**の **最新再開地点**は **§21.9.20**。**詳細正本**は **§32.17〜§32.19**。**次の利用者判断**は、production変更なしの最小診断を先に行うか、共通基盤の詳細設計を先に行うか。**§21.9.19** は原典監査前の **歴史**。
 
-**検索語:** ORDER_EXCHANGE_PROGRESS_4、進捗第4巻、TVT-MP、横並び表示、事後分析、監査出力、full-run audit helper、nonparticipating 20％、全車完走、交通解消、3,000台、T=999、departure-end、4交差点、T=382、初回Actual arrival、Actual arrival上書き、Baseline arrival一致、first divergenceなし、T=402、一時skip、clearance、C順位183、Actual通過順位177、selected=False、baseline fallback、leading nonparticipating、順位確定源、完了、最新再開地点、Git対象、commit、push、TVT-MP clearance=0、transaction 2421、Visit 5457、AWT 21.676、AWWT 20.427812923323355、Top 1%、buyer局所効果、nonparticipating 600台、30反復、最初の経路分岐、keyed randomization、原典監査、§21.9.19、§32。
+**検索語:** ORDER_EXCHANGE_PROGRESS_4、進捗第4巻、TVT-MP、横並び表示、事後分析、監査出力、full-run audit helper、nonparticipating 20％、全車完走、交通解消、3,000台、T=999、departure-end、4交差点、T=382、初回Actual arrival、Actual arrival上書き、Baseline arrival一致、first divergenceなし、T=402、一時skip、clearance、C順位183、Actual通過順位177、selected=False、baseline fallback、leading nonparticipating、順位確定源、完了、最新再開地点、Git対象、commit、push、TVT-MP clearance=0、transaction 2421、Visit 5457、AWT 21.676、AWWT 20.427812923323355、Top 1%、buyer局所効果、nonparticipating 600台、30反復、最初の経路分岐、keyed randomization、暫定分類2、原典監査、§21.9.19、§32、NOT_GUARANTEED_BY_CURRENT_CODE、NO_DIRECT_VIRTUAL_TO_REAL_RNG_CONTAMINATION_FOUND、4方式共通seed/RNG基盤、§21.9.20、§32.17。
 
 ---
 
@@ -2487,3 +2488,60 @@ TSE完全PDFまたは2009年overview chapter全文を別経路で入手した場
 **最新再開地点:** **本 §21.9.19**。**詳細正本:** **§32**。
 
 **Git 操作は利用者が行う。commit / push はまだ行わない。**
+
+#### 21.9.20 route-choice乱数原典監査完了と4方式共通seed/RNG基盤設計への移行
+
+**執筆日:** 2026-11-14
+
+**詳細正本:** `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_5.md` **§32.17〜§32.19**
+
+**歴史:** **§21.9.19** および **§32.1〜§32.16** は原典監査前の記録として維持する。当時の「まだ読取り監査していない」は当時の事実である。最新状態は **本 §21.9.20**。
+
+**検索語:** NOT_GUARANTEED_BY_CURRENT_CODE、NO_DIRECT_VIRTUAL_TO_REAL_RNG_CONTAMINATION_FOUND、keyed randomization暫定分類2、4方式共通seed/RNG基盤、Node.generate、route_next_link_choice、初回arrival tiebreaker、用途別RNG、BATCH改修前先行。
+
+**完了:** FCFS対TVT-MP route-choice乱数対応の読取り専用原典監査。production・script・tests・output は未変更。診断 script と seed/RNG 実装は未着手。
+
+**原典要点:**
+
+- `Node.generate` の origin choice は受入れ判定前に `W.rng` を消費する
+- `Vehicle.route_next_link_choice` は Link 終端待機中に毎 timestep 再抽選し得る
+- 初回 arrival tiebreaker は route choice と同じ `W.rng` を使用する
+- 再訪 tiebreaker は `W.order_control_rng`
+- DUO noise、通常 merge 等も `W.rng` を使用する
+- baseline／Candidate 仮想 World は独立 copy
+- 仮想 World から実 World への RNG 書戻しは確認されない
+
+**判定:**
+
+- 仮想 World: `NO_DIRECT_VIRTUAL_TO_REAL_RNG_CONTAMINATION_FOUND`（確認範囲での直接汚染なし。絶対証明ではない）
+- 最初の分岐時の同一 draw: `NOT_GUARANTEED_BY_CURRENT_CODE`
+- keyed randomization: **暫定分類2**、未採用・未実装。必須とは現時点で判断しない
+- production ファイルを変更しない診断には設計可能性がある
+- ただし診断方法は未設計・未実装・未検証
+- 単純な method 前後 wrapper だけで十分とは未確認
+- `Node.generate` は 1 呼出し中に複数 choice を含み得る
+- 診断なし／ありの結果完全一致を小規模 trial で確認する必要
+- 診断が安全に成立した後に分類2を確定する
+- 成立しない場合は keyed randomization 等を再評価する
+- 過去の特定 Vehicle 経路差の実原因は断定しない
+
+**4方式共通方針:**
+
+- seed 改善を FCFS対TVT だけの応急処置にしない
+- signalized UXsim、FCFS、BATCH、TVT-MP を方式設定だけで切替える共通基盤として設計する
+- `Node.transfer` の既存 4 方式分岐を維持する
+- scenario 層（`od_seed`、`departure_seed`、`vot_seed`、`participation_seed`）と用途別 RNG 層（`route_choice_rng`、`duo_noise_rng`、`merge_rng`、`arrival_tiebreaker_rng`、`method_rng` 受皿）を分ける
+- 用途別分離だけでは、route-choice 呼出回数差があれば stream はずれ得る。strict CRN の自動完成とは書かない
+- BATCH 共通基盤は大幅改修前に先行可能。BATCH 固有乱数契約は改修後
+- 現行 seed のまま 30 反復本番へ直ちに進まない。30 反復自体は依然必要で、seed 改善の代替ではない
+
+**次の利用者判断:**
+
+1. production 変更なしの最小 route-choice RNG 診断を先に設計するか
+2. 4 方式共通 seed/RNG 基盤の詳細設計を先に固めるか
+
+今回は診断 script 作成と seed/RNG 実装へ進まない。
+
+**最新再開地点:** **本 §21.9.20**。**詳細正本:** **§32.17〜§32.19**。
+
+**Git 操作は利用者が行う。**
