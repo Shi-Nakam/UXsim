@@ -2586,3 +2586,76 @@ TSE完全PDFまたは2009年overview chapter全文を別経路で入手した場
 **Git 操作は利用者が行う。commit／push はまだ行わない。**
 
 **検索語:** route-choice RNG診断、第一層、第二層、結果不変性、12台TVT-MP、baseline World、Candidate local World、pickle混入、proxy pickle rejection 0、transaction 2、Visit 8、buyer 2、seller 6、virtual Node.generate 4950、virtual route_next_link_choice 1512、seed改善未完成、keyed randomization未実装、最初の経路分岐、次の作業
+
+#### 21.9.22 4方式比較のseed／RNG改変基本設計確定とBATCHレビュー前の区切り
+
+**執筆日:** 2026-11-18
+
+**詳細正本:** `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_5.md` **§32.21**
+
+**§21.9.21** および **§32.20** は、診断実装と二層不変性反証までの歴史的記録である。当時の「keyed randomization 未採用」「限定 3,000台診断が次作業」は当時の状態である。削除も書換えもしない。最新状態は本 **§21.9.22** および詳細 **§32.21** を優先する。
+
+production の seed／RNG 改修は未着手である。seed 改善が完成したとはしない。BATCH production コードのレビューは未着手である。今すぐ別チャットへ移る予定ではなく、当面はこのチャットで BATCH レビューを進める。
+
+**確定した基本方針:**
+
+1. route choice
+   - 4 方式共通の keyed randomization
+   - origin と in-trip を分離
+   - 1 候補は乱数なし・attempt 非消費
+   - 2 候補以上だけ attempt 消費
+   - Vehicle、Link、Link 訪問番号、attempt 等で識別
+   - Candidate 局所計算の決定的進路には導入しない
+2. arrival tiebreaker
+   - FCFS・BATCH・TVT-MP で対応する Node 訪問に共通の keyed 値
+   - inlink は key に含めない
+   - Node 訪問番号は Link 別進入回数から導く
+   - signalized UXsim には導入しない
+3. signalized UXsim merge
+   - 他方式と共有しない
+   - 専用順次消費型 RNG へ分離
+   - outlink shuffle と Vehicle choice に使用
+   - 自然な「同じ merge 機会」がないため、無理に keyed 対応しない
+4. 最小追加状態
+   - Link 別進入回数
+   - 現在 Link 訪問中の確率的 route-choice attempt
+   - origin の確率的 route-choice attempt
+   - Node 別 counter は持たない
+5. production baseline 確認
+   - 現行 TVT-MP production は過去確定順位を適用する baseline 経路を使用する
+   - `apply_copied_tvt_confirmed_ranks=False` 側は production 呼出しなし
+   - 確認した呼出し元は tests のみ
+   - production baseline が通常 merge を使うという誤説明は採用しない
+   - TVT-MP には baseline 計算と局所 Candidate 計算があり、「最初の baseline 計算」という構造はない
+6. 実装 branch
+   - seed／RNG 実装は現在の production branch へ直接行わない
+   - BATCH レビュー完了後、専用の新規 branch で実装・検証する
+   - branch 名と分岐元 commit は実装開始時に確定する
+   - Git 操作は利用者が Terminal で行う
+   - Cursor には Git 操作をさせない
+   - 検証完了前に production へ統合しない
+
+**明確な未完了:**
+
+- 具体的な hash／乱数生成方式
+- 正式な属性名・メソッド名
+- snapshot／rollback／pickle 反映
+- BATCH Level 2 mimic への具体接続
+- BATCH production コードの処理レビュー
+- production 実装
+- test／trial
+- 30 反復本番
+
+**次の作業:**
+
+- まずメモ差分を Terminal で独立確認する。
+- メモだけをコミットし、残存変更を確認する。
+- その後、現在のチャットで現行 BATCH production コードをレビューする。
+- コードから処理順の疑似コードを作成する。
+- 利用者が BATCH 設計を思い出せるよう、交通上の意味と Python 処理を丁寧に説明する。
+- BATCH レビュー後に seed／RNG 基盤との接続範囲を確定する。
+- BATCH レビュー完了後、実装は専用 branch・別チャットで開始する予定である。
+- BATCH レビューが長引き、チャット上限が近づく場合は、安全な節目で停止し、確認済み範囲・未確認事項・再開手順を両メモへ追記してから別チャットへ移行する。未完了の Cursor 処理を残したまま移らない。
+- Git 操作は利用者が行う。
+
+**検索語:** seed/RNG基本設計、route choice keyed randomization、arrival tiebreaker、Link別進入回数、Node訪問番号、signalized UXsim merge、専用merge RNG、apply_copied_tvt_confirmed_ranks、production未実装、専用branch、別branch、別チャット、BATCHレビュー、疑似コード、次の作業

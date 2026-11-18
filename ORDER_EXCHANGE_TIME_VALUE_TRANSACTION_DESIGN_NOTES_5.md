@@ -5772,6 +5772,30 @@ Terminalへ貼り付けた一時監査だけで終わらせず、再実行可能
 
 到着時進路と **baseline物理通過時進路**（**physical passage route**）を分離し、Visit区分別の進路優先規則を適用する設計の正本は **本節（§17）** である。旧記述は歴史的経緯の参照用とし、実装・再開時は本節を優先する。
 
+### baseline到着後の進路再抽選とCandidateへ渡す進路の訂正（2026-11-16）
+
+上記 §17.1 に引用した旧契約（「同一baseline仮想計算の同一Visitでは、Node到着時に決まった`route_next_link`に従って通過する。」）および、第5巻内の同趣旨の記述（§17「candidate予測とactual結果」付近の「同一baseline仮想計算の同一Visitでは、Node到着時に決まったroute_next_linkに従って通過する。」を含む）は、**古い記述の訂正**の対象である。これらは**当時の記録**として削除・書換えしない。以下を **2026-11-16 時点の原典確認に基づく最新正本** とする。
+
+- 上記の「Node到着時に決まったroute_next_linkに従って通過する」という過去記述は、baseline全Worldの実際の通常UXsim更新処理を正確に表していない。
+- **baseline進路**は、単一の到着時点スナップショットだけでは決まらない。baseline全Worldでは、VehicleがNodeへ到着して通過待ちしている間も、各timestepの通常の`Vehicle.update()`でLink終端処理へ入り、`route_next_link_choice()`が再実行され得る（**待機中の再抽選**）。
+- したがって、同じVisitでも、最初のNode到着時に選ばれた`route_next_link`と、実際に物理通過するときの`route_next_link`は異なり得る。
+- baseline collectorは両者を別々に保存する。
+  - `route_next_link_name`: **到着時進路**。最初のNode到着時点の進路。到着再登録では上書きしない。
+  - `baseline_passage_route_next_link_name`: **通過時進路**。実際の物理通過時点の進路。待機中の再抽選を経た最終進路になり得る。
+- **Candidate進路**（Candidate局所仮想計算で使用するbaseline由来進路）は、`select_current_baseline_route()`の契約により次の優先順位で選ぶ。
+  1. baseline物理通過時進路（**通過時進路**）
+  2. snapshot時点で到着済みだった場合の進路（**到着時進路**）
+  3. baseline内で新たにNodeへ到着した時点の進路（**到着時進路**）
+- baseline horizon内で物理通過まで観測できたVisitについては、通過時進路を到着時進路より優先する。
+- horizon内で到着したが物理通過しなかったVisitについては、到着時進路を使用する。
+- `CONFIRMED_BEFORE_THIS_BASELINE`のVisitで、今回のbaselineから到着時進路も通過時進路も取得できない場合に限り、順位台帳に保存された進路へ**formal route fallback**する。
+- Candidate局所仮想計算自身は`route_next_link_choice()`を呼ばず、binding Visitには上記の優先順位で選ばれたbaseline由来の正式進路を割り当てる。
+- binding外でbaseline進路がない未決定Vehicleには、空きのあるacceptable outlinkをID順に並べ、real Vehicle ID modulo acceptable outlink数による決定的代替進路を使用する。そこでは通常のroute-choice乱数を使わない。
+- この訂正は、異なるbaseline計算間で進路を固定するものではない。各意思決定時刻Tから開始するbaseline全Worldは、そのbaseline内の通常UXsim処理により進路を選ぶ。
+- 今後の**RNG改善**では、実Worldだけでなくbaseline全Worldの到着時抽選および待機中の再抽選も対象候補となる。**common random numbers**（CRN）と**keyed randomization**は検討中であり、**未採用・未実装**である。乱数改善方式の採用はまだ確定していない。
+- Candidate局所計算には新しいroute-choice乱数を一律導入しない。Candidateは改善後のbaselineで得られた進路を既存契約どおり利用する。
+- 本追記は進路契約の記述訂正のみである。productionコード・既存テスト・Candidate計算実装は変更しない。
+
 ### 17.2 4交差点複雑networkの設計
 
 **topology**
@@ -17830,3 +17854,282 @@ audit 契約は、transaction 最低 1件、buyer Visit 最低 1件、seller Vis
 #### 32.20.13 検索語
 
 route-choice RNG診断、seed改善、RNG監査、最初の経路分岐、FCFSとTVT-MPの経路分岐、seed差、追加random draw、RNG proxy、diagnostic wrapper、Node.generate、Vehicle.route_next_link_choice、decision location、route_choice_ordinal、attempt_ordinal_at_location、raw preference、normalized probability、RNG state fingerprint、baseline World、Candidate local World、pickle混入、第一層、不変性反証、第二層、12台TVT-MP、formal snapshot、full-run audit、common random numbers、keyed randomization、暫定分類2、4方式共通seed、signalized UXsim、FCFS、BATCH、TVT-MP、未実装、未実行、未完了、次の作業
+
+## 32.21 4方式比較のseed／RNG改変基本設計の確定（2026-11-18）
+
+本節は、signalized UXsim、FCFS、BATCH、TVT-MP を比較するときの seed／RNG の基本設計を、後日の設計・実装再開で同じ論点を白紙から再検討しないための正本として記録する。結論だけでなく、採用理由、対象範囲、対象外、誤って復活させてはならない説明を残す。
+
+本節は **実装前設計** である。production の seed／RNG 改修は未着手である。設計方針は確定したが、実装完了ではない。seed改善が完成したとは書かない。
+
+進捗上の対応節は `ORDER_EXCHANGE_PROGRESS_4.md` **§21.9.22** である。
+
+### 32.21.1 位置づけと旧記述との関係
+
+- **§32.20** および進捗 **§21.9.21** は、production 変更なしの route-choice RNG 診断と二層不変性反証までを記録した **当時の正本** である。
+- その時点では、keyed randomization は暫定分類2、未採用・未実装であり、限定 3,000台診断が次作業だった。この記述は当時の記録として維持する。削除も書換えもしない。
+- その後、限定診断と原典確認を進め、route choice だけでなく arrival tiebreaker、signalized UXsim 固有 merge 乱数、World copy、Link／Node 訪問識別まで検討した。
+- **最新の基本設計は本 §32.21 を優先する。** 過去節は当時の経緯を示す歴史的記録として残す。
+- production 改修は未着手であり、本節は実装前設計である。seed改善は未完成である。
+- 当面の直接作業は、現行 BATCH production コードのレビューである。seed／RNG 実装ではない。BATCH production コードの処理内容レビューは、2026-11-18 時点ではまだ開始していない。
+- seed／RNG 実装は、BATCH レビュー完了後に専用の新規 branch を作成し、別チャットで開始する予定である。
+- branch 作成を含む Git 操作は Cursor に行わせない。利用者が Terminal で実行する。
+- branch 名、分岐元 commit、作成時期は、実装開始時に作業ツリーと最新 commit を確認して確定する。本節では branch 名も分岐元 commit も仮置きしない。
+- 専用 branch で反証・比較検証が完了するまでは、production へ統合しない。
+- 現行 production、既存 trial、既存 output を直接上書きして実装検証しない。
+
+### 32.21.2 解決対象
+
+- 現行の共有 `W.rng` は、route choice、初回 arrival tiebreaker、signalized UXsim の通常 merge、Vehicle 色、DUO noise その他に使用される。
+- 方式間で乱数呼出し順や回数が変わると、同じ seed でも対応する Vehicle・Visit へ同じ乱数値が割り当てられる保証がない。
+- 比較上共通化すべき確率事象と、方式固有の確率事象を分離する。
+- 経路や交通結果を強制的に同一化するのではない。対応可能な確率事象へ同じ乱数入力を与える。
+- traffic state、route preference、候補集合、確率が異なれば、同じ乱数入力でも異なる結果になり得る。その差は方式差として保持する。
+- route choice、arrival tiebreaker、signalized UXsim 固有 merge では、乱数の対応可能性と役割が異なる。同一方式で一括処理しない。
+
+### 32.21.3 route choiceの基本契約
+
+route choice は、signalized UXsim、FCFS、BATCH、TVT-MP の実 World、および TVT-MP baseline 全 World で共通利用する keyed randomization の対象とする。
+
+- origin choice と in-trip choice は別 event 種別である。
+- origin choice は、出発 Node から最初の Link を選ぶ処理である。Link 終端ではない。
+- in-trip choice は、現在 Link の終端 Node で次の outlink を選ぶ処理である。
+- origin は in-trip とは異なる event として扱う。
+- 候補 outlink が 1 本の場合は乱数を生成せず、その 1 本を直接選ぶ。
+- 候補 outlink が 1 本の場合は、確率的 route-choice attempt も進めない。
+- 候補 outlink が 2 本以上の場合だけ、確率的 route-choice attempt を 1 つ進め、その attempt を含む keyed 乱数値を使用する。
+- attempt は route-choice 関数の単純な呼出し回数ではない。複数候補間で確率的選択を実行した回数である。
+- origin で選択した outlink へ物理的に進入できず、次 timestep に再試行する場合、候補が 2 本以上なら新しい origin attempt として再抽選する。
+- Link 終端で通過待ちとなり `route_next_link_choice()` が再実行される場合、候補が 2 本以上なら新しい in-trip attempt として再抽選する。
+- 候補 1 本の場合に attempt を進めない理由は、選択の余地がなく、乱数入力も不要であり、attempt の意味を「確率的選択回数」に限定するためである。
+- `specified_route` は確率的 route choice の対象外である。
+- `hard_deterministic_mode=True` も確率的 route choice の対象外である。
+- TVT-MP Candidate 局所計算で、binding 順位または既存の決定規則により進路が固定される処理へ、通常 route-choice 乱数を導入しない。
+- 実 World と baseline を別の乱数名前空間にしない。
+- baseline 開始 timestep を key へ含めない。
+- 対応する Vehicle・場所・訪問・attempt には、実 World と baseline で同じ乱数値を与える。
+- 実 World と baseline で同じ乱数値を使っても、route preference、候補集合、正規化確率等が異なれば異なる Link が選ばれ得る。その差は抑制しない。
+
+Vehicle 識別には、方式間で同じ Vehicle へ同じ値となる正式な Vehicle 名、または検証済みの永続 ID を使う。Python の `id(object)` は使わない。object identity は World copy の前後で変わり、方式間の対応キーにならない。
+
+概念上の key 構成は次のとおりである。正式な serialization と hash 方式は未確定である（§32.21.10）。
+
+origin:
+
+- 専用 seed
+- Vehicle の不変識別子
+- event 種別 `origin`
+- origin Node の不変識別子
+- origin 確率的 attempt 番号
+
+in-trip:
+
+- 専用 seed
+- Vehicle の不変識別子
+- event 種別 `in_trip`
+- 現在 Link の不変識別子
+- その Vehicle による当該 Link への訪問番号
+- 現在 Link 訪問中の確率的 attempt 番号
+
+### 32.21.4 Link訪問番号と追加する最小状態
+
+ここでいう「最小状態」とは、新しい乱数 key を作るために Vehicle へ追加保存する必要最小限の情報である。
+
+- `order_control_visit_id` は order-control 対象 Node への Visit だけを数える。全 Link の route choice 識別には使えない。
+- `log_t_link` は全 Link 進入履歴の監査には使える。ただし Link 進入時ではなく後続の `record_log()` で更新されるため、乱数 key の正本にはしない。
+- Vehicle へ追加保存する必要最小限の状態は次の 3 項目である。
+  1. Link 別進入回数
+  2. 現在 Link 訪問中の確率的 route-choice attempt 数
+  3. origin の確率的 route-choice attempt 数
+- 現在 Link への進入回数を別属性として重複保存しない。
+- 現在 Link 名は `vehicle.link` から取得する。その Link の訪問番号は Link 別進入回数から取得する。
+- Link への物理的な進入に成功した時点で、その Link の進入回数を増やす。
+- Link へ進入できなかった場合は、Link 別進入回数を増やさない。
+- Link へ新しく進入した時点で、現在 Link 訪問中の確率的 attempt を 0 に戻す。
+- origin attempt は、候補が 2 本以上の確率的 origin choice を実行した場合だけ増やす。
+- in-trip attempt は、候補が 2 本以上の確率的 in-trip choice を実行した場合だけ増やす。
+- `log_t_link` は、この Link 別進入回数が正しいことを検査する監査情報として利用できる。
+- 全通常 Link 進入経路では、`vehicle.link = outlink` の直後に `begin_order_control_visit_on_link_entry()` が呼ばれていることを原典確認した。
+- 一般的な Link 進入状態更新は、order-control 固有処理と責務を分けた専用処理として設計し、その後に既存 order-control Visit 初期化を行う方向とする。
+- 正式な属性名・メソッド名は未確定である。
+- baseline World を copy する場合は、copy 時点までの Link 別進入回数と attempt 状態を引き継ぐ必要がある。
+- 具体的な pickle、snapshot、rollback への反映方法は未確定であり、実装設計時に決める。
+
+### 32.21.5 arrival tiebreakerの基本契約
+
+- arrival tiebreaker は、FCFS 順位、BATCH trigger 候補順位、TVT-MP baseline 到着順位、Candidate 局所計算内の補助的 FCFS 順位などで実際に使用される。
+- 現行では、初回 Node 訪問は `W.rng`、再訪は `W.order_control_rng` から値を得る。他用途の乱数消費回数に影響される。
+- arrival tiebreaker も順次消費型共有 RNG から分離し、対応する物理的 Node 訪問ごとに決まる keyed 乱数とする。
+- signalized UXsim では `order_control_type="none"` なので、現行の order-control arrival tiebreaker は生成されない。無理に導入しない。
+- 共通化対象は FCFS、BATCH、TVT-MP 実 World、TVT-MP baseline である。
+- 到着に使用した inlink は arrival tiebreaker の key に含めない。
+- arrival tiebreaker は、どの Link を通って Node へ到着したかではなく、同じ Vehicle によるその Node への訪問回数だけに依存させる。
+- 同じ Vehicle による同じ Node への同じ回数目の訪問に、同じ tiebreaker を与える。
+- 同じ Visit が同じ Node の `incoming_vehicles` へ再登録されても、tiebreaker を再生成しない。
+- baseline 開始時に到着済みの Visit は、実 World からコピーされた既存値をそのまま使う。
+- baseline 内で新規到着する Visit は key から値を得る。
+- その後、実 World で同じ Vehicle が同じ Node へ同じ回数目に到着すれば、到着時刻が異なっても同じ tiebreaker になる。
+- tiebreaker を方式間で共通化する目的は、同着順位へ他用途の乱数消費順の差が混入することを防ぐことである。到着時刻や順位結果そのものを強制的に一致させることではない。
+
+概念上の key 構成:
+
+- 専用 seed
+- Vehicle の不変識別子
+- Node の不変識別子
+- その Vehicle による当該 Node への訪問番号
+
+Vehicle 識別は §32.21.3 と同じく、正式な Vehicle 名または検証済みの永続 ID とする。`id(object)` は使わない。
+
+### 32.21.6 Node訪問番号を重複保存しない設計
+
+- Node 別訪問回数 counter を新設しない。
+- Vehicle が保持する Link 別進入回数から Node 訪問番号を導く。
+- ある Node への訪問番号は、その Node を終端とする全 inlink について、その Vehicle の Link 別進入回数を合計した値とする。
+- 例として、Node X へ入る Link A、B、C への進入回数が 2、1、0 なら、Node X への現在の訪問番号は 3 である。
+- route-choice key は現在 Link の Link 別進入回数を使う。
+- arrival-tiebreaker key は対象 Node を終端とする全 Link の進入回数合計を使う。
+- 必要なら、計算済み Node 訪問番号を `order_control_current_visit` の当該 Visit 属性として保存できる。別の永続的 Node 別 counter を正本にしない。
+- Link 別 counter と Node 別 counter を二重正本にせず、不整合を防ぐ。
+- Node 訪問番号を current visit へ保存するか、必要時にその場で計算するかは未確定の実装事項である。
+- Node 別訪問回数を別途再導入する場合は、本節の重複回避方針を覆す明確な必要性と、二重正本にならない構造を先に示す必要がある。過去の「Node 別 counter を持たない」を、実装の都合だけで黙って戻さない。
+
+### 32.21.7 signalized UXsim固有merge乱数
+
+通常 merge 選択とは、複数 inlink から同じ outlink へ進み得る複数 Vehicle のうち、どの Vehicle を先に通すかを選ぶ signalized UXsim の標準処理である。
+
+- 実 World の 4 方式のうち、通常 merge 選択を使用するのは signalized UXsim だけである。
+- FCFS は FCFS 順位、BATCH は service queue、TVT-MP は確定順位を用いる。これらは通常 merge 抽選を使用しない。
+- 現行 production の TVT-MP baseline は、`run_snapshot_fixed_baseline_fork_with_tvt_rank_ledger_registration()` を使用し、`apply_copied_tvt_confirmed_ranks=True` で baseline 開始前に確定済みの順位を適用する。
+- `apply_copied_tvt_confirmed_ranks=False` を使う `run_snapshot_fixed_baseline_fork()` は、現在の production 呼出し元にはない。確認した呼出し元は tests だけだった。
+- 過去確定順位を適用しない baseline が production に存在する、とは記載しない。
+- production の TVT-MP baseline が通常 merge を使う、とは記載しない。
+- TVT-MP には baseline 計算と局所 Candidate 計算がある。「最初の baseline 計算」「2 番目の baseline 計算」という構造はない。
+- 「今回の順位形成前に行う最初の baseline 計算」という過去の誤説明は採用しない。
+- signalized UXsim の通常 merge では、outlink 候補を車線数分並べ、`W.rng.shuffle()` で処理順を変え、各 outlink 処理時点で通過可能な Vehicle 集合を作り直し、`merge_priority` に応じて `W.rng.choice()` で 1 台を選ぶ。
+- 先に Vehicle を移動させた結果が、同一 timestep 内の後続 outlink 処理の候補集合へ影響し得る。
+- 単一車線の場合、同じ outlink は 1 timestep につき 1 回処理される。
+- 異なる outlink は同一 timestep 内に順次処理され得る。
+- 同じ単一車線 inlink で前後に並ぶ 2 台は、outlink が異なっても同一 timestep 内に両方通過できない。
+- 理由は、後続車がその timestep の候補集合形成時点で inlink の物理先頭ではないためである。
+- 後続車の通過は最短でも次 timestep となる。
+- 研究ネットワークの信号条件では、青方向が対向 2 方向に限定される。これまで前提としていた「信号制御では 1 timestep 最大 2 台通過」の理解と整合する。
+- merge 乱数には、route choice のように方式間で対応づけられる自然な「同じ merge 機会」がない。
+- Node 名、timestep、outlink 名、処理番号を key にすることは、交通上の同一事象ではなく、ループ実装位置を key にするだけである。
+- outlink の処理順を決める shuffle と、各 outlink で Vehicle を選ぶ choice が相互に影響し、先行処理後に候補集合も変わり得る。
+- よって merge 乱数は方式間で共有しない。
+- signalized UXsim 専用の順次消費型 RNG へ `W.rng` から分離する。
+- この専用 merge RNG を、outlink 処理順の shuffle と merge 候補 Vehicle の choice の双方へ使用する。
+- 同じ seed・同じ signalized 条件での再現性を維持しつつ、route choice や arrival tiebreaker の乱数消費へ波及させない。
+- merge を keyed randomization へ変更しないことは、単なる未検討ではない。自然な対応単位が存在しないという原典確認に基づく確定方針である。後日、実装の簡便さだけを理由に merge を keyed 化しない。
+
+### 32.21.8 BATCH Level 2 mimicとCandidate局所計算の扱い
+
+本小節は、BATCH レビュー前の現在地を示す。BATCH レビュー後に追加要件が判明した場合は、本節の既存記録を削除せず、後続節または明示的な追記で最新状態を示す。
+
+- BATCH Level 2 mimic は、実 Vehicle を丸ごと pickle copy するのではない。新規 mimic Vehicle へ位置・速度・現在 Visit 等を個別コピーする。
+- 現行 Level 2 では、inlink 待機 Vehicle の `route_next_link` を snapshot 状態に固定し、通常の `Vehicle.update()` による route choice を行わせない。
+- そのため、現行 Level 2 mimic は route-choice keyed 乱数を直接使用する対象ではない。
+- 現時点では、新しい Link 別進入回数や attempt 状態を Level 2 mimic へ必須コピーするとは確定しない。
+- BATCH レビュー時に、Level 2 内での Link 移動後状態、将来拡張、arrival tiebreaker との接続を改めて確認する。
+- TVT-MP Candidate 局所計算は、既存の binding 進路・baseline 由来進路・決定的代替進路の契約を維持する。通常 route-choice keyed 乱数を追加しない。
+- Candidate 局所計算内の snapshot／rollback へ新しい状態を含める必要性は、実装設計時に個別確認する。
+
+### 32.21.9 方式別の最終乱数契約
+
+| 用途 | 対象 | 乱数の形 | 含めないもの |
+| --- | --- | --- | --- |
+| route choice | signalized UXsim、FCFS、BATCH、TVT-MP 実 World、TVT-MP baseline | keyed randomization。origin と in-trip を区別。1 候補は直接選択、乱数なし、attempt 非消費。2 候補以上で attempt 消費 | Candidate 局所計算の決定的進路。`specified_route`。`hard_deterministic_mode=True` |
+| arrival tiebreaker | FCFS、BATCH、TVT-MP 実 World、TVT-MP baseline | Vehicle・Node・Node 訪問番号による keyed randomization | inlink。signalized UXsim への導入 |
+| signalized UXsim merge | signalized UXsim のみ | 専用順次消費型 RNG。outlink の shuffle と Vehicle の choice に使用 | 他方式との共有。keyed 対応 |
+| TVT-MP Candidate 局所進路 | Candidate 局所計算 | 既存決定規則を維持 | 通常 route-choice keyed 乱数 |
+| `specified_route`／`hard_deterministic_mode` | 該当 Vehicle／該当 World | 確率的 route choice を行わない | 確率的 route-choice keyed 乱数 |
+
+補足:
+
+- route choice の keyed 値は、実 World と baseline で同じ名前空間を使う。baseline 開始 timestep は key に入れない。
+- arrival tiebreaker の Node 訪問番号は、§32.21.6 のとおり Link 別進入回数の合計から導く。Node 別 counter を正本にしない。
+- merge を方式間で keyed 対応しない理由は §32.21.7 の原典確認である。未検討の保留ではない。
+
+### 32.21.10 確定した研究契約と未確定の実装手段の境界
+
+確定した研究契約は、単なる実装上の候補として再検討事項へ戻さない。変更が必要になった場合は、新しい根拠と明示的な設計変更記録を残す。過去節を黙って書き換えて最新契約を消さない。
+
+確定した研究契約:
+
+- route choice を keyed randomization にする。
+- origin と in-trip を区別する。
+- 1 候補では乱数も attempt も使わない。
+- 2 候補以上だけ attempt を進める。
+- Link 別進入回数を訪問識別の正本とする。
+- Node 別訪問 counter を別の正本として持たない。
+- arrival tiebreaker は Vehicle・Node・Node 訪問番号で keyed 化する。
+- arrival tiebreaker の key に inlink を含めない。
+- signalized UXsim の merge 乱数は他方式と共有しない。
+- signalized UXsim の merge には専用順次消費型 RNG を使う。
+- TVT-MP Candidate 局所計算へ通常 route-choice 乱数を導入しない。
+- production baseline は過去確定順位を適用する。`apply_copied_tvt_confirmed_ranks=False` の production 呼出しは確認されていない。確認した呼出し元は tests のみである。
+- seed／RNG 実装は専用 branch で行い、検証完了前に production へ統合しない。
+
+未確定であり、今後選択できる実装手段:
+
+- key から一様乱数値を生成する具体的アルゴリズム
+- Python 組込み `hash()` を使用しない、安定した key serialization と hash 方式
+- seed の正式名称、型、正規化、既定値、legacy compatibility
+- Vehicle 属性・メソッドの正式名称
+- Link 別進入回数の保存構造
+- origin／in-trip attempt の具体的な更新コード位置
+- arrival tiebreaker 用 Node 訪問番号を current visit へ保存するか、その場で計算するか
+- pickle、snapshot、rollback、Candidate local state、BATCH Level 2 mimic への具体反映
+- 診断・監査出力
+- production 実装前の専用 trial と test
+- 現行結果との非互換性の扱い
+- DUO noise、Vehicle 色、Analyzer 描画乱数など、今回の主要 3 用途以外の RNG 分離範囲
+- BATCH 固有処理のレビュー結果による追加要件
+
+上記の未確定リストを理由に、確定した研究契約（1 候補で attempt を進めない、inlink を tiebreaker key に入れない、merge を方式間 keyed 化しない、Node 別 counter を第二の正本にしない、など）へ戻らない。
+
+### 32.21.11 実装branchとGit運用
+
+- seed／RNG 改修は現在の production branch へ直接実装しない。
+- BATCH レビュー完了後、専用の新規 branch を作成して実装・検証する。
+- branch 名と分岐元 commit は実装開始時に決める。本節の執筆時点では未定である。
+- branch 作成、commit、push、merge 等の Git 操作は利用者が Terminal で行う。
+- Cursor には Git 操作を行わせない。Cursor が実装 branch を作成する、とは書かない。
+- 現行 production、既存 trial、既存 output を変更しない形で、まず専用 trial と test を用いて検証する。
+- 専用 branch で、route choice、arrival tiebreaker、signalized 専用 merge RNG の反証・比較検証を行う。
+- production 統合の可否は、既存回帰、方式間対応、監査出力、長期 trial への影響を確認した後に判断する。検証完了前に production へ統合しない。
+- メモを含む commit 名には `document` を含める既存運用を維持する。
+- 実装前仕様の文書化 commit では `complete` を使用しない。本節の文書化は実装完了ではない。
+
+### 32.21.12 現在地、BATCHレビュー、別チャットへの移行条件
+
+- route choice、arrival tiebreaker、signalized UXsim merge についての研究上の基本乱数契約は確定した。
+- production 実装は未着手である。
+- seed 改善は未完成である。
+- BATCH production コードのレビューは未着手である。
+- まず本節を正本化し、Terminal で独立確認してメモをコミットする。この Git 操作は利用者が行う。
+- その後、当面は現在のチャットで現行 BATCH production コードを読み直す。今すぐ別チャットへ移る予定ではない。
+- BATCH 処理を実際の処理順に沿った疑似コードへ落とし込み、利用者が設計を思い出せるよう、交通上の意味と Python 処理を丁寧に説明する。
+- BATCH レビューでは、trigger 候補、t_trigger Level 2／1／0、candidate 抽出、inlink 順序、max batch size、service queue、clearance、通常物理制約、一時 skip、reformation、Level 2 mimic を扱う。
+- BATCH レビュー後に、seed／RNG 基盤を BATCH へ接続する具体実装範囲を確定する。BATCH 接続範囲は、レビュー完了前には確定しない。
+- BATCH レビューと BATCH 接続範囲の整理が完了した後、実装は専用 branch・別チャットで開始する予定である。
+- BATCH レビューが長引き、チャット上限が近づく兆候が出た場合は、安全な節目で作業を停止する。
+- その場合は、詳細設計メモと進捗メモへ、BATCH レビューの確認済み範囲、確定事項、未確認事項、次に読む関数・ファイル、再開手順を記録してから別チャットへ移行する。
+- 未完了状態の Cursor 処理を残したまま別チャットへ移らない。
+- 30 反復本番へはまだ進まない。
+- Git 操作は利用者が行う。
+
+### 32.21.13 別チャット・実装再開用の参照情報
+
+- seed／RNG 設計の最新正本は本 **§32.21** である。
+- 進捗上の最新対応節は `ORDER_EXCHANGE_PROGRESS_4.md` **§21.9.22** である。
+- **§32.20** と **§21.9.21** は、診断実装・不変性反証までの歴史的記録である。当時の「keyed randomization 未採用」「限定 3,000台診断が次作業」は当時の状態であり、最新状態は本節を優先する。
+- production seed／RNG 実装は未着手である。seed 改善は未完成である。
+- route choice、arrival tiebreaker、signalized merge の基本契約は確定済みである。再度白紙から検討しない。
+- BATCH 接続範囲だけは、現行 BATCH production コードのレビュー後に確定する。レビューは未着手である。
+- 実装は専用 branch で行う。branch 作成を含む Git 操作は利用者が Terminal で行う。Cursor は branch を作らない。
+- 実装開始前に、本 §32.21 と、BATCH レビュー後の最新追記を必ず読む。
+- 現在の直接作業は BATCH レビューであり、実装ではない。
+
+### 32.21.14 検索語
+
+seed改善、乱数改変、4方式共通RNG、route choice、経路選択乱数、keyed randomization、common random numbers、origin attempt、in-trip attempt、Link別進入回数、Node別訪問回数、最小状態、arrival tiebreaker、同着順位、signalized UXsim、通常merge、merge乱数、merge priority、専用RNG、W.rng、order_control_rng、baseline確定順位、apply_copied_tvt_confirmed_ranks、Candidate局所計算、BATCH Level 2 mimic、1候補、複数候補、specified_route、hard_deterministic_mode、専用branch、別branch、production未変更、別チャット、実装再開、BATCHレビュー、疑似コード、未実装、実装前設計、未完了、次の作業
