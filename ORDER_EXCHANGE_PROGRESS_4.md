@@ -2659,3 +2659,88 @@ production の seed／RNG 改修は未着手である。seed 改善が完成し�
 - Git 操作は利用者が行う。
 
 **検索語:** seed/RNG基本設計、route choice keyed randomization、arrival tiebreaker、Link別進入回数、Node訪問番号、signalized UXsim merge、専用merge RNG、apply_copied_tvt_confirmed_ranks、production未実装、専用branch、別branch、別チャット、BATCHレビュー、疑似コード、次の作業
+
+#### 21.9.23 現行BATCH productionレビュー完了と将来大幅改修の基本設計確定
+
+**執筆日:** 2026-11-21
+
+**詳細正本:**
+
+- `ORDER_EXCHANGE_PHASE4-6_BATCH_PROCESSING_DESIGN_NOTES.md` **§1H.28**
+- `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_5.md` **§32.22**
+- seed／RNG 正本は同詳細メモ **§32.21**
+
+**§21.9.22** の「BATCH レビューは未着手」「次は現在のチャットで BATCH を読む」は 2026-11-18 時点の記録である。最新状態は本節を優先する。レビューが完了したのは現行 production の読取りと将来設計の確定であり、production 実装ではない。
+
+**完了:**
+
+- 現行 BATCH production コードの読取り
+- trigger 候補と trigger 順位
+- t_trigger Level 0／1／2
+- Level 2 mimic
+- 未到着 Vehicle と、別 inlink の未到着 Vehicle
+- candidate 抽出と inlink 順序
+- max_batch_size
+- service unit、service queue、residual 部分
+- clearance と通常物理制約
+- 0 台通過時の別 inlink 試行
+- reformation
+- arrival tiebreaker の同一 Visit 内不変
+- TVT-MP baseline の未確定 Visit に対する一時 FCFS の確認
+- BATCH 専用メモとの整合確認
+- 将来大幅改修の基本設計確定
+
+別 inlink 未到着 Vehicle を service unit へ含め、Level 2 で前進させる現行処理は、専用メモと整合していた。未到着 Vehicle の対象 Node 通過後 outlink が通常決定済みである、とは一般化しない。
+
+**将来設計要約:**
+
+- 全 World 仮想計算。Node 間相互作用を維持する
+- T-1 までの既存 BATCH を維持する
+- T 以後の仮想 World では新規 BATCH を形成しない
+- 未割当 Vehicle は一時 FCFS。正式順位台帳へは書かない
+- Node ごとに到着順位 1 位の trigger から 1 つの t を得る
+- 同時到着 2 位以下に個別 t を設けない
+- horizon 30。全 trigger 解決後に早期終了する
+- unresolved は Level 1 fallback。新方式では Level 0 fallback は使わない（clearance=0・clearance=1 いずれも新 Level 1 の t は horizon 30 以内）
+- clearance=0 では新 Level 1 の t は常に 1（通過 T+1、対象距離 0）
+- clearance=1 では新 Level 1 の t は 1 または 2
+- clearance=0 かつ t=1 では対象距離 0。1 つの BATCH は到着済み・未割当 Vehicle 1 台で構成（Node 端未到着後続を距離条件で追加しない）
+- 対象距離 = (t-1)×DELTAT×u。時刻 T の実 World 位置を使う
+- 1 台 BATCH は max_batch_size >= 1 で常に上限以下。max_batch_size=1 では各 BATCH の Vehicle 数は上限に等しい
+- N=1 BATCH 対 FCFS 完全一致性を将来の全 World 仮想計算型 BATCH 改修後も回帰検証する（同一 clearance、候補順位、network、需要、seed 等で比較。現行確認済み基準の回帰）
+- `earliest_arrival_timestep` を新形成範囲に使用しない
+- 同時到着 Vehicle と仮想計算中に順位判明する Vehicle は、順位判明後に同じ BATCH 形成規則（判明タイミングのみ異なる）
+- max_batch_size で残った Vehicle は翌 timestep の通常再評価。特別な救済はしない
+- arrival tiebreaker は再生成しない
+- 仮想対実績の予測精度比較はしない。監査は形成手順の再現確認
+- seed／RNG 改修を先に実装し、BATCH 大幅改修はその後
+
+仮想 World で T+t までに実際に到着した Vehicle だけを BATCH 構成員にはしない。
+
+**明確な未完了:**
+
+- seed／RNG production 実装
+- BATCH 大幅改修の production 実装
+- 全 World 仮想計算 runner
+- 仮想到着 collector
+- 監査出力
+- 専用 test
+- 独立 trial
+- branch 作成
+- 30 反復本番
+
+**次の作業:**
+
+1. 3 メモの差分を Terminal で独立確認する
+2. 必要なら文書修正する
+3. メモだけを commit する。commit 名には document を含め、complete は使わない
+4. commit 結果、最新 commit、残存変更を確認する
+5. 別指示で push する
+6. push 後の status、最新 commit、local／remote 一致を確認する
+7. その後、seed／RNG 改修用 branch と別チャットへの移行準備をする
+8. seed／RNG 改修を実装・検証する
+9. その後に BATCH 大幅改修へ進む
+
+Git 操作は利用者が Terminal で行う。Cursor には行わせない。branch も Cursor は作らない。
+
+**検索語:** BATCHレビュー完了、BATCH大幅改修、全World仮想計算、horizon 30、Level 1 fallback、Level 0不使用、(t-1)×DELTAT×u、arrival tiebreaker不変、max_batch_size、seed改修前、production未実装、次の作業

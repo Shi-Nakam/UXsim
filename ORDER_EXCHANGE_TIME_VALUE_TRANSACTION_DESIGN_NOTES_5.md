@@ -18133,3 +18133,125 @@ Vehicle 識別は §32.21.3 と同じく、正式な Vehicle 名または検証�
 ### 32.21.14 検索語
 
 seed改善、乱数改変、4方式共通RNG、route choice、経路選択乱数、keyed randomization、common random numbers、origin attempt、in-trip attempt、Link別進入回数、Node別訪問回数、最小状態、arrival tiebreaker、同着順位、signalized UXsim、通常merge、merge乱数、merge priority、専用RNG、W.rng、order_control_rng、baseline確定順位、apply_copied_tvt_confirmed_ranks、Candidate局所計算、BATCH Level 2 mimic、1候補、複数候補、specified_route、hard_deterministic_mode、専用branch、別branch、production未変更、別チャット、実装再開、BATCHレビュー、疑似コード、未実装、実装前設計、未完了、次の作業
+
+## 32.22 現行BATCH productionレビュー完了と全World仮想計算型BATCH大幅改修の基本設計確定（2026-11-21）
+
+本節は、2026-11-21 に現行 BATCH production の読取りレビューが終わり、将来の BATCH 大幅改修の基本設計が確定した時点の全体接続正本である。BATCH 処理の最詳細な技術正本は `ORDER_EXCHANGE_PHASE4-6_BATCH_PROCESSING_DESIGN_NOTES.md` **§1H.28** である。seed／RNG の研究契約は本メモ **§32.21** のままである。進捗上の現在地は `ORDER_EXCHANGE_PROGRESS_4.md` **§21.9.23** である。
+
+本節は実装前設計である。seed／RNG production 改修も、BATCH 全 World 仮想計算も、新しい BATCH 形成方式も未実装である。実装完了、改修完了、検証完了、production へ接続済み、とは書かない。30 反復本番へは進まない。
+
+### 32.22.1 位置づけ
+
+- 現行 BATCH production レビューは完了した。完了したのはコードの読取りと、それに基づく将来設計の確定である。production の書換えは行っていない。
+- **§32.21.12** の「BATCH レビュー未着手」、**§32.21.8** の「BATCH レビュー前の現在地」、**§32.21.10** の「BATCH 固有処理のレビュー結果による追加要件」、**§32.21.13** の「レビューは未着手」は、2026-11-18 時点の歴史的記録である。削除も書換えもしない。
+- 最新状態は本 **§32.22** を優先する。BATCH 大幅改修の手順・境界・採用しなかった解釈は **§1H.28** を優先する。
+- 作業順は、完了した BATCH レビューの次に seed／RNG 改修と検証を行い、その後に BATCH 大幅改修である。BATCH 大幅改修を seed／RNG 改修より先に実装しない。
+
+### 32.22.2 現行BATCHレビューの完了範囲
+
+現行 production と BATCH 専用メモを、次の処理について突き合わせた。別 inlink 上の未到着 Vehicle を service unit へ含め、Level 2 mimic 内で前進させる現行処理は、既存メモと整合していた。偶発的な誤実装とは判断しない。
+
+確認した範囲は、trigger 候補、trigger 順位、t_trigger Level 0／1／2、Level 2 mimic、Level 2 unresolved 時の Level 1 fallback、candidate 抽出、別 inlink 未到着 Vehicle、inlink 順序、snapshot estimated arrival、max_batch_size、service unit、service queue、residual 部分、未到着待ち、clearance、通常物理制約、0 台通過時の別 inlink 試行、zero-service reformation、1 台以上通過後の停止、current visit と batch assignment、arrival tiebreaker の同一 Visit 内不変、TVT-MP 順位適用 baseline における未確定 Visit の一時 FCFS 処理である。
+
+現行形成は、その timestep の新規到着だけを見ない。その時点までに到着済みで、現在 Visit が未割当の Vehicle を通常の trigger 候補とする。前 timestep から残った未割当 Vehicle に特別な救済処理はない。翌 timestep も同じ trigger 順位へ戻る。`record_order_control_node_arrival()` は、current visit の `arrival_time` が設定済みなら return する。同じ Visit の arrival tiebreaker は再生成しない。
+
+現行 `earliest_arrival_timestep` は Link 進入時に保存され、tau=1 を含むため交通上は最早通過可能 timestep に近い。新方式の形成範囲には使わない。属性や既存 test の削除は未決定であり、削除済みとは書かない。
+
+現行 Level 2 は実装済みの Node 局所 mimic である。「初期 Level 2」「後期 Level 2」という別制度はない。API 既定値が Level 1 であることと、Level 2 が実装済みであることは別である。未到着 Vehicle の `route_next_link` は、未作成か、現在 Link を指したままかであり、対象 Node 通過後の outlink が通常決定済みであるとは一般化しない。
+
+### 32.22.3 将来BATCH大幅改修の中心設計
+
+将来方式は未実装である。中心は、実時刻 T の snapshot から実 World とは別の 1 つの全 World を進め、Node 間の交通相互作用を保ったまま、各 BATCH 対象 Node の 1 位 trigger の通過時間 t と、未割当 Vehicle の仮想到着順位を集めることである。Node 別の独立 World は作らない。
+
+- T-1 までに確定した既存 BATCH assignment と service queue は維持する。
+- T 以後、仮想 World 内で新しい BATCH を形成しない。形成用の計算の中で新しい BATCH を作ると循環するため禁止する。
+- 既存 service queue は無条件の絶対停止ではない。未到着と clearance 未充足では待ち、未割当 FCFS へ進まない。通常物理制約でその timestep に 0 台なら、現行規則に従って別 inlink を試し得る。既存 BATCH から 1 台以上通過済みなら未割当 FCFS へ移らない。
+- 未割当 Vehicle の一時順位は到着時刻、arrival tiebreaker、Vehicle ID である。この一時順位を正式 BATCH 順位や恒久順位台帳へ書かない。TVT-MP の関数をそのまま使うとは断定しない。
+- 各 Node の trigger は到着済み・未割当の 1 位 1 台である。その 1 台から得た 1 つの t を、その Node の全形成処理に使う。
+- 同時到着の 2 位以下に個別の t を設けない。t_a、t_b は導入しない。
+- 同時到着 Vehicle は特別な形成規則を持たない。時刻 T の時点ですでに実到着時刻、保存済み arrival tiebreaker、Vehicle ID により順位が判明している。時刻 T では未到着の Vehicle の順位は、全 World 仮想計算による仮想到着時刻、対応する arrival tiebreaker、Vehicle ID で判明する。順位判明後は、両者に同じ BATCH 形成規則（同じ t による距離条件等）を適用する。
+- 暫定 horizon は 30 timestep である。今回対象となる全 Node の trigger 通過 timestep が得られれば、共通の全 World 仮想計算を早期終了する。未解決 Node が1つでも残る間は、Node 間相互作用を維持した同じ共通全 World を最大 horizon 30 まで継続する。解決済み Node も同じ仮想 World 内では交通状態の一部として引き続き進行するが、取得済みの trigger 通過 timestep を再計算・上書きしない。
+- horizon 内に通過 timestep が得られない Node は Level 1 へ fallback する。新方式は Level 0 fallback を使わない。
+- trigger Vehicle は時刻 T に対象 Node へ到着済みである。UXsim では到着 T の最速通過は T+1 である。t は 1 以上であり、t=0 は正常値として受理しない。
+- **clearance=0（新 Level 1）:** 直前通過 inlink と trigger inlink が同じか異なるかにかかわらず追加 clearance 待ちは生じない。trigger 通過時刻は常に T+1、t は常に 1、対象距離は 0 である。1 つの BATCH は Node 端へ到着済みの未割当 Vehicle 1 台だけで構成する。Node 端へ未到着の後続 Vehicle を距離条件でその BATCH へ追加しない。「対象距離 0」は Node 全体で 1 台しか対象にならない意味ではない。複数の到着済み・未割当 Vehicle がいても trigger 順位、BATCH 形成、service queue 登録、max_batch_size 等の現行規則は変えない。到着順位は現在 Visit の arrival_time、arrival_tiebreaker、Vehicle ID により BATCH 形成時に決める（順位自体は Vehicle または Visit に保存されない）。
+- **clearance=1（新 Level 1）:** 通過履歴なし、または直前通過と同じ inlink なら T+1、t=1。異なる inlink への方向切替で clearance 待ちが必要なら `max(T+1, last_order_control_entry_timestep + order_control_clearance_timesteps + 1)`（直前通過が T なら T+2、t=2）。t は 1 または 2 のみ。t=1 なら対象距離 0（意味は clearance=0 と同じ）、t=2 なら対象距離は `DELTAT × u`。
+- clearance=0・clearance=1 いずれも新 Level 1 の t は horizon 30 以内に収まる。Level 0 コードの削除は別判断であり、削除済みとは書かない。
+- 形成範囲は、保存済み `earliest_arrival_timestep` ではなく、時刻 T の実 World 位置と次の対象距離である。
+
+```
+対象距離 = (t - 1) × DELTAT × 当該inlinkの自由流速度u
+```
+
+- 残り距離が対象距離以内の Vehicle を、inlink の物理順に連続して含める。これは自由流なら T+t-1 までに到着し、T+t に潜在的に通過し得る範囲である。仮想 World で T+t までに実際に到着した Vehicle だけを構成員にしない。
+- 現行 max_batch_size は維持する。有効な max_batch_size は 1 以上である。1 台 BATCH の Vehicle 数は max_batch_size >= 1 のもとで常に上限以下である。max_batch_size > 1 なら 1 台 BATCH の Vehicle 数は上限を下回り得る。max_batch_size = 1 なら各 BATCH の Vehicle 数は上限に等しい。clearance=0 かつ新 Level 1 の t=1 では対象距離 0 のため 1 つの BATCH は到着済み・未割当 Vehicle 1 台で構成される（当該 1 台 BATCH も max_batch_size >= 1 の上限以下）。max_batch_size=1 の BATCH は、同一 clearance、候補順位、network、需要、seed その他の対応条件のもとで FCFS に相当する。BATCH 実装の重要な検証契約として、max_batch_size=1 と FCFS のシミュレーション結果が完全一致することを確認する（現行 BATCH で確認済みの N=1 対 FCFS 一致性を、将来の全 World 仮想計算型 BATCH 改修後も回帰検証する。形成、service queue、clearance、通常物理制約、実通過が N=1 条件で FCFS と整合することを確認する）。
+- N に達した方向でその形成を終える。残った到着済み未割当 Vehicle は翌 timestep の通常 trigger 順位へ戻る。特別な繰越・救済は設けない。arrival tiebreaker は再生成しない。既に BATCH へ入った Vehicle を重複登録しない。
+- 実 World の評価終了 timestep でも形成を検討し、内部仮想計算だけ horizon 30 分を実行可能にする。実 World を評価終了後へ進めず、終了後の実交通を観測値にしない。端点の inclusive／exclusive と内部終了式は、TVT-MP 原典と横並び確認するまで断定しない。
+- 仮想計算は T 以後に新 BATCH を作らない参照条件である。実 World は T 以後に BATCH を作る。制御前提が違うので、仮想到着・仮想通過と実績の差は当然である。その差を予測誤差、精度、Level 2 の当たり外れとして評価しない。監査は、確定した形成手順をコードが再現したかの確認である。
+
+### 32.22.4 seed／RNG設計との接続
+
+**§32.21.8**、**§32.21.10**、**§32.21.12**、**§32.21.13** の「BATCH レビュー後に追加要件を確認する」「レビュー未着手」は当時の記録として残す。レビュー後に判明した最新の追加要件は次である。
+
+- arrival tiebreaker の同一 Visit 内不変は、新方式でも必須である。keyed 化で値の決め方は変わっても、同じ Visit を毎 timestep 再抽選しない。
+- 全 World 仮想計算では、seed／RNG 改修後の Node 訪問識別を使う。同じ Vehicle・同じ Node・同じ Node 訪問番号の keyed tiebreaker を、仮想計算でも使う。
+- 仮想計算専用 tiebreaker を生成しない。
+- 現行 Level 2 mimic は route-choice keyed 乱数を直接使わない、という **§32.21** の判断を維持する。現行 Level 2 は inlink 待機 Vehicle の `route_next_link` を snapshot に固定し、通常の `Vehicle.update()` による route choice を行わせない。
+- 将来の全 World 仮想計算は、現行 Level 2 mimic とは別の新処理である。Level 2 の局所 mimic を全 World 方式へ読み替えない。
+- seed／RNG production 実装の具体的 BATCH 接続範囲は、今回のレビューで次のとおり整理された。先に seed／RNG 改修を実装し、route choice の keyed randomization、Link 別進入回数、attempt 状態、copy 契約、arrival tiebreaker の keyed 化と同一 Visit 内不変を正式状態にする。BATCH 大幅改修はその正式状態を再利用する。本節では seed／RNG production 実装を行わない。
+
+### 32.22.5 確定事項と未確定実装手段
+
+確定した研究契約は、実装手段が未定であることを理由に白紙へ戻さない。
+
+確定した研究契約:
+
+- 全 World 仮想計算と Node 間相互作用
+- T-1 までの既存 BATCH 維持と、T 以後の仮想 World 内新規 BATCH 形成禁止
+- 既存 service queue の条件付き優先と、未割当 Vehicle の一時 FCFS
+- Node ごとに 1 位 trigger 1 台、Node ごとに 1 つの t。同時到着 2 位以下の個別 t は導入しない
+- horizon 30 と、全 trigger 解決後の早期終了
+- 未解決 Node は Level 1 fallback。Level 0 fallback は使わない（clearance=0・clearance=1 いずれも新 Level 1 の t は horizon 30 以内）
+- clearance=0 では新 Level 1 の t は常に 1（通過 T+1、対象距離 0。1 BATCH = 到着済み未割当 1 台、未到着後続を距離で追加しない）
+- clearance=1 では新 Level 1 の t は 1 または 2
+- 対象距離 = (t-1)×DELTAT×u。時刻 T の実 World 位置を使う
+- 1 台 BATCH は max_batch_size >= 1 で常に上限以下。max_batch_size=1 では各 BATCH Vehicle 数は上限に等しい
+- N=1 BATCH 対 FCFS 完全一致性を将来の全 World 仮想計算型 BATCH 改修後も回帰検証する
+- `earliest_arrival_timestep` を新形成範囲に使わない
+- 同時到着 Vehicle と仮想計算中に順位判明する Vehicle は、順位判明後に同じ BATCH 形成規則（判明タイミングのみ異なる）
+- 現行 max_batch_size を維持し、残存 Vehicle は翌 timestep の通常再評価
+- 同一 Visit の arrival tiebreaker は翌 timestep でも不変
+- 仮想対実績を予測精度比較しない。監査は形成手順の再現確認
+- seed／RNG 改修を先に実装し、BATCH 大幅改修はその後
+
+未確定の実装手段:
+
+- 全 World 仮想計算 runner と、TVT-MP runner の再利用範囲
+- snapshot／copy、BATCH 形成停止、未割当 FCFS の関数構造
+- 仮想到着 collector、監査型、CSV／JSON
+- 早期終了判定の配置と、horizon 端点のコード表現
+- earliest_arrival 関連コードを残すか
+- Level 0 API・コード・test を残すか
+- 本番時の監査保存量、trial 条件
+- branch 名、分岐元 commit、実装開始時期
+- key から乱数を作るアルゴリズム、属性名、pickle／snapshot への具体反映（これらは **§32.21.10** の未確定手段のままである）
+
+### 32.22.6 現在地と次の作業
+
+- BATCH production の読取りレビューと、将来大幅改修の基本設計確定までが終わっている。
+- production 実装はどちらも未着手である。
+- 次は 3 メモの差分を利用者が Terminal で確認し、メモだけを commit する。commit 名には document を含め、実装前文書化なので complete は使わない。push は別指示である。
+- その後、seed／RNG 改修を専用 branch と別チャットで実装・検証する。branch 作成を含む Git 操作は利用者が行う。Cursor には行わせない。
+- seed／RNG 検証の後に BATCH 大幅改修へ進む。
+- 30 反復本番へはまだ進まない。
+
+### 32.22.7 参照先
+
+- BATCH 専用の最詳細正本: `ORDER_EXCHANGE_PHASE4-6_BATCH_PROCESSING_DESIGN_NOTES.md` **§1H.28**
+- seed／RNG 正本: 本メモ **§32.21**
+- 進捗: `ORDER_EXCHANGE_PROGRESS_4.md` **§21.9.23**
+- 現行 production の事実: BATCH 専用メモ **§1C**〜**§1H.27** とコード。**§1H.28** は未実装の将来設計である。
+- **§1H.27.46** と後半 **##2**〜**##23** の「Level 2 未実装」等は当時の記録である。現行 Level 2 は **§1H.27.42** 以降で実装済みである。
+
+### 32.22.8 検索語
+
+BATCH大幅修正、BATCH大幅改修、BATCH新設計、全World仮想計算、BATCH全World baseline、trigger通過時刻、horizon 30、早期終了、Level 1 fallback、Level 0不使用、earliest arrival廃止、最早通過可能時刻、現在位置、自由流距離、(t-1)×DELTAT×u、潜在的通過可能、仮想到着順位、同時到着、後着、arrival tiebreaker不変、max batch size、未割当繰越、service queue、residual batch、既存BATCH、T以後新規BATCH形成禁止、処理契約監査、予測対実績比較をしない、seed改変後、production未変更、未実装、実装前設計、次の作業
