@@ -18255,3 +18255,48 @@ seed改善、乱数改変、4方式共通RNG、route choice、経路選択乱数
 ### 32.22.8 検索語
 
 BATCH大幅修正、BATCH大幅改修、BATCH新設計、全World仮想計算、BATCH全World baseline、trigger通過時刻、horizon 30、早期終了、Level 1 fallback、Level 0不使用、earliest arrival廃止、最早通過可能時刻、現在位置、自由流距離、(t-1)×DELTAT×u、潜在的通過可能、仮想到着順位、同時到着、後着、arrival tiebreaker不変、max batch size、未割当繰越、service queue、residual batch、既存BATCH、T以後新規BATCH形成禁止、処理契約監査、予測対実績比較をしない、seed改変後、production未変更、未実装、実装前設計、次の作業
+
+## 32.23 seed／RNG改修とBATCH大幅改修の実装順、branch分離、現行BATCH保全方針の確定（2026-11-22）
+
+執筆日は2026-11-22である。**§32.21** のseed／RNG契約と **§32.22** のBATCH設計は維持する。削除も書換えもしない。**§32.22** の「seed／RNG改修を先に実装する」、およびそれ以前の「BATCHレビュー未着手」は当時の歴史的記録として残す。本節は「seed／RNG改修を先に実装する」を否定しない。追加したのは、その前に現行基準を固定し、seed／RNGとBATCHを別branchにし、各変更境界でN=1 BATCH対FCFSを反証可能にする具体化である。
+
+詳細正本は次である。本節はアルゴリズム詳細と乱数技術契約を複製しない。
+
+`ORDER_EXCHANGE_SEED_RNG_AND_BATCH_IMPLEMENTATION_BRANCH_STRATEGY.md`
+
+BATCH詳細側の接続要約は `ORDER_EXCHANGE_PHASE4-6_BATCH_PROCESSING_DESIGN_NOTES.md` **§1H.29**、進捗は `ORDER_EXCHANGE_PROGRESS_4.md` **§21.9.24** である。
+
+- 案Cを正式採用した。現行seed環境でN=1基準を確認したあと、seed／RNG改修専用branchで実装・検証し、その受入れ済みcommitからBATCH大幅改修専用branchを派生させる。
+- seed／RNG branchを現在のproduction branchへ直接実装しない。BATCH branchを旧seed基準から直接派生させない。両改修を同じbranchで連続して未分離実装しない。branch名と分岐元commitは各branch作成直前に確定する。branch作成は未実施である。
+- 旧seed結果と新seed結果の数値一致は要求しない。要求するのは各段階内部の横並び一致である。現行seed環境、seed／RNG改修後の共通seed環境、全World仮想計算型BATCH改修後の共通seed環境のそれぞれで、FCFS = N=1 BATCH である。
+- 新BATCHは未実装・未採用の評価候補である。現行BATCHは現在動作している採用済み比較対象として保全する。正確性または性能が不足すれば現行BATCHを継続採用できる。新BATCHを実装したこと自体を採用理由にしない。
+- 評価段階では、同一commit内で同じnetwork、OD、Vehicle plan、seed、clearance、max_batch_size等を用いて新旧を選択実行できる構造を基本方針とする。checkoutの繰返しだけに依存しない。`order_control_type="batch"` を黙って新方式へ置換しない。
+- 評価中に新旧を併存させることと、採用後もproduction公開APIとして永久に両方を維持することは別判断である。旧runtime経路の恒久併存は未確定である。Git履歴とbranchに旧実装を残すことと、同じproductionで旧実装を恒久的に選択可能にすることを混同しない。採用可能と判明する前に旧経路を削除しない。
+
+2026-11-22に、現行seed環境で200、1,000、5,000台のFCFS対N=1 BATCH Level 2を再確認し、いずれも comparison_class exact_match、集計不一致0、Vehicle-level不一致0だった。5,000台は Level 2 call 46428、resolved 46390、unresolved 38、fallback 38 を含めて完全一致した。10,000台は今回再実行していない。過去の正式exact_match実績を維持する。branch分岐前確認は200、1,000、5,000台で完了とする。
+
+診断の厳密比較fieldは、集計11項目（total_vehicles、completed_trips、unfinished_trips、completed_ratio、total_travel_time、average_travel_time、average_delay、delay_ratio、total_distance_traveled、last_completed_trip_time、analyzer_reference_average_speed）、Vehicle別7項目（state、departure_time、arrival_time、travel_time、destination_name、traveled_route_link_names、log_t_link_history）、Vehicle名集合、completion_orderである。比較はPythonの `!=` による厳密一致であり、toleranceや丸めを用いない。assignment prefix と visit_id／batch_assignment／service unit の「none observed」2行は固定printであり、実構造比較の根拠にしない。BATCH assignmentやservice unitをFCFSとの完全一致fieldとして追加しない。
+
+`tests_order_control_baseline_collector_uxsim.py` の `test_batch_passage_stops_before_physical_transfer_on_inconsistency` は、visit_id mismatch例外を期待する古いtestと現行collector契約の不一致として未解決である。記録は `ORDER_EXCHANGE_PROGRESS_3.md` にある。今回のexact_matchで解決したとは扱わない。この問題だけで通常実行のN=1一致性を否定もしない。
+
+採否は次の3分類で行う。正式採用は未確定である。
+
+1. 正確性不合格: 採用しない。修正または中止する。
+2. 正確性合格だが性能・研究上の利点が不十分: 現行BATCHを正式方式として維持し、新BATCHはbranchと研究記録に残す。BATCH改修branchをproductionへ統合しない選択肢を維持する。
+3. 正確性合格かつ評価上採用可能: 新BATCHを正式実装候補とし、その時点でproduction切替方法を決める。旧runtime経路を残すか削除するかは別途判断する。
+
+単一条件の平均旅行時間改善や、実装完了自体を研究上の優位性とみなさない。全World計算の負荷が大きく30反復本番に不適切なら、現行BATCH継続を選べるようにする。性能はN=1一致性の合否条件にしない。5,000台の実行時間短縮の全てをshort TMAXだけの効果とは断定しない。
+
+production seed／RNG改修、全World仮想計算型BATCH production実装、branch作成、30反復本番は未着手である。現行branchは `feature/intersection-order-control`、記録作成前の最新commitは `4c6d9da`、local HEADとremoteは一致確認済みだった。作業ツリーの無関係な変更・未追跡ファイルには触れない。Git操作は利用者がTerminalで行う。Cursorには行わせない。
+
+参照先:
+
+- 詳細正本: `ORDER_EXCHANGE_SEED_RNG_AND_BATCH_IMPLEMENTATION_BRANCH_STRATEGY.md`
+- seed／RNG契約: 本メモ **§32.21**
+- BATCH将来設計: 本メモ **§32.22**
+- BATCH詳細: `ORDER_EXCHANGE_PHASE4-6_BATCH_PROCESSING_DESIGN_NOTES.md` **§1H.28**、**§1H.29**
+- 進捗: `ORDER_EXCHANGE_PROGRESS_4.md` **§21.9.23**、**§21.9.24**
+- 診断: `diagnostics/order_control/grid_n1_level_2_vs_fcfs_check.py`
+- baseline collector既知問題: `ORDER_EXCHANGE_PROGRESS_3.md`
+
+**検索語:** seed改修順序、RNG改修順序、BATCH改修順序、案A、案B、案C、現行基準固定、N=1 BATCH、FCFS完全一致、exact_match、200台、1000台、5000台、10000台、fallback 38、Level 2、short TMAX、branch分離、seed branch、BATCH branch、分岐元commit、現行BATCH保全、旧BATCH維持、新BATCH試作、新旧横並び、同一commit比較、production未統合、不採用、性能不十分、正確性不合格、採否判断、全World仮想計算、baseline collector、visit_id mismatch、未解決test、production未実装、branch未作成、30反復未着手、次の作業

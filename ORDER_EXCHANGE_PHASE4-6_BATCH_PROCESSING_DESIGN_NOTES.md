@@ -7550,7 +7550,10 @@ TVT-MP 監査基盤を技術的参考にするが、BATCH 用に目的を読み�
 #### 1H.28.28 再開手順
 
 - 3 メモの差分を Terminal で確認する。
-- メモだけを commit・push する。
+- 対象メモだけを stage して commit する。
+- commit 結果、最新 commit、残存変更を確認する。
+- push は別指示で行う。
+- push 後に git status、最新 commit、local／remote 一致を確認する。
 - Git 操作は利用者が Terminal で行う。Cursor には行わせない。branch も Cursor は作らない。
 - commit 名には document を含める。
 - 実装前文書化なので complete を使わない。
@@ -7562,6 +7565,48 @@ TVT-MP 監査基盤を技術的参考にするが、BATCH 用に目的を読み�
 #### 1H.28.29 検索語
 
 BATCH大幅修正、BATCH大幅改修、BATCH新設計、全World仮想計算、BATCH全World baseline、trigger通過時刻、trigger passage timestep、horizon 30、早期終了、Level 1 fallback、Level 0不使用、earliest arrival廃止、最早到着時刻廃止、最早通過可能時刻、現在位置、自由流距離、(t-1)×DELTAT×u、潜在的通過可能、仮想到着順位、同時到着、後着、arrival tiebreaker不変、max batch size、未割当繰越、service queue、residual batch、既存BATCH、T以後新規BATCH形成禁止、FCFS baseline、処理契約監査、予測対実績比較をしない、seed改変後、production未変更、未実装、実装前設計
+
+---
+
+### 1H.29 seed／RNG改修とBATCH大幅改修のbranch分離、現行BATCH保全、N=1基準確認（2026-11-22）
+
+本節は **§1H.28** の形成規則を再掲しない。**§1H.28** は削除も書換えもしない。実装順、branch分離、現行BATCH保全、N=1基準確認の詳細正本は次である。
+
+`ORDER_EXCHANGE_SEED_RNG_AND_BATCH_IMPLEMENTATION_BRANCH_STRATEGY.md`
+
+全体設計側の接続は `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_5.md` **§32.23**、進捗は `ORDER_EXCHANGE_PROGRESS_4.md` **§21.9.24** である。**§32.21** のseed／RNG契約と **§32.22**・**§1H.28** の「seed／RNG改修を先に実装する」は当時の判断として維持する。本節はそれを否定せず、現行基準の固定とbranch分離を追加して具体化する。
+
+- 案Cを採用した。現行seed環境でN=1 BATCH対FCFS基準を確認したあと、seed／RNG改修をBATCH大幅改修より先に行う。
+- seed／RNG改修は専用branchで行う。現在のproduction branchへ直接実装しない。branch名と分岐元commitは作成直前に確定する。branchは未作成である。
+- seed／RNG改修の受入れ済みcommitから、BATCH大幅改修専用branchを派生させる。旧seed基準から直接派生させない。seed／RNG branchとBATCH branchを同じbranchで連続して未分離実装しない。
+- 現行BATCHは現在動作している採用済み比較対象として評価中も維持する。不完全であることだけを理由に削除・置換しない。
+- 新BATCHは未実装・未採用の評価候補である。`order_control_type="batch"` の意味を黙って新方式へ置換しない。新BATCHは明示的な独立試験経路として追加する。
+- 新BATCHが正確性不合格、または正確性は合格でも性能・研究上の利点が不十分なら、現行BATCHを継続使用できる。正式採用が確定したとは扱わない。採用可能と判明する前に旧runtime経路を削除しない。評価中の併存と、採用後の恒久runtime併存は別判断であり、後者は未確定である。
+- Git履歴とbranchに旧実装を残すことと、同じproductionで旧実装を恒久的に選択可能にすることを混同しない。
+
+2026-11-22の現行基準再確認（現行seed、6×6 grid、clearance=1、FCFS対N=1 BATCH Level 2、virtual horizon 30、Pythonの `!=` による厳密一致、toleranceなし）:
+
+- 200台: exact_match。aggregate mismatch 0、Vehicle-level mismatch 0。Level 2 call 1497、resolved 1497、unresolved 0、fallback 0。
+- 1,000台: exact_match。aggregate mismatch 0、Vehicle-level mismatch 0。Level 2 call 7766、resolved 7766、unresolved 0、fallback 0。
+- 5,000台: exact_match。aggregate mismatch 0、Vehicle-level mismatch 0。Level 2 call 46428、resolved 46390、unresolved 38、fallback 38。Level 1 fallback経路を含めて完全一致した。
+- 10,000台は今回再実行していない。過去の正式exact_match実績を維持する。branch分岐前確認は200、1,000、5,000台で完了とする。
+
+比較に使う主なfieldは、集計の total_vehicles、completed_trips、unfinished_trips、completed_ratio、total_travel_time、average_travel_time、average_delay、delay_ratio、total_distance_traveled、last_completed_trip_time、analyzer_reference_average_speed、Vehicle別の state、departure_time、arrival_time、travel_time、destination_name、traveled_route_link_names、log_t_link_history、ならびにVehicle名集合とcompletion_orderである。詳細は正本の診断比較契約を参照する。
+
+次の2行は実構造比較ではなく固定printであり、監査済み事実として扱わない。
+
+- assignment prefix violation: none observed (simulation completed)
+- visit_id / batch_assignment / service unit mismatch: none observed
+
+`tests_order_control_baseline_collector_uxsim.py` の `test_batch_passage_stops_before_physical_transfer_on_inconsistency` は、古いtestがvisit_id mismatch例外を期待し、現行collector契約と一致しない未解決事項である。`ORDER_EXCHANGE_PROGRESS_3.md` に記録がある。今回のexact_matchで解決したとは扱わない。このtest問題だけで通常実行のN=1一致性を否定もしない。seed／RNG実装前または実装設計中に、現行test、collector契約、期待例外のどれを正とするかを独立確認する。
+
+5,000台の今回のN1-L2実行時間は過去のfull TMAX時代の765.662秒より短いが、今回は厳密な性能A/B試験ではない。時間差の全てをshort TMAXだけの因果効果とは断定しない。性能はN=1一致性の合否基準ではない。
+
+production seed／RNG改修、全World仮想計算型BATCH production実装、branch作成、30反復本番は未着手である。現行branchは `feature/intersection-order-control`、記録作成前の最新commitは `4c6d9da`、local HEADとremoteは一致確認済みだった。作業ツリーの無関係な既存変更・未追跡ファイルには触れない。
+
+次の直接作業は、Markdown差分のTerminal独立確認と、必要な文書修正である。その後、対象Markdownだけを明示してstageし、commitする。commit結果、最新commit、残存する作業ツリー変更を確認する。pushは別指示で行う。push後にgit status、最新commit、local／remote一致を確認する。その後、利用者がseed／RNG専用branchを作成する前のGit状態確認へ進む。branch作成自体はまだ行わない。Git操作は利用者がTerminalで行う。CursorにはGit操作をさせない。利用者への作業指示は、その時点で次に実行する内容だけを提示する。
+
+**検索語:** seed改修順序、RNG改修順序、BATCH改修順序、案A、案B、案C、現行基準固定、N=1 BATCH、FCFS完全一致、exact_match、200台、1000台、5000台、10000台、fallback 38、Level 2、short TMAX、branch分離、seed branch、BATCH branch、分岐元commit、現行BATCH保全、旧BATCH維持、新BATCH試作、新旧横並び、同一commit比較、production未統合、不採用、性能不十分、正確性不合格、採否判断、全World仮想計算、baseline collector、visit_id mismatch、未解決test、production未実装、branch未作成、30反復未着手、次の作業
 
 ---
 

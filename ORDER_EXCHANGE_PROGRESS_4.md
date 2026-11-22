@@ -2744,3 +2744,49 @@ production の seed／RNG 改修は未着手である。seed 改善が完成し�
 Git 操作は利用者が Terminal で行う。Cursor には行わせない。branch も Cursor は作らない。
 
 **検索語:** BATCHレビュー完了、BATCH大幅改修、全World仮想計算、horizon 30、Level 1 fallback、Level 0不使用、(t-1)×DELTAT×u、arrival tiebreaker不変、max_batch_size、seed改修前、production未実装、次の作業
+
+#### 21.9.24 seed／RNG改修とBATCH大幅改修のbranch分離・現行基準確認・案C採用
+
+執筆日は2026-11-22である。**§21.9.23** と、そこにある「seed／RNG改修を先に実装する」は当時の記録として維持する。本節はそれを否定せず、現行基準の固定とbranch分離を後続判断として追加する。
+
+詳細正本:
+
+`ORDER_EXCHANGE_SEED_RNG_AND_BATCH_IMPLEMENTATION_BRANCH_STRATEGY.md`
+
+関連正本:
+
+- `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_5.md` **§32.21**
+- 同 **§32.22**
+- 同 **§32.23**
+- `ORDER_EXCHANGE_PHASE4-6_BATCH_PROCESSING_DESIGN_NOTES.md` **§1H.28**
+- 同 **§1H.29**
+
+- 案Cを採用した。現行基準確認を先に実施し、その後seed／RNG改修をBATCH大幅改修より先に行う。
+- 2026-11-22に200、1,000、5,000台のFCFS対N=1 BATCH Level 2を再確認し、全て exact_match だった。集計不一致0、Vehicle-level不一致0。
+- 5,000台は Level 2 call 46428、resolved 46390、unresolved 38、fallback 38 を含めて完全一致した。
+- 10,000台は過去exact_match実績であり、今回は未実行である。200台だけで完了したとは扱わない。
+- 現行基準固定は完了した。
+- seed／RNG production実装は未着手である。
+- BATCH production大幅改修は未着手である。
+- branch作成は未実施である。
+- seed／RNG専用branchを先に作成する。現在のproduction branchへ直接実装しない。
+- seed／RNG受入れ済みcommitからBATCH専用branchを作成する。旧seed基準から直接派生させない。両改修を同じbranchで連続実装しない。
+- 現行BATCHを保全し、新BATCHは採否評価前に正式置換しない。`order_control_type="batch"` を黙って新方式へ置換しない。新BATCHは未実装・未採用の評価候補である。正確性または性能が不足すれば現行BATCHを継続採用できる。恒久runtime併存は未確定である。
+- baseline collectorの既知test契約不一致（`test_batch_passage_stops_before_physical_transfer_on_inconsistency`、visit_id mismatch期待と現行collector契約の不一致。記録は `ORDER_EXCHANGE_PROGRESS_3.md`）は未解決であり、今回のexact_matchで解決とはしない。
+- 30反復本番へは進まない。
+- 性能はN=1一致性の合否条件にしない。5,000台の時間短縮の全てをshort TMAXだけの効果とは断定しない。固定printの assignment／visit_id／service unit 表示を実構造比較の結果としない。
+- 現行branchは `feature/intersection-order-control`。記録作成前の最新commitは `4c6d9da`。local HEADとremoteは一致確認済みだった。無関係な作業ツリー変更・未追跡ファイルには触れない。
+
+**次の作業:**
+
+1. Markdown差分をTerminalで独立確認する
+2. 必要なら文書修正する
+3. 対象Markdownだけを明示してstageし、commitする
+4. commit結果、最新commit、残存変更を確認する
+5. pushはcommit確認後の別指示で行う
+6. push後にgit status、最新commit、local／remote一致を確認する
+7. その後、seed／RNG専用branchを作成する前のGit状態を確認する
+
+Git操作は利用者がTerminalで行う。CursorにはGit操作をさせない。branchもCursorは作らない。利用者への作業指示は、その時点で次に実行する内容だけを提示する。
+
+**検索語:** seed改修順序、RNG改修順序、BATCH改修順序、案A、案B、案C、現行基準固定、N=1 BATCH、FCFS完全一致、exact_match、200台、1000台、5000台、10000台、fallback 38、Level 2、short TMAX、branch分離、seed branch、BATCH branch、分岐元commit、現行BATCH保全、旧BATCH維持、新BATCH試作、新旧横並び、同一commit比較、production未統合、不採用、性能不十分、正確性不合格、採否判断、全World仮想計算、baseline collector、visit_id mismatch、未解決test、production未実装、branch未作成、30反復未着手、次の作業
