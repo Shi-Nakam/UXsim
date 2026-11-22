@@ -18300,3 +18300,45 @@ production seed／RNG改修、全World仮想計算型BATCH production実装、br
 - baseline collector既知問題: `ORDER_EXCHANGE_PROGRESS_3.md`
 
 **検索語:** seed改修順序、RNG改修順序、BATCH改修順序、案A、案B、案C、現行基準固定、N=1 BATCH、FCFS完全一致、exact_match、200台、1000台、5000台、10000台、fallback 38、Level 2、short TMAX、branch分離、seed branch、BATCH branch、分岐元commit、現行BATCH保全、旧BATCH維持、新BATCH試作、新旧横並び、同一commit比較、production未統合、不採用、性能不十分、正確性不合格、採否判断、全World仮想計算、baseline collector、visit_id mismatch、未解決test、production未実装、branch未作成、30反復未着手、次の作業
+
+## 32.24 4方式共通seed／RNG基盤の具体実装前調査・反証・補正後設計の確定（2026-11-22）
+
+執筆日は2026-11-22である。詳細正本は `ORDER_EXCHANGE_SEED_RNG_AND_BATCH_IMPLEMENTATION_BRANCH_STRATEGY.md` **§14** である。本節は **§32.21** の研究契約を覆さない。§32.21.10 で未確定だった具体実装手段を、原典調査、Cursor の読取り専用反証、利用者の Terminal 独立確認、および反証後の補正で具体化した接続節である。**§32.21** から **§32.23** の本文は削除も書換えもしない。
+
+関係:
+
+- **§32.21** は、4方式共通 seed／RNG 改修の研究契約の正本である。
+- **§32.22** と BATCH 詳細 **§1H.28** は、将来の全 World 仮想計算型 BATCH の未実装設計である。現行 BATCH Level 2 ではない。
+- **§32.23**、BATCH 詳細 **§1H.29**、進捗 **§21.9.24** は、branch 分離、現行 BATCH 保全、N=1 基準固定、案 C 採用の正本である。
+- 進捗の対応節は `ORDER_EXCHANGE_PROGRESS_4.md` **§21.9.25** である。
+- **§32.23** にある「branch 作成は未実施」「現行 branch は `feature/intersection-order-control`」は、その節を書いた時点の記録である。本節時点では seed／RNG 改修 branch `feature/common-seed-rng-foundation` が作成済みであり、分岐元 commit は `fde6865`、remote push は未実施である。
+
+確認の区別:
+
+- 原典調査は、`uxsim/uxsim.py` の World 初期化、origin 生成、BATCH 実通過、両 FCFS、共通物理移動、通常 merge、`Node.transfer`、Vehicle の更新と route choice、Visit 開始、到着記録、`World.copy`、baseline driver の dill 往復、Candidate local state の `real_world.copy()`、局所前進と rollback、binding 通過、unbound FCFS transfer、TVT physical transfer の通常 merge 呼び出し、Level 2 mimic、Candidate 選択の既存 seed material、および影響する既存 test 群を読んだ結果である。
+- Cursor 反証の総合判定は「条件を追記すれば実装へ進める」だった。blocking 反例はなかった。high 相当の条件は4件だった。Cursor 報告を無条件には正本化していない。
+- Terminal 独立確認のあと、Candidate 局所 binding 通過について1件補正した。Cursor は、target Node の新規到着がコピー前に進入済みの inlink 上で起きるため、binding 経路の Link 進入 helper は当座の訪問番号計算には必須ではない、と整理していた。採用した設計は、局所 World 内で outlink へ物理進入したなら、その局所 World の Link 進入回数を増やし、その訪問中の in-trip attempt を 0 に戻す。属性の意味を実 World、baseline 全 World、Candidate 局所 World で揃えるためである。§32.21 の研究契約の変更ではない。
+
+総合判定:
+
+- 研究契約は現行 production の処理順と矛盾しない。
+- blocking 反例はない。
+- 次の条件を入れれば実装へ進める。
+- seed／RNG 改修を BATCH 大幅改修より先に行う案 C を維持する。順序を変える反例は見つからなかった。
+- 新 BATCH は未実装・未採用である。現行 BATCH は保全する。
+- production の seed／RNG 実装、test 変更、診断変更、simulation は未実施である。
+
+確定した具体条件:
+
+- `random_seed=None` では、`SeedSequence(None)` を用途ごとに別呼び出ししない。World 生成時に内部 entropy を1回だけ確定し、pickle 可能な正規化済み内部表現として保存する。保存形式は現時点で tuple と断定しない。有力候補は非負 Python 整数、またはその明示的な列であり、最初の実装単位の専用 test で確定する。公開の `W.random_seed` と、正規化済み内部 entropy は区別する。keyed helper は公開 seed を都度読み直さない。公開 API の一括厳格化は行わない。keyed 値と通常 merge 用 RNG の正本は、その保存済み entropy である。生成後に `W.random_seed` を書き換えても entropy は変えない。明示整数 seed の独立 World は同じ key で一致する。`None` の独立 World 同士は一致を要求しない。同一 World とその baseline／Candidate copy は一致を要求する。`W.rng` の state から entropy を導かない。dill／pickle の restore は `World.__init__` を再実行しない。
+- 最終候補 0 件では乱数も attempt も使わず、現行の選択不能を成功へ変えない。1 件は直接選択で、乱数も attempt も使わない。2 件以上の確率的選択だけ attempt を消費する。preference 合計 0 かつ 2 件以上は一様選択であり、attempt は消費する。
+- Node 訪問番号は、その Node を終端とする全 inlink の Link 別進入回数の合計である。合計が 0 のとき訪問番号 1 へ補正しない。到着記録時に 1 未満なら不整合として停止する。手動 fixture の欠落を production が埋めない。
+- 通常 merge 用の順次消費 RNG は、`_transfer_normal_merge()` の非 hard deterministic 分岐で、shuffle と Vehicle choice の双方に使う。名称は「signalized 専用」ではない。信号の有無で追加分岐しない。FCFS、BATCH、TVT-MP 確定順位には導入しない。`hard_deterministic_mode=True` では消費しない。4方式比較の中で通常 merge を使うのが signalized UXsim である、という研究上の文と、この関数の全 caller を混同しない。
+- Candidate binding の局所通過でも、局所 World 内の Link 進入状態を更新する。Candidate は対象 Node から outlink へ物理進入し、outlink 上を下流端まで処理する。下流端では boundary により退出、sink 相当として扱う。下流 Node へ通常の Vehicle として進入させず、新しい Node Visit と通常 route choice は発生させない。局所前進は同一 inlink 上の移動であり、そこで Link 回数は増やさない。変更は copy 内だけであり、実 World へ戻さない。
+- 現行 BATCH Level 2 へ、Link 別進入回数と route-choice attempt は追加コピーしない。mimic 内物理通過へ共通 helper も接続しない。Level 2 mimic は正式な将来交通 World 状態を構築するものではなく、局所通過時刻推定に限定された例外である。このため新状態を追加コピーせず、mimic 内物理通過へ helper を接続しない。Candidate 局所 World および将来の全 World 型 BATCH には、この例外を適用しない。`begin_order_control_visit_on_link_entry` の内部へ helper を埋め込まない。Level 2 は通常 route choice と `record_order_control_node_arrival` を呼ばない。
+
+実装原則: 根幹の Python は、短さや技巧より、初心者が処理順、key の構成、counter の更新位置を追える明示的な書き方を優先する。helper に seed 正規化、key 構築、hash、カテゴリ選択、counter 更新を過度に詰め込まない。確定した研究契約を、コードを短くする目的で省略しない。高度な技法が必要なときは、単純な方法では不十分な理由と、入出力、不変条件、再現性への影響を書く。
+
+次の直接作業は、今回の Markdown 差分を利用者が Terminal で独立確認することである。その後の予定は、必要なら文書修正、対象 Markdown だけの stage と commit、commit 結果と最新 commit と残存変更の確認、push は別指示、push 後の status と最新 commit と local／remote 一致の確認、その後に内部 entropy と pure keyed helper の最小実装単位へ進むことである。利用者への指示は、その時点で次に実行する内容だけを提示する。Git 操作は利用者が Terminal で行う。Cursor には行わせない。作業ツリーの無関係な既存変更と未追跡ファイルには触れない。
+
+**検索語:** seed RNG具体実装前調査、Cursor反証、Terminal独立確認、blockingなし、条件付き成立、random_seed None、内部entropy、単一entropy、stable hash、keyed randomization、pure function、domain separator、origin attempt、in-trip attempt、候補0件、候補1件、候補2件以上、Link別進入回数、Node訪問番号、合計0不整合、arrival tiebreaker、通常merge RNG、signalized専用ではない、_transfer_normal_merge、baseline全World、Candidate局所World、Candidate binding通過、outlink下流端、sink相当、下流Nodeへ通常進入しない、Candidate rollback、現行BATCH Level 2、mimic、追加コピー不要、N=1 BATCH、FCFS完全一致、fallback 38、旧seed結果非互換、production未実装、test未変更、次の作業、seed改修前に確認したこと、RNG実装前の問題、CandidateでLink回数を増やすか、BATCH Level 2に新状態をコピーするか、merge乱数をどこへ分けるか、random_seedがNoneのとき、route choice候補が0件のとき、arrival tiebreaker再訪、Node訪問番号が0、FCFSとN=1 BATCHが一致しなくなった、seed改修のテスト範囲、feature/common-seed-rng-foundation、fde6865
