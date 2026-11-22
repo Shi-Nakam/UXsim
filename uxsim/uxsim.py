@@ -21,6 +21,9 @@ from uxsim.order_control_tvt_mp_actual_passage import (
     OrderControlTvtMpActualNodePassageHistoryRegistry,
     OrderControlTvtMpActualPassageWaitRegistry,
 )
+from .common_seed_rng_keyed_uniform import (
+    normalize_seed_sequence_entropy as _normalize_seed_sequence_entropy,
+)
 
 
 def _validate_order_control_batch_t_trigger_level(value, node_name=None):
@@ -4156,6 +4159,15 @@ class World:
             order_control_child_seed_sequence
         )
         W.random_seed = random_seed
+        # One stored entropy for later keyed route choice, arrival
+        # tiebreakers, and ordinary-merge derivation. This reads the entropy
+        # already drawn for order_control_seed_sequence. It does not call
+        # SeedSequence(None) again, does not spawn another child, and does
+        # not draw from W.rng. Keyed helpers must use this attribute, not a
+        # later read of the public W.random_seed.
+        W._common_seed_rng_internal_entropy = _normalize_seed_sequence_entropy(
+            order_control_seed_sequence.entropy
+        )
 
         W.TMAX = tmax   #simulation time (s)
 

@@ -1026,3 +1026,443 @@ Level 2: route choice を使わない。新しい tiebreaker を生成しない�
 ### 14.21 検索語
 
 seed RNG具体実装前調査、Cursor反証、Terminal独立確認、blockingなし、条件付き成立、random_seed None、内部entropy、単一entropy、stable hash、keyed randomization、pure function、domain separator、origin attempt、in-trip attempt、候補0件、候補1件、候補2件以上、Link別進入回数、Node訪問番号、合計0不整合、arrival tiebreaker、通常merge RNG、signalized専用ではない、_transfer_normal_merge、baseline全World、Candidate局所World、Candidate binding通過、outlink下流端、sink相当、下流Nodeへ通常進入しない、Candidate rollback、現行BATCH Level 2、mimic、追加コピー不要、N=1 BATCH、FCFS完全一致、fallback 38、旧seed結果非互換、production未実装、test未変更、次の作業、seed改修前に確認したこと、RNG実装前の問題、CandidateでLink回数を増やすか、BATCH Level 2に新状態をコピーするか、merge乱数をどこへ分けるか、random_seedがNoneのとき、route choice候補が0件のとき、arrival tiebreaker再訪、Node訪問番号が0、FCFSとN=1 BATCHが一致しなくなった、seed改修のテスト範囲、feature/common-seed-rng-foundation、fde6865
+
+## 15. 内部entropy保存とpure keyed helperの最小実装・反証・受入れ（2026-11-22）
+
+### 15.1 記録の位置づけ
+
+執筆日は2026-11-22である。本節は、**§14** で定めた最初の最小実装単位を、実際に実装し、読取り専用で反証し、限定修正し、Terminal で独立確認したあとの結果の詳細正本である。
+
+既存節との関係は次のとおりである。
+
+- **§14** は、実装前調査、反証、具体設計の正本である。本節は **§14** を削除も改変もしない。
+- **§15** は、**§14** の最初の最小実装単位を実装・反証・検証した結果の正本である。
+- `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_5.md` **§32.21** は研究契約の正本である。本節は研究契約を変更しない。
+- 同 **§32.24** は実装前の具体設計確定である。同 **§32.25** は本節に対応する全体設計上の接続である。
+- `ORDER_EXCHANGE_PROGRESS_4.md` **§21.9.25** は実装前調査完了の進捗である。同 **§21.9.26** は最初の実装単位の完了記録である。
+- route choice、arrival tiebreaker、通常 merge、Vehicle counter への接続は未実装である。
+- 現行 BATCH Level 2、Candidate、baseline の処理は変更していない。
+- 新 BATCH は未実装・未採用である。現行 BATCH は保全する。
+
+本節の受入れは、内部 entropy と pure keyed helper の最小単位だけである。4方式共通 seed／RNG 改修全体の完了ではない。
+
+current branch は `feature/common-seed-rng-foundation` である。分岐元 commit は `fde6865` である。本節の文書化時点で、この branch の remote push は未実施である。作業ツリーの無関係な既存変更と未追跡ファイルには触れない。Git 操作は利用者が Terminal で行う。Cursor は本節の文書化で Git 操作を行っていない。
+
+### 15.2 今回の実装範囲
+
+production:
+
+- `uxsim/uxsim.py`
+- `uxsim/common_seed_rng_keyed_uniform.py`
+
+test:
+
+- `tests_common_seed_rng_keyed_uniform.py`
+
+変更内容:
+
+- `World.__init__()` で内部 entropy を1回だけ確定し、保存する。
+- 新しい内部 module で、正規化済み内部 entropy、domain、順序付き key parts から `[0, 1)` の一様値を返す。
+- shared mutable RNG stream を消費しない。
+- route choice 等へはまだ接続しない。
+- 専用 test を新規作成する。
+
+変更していない範囲:
+
+- `Node.generate()`
+- `Vehicle.route_next_link_choice()`
+- Vehicle counter
+- Link 進入 helper
+- `Vehicle.record_order_control_node_arrival()`
+- `_transfer_normal_merge()`
+- 通常 merge 用 RNG
+- baseline 処理
+- Candidate 処理
+- Level 2
+- Candidate selection RNG
+- `uxsim/__init__.py`
+- research scripts
+- diagnostics
+- output
+
+### 15.3 変更したproductionとtest
+
+初回実装の時点で、新規 module は361行、新規専用 test は322行、専用 test は19件だった。この時点の成功だけで受入れ完了とはしなかった。読取り専用反証のあと、空 key の拒否、正規化入口、version と prefix の一本化、固定ベクトルを限定修正した。最終の専用 test は23件である。
+
+production の接続先は増やしていない。`uxsim/__init__.py` から新しい module は公開していない。`uxsim.py` 側の import は、先頭が `_` の別名であり、`from uxsim import *` には出ない。
+
+### 15.4 World内部entropyの実装
+
+保存位置は `World.__init__()` である。次の既存初期化のあとで保存する。
+
+- `W.rng = np.random.default_rng(seed=random_seed)`
+- `order_control_seed_sequence = np.random.SeedSequence(random_seed)`
+- `order_control_child_seed_sequence = order_control_seed_sequence.spawn(1)[0]`
+- `W.order_control_rng = np.random.default_rng(order_control_child_seed_sequence)`
+- `W.random_seed = random_seed`
+
+属性名は `W._common_seed_rng_internal_entropy` である。保存元は、上で既に作った `order_control_seed_sequence.entropy` だけである。
+
+行わないこと:
+
+- 新しい `SeedSequence(None)` を作らない。
+- 追加 spawn しない。
+- Generator から draw しない。
+- `W.rng` の state から導かない。
+- 公開の `W.random_seed` を後から読み直さない。
+- `W.random_seed` を書き換えても、保存済み内部 entropy は変えない。
+
+内部表現は、非空 tuple of non-negative Python int である。現在の NumPy 2.3.5 では、明示整数 seed でも `None` でも `SeedSequence.entropy` は Python int である。Terminal 確認では、`SeedSequence(0).entropy` は `0`、`SeedSequence(7).entropy` は `7`、`SeedSequence(None).entropy` は複数 word の配列ではなく、OS 由来の大きな Python int 1個だった。
+
+正規化 `normalize_seed_sequence_entropy()` の契約:
+
+- Python int は1要素 tuple にする。`None` の大きな Python int は分割せず、1要素 tuple にする。
+- NumPy 整数 scalar も Python int へ変換して1要素 tuple にする。反復処理へ送らない。
+- 非空の整数 iterable は、順序を保った tuple へ正規化できる。1要素 iterable `[1]` と単一整数 `1` は、どちらも `(1,)` になる。
+- この関数内で `SeedSequence` を作らない。OS entropy を再取得しない。spawn しない。Generator から draw しない。
+
+受理:
+
+- Python 非負 int
+- NumPy 非負整数 scalar
+- 非空の非負整数 iterable
+
+拒否:
+
+- bool
+- 負整数
+- float
+- str
+- bytes
+- bytearray
+- dict
+- None
+- 空 iterable
+- 不正要素を含む iterable
+- 非 iterable の不正型
+
+入力境界の例外は、原因が分かる `ValueError` である。非 iterable の生の `TypeError` は外へ漏らさない。反復できない場合は `ValueError` へ変換する。bool は最初に拒否し、`True` や `False` を整数 entropy として受理しない。`bytes`、`bytearray`、整数 key の `dict`、`str` は、反復する前に拒否する。byte 列や dict key 列を entropy の整数列として受理しない。
+
+### 15.5 pure keyed helperの実装
+
+新規 module は `uxsim/common_seed_rng_keyed_uniform.py` である。最上位 helper は `keyed_uniform_value(...)` である。
+
+入力:
+
+- 正規化済み内部 entropy
+- 非空 domain
+- 非空 tuple の key parts
+
+key parts として正式に受けるのは、非空 `str` と非負 Python `int` である。bool、負整数、空 `str`、未対応型、空 tuple は `ValueError` で拒否する。
+
+空 key を拒否する理由は、origin、in-trip、arrival tiebreaker で、Vehicle、Node、Link、訪問、attempt 等の構築漏れを隠さないためである。domain だけの派生は、この helper へ空 tuple を渡す方式にしない。将来の通常 merge 用 seed 派生は、別 helper として設計する。空 key を許可する理由にしない。
+
+pure function 契約:
+
+- module global の mutable state はない。
+- Generator はない。
+- counter はない。
+- cache はない。
+- 呼出し順に依存しない。
+- 呼出し回数に依存しない。
+- attempt を変更しない。
+- 同じ入力には同じ値を返す。
+- `W.rng` を消費しない。
+- `W.order_control_rng` を消費しない。
+
+可読性は **§15.13** に記録する。seed 正規化、validation、serialization、hash、uniform 変換は別関数のままである。
+
+### 15.6 serialization version 1
+
+定数:
+
+- `SERIALIZATION_VERSION = 1` が version の正本である。
+- `_FORMAT_PREFIX_BASE = b"UXSIM_COMMON_SEED_RNG_V"`
+- version を ASCII decimal へ変換し、base と連結して `FORMAT_PREFIX` を作る。
+- version 1 の最終 prefix は、従来どおり `b"UXSIM_COMMON_SEED_RNG_V1"` である。
+- prefix と version を別々に手入力しない。
+- 新しい version field を bytes へ追加していない。prefix の位置も変えていない。
+
+layout:
+
+- fixed prefix
+- entropy field
+- domain field
+- key-part count
+- ordered key parts
+
+field と type tag:
+
+- entropy: `E`
+- domain: `D`
+- string key: `S`
+- nonnegative integer key: `I`
+- nonnegative sign marker: `0x00`
+
+境界:
+
+- entropy word count
+- domain の UTF-8 byte 長
+- key-part count
+- string の UTF-8 byte 長
+- integer magnitude の byte 長
+- すべての複数 byte 整数は big-endian
+
+保証:
+
+- `("ab", "c")` と `("a", "bc")` を区別する。
+- `(1, 23)` と `(12, 3)` を区別する。
+- `"1"` と `1` を区別する。
+- domain の違いを区別する。
+- key 順序の違いを区別する。
+- Python 組込み `hash()` を使わない。
+- `id()` を使わない。
+- `repr()` だけに依存しない。
+
+### 15.7 SHA-256と53-bit一様値変換
+
+hash:
+
+- Python 標準ライブラリの `hashlib.sha256` を使う。
+- digest は32 bytes である。
+- process-wide の hash randomization に依存しない。
+- 外部依存はない。
+
+一様値変換:
+
+- digest の先頭8 bytes を使う。
+- big-endian の64-bit 整数として読む。
+- 上位53 bits を使う。shift は11 bits である。
+- 53-bit 整数を `2**53` で割る。
+- 結果は `0.0 <= value < 1.0` である。
+- `1.0` を返さない。53-bit 整数の最大値は `2**53 - 1` だからである。
+- NumPy Generator を作らない。
+
+53 bits の理由:
+
+- Python float の有効整数精度に対応する。
+- それ以上の bit をそのまま float へ変換すると、丸めにより `[0, 1)` の契約が不明確になる。
+- digest の残り24 bytes は一様値へ使わない。
+- SHA-256 出力の先頭53 bits を決定的に利用する。
+- modulo による偏りはない。割る数は2の累乗である。
+
+### 15.8 初回専用testと既存回帰
+
+初回実装のあと、受入れ前に利用者が Terminal で確認した。
+
+- 新規 module 361行。
+- 新規専用 test 322行。
+- 専用 test 19件。
+- `py_compile` は成功した。
+- 専用 test は成功した。
+- `tests_order_control_rng.py` は成功した。
+- `tests/test_other_functions.py::test_world_copy` は1 passed だった。
+- 6 warnings は、既存の未登録 `pytest.mark.flaky` と NumPy の test collection warning であり、今回の実装失敗ではない。
+- `git diff --check` の出力はなかった。
+
+この時点では直ちに受入れ完了とはしない。読取り専用反証レビューへ進んだ。
+
+### 15.9 読取り専用反証レビュー
+
+Cursor Grok 4.7、effort high により、production と専用 test の読取り専用反証レビューを行った。Cursor は編集、test 実行、Git 操作を行っていない。Cursor の報告は、Terminal 確認の代わりにはしていない。
+
+総合判定は「小修正後に受入れ可能」だった。blocking はなかった。現在の正しい入力で production 結果を誤らせる反例はなかった。
+
+high 相当は2件だった。
+
+1. 固定ベクトルがなく、serialization、digest、53-bit 変換の値契約が test で固定されていない。
+2. 空の `key_parts=()` が一様値を返し、将来の key 構築漏れを隠す。
+
+medium は3件だった。
+
+1. entropy 正規化入口で、NumPy 整数 scalar、bytes、dict、非 iterable 等の扱いが不十分である。
+2. `SERIALIZATION_VERSION` と `FORMAT_PREFIX` が別正本である。
+3. seed 0 等の具体的な正規化値を固定していない。
+
+low:
+
+- AST 禁止 test は、別名や間接 call を検出できない。
+- `open(...).read()` の file を明示的に閉じると読みやすい。
+- 53-bit 変換で digest の残りを使わない理由を、説明に残す。
+
+`_append_uint64()` へ追加の重複検証は不要と判断した。caller は `len(...)` と非負整数の magnitude 長だけを渡す。現実の入力では、`2**64` へ到達する前にメモリ上不可能である。過剰な実行時検証を追加しない方針と整合する。
+
+### 15.10 反証後の限定修正
+
+production module だけを次のとおり修正した。`uxsim.py` は、この限定修正では変更していない。
+
+- 空 key parts を `ValueError` にする。
+- NumPy 整数 scalar を1要素 tuple にする。
+- `str`、`bytes`、`bytearray`、`dict` を反復前に拒否する。
+- 非 iterable の `TypeError` を `ValueError` へ変換する。
+- version 定数から prefix を構築する。
+- docstring を受理範囲と拒否範囲へ同期する。
+
+専用 test:
+
+- seed 0 の内部 entropy は `(0,)` である。
+- seed 1 の内部 entropy は `(1,)` である。
+- seed 7 の内部 entropy は `(7,)` である。
+- 正規化の正常入力を直接確認する。
+- 正規化の異常入力を直接確認する。
+- 空 key を拒否する。
+- version と prefix の対応を確認する。
+- serialization version 1 の固定ベクトルを追加する。
+- AST test は `with open(...)` で file を閉じる。
+
+最終の専用 test 数は23件である。SHA-256、53-bit の式、serialization の field 順、type tag、byte order は変えていない。
+
+### 15.11 固定ベクトル転記失敗とTerminal独立修正
+
+固定ベクトルの入力は次である。
+
+- entropy: `(1,)`
+- domain: `"d"`
+- key parts: `("a", 1)`
+
+production serializer の正しい出力は、162 hex characters、81 bytes である。この不一致は production serializer の欠陥ではない。修正したのは test の固定値だけである。
+
+正しい serialization hex:
+
+`555853494d5f434f4d4d4f4e5f534545445f524e475f5631450000000000000001000000000000000101440000000000000001640000000000000002530000000000000001614900000000000000000101`
+
+正しい SHA-256 digest:
+
+`02b81eccf53766e351c8bc3b042a94a09aa4fcb972b99fcb205ab2793870e199`
+
+正しい53-bit integer:
+
+`95674047571692`
+
+正しい uniform value:
+
+`0.0106219530473175`
+
+失敗経緯:
+
+- Cursor は最初、固定 serialization hex を79 bytes で記録した。
+- Terminal の専用 test で `AssertionError` になった。
+- Terminal 比較で、actual は81 bytes、fixed は79 bytes と判明した。entropy field の8-byte 長さ表現に zero が合計2 byte 不足していた。
+- Cursor へ限定修正を依頼した。
+- Cursor は81 bytes へ修正したと報告したが、実ファイルは80 bytes だった。
+- Terminal 独立確認で再び `same = False` だった。
+- Cursor の報告と実ファイルは、2回一致しなかった。
+- 3回目は Cursor へ依頼せず、利用者が Terminal の Python スクリプトで production serializer の actual hex を直接読み、固定リテラルへ書き込んだ。
+- 書込み後、actual 162 chars、fixed 162 chars、actual 81 bytes、fixed 81 bytes、`same = True` を確認した。
+
+digest と53-bit 整数は、この81-byte の actual serialization から Terminal で独立算出し、test の固定値と一致していた。したがって digest と53-bit 整数は、hex 転記の修正では変更していない。
+
+教訓:
+
+- 長い zero 列を含む固定 hex を、人手または Cursor の転記だけで確定しない。
+- production serializer の actual bytes を Terminal で直接取得する。
+- 固定値の長さを、文字数と bytes 数で確認する。
+- Cursor の完了報告だけで終了しない。
+- test 実行前にも固定値を独立確認する。
+- test 失敗時に production を直ちに疑わず、固定ベクトル自体を比較する。
+
+### 15.12 最終検証結果
+
+最終状態で、利用者が Terminal から次を実行し、成功した。Cursor はこの最終検証を実行していない。
+
+構文:
+
+- `python -m py_compile` の対象は `uxsim/uxsim.py`、`uxsim/common_seed_rng_keyed_uniform.py`、`tests_common_seed_rng_keyed_uniform.py` である。
+- エラーはなかった。
+
+専用 test:
+
+- `python tests_common_seed_rng_keyed_uniform.py`
+- 表示は `Common seed/RNG keyed uniform tests passed.` である。
+- 23件成功した。
+
+既存 RNG 回帰:
+
+- `python tests_order_control_rng.py`
+- 表示は `Order-control RNG tests passed.` である。
+
+固定ベクトルの独立確認:
+
+- actual chars 162
+- fixed chars 162
+- actual bytes 81
+- fixed bytes 81
+- same True
+
+差分品質:
+
+- `git diff --check`
+- 出力はなかった。
+
+過去に実行済みの World copy:
+
+- `tests/test_other_functions.py::test_world_copy`
+- 1 passed
+- 6 warnings は既存 warning である。
+
+### 15.13 受入れ判定
+
+今回の最小実装単位は、次の理由で受入れ可能とする。test 成功だけを理由にはしない。
+
+- blocking 反例はなかった。
+- 反証で判明した high と medium を限定修正した。
+- fixed serialization format を固定ベクトルで監査できるようにした。固定 hex の転記失敗は、Terminal で actual bytes を直接書いて解消した。
+- 専用 test 23件が成功した。
+- 既存 RNG 回帰が成功した。
+- World copy の確認が成功した。
+- shared RNG stream を消費しない。
+- route choice 等の既存挙動へ未接続である。
+- 対象外の production を変更していない。
+- 可読性原則を維持した。
+
+可読性として維持したこと:
+
+- 正しさを最優先する。
+- Python 初心者が処理順を追える。
+- seed 正規化、validation、serialization、hash、uniform 変換を分割する。
+- 複雑な内包表記を使わない。
+- 過度な関数合成をしない。
+- 中間変数へ意味のある名前を付ける。
+- byte order と length を明示する。
+- 例外条件を明示する。
+- 高度な技巧で短縮しない。
+- docstring に研究上の意味を書く。
+
+今後の Cursor 実装指示にも、この原則を必ず含める。
+
+この受入れは、内部 entropy と pure keyed helper の最小単位だけである。4方式共通 seed／RNG 改修全体の完了ではない。
+
+### 15.14 今回未実装の範囲
+
+次は未実装である。
+
+- Vehicle の Link 別進入回数
+- origin attempt
+- in-trip attempt
+- 共通 Link 進入 helper
+- 通常 production の5進入経路への接続
+- Candidate binding 通過への接続
+- origin route choice の keyed 化
+- in-trip route choice の keyed 化
+- 候補0件、1件、2件以上の production 分岐
+- arrival tiebreaker の keyed 化
+- Node 訪問番号
+- 通常 merge 用 sequential RNG
+- `_transfer_normal_merge()` への接続
+- baseline での実使用
+- Candidate での実使用
+- N=1 BATCH 対 FCFS の統合回帰
+- 4方式統合回帰
+- performance 確認
+
+### 15.15 次の直接作業
+
+次の直接作業は、今回の Markdown 差分を、利用者が Terminal で独立確認することである。
+
+その後の予定は、必要なら文書を修正し、production 2ファイル、専用 test 1ファイル、対象 Markdown 3ファイルだけを明示して stage し、commit し、commit 結果、最新 commit、残存変更を確認することである。push はその確認後の別指示である。push 後に status、最新 commit、local と remote の一致を確認する。その後に、次の実装単位である Vehicle 状態と Link 進入 helper へ進む。
+
+利用者への指示は、その時点で次に実行する内容だけを提示する。Git 操作は利用者が Terminal で行う。Cursor には行わせない。作業ツリーの無関係な既存変更と未追跡ファイルには触れない。
+
+### 15.16 検索語
+
+内部entropy実装、pure keyed helper、common seed RNG、最小実装単位、World内部entropy、_common_seed_rng_internal_entropy、normalize_seed_sequence_entropy、keyed_uniform_value、serialization version 1、FORMAT_PREFIX、SHA-256、53-bit、2の53乗、mutable RNG非消費、W.rng非消費、order_control_rng非消費、空key拒否、NumPy整数scalar、bytes拒否、dict拒否、固定ベクトル、fixed vector、81 bytes、162 hex characters、02b81ecc、95674047571692、0.0106219530473175、固定hex転記失敗、79 bytes、80 bytes、Cursor報告不一致、Terminal直接修正、専用test 23件、既存RNG回帰、World copy、blockingなし、小修正後受入れ、route choice未接続、arrival tiebreaker未接続、normal merge未接続、Vehicle counter未実装、次の作業、seed RNGの最初の実装、固定値testが失敗した、serialization hexが足りない、Cursorの修正報告と実ファイルが違う、entropyをどこへ保存したか、shared RNGを消費しない乱数、route choice接続前の基盤、次の実装単位、feature/common-seed-rng-foundation、fde6865

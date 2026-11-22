@@ -2814,3 +2814,29 @@ Git操作は利用者がTerminalで行う。CursorにはGit操作をさせない
 その後の予定は、必要なら文書修正、対象 Markdown だけの stage と commit、commit 結果と最新 commit と残存変更の確認、push は別指示、push 後の status と最新 commit と local／remote 一致の確認、その後に内部 entropy と pure keyed helper の最小実装単位へ進むことである。利用者への指示は、その時点で次に実行する内容だけを提示する。Git 操作は利用者が Terminal で行う。Cursor には行わせない。
 
 **検索語:** seed RNG具体実装前調査、Cursor反証、Terminal独立確認、blockingなし、条件付き成立、random_seed None、内部entropy、単一entropy、stable hash、keyed randomization、pure function、domain separator、origin attempt、in-trip attempt、候補0件、候補1件、候補2件以上、Link別進入回数、Node訪問番号、合計0不整合、arrival tiebreaker、通常merge RNG、signalized専用ではない、_transfer_normal_merge、baseline全World、Candidate局所World、Candidate binding通過、outlink下流端、sink相当、下流Nodeへ通常進入しない、Candidate rollback、現行BATCH Level 2、mimic、追加コピー不要、N=1 BATCH、FCFS完全一致、fallback 38、旧seed結果非互換、production未実装、test未変更、次の作業、seed改修前に確認したこと、RNG実装前の問題、CandidateでLink回数を増やすか、BATCH Level 2に新状態をコピーするか、merge乱数をどこへ分けるか、random_seedがNoneのとき、route choice候補が0件のとき、arrival tiebreaker再訪、Node訪問番号が0、FCFSとN=1 BATCHが一致しなくなった、seed改修のテスト範囲、feature/common-seed-rng-foundation、fde6865
+
+#### 21.9.26 内部entropy保存とpure keyed helperの最小実装・反証・受入れ完了
+
+執筆日は2026-11-22である。**§21.9.25** の「production の seed／RNG 実装は未着手」は、その節の時点の記録として残す。本節は最初の実装単位が終わったあとの進捗である。
+
+詳細正本は `ORDER_EXCHANGE_SEED_RNG_AND_BATCH_IMPLEMENTATION_BRANCH_STRATEGY.md` **§15** である。全体設計の接続は `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_5.md` **§32.25** である。研究契約 **§32.21** と実装前設計 **§32.24**、実装前進捗 **§21.9.25** は変更していない。
+
+- production は2ファイルである。`uxsim/uxsim.py` と `uxsim/common_seed_rng_keyed_uniform.py` である。
+- 専用 test は1ファイルである。`tests_common_seed_rng_keyed_uniform.py` である。
+- 実装範囲は、`World.__init__()` で `W._common_seed_rng_internal_entropy` を1回保存することと、正規化済み entropy、非空 domain、非空 key tuple から `[0, 1)` の一様値を返す pure helper だけである。serialization version 1、SHA-256、上位53 bits を `2**53` で割る変換を含む。`W.rng` と `W.order_control_rng` は消費しない。
+- 初回は専用 test 19件、`py_compile`、既存 RNG test、World copy の1 passed が成功した。6 warnings は既存 warning である。この成功だけでは受入れ完了としなかった。
+- Cursor Grok 4.7、effort high の読取り専用反証は完了した。Cursor は編集、test、Git を行っていない。blocking はなかった。判定は小修正後に受入れ可能だった。high は固定ベクトルの欠如と空 key の受理だった。
+- 小修正は完了した。空 key を拒否し、NumPy 整数 scalar を1要素 tuple にし、bytes、bytearray、dict、str を反復前に拒否し、非 iterable の `TypeError` を `ValueError` にし、version から prefix を構築した。最終の専用 test は23件である。seed 0、1、7 は `(0,)`、`(1,)`、`(7,)` である。
+- 固定ベクトルの転記は2回失敗した。最初の Cursor 記録は79 bytes、production の actual は81 bytes、162 hex characters だった。2回目は Cursor が81 bytes と報告したが実ファイルは80 bytes で、Terminal の `same` は False だった。3回目は Cursor へ依頼せず、利用者が Terminal で actual hex を直接書いて固定した。書込み後は162 chars、81 bytes、`same = True` だった。これは production serializer の欠陥ではない。digest `02b81eccf53766e351c8bc3b042a94a09aa4fcb972b99fcb205ab2793870e199` と53-bit 整数 `95674047571692`、uniform value `0.0106219530473175` は、81-byte 列から Terminal で独立確認済みであり、変更していない。
+- 最終の専用 test は成功した。表示は `Common seed/RNG keyed uniform tests passed.` である。
+- 既存 RNG test は成功した。表示は `Order-control RNG tests passed.` である。`py_compile` はエラーなし、`git diff --check` は出力なし、過去の World copy は1 passed である。
+- route choice、arrival tiebreaker、通常 merge、Vehicle counter、Link 進入 helper、Level 2、Candidate、baseline は未接続のままである。新 BATCH は未実装・未採用である。4方式共通 seed／RNG 改修全体は未完了である。
+- 受入れは、blocking がないこと、反証後の限定修正、固定ベクトル、専用 test 23件、既存 RNG 回帰、shared RNG 非消費、対象外を変えていないことによる。test 成功だけを理由にしない。
+
+**次の作業:**
+
+次の直接作業は、今回の Markdown 差分を利用者が Terminal で独立確認することである。
+
+その後の予定は、必要なら文書修正、production 2ファイル、専用 test 1ファイル、対象 Markdown 3ファイルだけを明示して stage し、commit し、commit 結果、最新 commit、残存変更を確認することである。push は別指示である。push 後に status、最新 commit、local と remote の一致を確認する。その後に、次の実装単位である Vehicle 状態と Link 進入 helper へ進む。利用者への指示は、その時点で次に実行する内容だけを提示する。Git 操作は利用者が Terminal で行う。Cursor には行わせない。
+
+**検索語:** 内部entropy実装、pure keyed helper、common seed RNG、最小実装単位、World内部entropy、_common_seed_rng_internal_entropy、normalize_seed_sequence_entropy、keyed_uniform_value、serialization version 1、FORMAT_PREFIX、SHA-256、53-bit、2の53乗、mutable RNG非消費、W.rng非消費、order_control_rng非消費、空key拒否、NumPy整数scalar、bytes拒否、dict拒否、固定ベクトル、fixed vector、81 bytes、162 hex characters、02b81ecc、95674047571692、0.0106219530473175、固定hex転記失敗、79 bytes、80 bytes、Cursor報告不一致、Terminal直接修正、専用test 23件、既存RNG回帰、World copy、blockingなし、小修正後受入れ、route choice未接続、arrival tiebreaker未接続、normal merge未接続、Vehicle counter未実装、次の作業、seed RNGの最初の実装、固定値testが失敗した、serialization hexが足りない、Cursorの修正報告と実ファイルが違う、entropyをどこへ保存したか、shared RNGを消費しない乱数、route choice接続前の基盤、次の実装単位、feature/common-seed-rng-foundation、fde6865
