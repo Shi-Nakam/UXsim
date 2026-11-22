@@ -263,6 +263,7 @@ def _transfer_one_vehicle_like_uxsim(
     inlink.vehicles.popleft()
     outlink.vehicles_enter_log[virtual_time_seconds] = local_vehicle
     local_vehicle.link = outlink
+    local_vehicle.record_successful_physical_link_entry()
     local_vehicle.begin_order_control_visit_on_link_entry()
     local_vehicle.x = 0
 

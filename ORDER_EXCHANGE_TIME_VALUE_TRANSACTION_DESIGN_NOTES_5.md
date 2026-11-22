@@ -18417,3 +18417,74 @@ SHA-256 と53-bit 一様値:
 次の直接作業は、今回の Markdown 差分を利用者が Terminal で独立確認することである。その後の予定は、必要なら文書修正、production 2ファイルと専用 test 1ファイルと対象 Markdown 3ファイルだけを明示して stage、commit、commit 結果と最新 commit と残存変更の確認、push は別指示、push 後の status と最新 commit と local／remote 一致の確認、その後に Vehicle 状態と Link 進入 helper へ進むことである。利用者への指示は、その時点で次に実行する内容だけを提示する。Git 操作は利用者が Terminal で行う。Cursor には行わせない。
 
 **検索語:** 内部entropy実装、pure keyed helper、common seed RNG、最小実装単位、World内部entropy、_common_seed_rng_internal_entropy、normalize_seed_sequence_entropy、keyed_uniform_value、serialization version 1、FORMAT_PREFIX、SHA-256、53-bit、2の53乗、mutable RNG非消費、W.rng非消費、order_control_rng非消費、空key拒否、NumPy整数scalar、bytes拒否、dict拒否、固定ベクトル、fixed vector、81 bytes、162 hex characters、02b81ecc、95674047571692、0.0106219530473175、固定hex転記失敗、79 bytes、80 bytes、Cursor報告不一致、Terminal直接修正、専用test 23件、既存RNG回帰、World copy、blockingなし、小修正後受入れ、route choice未接続、arrival tiebreaker未接続、normal merge未接続、Vehicle counter未実装、次の作業、seed RNGの最初の実装、固定値testが失敗した、serialization hexが足りない、Cursorの修正報告と実ファイルが違う、entropyをどこへ保存したか、shared RNGを消費しない乱数、route choice接続前の基盤、次の実装単位、feature/common-seed-rng-foundation、fde6865
+
+## 32.26 Vehicle状態とLink物理進入helperの実装・反証・受入れ（2026-11-23）
+
+執筆日は2026-11-23である。詳細正本は `ORDER_EXCHANGE_SEED_RNG_AND_BATCH_IMPLEMENTATION_BRANCH_STRATEGY.md` **§16** である。本節は **§32.21** の研究契約と **§32.24** の実装前設計を覆さない。**§32.21** から **§32.25** の本文は削除も書換えもしない。
+
+関係:
+
+- **§32.21** は、4方式共通 seed／RNG 改修の研究契約の正本である。
+- **§32.24** は、実装前の具体設計確定である。
+- **§32.25** は、内部 entropy と pure keyed helper の実装結果である。
+- **§32.26** は、Vehicle 状態と Link 物理進入 helper の実装結果である。
+- 進捗の対応節は `ORDER_EXCHANGE_PROGRESS_4.md` **§21.9.27** である。**§21.9.26** は前の実装単位の進捗として残す。
+- **§14** は実装前設計の正本である。**§15** は内部 entropy と pure keyed helper の正本である。**§16** は本節の詳細正本である。
+
+この単位は受入れ可能になった。受入れ範囲は、Vehicle の 3 状態、Link 物理進入 helper、正式進入経路への接続、Candidate と Level 2 の接続区別だけである。4方式共通 seed／RNG 改修全体の完了ではない。route choice の keyed 化、attempt 増分、arrival tiebreaker の keyed 化、通常 merge 用 RNG は未実装である。新 BATCH は未実装・未採用である。test 成功だけを受入れ理由にはしない。
+
+production は `uxsim/uxsim.py` と `uxsim/order_control_tvt_mp_candidate_binding_transfer.py` である。専用 test は新規の `tests_vehicle_link_entry_state.py` である。初期状態、helper、origin、BATCH、両 FCFS、共通移動、loop、Candidate、Level 2、World copy、小規模行程を既存 test へ足すと責務がぼやけるため、新規ファイルにした。
+
+Vehicle へ追加した 3 状態:
+
+- `link_entry_count_by_link_name` は、`Vehicle.__init__()` の空 dict である。Vehicle ごとに別 object である。key は正式 Link 名である。value は、その Vehicle がその Link へ物理進入した累積回数である。初回は 1、同じ Link への再進入は 2 以上、進入失敗では増えない、行程終了では消さない。現在 Link だけの重複属性、Node 別 counter、`order_control_visit_id` の流用、`log_t_link` を正本にすること、Link object、object identity、新しい整数 Link ID は使わない。正式 Link 名は、World 内で一意であり、auto rename 後の正式名であり、real World と copy で同じ文字列であり、object identity に依存せず、将来の key serializer へ非空 str として渡せ、初心者が確認しやすい。
+- `current_link_route_choice_attempt_count` の初期値は 0 である。現在 Link 訪問中の確率的 in-trip route choice の試行回数である。今回は増分しない。新しい Link への物理進入で 0 に戻す。同じ Link 上の待機と Candidate 局所前進では reset しない。
+- `origin_route_choice_attempt_count` の初期値は 0 である。最初の Link へ入る前の確率的 origin route choice の試行回数である。今回は増分しない。Link 進入 helper は変更しない。最初の Link へ進入しても reset しない。今回検証したのは初期値と不変性だけである。
+
+共通 helper は `Vehicle.record_successful_physical_link_entry()` である。現在の `vehicle.link.name` の回数を 1 増やし、current Link attempt を 0 に戻す。物理進入成功後、`vehicle.link` が進入後の Link を指し、同じ進入につき 1 回、Visit 開始の前に呼ぶ。`vehicle.link is None` は原因の分かる `ValueError` である。link、origin attempt、Visit、visit id、arrival tiebreaker、route choice、append、pop、capacity、Node 訪問番号、output、audit は変えない。2 回呼べば 2 回分として数える。検出用の追加状態は持たない。caller が 1 回だけ呼ぶ。
+
+helper は `begin_order_control_visit_on_link_entry()` の内部へ入れていない。Level 2 mimic も Visit 開始を呼ぶ。Level 2 へ正式 Link 進入状態を自動接続しない。Link 進入状態と order-control Visit は別責務である。Candidate binding には接続し、Level 2 には接続しない。
+
+通常 production の 5 経路。最終確認の call site は `uxsim.py` の 5 箇所であり、すべて Link 代入のあと、Visit 開始の前である。
+
+- origin の `Node.generate()` は、進入条件成立後、`veh.link = outlink`、lane／leader、append、arrival log、`cum_arrival`、`link_arrival_time`、helper、Visit 開始、capacity 減算の順である。入口空間や流入容量不足の `break` では呼ばない。origin attempt は今回変えない。helper と Visit 開始は capacity 減算より前なので、Visit 開始の例外では counter 更新済み・capacity 未減算になり得る。この非 atomic な順序は helper 追加前からある。helper は既に成立した物理進入へ追随する。経路全体は atomic 化していない。
+- BATCH 実通過の `_transfer_vehicle` は、物理条件のあと、容量減算と pop のあと、`veh.link = outlink` の直後に 1 回である。`_can_transfer` 不成立では呼ばない。Level 2 の `_transfer_vehicle_reference` とは別である。
+- `transfer_fcfs_no_clearance()` は正式通過だけ、`veh.link = outlink` の直後、Visit 開始の直前である。容量、入口空間、物理先頭を満たさないときは呼ばない。
+- `transfer_fcfs_clearance()` は judgment が `pass` のときだけ、同じ位置である。clearance 未充足と容量不足では呼ばない。baseline collector の既存順序は変えていない。
+- `_transfer_one_vehicle_between_links()` は `vehicle.link = outlink` の直後、Visit 開始の直前である。通常 merge と TVT-MP 確定順位は、この共通関数を 1 回呼ぶ。caller 側には helper を足していない。二重計上しない。
+
+Candidate binding は `order_control_tvt_mp_candidate_binding_transfer.py` の `_transfer_one_vehicle_like_uxsim()` である。call site は 1 箇所である。順序は `local_vehicle.link = outlink`、helper、Visit 開始である。local World は real World の copy であり、dict は別 object である。局所の outlink 進入を記録し、outlink 回数を増やし、current Link attempt を 0 に戻し、origin attempt は変えない。real Vehicle へ戻さない。通常 route choice は発生しない。outlink 上を下流端まで処理し、下流端は退出、sink 相当であり、下流 Node へ通常進入させず、新しい Node Visit と通常 route choice は発生させない。共有関数のため、Candidate unbound 局所 FCFS も同じ正式な局所進入として更新される。これは契約違反ではない。
+
+非接続:
+
+- Candidate 局所前進の正式関数 `advance_tvt_mp_candidate_local_vehicles_and_register_new_arrivals` は、同一 inlink 上の前進と到着登録である。Link 別進入回数、current Link attempt、origin attempt は変えない。call site は 0 箇所である。
+- Level 2 は `_transfer_vehicle_reference`、mimic への新状態の追加コピー、Visit 開始の内部へ接続しない。mimic Vehicle は `Vehicle.__init__()` の初期値を持つ。回数は空 dict、attempts は 0、real の値は追加コピーしない。mimic 内通過後も空である。正式な将来交通 World ではない。局所通過時刻推定の限定例外であり、Candidate や将来の全 World 型 BATCH へ一般化しない。call site は 0 箇所である。
+- `Vehicle.end_trip()`、`vehicle.link = None`、進入失敗、同一 Link 上の位置更新、到着登録だけ、route choice だけ、baseline snapshot、World copy、log、rollback と snapshot 復元も非接続である。復元は新しい進入ではなく、保存済み状態を戻す。
+
+専用 test は 17 件である。名前と保証は **§16.9** と同一である。helper 直接 test は正式経路を証明しない。origin、BATCH、両 FCFS、共通移動、通常 merge、loop は正式経路を実行する。Candidate binding は copy 側だけを確認する。Candidate 局所前進は正式関数を呼ぶ。Level 2 は実動作と source-level の両方である。World copy は値の継承と dict 非共有である。単一路行程は小規模な既存交通結果の非変更である。source-level test だけを受入れ根拠にしない。
+
+初回専用 test では `py_compile` は成功し、`test_level2_reference_transfer_does_not_record_link_entry` だけが失敗した。例外は `'_mimic_up_link1' is not Node in this World` である。`_create_mimic_vehicle()` は real inlink `link1` の origin を `_mimic_up_link1`、destination を `merge` とする。test は通常 merge network を mimic に流用し、`_mimic_up_link1` がなかった。production 欠陥ではなく fixture 不整合である。test へ `_build_level2_mimic_world_for_real_merge` を追加し、`merge`、`_mimic_up_{link_name}`、`_mimic_sink_{link_name}`、real Link から mimic Link への mapping を置いた。mimic `link1` は `_mimic_up_link1` から `merge`、mimic `out` は `merge` から `_mimic_sink_out` である。production は変えていない。修正後は `py_compile` 成功、専用 17 件成功、表示は `Vehicle link-entry state tests passed.` である。
+
+既存回帰は利用者の Terminal 確認である。Candidate binding は `binding transfer scan tests passed (21 tests).` である。BATCH transfer は `Order-control batch transfer tests passed.` である。FCFS transfer は `FCFS order control transfer test passed.` である。Level 2 reference は `All 20 Level 2 reference tests passed.` である。表示された単一 call 0.20 ms は参考値であり、性能合否には使わない。存在しない `tests_order_control_batch.py` と `tests_order_control_fcfs.py` の `No such file or directory` は、案内したファイル名の誤りであり、実装 test の失敗ではない。
+
+Cursor Grok 4.7、effort high の読取り専用反証は、編集、test、`py_compile`、simulation、Git を行っていない。総合判定は、このまま受入れ可能である。blocking はない。high はない。正式接続は通常 5 経路と Candidate 局所 transfer の 1 経路である。通常 merge と TVT-MP 確定順位は共通物理移動を 1 回、binding と unbound 局所 FCFS は共通局所 transfer を 1 回呼ぶ。二重計上はない。進入失敗、Candidate 局所前進、Level 2 は非接続である。baseline fork 後の正式進入も通常 5 経路である。helper は `link is None` の最小検査で足り、過剰な重複検証と二重呼出し検出状態は持たない。medium は、Candidate 局所前進 test の対象不一致と、AST が間接呼出しを見逃し得ることである。low は、Level 2 fixture が production builder の再実装であること、unbound 専用 test がないこと、単一路 test が RNG と旅行時間を固定しないこと、0.20 ms が参考値であることである。追加必須の既存回帰はない。N=1 は統合回帰、baseline route choice は将来接続時である。
+
+Candidate 局所前進 test の対象誤りは、production 契約の不成立ではない。test 名は局所前進だが、呼んでいたのは Level 2 の `_advance_inlink_vehicles` だった。production 読取りでは helper も新 Link 代入もなかった。不一致は残さず、test だけを直した。`_advance_inlink_vehicles` の import と呼出しを削除し、`advance_tvt_mp_candidate_local_vehicles_and_register_new_arrivals` を、正式な初期化順の local state で、binding transfer が起きない条件のあと 1 回呼ぶ。local Vehicle は同じ `link1`、回数は `{"link1": 1}`、current attempt は 4、origin attempt は 2、real Vehicle も不変である。test 数は 17 のままである。Terminal で import と正式関数呼出しを独立確認した。Level 2 関数の参照は説明 comment だけである。`git diff --check` の出力はなく、専用 17 件の再実行は成功し、表示は `Vehicle link-entry state tests passed.` である。
+
+最終確認は、`uxsim.py` の 5 箇所、Candidate binding transfer の 1 箇所、Level 2 の 0 箇所、Candidate 局所前進の 0 箇所、6 接続は Link 代入後かつ Visit 開始前、3 属性の初期化、`py_compile` 成功、専用 17 件、Candidate binding 21 件、BATCH transfer、FCFS transfer、Level 2 reference 20 件、反証の blocking／high なし、test 修正後の専用 17 件、`git diff --check` 出力なしである。広範な simulation、benchmark、N=1 回帰は実行していない。
+
+受入れ理由は、経路網羅、5 経路と Candidate 局所 transfer、二重計上なし、失敗時非接続、helper の狭い責務、Level 2 非接続、局所前進非接続、copy の値継承と dict 非共有、専用 17 件、直接関係する既存回帰、blocking／high なし、test 対象誤りの修正と正式関数での再検証、route choice 等への未接続、可読性の維持である。正しさ、処理順、3属性の comment、helper 2点、6接続位置の統一、意味のある中間名、内包表記と過度な合成を避けること、例外の明示、test の準備・実行・期待の分離、実 World と Candidate と Level 2 の区別、Terminal 独立確認、test 成功だけで受入れないこと、を維持した。今後の Cursor 実装指示にもこの原則を含める。
+
+未実装のまま残るもの:
+
+- origin と in-trip の route choice keyed 化、origin attempt と in-trip attempt の増分、候補 0 件／1 件／2 件以上の production 分岐変更
+- arrival tiebreaker の keyed 化、Node 訪問番号の実利用
+- 通常 merge 用 sequential RNG と `_transfer_normal_merge()` の乱数変更
+- baseline route choice と Candidate route choice での実使用
+- N=1 BATCH 対 FCFS の完全一致、4方式統合回帰、performance 確認
+
+**§14.17** の順序を再確認した。次の実装単位は origin と in-trip route choice の keyed 化である。arrival tiebreaker、通常 merge 用 RNG、統合回帰はその後である。
+
+次の直接作業は、今回の Markdown 差分を利用者が Terminal で独立確認することである。その後の予定は、必要なら文書修正、production 2 ファイルと専用 test 1 ファイルと対象 Markdown 3 ファイルだけを明示して stage、commit、commit 結果と最新 commit と残存変更の確認、push は別指示、push 後の status と最新 commit と local／remote 一致の確認、その後に origin と in-trip route choice の keyed 化へ進むことである。利用者への指示は、その時点で次に実行する内容だけを提示する。Git 操作は利用者が Terminal で行う。Cursor には行わせない。
+
+**検索語:** Vehicle状態、Link進入回数、link_entry_count_by_link_name、current_link_route_choice_attempt_count、origin_route_choice_attempt_count、record_successful_physical_link_entry、物理進入成功、Link名key、正式Link名、origin進入、BATCH実通過、FCFS clearanceなし、FCFS clearanceあり、_transfer_one_vehicle_between_links、Candidate binding、Candidate unbound FCFS、Candidate局所前進非接続、Level 2非接続、_transfer_vehicle_reference、begin_order_control_visit_on_link_entry、helperをVisit内部へ入れない、二重計上なし、進入失敗非接続、loop再進入、World copy、dict非共有、Level 2 fixture、_mimic_up_link1、_mimic_sink_out、Candidate局所前進test対象誤り、advance_tvt_mp_candidate_local_vehicles_and_register_new_arrivals、専用test 17件、Candidate binding 21件、BATCH transfer、FCFS transfer、Level 2 reference 20件、blockingなし、highなし、route choice未接続、attempt増分未実装、arrival tiebreaker未実装、normal merge RNG未実装、次の作業、feature/common-seed-rng-foundation、ef008ce、VehicleがLinkへ何回入ったか、同じLinkへ再進入した回数、新しいLinkへ入るとattemptが0になる、origin attemptをresetしない、CandidateでLink回数を増やすか、Level 2でLink回数を増やすか、Link進入helperの接続漏れ、Link進入回数が二重になった、Candidate局所前進でcounterが変わった、Level 2 mimicへcounterをコピーするか、test名と実際の関数が違った、_mimic_up_link1がない、Vehicle状態実装後の次作業

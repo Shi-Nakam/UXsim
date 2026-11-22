@@ -419,6 +419,7 @@ class Node:
 
                         outlink.cum_arrival[-1] += s.W.DELTAN
                         veh.link_arrival_time = s.W.T*s.W.DELTAT
+                        veh.record_successful_physical_link_entry()
                         veh.begin_order_control_visit_on_link_entry()
 
                         outlink.capacity_in_remain -= s.W.DELTAN
@@ -1604,6 +1605,7 @@ class Node:
             inlink.vehicles.popleft()
             outlink.vehicles_enter_log[s.W.T * s.W.DELTAT] = veh
             veh.link = outlink
+            veh.record_successful_physical_link_entry()
             veh.begin_order_control_visit_on_link_entry()
             veh.x = 0
 
@@ -1919,6 +1921,7 @@ class Node:
                 inlink.vehicles.popleft()
                 outlink.vehicles_enter_log[s.W.T*s.W.DELTAT] = veh
                 veh.link = outlink
+                veh.record_successful_physical_link_entry()
                 veh.begin_order_control_visit_on_link_entry()
                 veh.x = 0
 
@@ -2112,6 +2115,7 @@ class Node:
                 inlink.vehicles.popleft()
                 outlink.vehicles_enter_log[s.W.T*s.W.DELTAT] = veh
                 veh.link = outlink
+                veh.record_successful_physical_link_entry()
                 veh.begin_order_control_visit_on_link_entry()
                 veh.x = 0
 
@@ -2216,6 +2220,7 @@ class Node:
         inlink.vehicles.popleft()
         outlink.vehicles_enter_log[s.W.T*s.W.DELTAT] = vehicle
         vehicle.link = outlink
+        vehicle.record_successful_physical_link_entry()
         vehicle.begin_order_control_visit_on_link_entry()
         vehicle.x = 0
 
@@ -3132,6 +3137,14 @@ class Vehicle:
         s.order_control_batch_assignments = {}
         s.order_control_visit_id = 0
         s.order_control_current_visit = None
+        # Route-choice identity for a later keyed draw. These counters do not
+        # choose a link. Link entry counts accumulate for the life of the
+        # vehicle. The in-trip attempt is only the tries at the end of the
+        # link the vehicle is on now. The origin attempt is only the tries
+        # before the first link. This unit does not increment either attempt.
+        s.link_entry_count_by_link_name = {}
+        s.current_link_route_choice_attempt_count = 0
+        s.origin_route_choice_attempt_count = 0
 
         s.id = len(s.W.VEHICLES)
         if name != None:
@@ -3697,6 +3710,44 @@ class Vehicle:
             s._compute_order_control_earliest_arrival_timestep_for_current_link()
         )
         s.order_control_earliest_arrival_timesteps[node.name] = earliest_arrival_timestep
+
+    def record_successful_physical_link_entry(s):
+        """
+        Record one successful physical entry onto the vehicle's current link.
+
+        Call this once after the caller has set ``vehicle.link`` to the link
+        that was actually entered, and before
+        ``begin_order_control_visit_on_link_entry``. The two steps are
+        separate. Order-control visit state counts eligible node visits.
+        This method counts physical link entries for a later route-choice
+        key. A second call for the same entry counts a second entry.
+
+        The current link name is the dict key. The same link name increases
+        again when the vehicle physically re-enters it. A failed entry must
+        not call this method. Leaving the link, including ``end_trip``, does
+        not remove past counts.
+
+        This method does not choose a route, does not increment the origin
+        attempt or the in-trip attempt, and does not start an order-control
+        visit. It resets the in-trip attempt to 0 because a new link visit
+        has started. Waiting on the same link must not call this method, so
+        that wait does not clear the attempt.
+        """
+        if s.link is None:
+            raise ValueError(
+                f"Vehicle {s.name}: record_successful_physical_link_entry "
+                "requires vehicle.link to be the entered link. link is None, "
+                "so this call is not a successful physical link entry."
+            )
+        entered_link_name = s.link.name
+        previous_entry_count = s.link_entry_count_by_link_name.get(
+            entered_link_name,
+            0,
+        )
+        s.link_entry_count_by_link_name[entered_link_name] = (
+            previous_entry_count + 1
+        )
+        s.current_link_route_choice_attempt_count = 0
 
     def begin_order_control_visit_on_link_entry(s):
         """
