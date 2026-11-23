@@ -1978,3 +1978,534 @@ low は次である。
 ### 16.18 検索語
 
 Vehicle状態、Link進入回数、link_entry_count_by_link_name、current_link_route_choice_attempt_count、origin_route_choice_attempt_count、record_successful_physical_link_entry、物理進入成功、Link名key、正式Link名、origin進入、BATCH実通過、FCFS clearanceなし、FCFS clearanceあり、_transfer_one_vehicle_between_links、Candidate binding、Candidate unbound FCFS、Candidate局所前進非接続、Level 2非接続、_transfer_vehicle_reference、begin_order_control_visit_on_link_entry、helperをVisit内部へ入れない、二重計上なし、進入失敗非接続、loop再進入、World copy、dict非共有、Level 2 fixture、_mimic_up_link1、_mimic_sink_out、Candidate局所前進test対象誤り、advance_tvt_mp_candidate_local_vehicles_and_register_new_arrivals、専用test 17件、Candidate binding 21件、BATCH transfer、FCFS transfer、Level 2 reference 20件、blockingなし、highなし、route choice未接続、attempt増分未実装、arrival tiebreaker未実装、normal merge RNG未実装、次の作業、feature/common-seed-rng-foundation、ef008ce、VehicleがLinkへ何回入ったか、同じLinkへ再進入した回数、新しいLinkへ入るとattemptが0になる、origin attemptをresetしない、CandidateでLink回数を増やすか、Level 2でLink回数を増やすか、Link進入helperの接続漏れ、Link進入回数が二重になった、Candidate局所前進でcounterが変わった、Level 2 mimicへcounterをコピーするか、test名と実際の関数が違った、_mimic_up_link1がない、Vehicle状態実装後の次作業
+
+## 17. origin・in-trip route choice keyed化の実装・反証・受入れ（2026-11-23）
+
+### 17.1 記録の位置づけ
+
+執筆日は2026-11-23である。本節は、origin route choice と in-trip route choice の keyed 化、専用 test、初回 fixture 失敗、既存回帰、読取り専用反証、反証後の test 補強、Terminal 独立確認、最終受入れ結果の詳細正本である。
+
+既存節との関係は次のとおりである。
+
+- **§14** は、4方式共通 seed／RNG 改修の具体実装前設計の正本である。本節は **§14** から **§16** の本文を削除も置換もしない。
+- **§15** は、内部 entropy 保存と pure keyed helper の実装・反証・受入れ結果の正本である。
+- **§16** は、Vehicle 状態と Link 物理進入 helper の実装・反証・受入れ結果の正本である。
+- **§17** は、origin・in-trip route choice keyed 化の実装・反証・受入れ結果の正本である。
+- `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_5.md` **§32.21** は研究契約の正本である。本節は研究契約を変更しない。
+- 同 **§32.24** は実装前の具体設計確定である。同 **§32.25** は内部 entropy と pure keyed helper の実装結果である。同 **§32.26** は Vehicle 状態と Link 進入 helper の実装結果である。同 **§32.27** は本節に対応する全体設計上の接続である。**§32.21** と **§32.24** から **§32.26** の本文は削除も置換もしない。
+- 進捗の対応節は `ORDER_EXCHANGE_PROGRESS_4.md` **§21.9.28** である。**§21.9.27** は前の実装単位の進捗として残す。
+
+今回の実装は、4方式共通 seed／RNG 改修全体の完了ではない。arrival tiebreaker の keyed 化、Node 訪問番号の production 利用、通常 merge 用 RNG は未実装である。N=1 BATCH 対 FCFS 回帰と 4方式統合回帰は未実行である。新 BATCH は未実装・未採用である。
+
+受入れは、Terminal の独立確認と読取り専用反証のあと、反証で判明した test 不足を補強し、補強後の専用 test を Terminal で再確認してから行った。test 成功だけを受入れ理由にはしない。Cursor の報告を無条件には採用していない。Cursor は Git 操作を行っていない。
+
+### 17.2 今回の実装範囲
+
+受入れ範囲は次だけである。
+
+- origin route choice の keyed 化。対象は `Node.generate()` である。
+- in-trip route choice の keyed 化。対象は `Vehicle.route_next_link_choice()` である。
+- route choice の category selection helper。
+- origin attempt と in-trip attempt の増分。
+- 候補 0 件、1 件、2 件以上の明示分岐。
+- route choice からの mutable RNG 非消費。
+
+arrival tiebreaker、Node 訪問番号の production 利用、通常 merge 用 RNG、Candidate selection RNG、N=1 完全一致、4方式統合回帰は、この単位の範囲外である。
+
+### 17.3 変更したproductionとtest
+
+production は 2 ファイルである。
+
+- `uxsim/uxsim.py`
+- 新規 `uxsim/common_seed_rng_route_choice.py`
+
+test は新規の root-level ファイル 1 件である。
+
+- `tests_common_seed_rng_route_choice.py`
+
+新規 module にした理由は次である。
+
+- generic な serialization と hash は、受入れ済みの `uxsim/common_seed_rng_keyed_uniform.py` に残す。UXsim 固有の route choice category selection 契約は別 module に置く。
+- origin と in-trip で、候補選択の処理を共有する。
+- `uxsim.py` へ確率境界の検査を詰め込まない。
+- `uxsim/__init__.py` から公開しない。public API へ露出しない。
+- World も Vehicle も変更しない pure helper にする。attempt の増分は caller が行う。
+
+専用 test を新規ファイルにした理由は、origin、in-trip、候補 0 件・1 件・2 件以上、hard deterministic、specified route、World copy、process 順序独立、helper 境界、候補順序、loop 再進入を、既存の keyed uniform test や Vehicle Link 進入 test の責務へ混在させないためである。
+
+反証後に変えた production は、`Vehicle.__init__()` の 3 属性付近の説明 comment だけである。route choice の処理、key、domain、attempt 更新位置、候補形成、helper 本体は反証後に変えていない。
+
+### 17.4 既存route choice制御フロー
+
+#### origin
+
+対象は `Node.generate()` である。
+
+- generation queue の先頭 Vehicle について、呼出しごとに候補を構築する。
+- 選択した Link を専用属性へ保存しない。進入成功時に `veh.link` へ設定する。
+- 入口空間または流入容量が足りないときは `break` する。同じ `generate()` 呼出しの中では再抽選しない。
+- 次 timestep に、再び候補形成と選択を行う。候補が 2 件以上なら、次の origin attempt を使う。
+
+origin Node 自体に outlink がない場合は、`Node.generate()` の処理に入らない。queue に残る既存挙動である。候補 0 件の成功としては扱わない。
+
+#### in-trip
+
+対象は `Vehicle.route_next_link_choice()` である。正式な caller は `Vehicle.update()` である。
+
+- Vehicle が Link 終端にいるあいだ、timestep ごとに呼ばれる。終端到達前には呼ばれない。
+- 結果は既存の `route_next_link` へ保存する。
+- 通過できず同じ Link 終端に残れば、次 timestep に再選択する。同一 Link 訪問中の再選択は次の attempt を使う。
+- 新しい Link へ物理進入すると、**§16** の Link 進入 helper が in-trip attempt を 0 に戻す。Link 進入回数は累積し、route choice では変更しない。origin attempt は Link 進入では戻さない。
+
+`single_trip` で目的地に着いているときは、この関数を呼ばず行程終了の準備へ進む。`trip_abort` が有効な dead-end も、update 側で `route_next_link = None` とし、この関数を呼ばない。関数自体も、Node に outlink がないときは `route_next_link = None` とし、attempt は増やさない。
+
+#### 候補順序
+
+- prefer も avoid もないときは、outlink の登録順である。
+- prefer を適用したあとは、Link 名の昇順である。
+- avoid を適用したあとも、Link 名の昇順である。
+- origin と in-trip で同じ規則である。
+- key には候補集合も候補順序も入れない。同じ uniform を、その event 時点の候補分布へ適用する。候補集合または順序が違えば、同じ uniform でも選ばれる Link は異なり得る。その差は抑制しない。
+
+### 17.5 route choice用domain
+
+固定 domain は次である。
+
+- origin は `origin_route_choice` である。定数名は `ORIGIN_ROUTE_CHOICE_DOMAIN` である。
+- in-trip は `in_trip_route_choice` である。定数名は `IN_TRIP_ROUTE_CHOICE_DOMAIN` である。
+
+origin と in-trip は domain を共有しない。arrival tiebreaker とも、通常 merge とも共有しない。caller が自由文字列で domain を渡す一般 API にはしない。定数は内部 module に置く。domain が違うと、同じ key parts でも uniform が違うことを、専用 test が確認する。
+
+### 17.6 共通category selection helper
+
+module は `uxsim/common_seed_rng_route_choice.py` である。関数は `select_route_choice_candidate(candidate_links, preference_weights, uniform_value)` である。
+
+責務は次である。
+
+- caller が渡した候補順を維持する。関数内では sort しない。
+- candidate Link object を copy しない。
+- World を読まない。Vehicle を読まない。
+- attempt を変更しない。
+- mutable RNG を使わない。新しい Generator も作らない。
+
+候補数ごとの契約は次である。
+
+- 候補 0 件は `ValueError` である。空 list を成功にしない。
+- 候補 1 件は、その唯一候補を直接返す。weight も uniform も読まない。draw なし契約である。
+- 候補 2 件以上では、preference を float へ変換する。候補数と weight 数が違うときは `ValueError` である。負値、NaN、正の無限大、負の無限大、bool は拒否する。uniform は exact な Python `float` で、範囲は `[0, 1)` である。範囲外、NaN、bool、整数は `ValueError` である。
+- preference の合計が正のときは、`weight / total` の累積確率を候補順に作る。最初に `u < cumulative_probability` となる候補を選ぶ。通常の浮動小数点丸めで最後まで閾値を超えない場合だけ、最後の候補を明示的な remainder とする。この remainder は空 list を成功にしない。
+- 合計が 0 のときは、`int(u * candidate_count)` の等確率 slot である。`u * n` が `n` に丸まる場合の上限補正はある。state は変えない。
+
+有限 weight の合計自体が overflow して `inf` になる極端値は、通常の route preference の範囲外である。今回の受入れを妨げる反例にはしない。
+
+正の合計で最後の候補へ落ちる remainder 分岐は、helper の source 上の契約として残す。安全に到達させる直接 test は追加していない。helper 本体は、この分岐を test しやすくするために変更していない。
+
+### 17.7 origin route choice keyed化
+
+key は、Vehicle 正式名、origin Node 正式名、その時点の `origin_route_choice_attempt_count` である。
+
+具体形は `(veh.name, origin_node.name, origin_attempt)` である。domain は `origin_route_choice` である。保存済み内部 entropy と domain は、keyed uniform の引数として key parts の外に渡す。
+
+契約は次である。
+
+- Vehicle 名は auto rename 後の正式名である。Node 名は正式名である。
+- object identity を使わない。Vehicle ID も Node の整数 ID も使わない。
+- 現在の attempt を、uniform を得る前に key へ使う。
+- 確率選択が正常に返ったあと、入口判定より前に attempt を 1 増やす。
+- 入口空間または流入容量が足りず進入できなくても、attempt は戻さない。
+- 同じ `generate()` 呼出しの中では、容量不足の `break` のあと再抽選しない。
+- 次 timestep の再抽選は次の attempt である。
+- 候補 0 件、候補 1 件、hard deterministic、specified route では attempt を増やさない。
+- preference、key、category 選択の途中で例外が出た場合、attempt は進めない。
+
+選択 Link は、成功して進入するまで Vehicle の専用属性へ保存しない。失敗した選択は捨て、attempt だけが残る。これは **§14.8** の契約である。
+
+### 17.8 in-trip route choice keyed化
+
+key は、Vehicle 正式名、current Link 正式名、その Link への累積進入回数、その時点の `current_link_route_choice_attempt_count` である。
+
+具体形は `(vehicle.name, current_link.name, link_entry_count, in_trip_attempt)` である。domain は `in_trip_route_choice` である。
+
+契約は次である。
+
+- Link 名は正式名である。Link object identity も Link の整数 ID も使わない。
+- `order_control_visit_id` は key に使わない。
+- 進入回数が dict に無いとき、または値が int でないとき、または 1 未満のときは `ValueError` である。missing も 0 も 1 へ補正しない。
+- この検査は、確率的な候補 2 件以上の分岐だけで行う。候補 1 件、hard deterministic、specified route は key を作らないので、この検査をしない。
+- `route_next_link` へ選択結果を保存したあとで、attempt を 1 増やす。
+- 同じ Link 終端に残れば、次 timestep は次の attempt である。`route_next_link` は再選択で上書きされる。
+- 新しい Link へ正式進入すると、in-trip attempt だけが 0 に戻る。Link 進入回数は route choice では変更しない。
+- 候補 0 件、候補 1 件、hard deterministic、specified route では attempt を増やさない。
+
+方式間で、同じ Link 終端に留まる timestep 数が違うと、通過時点で使われる attempt 番号は異なり得る。契約が揃えるのは、同じ attempt 番号の uniform である。待ち時間そのものや、通過に使った attempt 番号を方式間で強制一致させる契約ではない。**§14.9** は、終端に留まる各 timestep の再選択を別 attempt とする。N=1 の完全一致は、後続の統合回帰で確認する。
+
+### 17.9 候補0件・1件・2件以上の契約
+
+#### 候補0件
+
+origin または in-trip で、Node に outlink はあるが、prefer または avoid のあとで 0 件になる場合は次である。
+
+- `ValueError` である。
+- keyed draw はない。
+- attempt は増えない。
+- mutable RNG は消費しない。
+- 空 list を成功にする fallback はない。
+- 既存の `route_next_link` は消さない。`Vehicle.__init__()` はこの属性を常設しない。例外経路でも新しく代入しない。
+
+正当な in-trip dead-end は別である。Node 自体に outlink がないとき、`route_next_link = None` とし、attempt は増やさない。prefer／avoid 後の 0 件と、Node に outlink がない dead-end を、同じ成功経路にはしない。
+
+#### 候補1件
+
+- 唯一の候補を直接選ぶ。
+- keyed uniform はない。SHA-256 もない。
+- mutable RNG は消費しない。
+- attempt は増えない。
+- preference の正規化はない。
+
+#### 候補2件以上
+
+- 現在の attempt を含む explicit key を使う。
+- pure keyed uniform を 1 つ使う。
+- 既存の候補順を維持する。
+- 既存の preference 比を使う。合計が正ならその重み、合計が 0 なら等確率である。
+- 選択が成功したあとだけ、attempt を 1 増やす。
+
+### 17.10 hard deterministicとspecified route
+
+hard deterministic は次を維持する。
+
+- 既存の最大 preference 選択である。同点のときは候補順の先頭である。
+- keyed draw はない。attempt は増えない。mutable RNG は消費しない。
+- preference の負値や NaN の検査を、新しい category helper へ移していない。既存の `max` の経路に残す。
+
+specified route は次を維持する。
+
+- origin は `specified_route[0]` である。
+- in-trip は `len(log_t_link) - 1` の既存索引である。route progression の式は変えていない。
+- 候補と一致しないときは、既存の `ValueError` である。
+- keyed draw はない。attempt は増えない。Link 進入回数を key に使わない。
+
+空の specified route list による既存の `IndexError` などは、今回の単位の外である。今回新しく導入した欠陥ではない。
+
+### 17.11 mutable RNG非消費
+
+確率的 route choice は、次を使わない。
+
+- `W.rng.choice()`
+- `W.order_control_rng`
+- Python 標準 `random`
+- built-in `hash()`
+- 新しい NumPy Generator
+
+使うのは、保存済み内部 entropy、domain、explicit key から得る pure keyed uniform だけである。
+
+route choice 以外の既存の mutable RNG は変えていない。Vehicle や Node や Link の auto rename、到着 tiebreaker、通常 merge の `W.rng.choice` は、この単位の置換対象ではない。
+
+意図した非互換は次である。
+
+- 確率的 route choice が選ぶ具体的な Link。旧 seed の選択結果との数値一致は要求しない。
+- shared RNG の消費順。route choice が `W.rng` を進めなくなる。
+
+維持する契約は次である。
+
+- 候補集合
+- 候補順序
+- preference 比
+- 合計 0 の等確率
+- hard deterministic
+- specified route
+- dead-end
+- route progression
+- 候補 1 件の決定論性
+- 交通処理そのもの
+
+### 17.12 copy・baseline・Candidate・Level 2
+
+- World copy は dill である。`World.__init__` は再実行されない。保存済み内部 entropy は copy される。World 名は entropy に入っていない。
+- Vehicle copy は、attempt と Link 進入回数を属性として引き継ぐ。
+- 同じ key、同じ候補、同じ重みなら、original と copy は同じ Link を選ぶ。
+- copy 側で増えた attempt は、real または original へ戻らない。
+- baseline 全 World が通常の `generate()` と `Vehicle.update()` を使うとき、keyed route choice が働く。fork 時点の attempt を引き継ぐ。baseline 開始 timestep は key に入れない。
+- Candidate 局所前進は、通常の `Vehicle.update()` も `route_next_link_choice()` も呼ばない。
+- Candidate binding transfer は route choice を呼ばない。outlink の下流端から新しい route choice は発生させない。
+- Level 2 は route choice を呼ばない。
+- Candidate と Level 2 へ、新しい route choice helper の接続は追加していない。
+
+### 17.13 専用testの初期18件
+
+新規 test は `tests_common_seed_rng_route_choice.py` である。最初の test 数は 18 件である。具体的な uniform の小数は、World event の期待値として固定していない。明示 key を `keyed_uniform_value()` へ渡し、production の category helper を使わない test 側の累積規則で期待 Link を求める。
+
+初期 18 件の名前と保証は次である。
+
+1. `test_origin_and_in_trip_domains_are_distinct_fixed_strings`。domain 定数が `origin_route_choice` と `in_trip_route_choice` であり、同じ parts でも domain が違えば uniform が違う。
+2. `test_origin_zero_candidates_does_not_draw_or_increment_attempt`。prefer と avoid で origin 候補が 0 件になると `ValueError` であり、attempt は 0、queue に残り、mutable RNG は不変である。
+3. `test_origin_one_candidate_selects_without_keyed_draw`。唯一の outlink を直接進入し、origin attempt は 0、mutable RNG は不変である。
+4. `test_origin_two_candidates_uses_current_attempt_and_not_world_rng`。key は Vehicle 名、origin Node 名、attempt 0 である。選択は test 側の累積規則と一致し、attempt は 1、mutable RNG は不変である。
+5. `test_origin_zero_preference_uses_equal_categories`。preference 合計 0 は等確率 slot であり、attempt は 1 になる。
+6. `test_origin_rejected_entry_keeps_the_consumed_attempt`。進入できなくても attempt は 1 のままである。次の成功は attempt 1 の key を使う。
+7. `test_origin_negative_preference_does_not_increment_attempt`。負の preference は選択前に `ValueError` であり、attempt は 0 のままである。
+8. `test_in_trip_dead_end_sets_no_next_link_without_an_attempt`。outlink がない Node では `route_next_link = None` であり、attempt は 0、進入回数 dict は空、mutable RNG は不変である。
+9. `test_in_trip_zero_final_candidates_does_not_increment_attempt`。prefer と avoid で in-trip 候補が 0 件になると `ValueError` であり、attempt は増えない。初回 fixture の不備と修正は **§17.14** に書く。
+10. `test_in_trip_one_candidate_does_not_increment_attempt`。唯一候補を直接選び、attempt は 0、進入回数は不変、mutable RNG は不変である。
+11. `test_in_trip_two_candidates_uses_link_name_entry_count_and_attempt`。key は Vehicle 名、Link 名、進入回数 1、attempt 0 である。同じ Link 上の次の呼出しは attempt 1 である。進入回数は 1 のままである。
+12. `test_in_trip_missing_or_zero_entry_count_stops_without_increment`。進入回数が無いときと 0 のときは `ValueError` であり、0 を 1 にせず、attempt は 0 である。
+13. `test_loop_reentry_changes_the_in_trip_uniform`。初期版は、同じ attempt 0 で進入回数 1 と 2 の uniform が違うことを見た。回数 2 と attempt の 0 戻しは、正式な物理再進入ではなく、test が dict と attempt を手で書き換えていた。正式経路への置換は **§17.17** に書く。test 名は維持した。
+14. `test_hard_deterministic_keeps_max_preference_without_an_attempt`。最大 preference を選び、同点は登録順の先頭であり、attempt は増えず、mutable RNG は不変である。
+15. `test_specified_route_does_not_draw_or_increment_attempt`。origin と in-trip の指定 Link を選び、不一致は `ValueError` であり、attempt は増えない。
+16. `test_world_copy_matches_and_keeps_attempts_separate`。copy は entropy を引き継ぐ。copy 側の origin attempt だけが進み、同じ key なら同じ Link 名になる。
+17. `test_vehicle_choice_does_not_depend_on_call_order`。同じ seed の別 World で、呼出し順を入れ替えても各 Vehicle の選択は同じである。World 名は key に入らない。
+18. `test_single_path_trip_still_reaches_the_only_destination`。hard deterministic の一本道で目的地へ到達し、進入回数は各 Link 1、両 attempt は 0 である。
+
+この 18 件の成功は、helper の異常値、登録順と名前順の差、正式な loop 再進入を、すべて直接証明するものではない。その不足は反証で指摘し、**§17.17** で補強した。
+
+### 17.14 初回fixture失敗と修正
+
+初回の Terminal 確認では、`py_compile` は成功した。専用 test は最初の失敗で停止した。その時点では 18 件全体の成否は未確定である。
+
+失敗した test は `test_in_trip_zero_final_candidates_does_not_increment_attempt` である。
+
+例外は `AttributeError: 'Vehicle' object has no attribute 'route_next_link'` である。
+
+原因は test fixture である。production 欠陥ではない。
+
+- `route_next_link` は `Vehicle.__init__()` の常設属性ではない。
+- production は、prefer／avoid 後 0 件の `ValueError` の前に、`route_next_link` を変更しない。
+- test は例外の前に既存値を設定していなかった。
+- 例外のあとで `vehicle.route_next_link is None` を参照したため、属性未作成の `AttributeError` になった。
+
+修正は test だけである。次の各例外経路で、同一 World の実在 Link object を、事前の `route_next_link` として設定した。
+
+- prefer／avoid 後の 0 件
+- missing の Link 進入回数
+- zero の Link 進入回数
+
+例外のあとで確認するのは、同じ Link object が維持されること、attempt が 0 であること、Link 進入回数が不変であること、mutable RNG が不変であることである。`None` を事前値にしても属性未作成は解消するが、既存選択を消さないことを見るため、実在 Link を sentinel にした。
+
+修正後の Terminal 確認は、`py_compile` 成功、専用 18 件成功、表示は `Common seed/RNG route choice tests passed.` である。
+
+空白誤記と疑った表示については、Terminal で `grep -F` により実ファイルを確認した。`but that link has no` と `The count is` は、実ファイル上では空白が入っており、修正不要だった。Terminal 表示の詰まりを、実ファイルの誤記と誤認して修正指示を出さない。以後は固定文字列で確認する。
+
+### 17.15 既存回帰
+
+初期 18 件の成功のあと、利用者の Terminal で次を実行した。
+
+既存 route choice 検証は `python tests/test_verification_route_choice.py` である。エラー、Traceback、標準失敗出力はなく終了した。この script は成功メッセージを表示しない形式である。旧 seed の個別 Link を固定する test ではなく、複数経路の均衡を見る。確率的選択の具体 Link が旧結果と違いうることは、**§17.11** の意図した非互換である。この終了をもって、候補集合や均衡の意味まで壊れたとは扱わない。
+
+keyed uniform 基盤は `python tests_common_seed_rng_keyed_uniform.py` である。表示は `Common seed/RNG keyed uniform tests passed.` である。
+
+Vehicle Link 進入状態は `python tests_vehicle_link_entry_state.py` である。表示は `Vehicle link-entry state tests passed.` である。
+
+### 17.16 読取り専用反証レビュー
+
+Cursor Grok 4.7、effort high で、読取り専用の反証レビューを実施した。Cursor は編集、test、`py_compile`、simulation、Git を行っていない。
+
+総合判定は、このまま受入れ可能、である。blocking はない。high はない。この判定は、当時の production と初期 18 件に対する読取りである。受入れそのものは、その後の test 補強と Terminal 再確認を経ている。Cursor 報告をそのまま正本の最終判定にはしていない。
+
+読取りで成立した主要事項は次である。
+
+- origin の key と domain
+- in-trip の key と domain
+- 候補 0 件、1 件、2 件以上の分岐
+- attempt の更新位置
+- origin の進入失敗後も attempt を戻さないこと
+- missing と 0 の進入回数を 1 へ補正しないこと
+- hard deterministic の維持
+- specified route の維持
+- mutable RNG の非消費
+- copy と baseline の継承
+- Candidate と Level 2 への新しい接続がないこと
+
+方式差による待ち timestep 数は、blocking にしなかった。同じ Link 終端での待ち timestep 数が方式間で違うと、通過時に使う attempt 番号はずれ得る。**§14.9** は各再選択を別 attempt とする。揃えるのは同じ attempt 番号の uniform である。待ち時間や使用 attempt 番号の強制一致は契約ではない。N=1 の完全一致は統合回帰で確認する。
+
+反証で判明した medium は次である。
+
+1. 当時の fork fixture は、登録順と Link 名順が同じだった。prefer／avoid 後の名前 sort を削除しても、18 件では検出できない。
+2. 候補 1 件などで helper を呼ばないことは、mutable RNG の比較だけでは証明できない。helper は pure であり、RNG を変えない。
+3. loop 再訪 test は、正式な物理再進入を使わず、進入回数と attempt を手で変えていた。
+4. category helper の異常値と境界を、18 件では直接検証していなかった。
+
+low は次である。
+
+- taxi の専用 test はない。
+- in-trip の preference 合計 0 は、origin 側の等確率 test だけである。
+- zero count の例外のあと、mutable RNG を再比較していない。
+- specified route の test は、複数 Link の progression ではない。
+- `Vehicle.__init__()` の comment が、前単位の「attempt を増やさない」のままだった。
+- 有限 weight の合計が overflow する極端値は、通常の route preference の範囲外である。
+- route choice 毎の hash の性能は未測定である。合否条件ではない。
+
+反証は、受入れ前の追加必須回帰はない、とした。そのうえで、medium のうち test 契約上重要な事項と、古い comment は、受入れ前に補強した。helper 非呼出しを monkeypatch で証明する test、taxi、in-trip 合計 0 の重複、specified route の複数 Link、performance は追加していない。
+
+### 17.17 反証後の4点補強
+
+production の route choice ロジックは変更していない。変更したのは `tests_common_seed_rng_route_choice.py` と、`uxsim/uxsim.py` の Vehicle の 3 属性付近の comment だけである。
+
+#### 候補順序test
+
+追加 test は `test_prefer_uses_link_name_order_not_registration_order` である。名前は prefer だけに合わせた。この test は avoid を実行しない。
+
+fixture は次である。
+
+- 登録順は `z_link`、その次が `a_link` である。
+- Link 名順は `a_link`、その次が `z_link` である。
+- prefer は両方を含む。
+- weight は両方 1.0 である。
+
+等重みでは、`[0, 1)` のどの uniform でも、登録順と名前順の期待 Link は反対になる。test は explicit origin key で uniform を得て、両期待 Link が異なることを、`Node.generate()` の前に assert する。production の結果は名前順の期待 Link である。origin attempt は 1 である。`W.rng` と `W.order_control_rng` は不変である。
+
+avoid 後の sort は、origin と in-trip で prefer と同じ `sorted(..., key=name)` である。読取りで確認し、専用 test は重複追加していない。
+
+#### helperの異常値
+
+追加 test は `test_route_choice_candidate_helper_rejects_invalid_weights_and_uniforms` である。`select_route_choice_candidate()` を直接呼ぶ。
+
+確認したのは、候補 0 件の `ValueError`、候補 1 件が weight と uniform を読まず唯一候補を返すこと、weight 数が足りないこと、weight 数が多いこと、負値、NaN、`inf`、`-inf`、`True`、`False`、uniform の `-0.1`、`1.0`、NaN、`True`、整数 `0` である。候補 1 件が不正値を読まないことは、draw なし契約であると test の comment に書いた。
+
+#### helperの境界
+
+追加 test は `test_route_choice_candidate_helper_handles_boundaries` である。
+
+確認したのは、正の weight で `u=0.0` が先頭であること、等 weight で `nextafter(0.5, 0.0)` が先頭であること、`u=0.5` が 2 番目であること、合計 0 の 3 候補で `0.0`、`0.5`、`0.9` が slot 0、1、2 であること、候補順を維持することである。比較は strict `<` である。
+
+最後の候補への浮動小数点 remainder fallback は、安全に到達させる直接 test を追加していない。helper 本体は変更していない。
+
+#### 正式loop再進入
+
+既存の `test_loop_reentry_changes_the_in_trip_uniform` を、同名のまま置換した。追加件数には数えない。
+
+経路は `feeder`、`loop_in`、`hop`、`return_feeder`、再び `loop_in` である。`n2` の登録順は `hop`、`spur` であり、両方を候補にする。使用関数は `Node._transfer_one_vehicle_between_links()` と `Vehicle.route_next_link_choice()` である。choice が `spur` を選んでも、帰還の移動は `hop` を指定する。transfer は route choice をしない。
+
+この test 単独で確認するのは次である。
+
+1. `loop_in` への初回の正式進入で、回数は 1、attempt は 0 である。
+2. in-trip 選択のあと、attempt は 1 である。選択は進入回数 1、attempt 0 の key と一致する。
+3. `hop` への正式進入で、attempt は 0 に戻る。
+4. `return_feeder` への正式進入でも、attempt は 0 である。
+5. `loop_in` への正式再進入で、回数は 2、attempt は 0 である。
+6. 進入回数 1・attempt 0 と、進入回数 2・attempt 0 の uniform は異なる。
+7. 2 回目の production 選択は、進入回数 2 の key と一致する。
+8. `order_control_visit_id` は 0 のままである。key の第 3 要素は進入回数 2 であり、visit id ではない。
+9. origin attempt は 0 のままである。
+10. mutable RNG は不変である。
+
+#### comment
+
+`Vehicle.__init__()` の comment を、現在の実装に合わせた。属性名、初期値、配置は変えていない。
+
+明記した内容は次である。
+
+- Link 進入回数は Vehicle の生涯で累積する。
+- current Link attempt は、現在 Link の訪問中に行った確率的 in-trip 選択の回数である。
+- origin attempt は、最初の Link へ入る前の確率的 origin 選択の回数である。
+- 候補 2 件以上の通常の確率選択が成功したときだけ、`Node.generate()` と `route_next_link_choice()` が増やす。
+- 候補 0 件、候補 1 件、hard deterministic、specified route では増やさない。
+- 新しい Link への物理進入で 0 に戻すのは、current Link attempt だけである。
+- origin attempt は Link 進入では reset しない。
+
+### 17.18 最終専用test 21件
+
+補強後の test 数は 21 件である。初期 18 件は残している。loop test は同名置換であり、21 件への加算ではない。
+
+追加 3 件は次である。
+
+1. `test_prefer_uses_link_name_order_not_registration_order`
+2. `test_route_choice_candidate_helper_rejects_invalid_weights_and_uniforms`
+3. `test_route_choice_candidate_helper_handles_boundaries`
+
+最終の Terminal 確認は次である。
+
+- `py_compile` は成功した。
+- 専用 21 件は成功した。
+- 表示は `Common seed/RNG route choice tests passed.` である。
+- `git diff --check` の出力はなかった。
+- helper module は反証後に変更していない。
+- route choice の production 処理は反証後に変更していない。変更した production 箇所は、`Vehicle.__init__()` の説明 comment だけである。
+
+### 17.19 最終検証結果
+
+利用者の Terminal で確認済みの結果は、次の順である。
+
+1. 初回は `py_compile` 成功のあと、**§17.14** の fixture 不備で専用 test が停止した。18 件全体はその時点では未確定である。
+2. fixture 修正後、`py_compile` 成功、専用 18 件成功、表示は `Common seed/RNG route choice tests passed.` である。
+3. 既存回帰は **§17.15** のとおり成功した。`tests/test_verification_route_choice.py` は成功メッセージのない終了である。
+4. 読取り専用反証は **§17.16** のとおり、編集も実行もしていない。blocking と high はなかった。
+5. 反証後の補強のあと、`py_compile` 成功、専用 21 件成功、同じ成功表示、`git diff --check` の出力なし、である。
+
+Cursor の反証と、Terminal の実行確認は別である。21 件の成功は、remainder fallback の直接実行や、N=1 の完全一致を含むものではない。
+
+### 17.20 受入れ判定
+
+今回の実装単位を受入れ可能とする。理由は次である。
+
+- origin と in-trip の event key が、**§14.8**、**§14.9**、**§32.21.3** と一致する。
+- domain を分離した。
+- object identity や整数 ID に依存しない。
+- 候補 0 件、1 件、2 件以上を明示的に分岐した。
+- 確率的な候補 2 件以上だけが draw する。
+- attempt は選択成功のあとだけ増える。
+- origin の進入失敗後も attempt を戻さない。
+- in-trip の Link 進入回数の欠落を、1 へ暗黙補正しない。
+- hard deterministic と specified route を維持した。
+- mutable RNG を route choice で消費しない。
+- copy と baseline で同じ event key を使える。
+- Candidate と Level 2 へ誤って接続していない。
+- 初回の `AttributeError` を production 欠陥と混同しなかった。
+- 専用 18 件と既存回帰が成功した。
+- 反証で blocking と high はなかった。
+- 反証で判明した test の穴を、21 件へ補強した。
+- 正式な loop 再進入、回数の増加、attempt の reset、再選択を、1 本の test で横断した。
+- test 成功だけを受入れ理由にしていない。
+- Python 初心者が、候補分岐と attempt の位置を追える。
+
+受入れ範囲は、origin route choice の keyed 化、in-trip route choice の keyed 化、route choice category helper、attempt 増分、候補別分岐、mutable RNG 非消費、である。4方式共通 seed／RNG 改修全体の完了ではない。
+
+### 17.21 今回未実装の範囲
+
+次は未実装、または未完了である。
+
+- arrival tiebreaker の keyed 化
+- Node 訪問番号の production 利用
+- 通常 merge 用の sequential RNG
+- `_transfer_normal_merge()` の乱数変更
+- Candidate selection RNG の変更
+- N=1 BATCH 対 FCFS の完全一致
+- 4方式統合回帰
+- route choice の hash 性能確認
+- taxi の専用 route choice test
+- specified route の複数 Link progression の追加 test
+- baseline の full simulation
+- Candidate の full simulation
+- performance benchmark
+
+新 BATCH は未実装・未採用である。正の合計で最後の候補へ落ちる remainder の直接 test も、この単位にはない。
+
+### 17.22 実装完了までの現在地
+
+完了した単位は次である。
+
+1. 内部 entropy 保存と pure keyed uniform helper。詳細は **§15** である。
+2. Vehicle の Link 進入状態と物理進入追跡。詳細は **§16** である。
+3. origin・in-trip route choice の keyed 化。詳細は本 **§17** である。
+
+残る単位は次である。
+
+4. arrival tiebreaker の keyed 化と、Node 訪問番号の production 利用。
+5. 通常 merge 用 RNG の分離。
+6. N=1 BATCH 対 FCFS と、4方式統合回帰。
+7. 最終正本記録と、全体受入れ。
+
+次の実装単位を完了すると、主要 production 接続の残りは、通常 merge 用 RNG と統合回帰になる。
+
+### 17.23 次の直接作業
+
+次の直接作業は、今回の Markdown 差分を、利用者が Terminal で独立確認することである。
+
+その後の予定は、必要なら文書を修正し、production 2 ファイル、専用 test 1 ファイル、Markdown 3 ファイルだけを明示して stage し、commit し、commit 結果、最新 commit、残存変更を確認することである。push はその確認後の別指示である。push 後に status、最新 commit、local と remote の一致を確認する。その後に、次の実装単位である arrival tiebreaker の keyed 化と、Node 訪問番号の production 利用へ進む。
+
+production 2 ファイルは `uxsim/uxsim.py` と `uxsim/common_seed_rng_route_choice.py` である。専用 test 1 ファイルは `tests_common_seed_rng_route_choice.py` である。Markdown 3 ファイルは、本ファイル、`ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_5.md`、`ORDER_EXCHANGE_PROGRESS_4.md` である。
+
+利用者への指示は、その時点で次に実行する内容だけを提示する。Git 操作は利用者が Terminal で行う。Cursor には行わせない。作業ツリーの無関係な既存変更と未追跡ファイルには触れない。`research_scripts/route_choice_rng_diagnostic.py` も、この記録の対象外である。
+
+### 17.24 検索語
+
+origin route choice keyed化、in-trip route choice keyed化、origin_route_choice、in_trip_route_choice、origin_route_choice_attempt_count、current_link_route_choice_attempt_count、link_entry_count_by_link_name、Vehicle正式名、origin Node正式名、current Link正式名、累積進入回数、explicit key、pure keyed uniform、common seed RNG、candidate 0件、candidate 1件、candidate 2件以上、dead-end、prefer、avoid、Link名順、登録順、route preference、合計0、等確率、hard deterministic、specified route、mutable RNG非消費、W.rng非消費、W.order_control_rng非消費、select_route_choice_candidate、World copy、baseline fork、Candidate非接続、Level 2非接続、初回fixture失敗、route_next_link未作成、AttributeError、sentinel Link、専用test 18件、反証、blockingなし、highなし、候補順序test、helper境界test、正式loop再進入、専用test 21件、Common seed/RNG route choice tests passed、tests/test_verification_route_choice.py、keyed uniform回帰、Vehicle Link進入状態回帰、arrival tiebreaker未実装、Node訪問番号未利用、normal merge RNG未実装、N=1未実行、4方式統合回帰未実行、feature/common-seed-rng-foundation、3a4c3ee、originでどの乱数を使うか、Link終端で毎timestep経路を再選択する、capacity不足でorigin attemptを戻すか、同じLinkでroute choiceを何回試したか、loop再進入で同じ乱数になるか、candidateが1本なら乱数を使うか、candidateが0本ならどうなるか、preference合計0ならどう選ぶか、preferとavoid後の順序、登録順とLink名順、hard deterministicでattemptが増えるか、specified routeでattemptが増えるか、W.rngを経路選択で消費するか、baseline copyで同じ経路選択になるか、Candidateで通常route choiceを行うか、Level 2でroute choiceを行うか、route_next_linkのfixtureが失敗した、test名と実際の対象、route choice実装後の次作業、実装完了までの残り区分

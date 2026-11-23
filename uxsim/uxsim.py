@@ -23,6 +23,12 @@ from uxsim.order_control_tvt_mp_actual_passage import (
 )
 from .common_seed_rng_keyed_uniform import (
     normalize_seed_sequence_entropy as _normalize_seed_sequence_entropy,
+    keyed_uniform_value as _keyed_uniform_value,
+)
+from .common_seed_rng_route_choice import (
+    IN_TRIP_ROUTE_CHOICE_DOMAIN as _IN_TRIP_ROUTE_CHOICE_DOMAIN,
+    ORIGIN_ROUTE_CHOICE_DOMAIN as _ORIGIN_ROUTE_CHOICE_DOMAIN,
+    select_route_choice_candidate as _select_route_choice_candidate,
 )
 
 
@@ -383,15 +389,54 @@ class Node:
                             outlinks = [veh.specified_route[0]]
                         else:
                             raise ValueError(f"Vehicle {veh.name}: specified route {veh.specified_route} is inconsistent at the origin node {s.name}. Debug info: {outlinks=}")
-                    
-                    preference = np.array([veh.route_pref[l.id] for l in outlinks], dtype=float)
-                    if s.W.hard_deterministic_mode == False:
-                        if sum(preference) > 0:
-                            outlink = s.W.rng.choice(outlinks, p=preference/sum(preference))
-                        else:
-                            outlink = s.W.rng.choice(outlinks)
+
+                    if len(outlinks) == 0:
+                        raise ValueError(
+                            f"Vehicle {veh.name} at origin node {s.name}: "
+                            "no candidate outlink remains after links_prefer and "
+                            "links_avoid. This is not a successful origin route "
+                            "choice, so origin_route_choice_attempt_count "
+                            "is not increased."
+                        )
+
+                    # A specified first link is already one candidate. It is
+                    # not a probabilistic draw, even when hard deterministic
+                    # mode is off. Hard deterministic mode keeps the existing
+                    # maximum-preference rule and does not consume an attempt.
+                    # One remaining candidate is taken directly. Two or more
+                    # candidates in ordinary mode draw one keyed uniform, then
+                    # increment the origin attempt before the entry check. A
+                    # later capacity rejection does not return that attempt.
+                    if veh.specified_route is not None:
+                        outlink = outlinks[0]
+                    elif s.W.hard_deterministic_mode:
+                        preference = np.array(
+                            [veh.route_pref[l.id] for l in outlinks],
+                            dtype=float,
+                        )
+                        outlink = max(
+                            zip(preference, outlinks),
+                            key=lambda item: item[0],
+                        )[1]
+                    elif len(outlinks) == 1:
+                        outlink = outlinks[0]
                     else:
-                        outlink = max(zip(preference, outlinks), key=lambda x:x[0])[1]
+                        preference = np.array(
+                            [veh.route_pref[l.id] for l in outlinks],
+                            dtype=float,
+                        )
+                        origin_attempt = veh.origin_route_choice_attempt_count
+                        origin_uniform = _keyed_uniform_value(
+                            s.W._common_seed_rng_internal_entropy,
+                            _ORIGIN_ROUTE_CHOICE_DOMAIN,
+                            (veh.name, s.name, origin_attempt),
+                        )
+                        outlink = _select_route_choice_candidate(
+                            outlinks,
+                            preference,
+                            origin_uniform,
+                        )
+                        veh.origin_route_choice_attempt_count = origin_attempt + 1
 
                     if (len(outlink.vehicles) < outlink.number_of_lanes or outlink.vehicles[-outlink.number_of_lanes].x > outlink.delta_per_lane*s.W.DELTAN) and outlink.capacity_in_remain >= s.W.DELTAN:
                         #受け入れ可能な場合，リンク優先度に応じて選択
@@ -3137,11 +3182,17 @@ class Vehicle:
         s.order_control_batch_assignments = {}
         s.order_control_visit_id = 0
         s.order_control_current_visit = None
-        # Route-choice identity for a later keyed draw. These counters do not
-        # choose a link. Link entry counts accumulate for the life of the
-        # vehicle. The in-trip attempt is only the tries at the end of the
-        # link the vehicle is on now. The origin attempt is only the tries
-        # before the first link. This unit does not increment either attempt.
+        # Route-choice identity. These counters do not themselves choose a
+        # link. Link entry counts accumulate for the life of the vehicle.
+        # The in-trip attempt is the number of probabilistic choices at the
+        # end of the link the vehicle is on now. The origin attempt is the
+        # number of probabilistic choices before the first link.
+        # Node.generate increments the origin attempt, and
+        # route_next_link_choice increments the in-trip attempt, only after
+        # an ordinary choice among two or more candidates succeeds. Zero
+        # candidates, one candidate, hard deterministic mode, and a specified
+        # route do not increment either attempt. Entering a new link resets
+        # only the in-trip attempt. The origin attempt is not reset on entry.
         s.link_entry_count_by_link_name = {}
         s.current_link_route_choice_attempt_count = 0
         s.origin_route_choice_attempt_count = 0
@@ -3792,30 +3843,98 @@ class Vehicle:
     def route_next_link_choice(s):
         """
         Select a next link from the current link.
+
+        A node with no outgoing link keeps the existing dead-end result
+        ``route_next_link = None``. That is not a successful choice and does
+        not use an attempt. If prefer or avoid removes every outgoing link,
+        the call stops with ``ValueError`` instead of treating the empty
+        list as a choice.
+
+        A specified route and hard deterministic mode keep their existing
+        rules and do not draw a keyed value. One remaining candidate is
+        that link. Two or more candidates in ordinary mode use the current
+        link name, the cumulative entry count of that link, and the current
+        in-trip attempt. The attempt increases only after the next link is
+        stored. Waiting on the same link does not reset it.
         """
         if s.specified_route == None:
             if s.dest != s.link.end_node:
                 outlinks = list(s.link.end_node.outlinks.values())
 
-                if len(outlinks):
-
+                if len(outlinks) == 0:
+                    s.route_next_link = None
+                else:
                     #if links_prefer is given and available at the node, select only from the links in the list. if links_avoid is given, select links not in the list.
                     if set(outlinks) & set(s.links_prefer):
                         outlinks = sorted(set(outlinks) & set(s.links_prefer), key=lambda l:l.name)
                     if set(outlinks) & set(s.links_avoid):
                         outlinks = sorted(set(outlinks) - set(s.links_avoid), key=lambda l:l.name)
 
-                    preference = np.array([s.route_pref[l.id] for l in outlinks], dtype=float)
-                    if s.W.hard_deterministic_mode == False:
-                        if sum(preference) > 0:
-                            s.route_next_link = s.W.rng.choice(outlinks, p=preference/sum(preference))
-                        else:
-                            s.route_next_link = s.W.rng.choice(outlinks)
+                    if len(outlinks) == 0:
+                        raise ValueError(
+                            f"Vehicle {s.name} on link {s.link.name}: no "
+                            "candidate outlink remains after links_prefer "
+                            "and links_avoid. This is not a successful in-trip "
+                            "route choice, so "
+                            "current_link_route_choice_attempt_count is not "
+                            "increased."
+                        )
+                    if s.W.hard_deterministic_mode:
+                        preference = np.array(
+                            [s.route_pref[l.id] for l in outlinks],
+                            dtype=float,
+                        )
+                        s.route_next_link = max(
+                            zip(preference, outlinks),
+                            key=lambda item: item[0],
+                        )[1]
+                    elif len(outlinks) == 1:
+                        s.route_next_link = outlinks[0]
                     else:
-                        s.route_next_link = max(zip(preference, outlinks), key=lambda x:x[0])[1]
-
-                else:
-                    s.route_next_link = None
+                        current_link_name = s.link.name
+                        if current_link_name not in s.link_entry_count_by_link_name:
+                            raise ValueError(
+                                f"Vehicle {s.name} is choosing the next link "
+                                f"from {current_link_name}, but that link has no "
+                                "entry count. A missing count is not treated as "
+                                "the first visit."
+                            )
+                        link_entry_count = s.link_entry_count_by_link_name[
+                            current_link_name
+                        ]
+                        if type(link_entry_count) is not int or link_entry_count < 1:
+                            raise ValueError(
+                                f"Vehicle {s.name} on link {current_link_name} "
+                                "has link entry count "
+                                f"{link_entry_count!r}. In-trip route choice "
+                                "requires the cumulative count recorded at "
+                                "physical entry, which starts at 1. The count is "
+                                "not corrected upward."
+                            )
+                        preference = np.array(
+                            [s.route_pref[l.id] for l in outlinks],
+                            dtype=float,
+                        )
+                        in_trip_attempt = s.current_link_route_choice_attempt_count
+                        in_trip_uniform = _keyed_uniform_value(
+                            s.W._common_seed_rng_internal_entropy,
+                            _IN_TRIP_ROUTE_CHOICE_DOMAIN,
+                            (
+                                s.name,
+                                current_link_name,
+                                link_entry_count,
+                                in_trip_attempt,
+                            ),
+                        )
+                        chosen_outlink = _select_route_choice_candidate(
+                            outlinks,
+                            preference,
+                            in_trip_uniform,
+                        )
+                        s.route_next_link = chosen_outlink
+                        s.current_link_route_choice_attempt_count = (
+                            in_trip_attempt + 1
+                        )
         else:
             outlinks = list(s.link.end_node.outlinks.values())
             if len(outlinks):
