@@ -11,6 +11,8 @@ import numpy as np
 import pytest
 
 from uxsim import World
+from uxsim.common_seed_rng_arrival_tiebreaker import ARRIVAL_TIEBREAKER_DOMAIN
+from uxsim.common_seed_rng_keyed_uniform import keyed_uniform_value
 
 
 def _prepare_network(W):
@@ -116,6 +118,24 @@ def _sync_vehicle_on_link_end(W, veh, link, out_link, *, timestep):
     veh.route_next_link = out_link
     if veh not in link.vehicles:
         link.vehicles.append(veh)
+
+
+def _entry_total_on_node_inlinks(node, vehicle):
+    """Test-side sum of this vehicle's entries on links that end at node."""
+    entry_total = 0
+    for inlink in node.inlinks.values():
+        if inlink.name in vehicle.link_entry_count_by_link_name:
+            entry_total = entry_total + vehicle.link_entry_count_by_link_name[inlink.name]
+    return entry_total
+
+
+def _keyed_arrival_tiebreaker(world, vehicle_name, node_name, node_visit_number):
+    assert ARRIVAL_TIEBREAKER_DOMAIN == "arrival_tiebreaker"
+    return keyed_uniform_value(
+        world._common_seed_rng_internal_entropy,
+        "arrival_tiebreaker",
+        (vehicle_name, node_name, node_visit_number),
+    )
 
 
 def _assert_rng_streams_match(W_a, W_b):
@@ -257,31 +277,37 @@ def test_first_visit_records_matching_values():
     veh_ref = W_ref.addVehicle("orig1", "dest", 0, name="veh_first_ref")
     merge, _, _ = _setup_first_visit_ready(W, veh)
     _setup_first_visit_ready(W_ref, veh_ref)
+    assert veh.name == "veh_first"
+    assert merge.name == "merge"
+    assert _entry_total_on_node_inlinks(merge, veh) == 1
 
     veh.record_order_control_node_arrival(merge)
 
     visit = veh.order_control_current_visit
+    expected_tiebreaker = _keyed_arrival_tiebreaker(W, veh.name, "merge", 1)
     assert visit["arrival_time"] == W.T * W.DELTAT
-    assert visit["arrival_tiebreaker"] is not None
+    assert visit["arrival_tiebreaker"] == expected_tiebreaker
     assert veh.order_control_node_arrival_times["merge"] == visit["arrival_time"]
     assert veh.order_control_node_arrival_tiebreakers["merge"] == visit["arrival_tiebreaker"]
-    assert visit["arrival_tiebreaker"] == W_ref.rng.random()
     _assert_rng_streams_match(W, W_ref)
 
 
-def test_first_visit_tiebreaker_uses_existing_rng_stream():
+def test_first_visit_tiebreaker_uses_keyed_uniform_without_consuming_rng_streams():
     W = _build_merge_world("arrival_rng_stream")
     W_ref = _build_merge_world("arrival_rng_stream_ref")
     veh = W.addVehicle("orig1", "dest", 0, name="veh_rng")
     W_ref.addVehicle("orig1", "dest", 0, name="veh_rng_ref")
     merge, _, _ = _setup_first_visit_ready(W, veh)
     _setup_first_visit_ready(W_ref, W_ref.VEHICLES["veh_rng_ref"])
+    assert veh.name == "veh_rng"
+    assert merge.name == "merge"
+    assert _entry_total_on_node_inlinks(merge, veh) == 1
 
     veh.record_order_control_node_arrival(merge)
 
-    expected_tiebreaker = W_ref.rng.random()
+    expected_tiebreaker = _keyed_arrival_tiebreaker(W, veh.name, "merge", 1)
     assert veh.order_control_current_visit["arrival_tiebreaker"] == expected_tiebreaker
-    np.testing.assert_allclose(W.rng.random(), W_ref.rng.random())
+    _assert_rng_streams_match(W, W_ref)
 
 
 def test_same_visit_reregistration_is_noop():
@@ -344,14 +370,22 @@ def test_revisit_updates_current_visit_only():
     W_ref.addVehicle("orig1", "dest", 0, name="veh_revisit_ref")
     merge, first_hist_time, first_hist_tie = _complete_first_visit_and_loop_back(W, veh)
     _complete_first_visit_and_loop_back(W_ref, W_ref.VEHICLES["veh_revisit_ref"])
+    assert veh.name == "veh_revisit"
+    assert merge.name == "merge"
+    assert veh.link.name == "link2"
+    assert veh.link.end_node.name == "merge"
+    assert veh.link_entry_count_by_link_name["link1"] == 1
+    assert veh.link_entry_count_by_link_name["link2"] == 1
+    assert _entry_total_on_node_inlinks(merge, veh) == 2
+    assert veh.order_control_current_visit["arrival_tiebreaker"] is None
 
     W.T = 40
     veh.record_order_control_node_arrival(merge)
 
     visit = veh.order_control_current_visit
+    expected_tiebreaker = _keyed_arrival_tiebreaker(W, veh.name, "merge", 2)
     assert visit["arrival_time"] == W.T * W.DELTAT
-    assert visit["arrival_tiebreaker"] is not None
-    assert visit["arrival_tiebreaker"] == W_ref.order_control_rng.random()
+    assert visit["arrival_tiebreaker"] == expected_tiebreaker
     assert veh.order_control_node_arrival_times["merge"] == first_hist_time
     assert veh.order_control_node_arrival_tiebreakers["merge"] == first_hist_tie
     _assert_rng_streams_match(W, W_ref)
@@ -392,8 +426,8 @@ def _run_first_visit_and_revisit(W, veh):
 def test_revisit_tiebreaker_reproducible_for_same_seed():
     W1 = _build_revisit_world("arrival_repro_1")
     W2 = _build_revisit_world("arrival_repro_2")
-    veh1 = W1.addVehicle("orig1", "dest", 0, name="veh_repro_1")
-    veh2 = W2.addVehicle("orig1", "dest", 0, name="veh_repro_2")
+    veh1 = W1.addVehicle("orig1", "dest", 0, name="veh_repro")
+    veh2 = W2.addVehicle("orig1", "dest", 0, name="veh_repro")
     tie1 = _run_first_visit_and_revisit(W1, veh1)
     tie2 = _run_first_visit_and_revisit(W2, veh2)
     np.testing.assert_allclose(tie1, tie2)
@@ -433,7 +467,7 @@ TESTS = [
     test_partial_arrival_time_only_raises,
     test_partial_tiebreaker_only_raises,
     test_first_visit_records_matching_values,
-    test_first_visit_tiebreaker_uses_existing_rng_stream,
+    test_first_visit_tiebreaker_uses_keyed_uniform_without_consuming_rng_streams,
     test_same_visit_reregistration_is_noop,
     test_revisit_updates_current_visit_only,
     test_revisit_reregistration_is_noop,

@@ -18546,3 +18546,72 @@ Cursor Grok 4.7、effort high の読取り専用反証は、編集、test、`py_
 次の直接作業は、今回の Markdown 差分を利用者が Terminal で独立確認することである。その後の予定は、必要なら文書修正、production 2 ファイルと専用 test 1 ファイルと Markdown 3 ファイルだけを明示して stage、commit、commit 結果と最新 commit と残存変更の確認、push は別指示、push 後の status と最新 commit と local／remote 一致の確認、その後に arrival tiebreaker の keyed 化と Node 訪問番号の production 利用へ進むことである。利用者への指示は、その時点で次に実行する内容だけを提示する。Git 操作は利用者が Terminal で行う。Cursor には行わせない。
 
 **検索語:** origin route choice keyed化、in-trip route choice keyed化、origin_route_choice、in_trip_route_choice、origin_route_choice_attempt_count、current_link_route_choice_attempt_count、link_entry_count_by_link_name、Vehicle正式名、origin Node正式名、current Link正式名、累積進入回数、explicit key、pure keyed uniform、common seed RNG、candidate 0件、candidate 1件、candidate 2件以上、dead-end、prefer、avoid、Link名順、登録順、route preference、合計0、等確率、hard deterministic、specified route、mutable RNG非消費、W.rng非消費、W.order_control_rng非消費、select_route_choice_candidate、World copy、baseline fork、Candidate非接続、Level 2非接続、初回fixture失敗、route_next_link未作成、AttributeError、sentinel Link、専用test 18件、反証、blockingなし、highなし、候補順序test、helper境界test、正式loop再進入、専用test 21件、Common seed/RNG route choice tests passed、tests/test_verification_route_choice.py、keyed uniform回帰、Vehicle Link進入状態回帰、arrival tiebreaker未実装、Node訪問番号未利用、normal merge RNG未実装、N=1未実行、4方式統合回帰未実行、feature/common-seed-rng-foundation、3a4c3ee、originでどの乱数を使うか、Link終端で毎timestep経路を再選択する、capacity不足でorigin attemptを戻すか、同じLinkでroute choiceを何回試したか、loop再進入で同じ乱数になるか、candidateが1本なら乱数を使うか、candidateが0本ならどうなるか、preference合計0ならどう選ぶか、preferとavoid後の順序、登録順とLink名順、hard deterministicでattemptが増えるか、specified routeでattemptが増えるか、W.rngを経路選択で消費するか、baseline copyで同じ経路選択になるか、Candidateで通常route choiceを行うか、Level 2でroute choiceを行うか、route_next_linkのfixtureが失敗した、test名と実際の対象、route choice実装後の次作業、実装完了までの残り区分
+
+## 32.28 arrival tiebreaker keyed化とNode訪問番号のproduction利用の実装・反証・受入れ（2026-11-23）
+
+執筆日は2026-11-23である。詳細正本は `ORDER_EXCHANGE_SEED_RNG_AND_BATCH_IMPLEMENTATION_BRANCH_STRATEGY.md` **§18** である。本節は **§32.21** の研究契約と **§32.24** の実装前設計を覆さない。**§32.21** から **§32.27** の本文は削除も書換えもしない。
+
+関係:
+
+- **§32.21** は、4方式共通 seed／RNG 改修の研究契約の正本である。
+- **§32.24** は、実装前の具体設計確定である。
+- **§32.25** は、内部 entropy と pure keyed helper の実装結果である。
+- **§32.26** は、Vehicle 状態と Link 進入 helper の実装結果である。
+- **§32.27** は、origin・in-trip route choice keyed 化の実装結果である。
+- **§32.28** は、arrival tiebreaker keyed 化と Node 訪問番号の production 利用の実装結果である。
+- 進捗の対応節は `ORDER_EXCHANGE_PROGRESS_4.md` **§21.9.29** である。**§21.9.28** は前の実装単位の進捗として残す。
+- **§14** は実装前設計の正本である。**§15** は内部 entropy と pure keyed helper の正本である。**§16** は Vehicle 状態と Link 進入 helper の正本である。**§17** は route choice keyed 化の正本である。**§18** は本節の詳細正本である。
+
+この単位だけを受入れ可能とした。4方式共通 seed／RNG 改修全体の完了ではない。通常 merge 用 RNG は未実装である。N=1 BATCH 対 FCFS 回帰と 4方式統合回帰は未実行である。新 BATCH は未実装・未採用である。test 成功だけを受入れ理由にはしない。Cursor の報告を無条件には正本化していない。Cursor は Git 操作を行っていない。
+
+production は `uxsim/uxsim.py` と、新規の `uxsim/common_seed_rng_arrival_tiebreaker.py` である。`uxsim/order_control_tvt_mp_candidate_local_vehicle_advance.py` は、production 処理ではなく、古い説明コメント 4 行だけを更新した。専用 test は新規の `tests_common_seed_rng_arrival_tiebreaker.py` の 19 件である。既存の `tests_order_control_current_visit_arrival.py` は 13 件のまま、旧 mutable RNG 期待を keyed 契約へ更新した。
+
+新規 module は、Node 訪問番号の算出と arrival key の構築だけを持つ。World、Vehicle、Visit は変えない。real World、baseline full World、World copy で共有する。public API へ出さない。route choice helper とも generic hash helper とも責務を分ける。専用 test を別ファイルにしたのは、Node 訪問番号、arrival key、初回と再訪、current Visit、legacy 初回台帳、mutable RNG 非消費、World copy、方式非依存、Candidate／Level 2 の接続契約を、keyed uniform、Link 進入、route choice の各 test へ混ぜないためである。
+
+正式 recorder は `Vehicle.record_order_control_node_arrival(node)` である。主な caller は `Vehicle.update()` と、Candidate 局所前進の既存到着登録である。Link 終端で `incoming_vehicles` へ追加し、current Visit があり、arrival 未記録のときに呼ぶ。物理進入だけでは生成しない。Visit 開始 helper は `tiebreaker=None` の Visit を作るだけである。終端前には生成しない。eligible でない Node と `order_control_type="none"` は何もしない。current Visit なし、Node 不一致、arrival time と tiebreaker の片側だけは不整合である。両方記録済みなら、Node 訪問番号の算出前に return する。同じ Visit では再生成しない。
+
+`record_order_control_node_first_arrival(node)` に production caller は確認されなかった。legacy 初回台帳だけを保存し、current Visit へは保存しない。keyed 化済みで mutable RNG は消費しない。今回は削除しない。将来の整理候補であり、受入れは妨げない。
+
+domain は `arrival_tiebreaker` である。定数は `ARRIVAL_TIEBREAKER_DOMAIN` である。`origin_route_choice` とも `in_trip_route_choice` とも通常 merge とも共有しない。自由文字列の domain API にはしない。初回と再訪で同じ domain である。domain 分離の test がある。
+
+Node 訪問番号は `node_visit_number_from_link_entries(vehicle, node)` である。対象 Node を終端とする `node.inlinks` の全 Link を正式名で走査し、`link_entry_count_by_link_name` の累積進入回数を合計する。missing は 0 である。現在 Link だけ、`order_control_visit_id`、arrival log、`log_t_link`、新しい Node counter は使わない。終端が違う Link は合計しない。parallel Link は正式名ごとに別々に足す。個別の 0 は許容する。負値、bool、float、str は `ValueError` である。helper は合計 0 をそのまま返し、1 へ補正しない。recorder が 1 未満を保存前に `ValueError` にする。そのとき uniform も保存もしない。
+
+例は次である。対象 inlink が 1 つだけ 1 なら訪問番号は 1 である。別 inlink が 1 と 1 なら 2 である。同一 inlink が 2 で他が 0 なら 2 である。**§32.21.6** の 2、1、0 は 3 のままである。
+
+arrival key は `(vehicle.name, node.name, node_visit_number)` である。Vehicle 正式名は auto rename 後、Node 名は正式名、訪問番号は production がその場で合計した値である。object identity、Vehicle ID、Node 整数 ID、timestep、arrival time、inlink 名、order-control type、World 名、clearance、batch size、transaction case、signal phase は入れない。同じ Vehicle、同じ Node、同じ訪問番号は同じ event である。再訪は訪問番号が違うので別 event である。別 Vehicle と別 Node も別 event である。baseline fork と real World の同じ物理訪問は同じ key である。rollback 後の同じ未記録 Visit も同じ key である。
+
+初回は訪問番号 1 で、current Visit と legacy の `order_control_node_arrival_times`、`order_control_node_arrival_tiebreakers` へ同じ値を保存する。再訪は訪問番号 2 以上で、current Visit だけを更新し、legacy は上書きしない。両方とも同じ domain、同じ key 形、同じ helper であり、mutable RNG は使わない。同じ Visit では再生成しない。正式 production では、legacy の初回判定と Node 訪問番号は一致する。台帳の手動削除や、caller の無い legacy helper の単独利用ではずれ得る。recorder はその不変条件を重複検査しない。
+
+保存順は、eligible と type、current Visit、Node 一致、部分状態、記録済みなら return、訪問番号、1 未満なら停止、key、pure keyed uniform、arrival time、current Visit、初回なら legacy、collector へ保存済み値、である。invalid count、訪問番号 0、keyed uniform の例外、Visit 不整合は保存前である。collector 例外だけは保存後である。そのあと再呼出しすると、Visit が記録済みのため return し、collector 記録だけが欠け得る。これは既存順序であり、今回の新しい欠陥ではない。Candidate 局所前進には snapshot 復元がある。
+
+arrival 生成は `W.rng.random()`、`W.order_control_rng.random()`、Python `random`、built-in `hash()`、新しい NumPy Generator を使わない。使うのは保存済み内部 entropy、domain `arrival_tiebreaker`、明示 key、`keyed_uniform_value()` である。通常 merge の `W.rng`、route choice、Vehicle 色、Candidate selection RNG は変えていない。意図した非互換は、tiebreaker の具体 float、mutable RNG の後続 state、同着順位、そこから波及する交通結果である。旧 trial との tiebreaker 一致は要求しない。維持するのは、arrival 条件、arrival timestep、Visit identity、`[0, 1)`、時刻優先、tiebreaker を使う順位、保存先、batch assignment、confirmed rank、passage、trip end、order-control type である。
+
+legacy 台帳は Node 名を key にした初回だけの互換台帳であり、current Visit の正本ではない。current Visit の arrival time と arrival tiebreaker が各訪問の正本である。到着前は両方 `None` である。FCFS rank と BATCH trigger rank は current Visit を読む。`Vehicle.__init__()` の説明は、初回 `W.rng`、再訪 `W.order_control_rng` から、現在の keyed 契約へ更新した。属性の初期値は変えていない。
+
+baseline full World は、copy で内部 entropy、Link 進入回数、current Visit を引き継ぐ。same event なら same tiebreaker である。baseline 開始 timestep は key に入らない。fork 後に物理訪問回数が違えば別 key である。collector は保存済み値を受け取り、別の乱数は引かない。original と copy の台帳は独立である。到着済み Visit は再生成しない。
+
+Candidate 局所前進 `advance_tvt_mp_candidate_local_vehicles_and_register_new_arrivals` は、対象 Node へ新たに到達した Vehicle について、既存の `vehicle.record_order_control_node_arrival(target_node)` を呼ぶ。copy 済みの進入回数を使い、局所前進では回数を増やさない。同じ Visit は再生成しない。binding transfer 後の outlink 退出は、新しい Node arrival として記録しない。Candidate binding は recorder を呼ばない。局所の arrival 値は real World へ戻さない。失敗時は snapshot を復元する。
+
+Level 2 は正式な将来交通 World ではない。arrival recorder を呼ばない。Visit 開始 helper の内部にも生成を入れない。Node 訪問番号用の正式進入状態を新設しない。keyed 化を接続しない。この非接続を将来の全 World 型 BATCH へ一般化しない。
+
+専用 19 件は **§18.13** の名前と保証と同じである。期待値は test 側の明示 key と `"arrival_tiebreaker"` から作り、固定小数は書かない。再訪 test は Visit ID を 9、Node 訪問番号を 2 にずらす。Candidate／Level 2 の接続確認の一部は source-level である。full 実動作 fixture と baseline collector の実動作は、この 19 件に含まない。
+
+既存 13 件のうち、更新したのは次の 3 件である。`test_first_visit_records_matching_values` は、旧 `W_ref.rng.random()` をやめ、`(veh.name, "merge", 1)` と domain `arrival_tiebreaker` と保存済み entropy から期待値を作る。current Visit と legacy の一致と、両 mutable RNG の非消費を見る。`test_first_visit_tiebreaker_uses_existing_rng_stream` は、`test_first_visit_tiebreaker_uses_keyed_uniform_without_consuming_rng_streams` へ改名した。訪問番号 1、明示 key、keyed uniform、両 RNG 非消費である。`test_revisit_updates_current_visit_only` は、旧 `W_ref.order_control_rng.random()` をやめ、`link1` が 1、`link2` が 1、訪問番号 2、明示 key `(veh.name, "merge", 2)`、current Visit だけ更新、legacy 初回値の維持、両 RNG 非消費である。削除は無い。`TESTS` は 13 件すべてを呼ぶ。旧 mutable RNG 期待は残していない。
+
+専用 19 件は初回から成功し、表示は `Common seed/RNG arrival tiebreaker tests passed.` である。既存 13 件の初回再実行は `test_revisit_tiebreaker_reproducible_for_same_seed` で停止した。観測された差は actual 約 0.350942、desired 約 0.241633 である。この小数は失敗の記録であり、固定期待値ではない。World 1 の Vehicle 名が `veh_repro_1`、World 2 が `veh_repro_2` だった。key に Vehicle 正式名が入るので、異なる名前なら異なる値になるのが正しい。production 欠陥ではない。同じ event の再現性を見る fixture が、同じ event key を作っていなかった。修正は、別 World の両 Vehicle 名を同じ `veh_repro` にしたことだけである。World 名と World object は別、random seed は同じ、Node 名と訪問番号も同じである。test 名、network、production は変えていない。Terminal では 2 台とも `veh_repro` であり、古い 2 名は残っていなかった。`git diff --check` の出力は無かった。修正後の表示は `Order-control current visit arrival tests passed.` である。異なる Vehicle 名で値が違う契約は、専用 test が確認する。
+
+交差回帰は、上記 19 件と 13 件に加え、keyed uniform が `Common seed/RNG keyed uniform tests passed.`、Link 進入状態が `Vehicle link-entry state tests passed.`、route choice が `Common seed/RNG route choice tests passed.` である。`py_compile` は成功した。これらは利用者の Terminal 確認である。
+
+Cursor Grok 4.7、effort high の読取り専用反証は、編集、test、`py_compile`、simulation、Git を行っていない。総合判定は、このまま受入れ可能、である。blocking は無い。high は無い。Node 訪問番号、domain と key、初回と再訪、再生成防止、保存順序、mutable RNG 非消費、baseline copy、Candidate 既存接続、Level 2 非接続、専用 19 件、更新済み 13 件は成立した。low は、古い「one candidate RNG」コメント、caller の無い legacy helper、collector 例外後に保存済み Visit だけが残る既存順序、legacy の有無と Node 訪問番号が別管理であること、である。受入れ前の production 修正と追加 test は不要とし、Terminal 追加回帰も必須無しとした。
+
+その後、古いコメントだけを直した。対象は Candidate 局所前進の `_snapshot_local_advance_for_rollback()` 直前 4 行である。旧文の one candidate RNG を、current Visit、初回 legacy、one keyed arrival value、失敗時の snapshot 復元へ更新した。Candidate 固有 mutable RNG も `W.rng` も `W.order_control_rng` も、この生成では消費しない。これは説明の修正であり、動作変更ではない。snapshot 位置、rollback、recorder の呼出し位置は変えていない。Terminal では変更がコメント 4 行だけであり、`one candidate RNG` は消え、`git diff --check` の出力は無かった。コメントだけなので追加 test は不要である。
+
+受入れ範囲は、Node 訪問番号 helper、arrival key helper、初回と再訪の keyed tiebreaker、current Visit 保存、legacy 初回台帳、mutable RNG 非消費、Candidate 既存 arrival 記録への適用、である。理由は、全 inlink 合計、0 を補正しないこと、invalid count の拒否、独立 domain、正式名と訪問番号の key、成立前は未生成、同じ Visit は再生成しない、台帳の役割、RNG 非消費、baseline の same event、Candidate 接続の維持、Level 2 非接続、19 件、fixture 修正後の 13 件、交差回帰、blocking と high が無いこと、コメント修正、test 成功だけにしないこと、である。
+
+未実装のまま残るものは、通常 merge 用 RNG の分離、`_transfer_normal_merge()` の乱数変更、Candidate selection RNG、N=1 完全一致、4方式統合回帰、最終正本と全体受入れ、arrival hash の性能、Candidate と Level 2 の full 実動作回帰、今回単位での baseline collector 追加実行、legacy helper の削除検討、collector 例外後の再通知、である。新 BATCH は未実装・未採用である。
+
+実装完了までの現在地は次である。完了は、内部 entropy と pure keyed uniform、Vehicle の Link 進入状態、origin・in-trip route choice、arrival tiebreaker と Node 訪問番号、の 4 単位である。残りは、通常 merge 用 RNG の分離、N=1 と 4方式統合回帰、最終正本記録と全体受入れ、である。主要 production 接続で残るのは、通常 merge 用 RNG だけである。
+
+次の直接作業は、今回の Markdown 差分を利用者が Terminal で全文独立確認することである。その後の予定は、必要なら文書修正、production 3 ファイルと test 2 ファイルと Markdown 3 ファイルだけを明示して stage、commit、commit 結果と最新 commit と残存変更の確認、push は別指示、push 後の status と最新 commit と local／remote 一致の確認、その後に通常 merge 用 RNG の分離へ進むことである。production 3 ファイルは `uxsim/uxsim.py`、`uxsim/common_seed_rng_arrival_tiebreaker.py`、`uxsim/order_control_tvt_mp_candidate_local_vehicle_advance.py` である。test 2 ファイルは `tests_common_seed_rng_arrival_tiebreaker.py` と `tests_order_control_current_visit_arrival.py` である。利用者への指示は、その時点で次に実行する内容だけを提示する。Git 操作は利用者が Terminal で行う。Cursor には行わせない。
+
+**検索語:** arrival tiebreaker keyed化、arrival_tiebreaker、ARRIVAL_TIEBREAKER_DOMAIN、Node訪問番号、node_visit_number_from_link_entries、arrival_tiebreaker_key_parts、Vehicle正式名、Node正式名、全inlink合計、累積進入回数、同一inlink再進入、別inlink再訪、parallel Link、missing 0、合計0、0を1へ補正しない、invalid count、bool拒否、float拒否、str拒否、pure keyed uniform、common seed RNG、current Visit、legacy first-arrival、初回台帳、再訪非上書き、同じVisit再生成なし、arrival成立前未生成、W.rng非消費、W.order_control_rng非消費、初回と再訪、明示key、World copy、baseline fork、baseline collector、Candidate局所前進、Candidate binding非接続、Level 2非接続、専用test 19件、既存test 13件、fixture不備、veh_repro_1、veh_repro_2、veh_repro、異なるVehicle名、same event key、blockingなし、highなし、one candidate RNG、keyed arrival value、Candidateコメント修正、Common seed/RNG arrival tiebreaker tests passed、Order-control current visit arrival tests passed、keyed uniform回帰、Vehicle Link進入状態回帰、route choice回帰、normal merge RNG未実装、N=1未実行、4方式統合回帰未実行、feature/common-seed-rng-foundation、58521aa、到着順の乱数、同着順位をどう決めるか、同じNodeへの何回目の訪問か、Node訪問回数の数え方、同じinlinkへ再進入した場合、別inlinkから同じNodeへ戻る場合、到着時にW.rngを消費するか、初回到着と再訪で別の乱数か、current Visitと初回台帳の違い、同じVisitでtiebreakerを作り直すか、Candidateでarrival tiebreakerを作るか、Level 2でarrival tiebreakerを作るか、baseline copyで同じtiebreakerになるか、Vehicle名が違うと別の値になるか、same seedなのに結果が違った、fixtureのVehicle名が違った、candidate RNGという古いコメント、arrival実装後の次作業、実装完了までの残り区分

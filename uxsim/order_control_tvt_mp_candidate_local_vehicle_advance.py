@@ -818,10 +818,10 @@ def advance_tvt_mp_candidate_local_vehicles_and_register_new_arrivals(
             }
         )
 
-    # Checks above do not move vehicles or draw arrival tiebreakers.
-    # ``record_order_control_node_arrival`` writes the visit, the first-arrival
-    # dictionaries, and one candidate RNG as soon as it is called. Snapshot the
-    # copied World first so a later arrival failure puts all of that back.
+    # Checks above do not move vehicles or record arrival tiebreakers.
+    # ``record_order_control_node_arrival`` writes the current visit and, on
+    # the first visit, the legacy dictionaries with one keyed arrival value.
+    # Snapshot the copied World first so a later failure restores all writes.
     arrival_snapshot = _snapshot_local_advance_for_rollback(
         local_world=local_world,
         target_node=target_node,

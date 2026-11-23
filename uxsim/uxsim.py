@@ -30,6 +30,11 @@ from .common_seed_rng_route_choice import (
     ORIGIN_ROUTE_CHOICE_DOMAIN as _ORIGIN_ROUTE_CHOICE_DOMAIN,
     select_route_choice_candidate as _select_route_choice_candidate,
 )
+from .common_seed_rng_arrival_tiebreaker import (
+    ARRIVAL_TIEBREAKER_DOMAIN as _ARRIVAL_TIEBREAKER_DOMAIN,
+    arrival_tiebreaker_key_parts as _arrival_tiebreaker_key_parts,
+    node_visit_number_from_link_entries as _node_visit_number_from_link_entries,
+)
 
 
 def _validate_order_control_batch_t_trigger_level(value, node_name=None):
@@ -3050,14 +3055,19 @@ class Vehicle:
         Attributes
         ----------
         order_control_node_arrival_times : dict
-            Control state holding the first arrival time (in seconds) at each order-control node for this vehicle.
-            Intended primarily for FCFS ordering; may be reused for Batch Processing or Time-value Transaction later.
-            Keys are node names (``node.name``) for now; if the same vehicle visits the same node more than once,
-            the key design may need to be extended. Initialized to an empty dict.
+            Legacy compatibility record of this vehicle's first arrival time, in seconds, at each
+            order-control node. Keys are node names. A later visit to the same node does not overwrite
+            this dict. It is not the record of the current visit. The current visit's arrival time is
+            stored on ``order_control_current_visit``. Initialized to an empty dict.
         order_control_node_arrival_tiebreakers : dict
-            Control state holding a fixed tiebreaker value for each order-control node at first arrival.
-            Used as the second sort key when multiple vehicles share the same first arrival time at a node.
-            Keys are node names (``node.name``). Initialized to an empty dict.
+            Legacy compatibility record of this vehicle's first-arrival tiebreaker at each order-control
+            node. Keys are node names. A later visit to the same node does not overwrite this dict. It is
+            not the record of the current visit. The current visit's tiebreaker is stored on
+            ``order_control_current_visit``. The stored value is one fixed uniform in ``[0, 1)``. Its
+            domain is ``arrival_tiebreaker``. Its key is the vehicle's formal name, the node's formal
+            name, and the node visit number. The first visit and a later visit use that same domain and
+            key shape, and the node visit number separates the events. ``W.rng`` and
+            ``W.order_control_rng`` are not used. Initialized to an empty dict.
         order_control_earliest_arrival_timesteps : dict
             BATCH research attribute mapping each downstream node name to the earliest arrival timestep
             (timestep units) estimated at link entry under free-flow conditions. Initialized to an empty dict.
@@ -3077,9 +3087,12 @@ class Vehicle:
             Current visit state for the order-control target node this vehicle is approaching, or ``None``
             when not approaching such a node. Initialized to ``None``. When present, ``arrival_time`` holds
             the simulation time in seconds when this visit was first registered in the node's
-            ``incoming_vehicles`` list; ``arrival_tiebreaker`` is a fixed uniform random value for this
-            visit (from ``W.rng`` on first visit to the node, or ``W.order_control_rng`` on revisit).
-            Both are ``None`` until link-end arrival registration.
+            ``incoming_vehicles`` list. ``arrival_tiebreaker`` stays ``None`` until that arrival is
+            recorded, and the same visit does not generate it again. The recorded value is one fixed
+            uniform in ``[0, 1)``. Its domain is ``arrival_tiebreaker``. Its key is the vehicle's formal
+            name, the node's formal name, and the node visit number. The first visit and a later visit
+            use that same domain and key shape, and the node visit number separates the events.
+            ``W.rng`` and ``W.order_control_rng`` are not used.
         """
 
         s.W = W
@@ -3409,10 +3422,9 @@ class Vehicle:
 
         Only nodes with ``order_control_eligible=True`` and ``order_control_type != "none"`` are
         recorded. If an arrival time for ``node.name`` is already stored, it is not overwritten.
-        A fixed tiebreaker value is stored in ``order_control_node_arrival_tiebreakers`` at the
-        same first-arrival event and is not overwritten either.
-        Keys are node names for now; if the same vehicle visits the same node more than once,
-        the key design may need to be extended in the future.
+        The tiebreaker is the keyed uniform for this vehicle, this node, and the node visit
+        number. It is not drawn from ``W.rng``. This helper has no production caller.
+        ``record_order_control_node_arrival`` is the arrival recorder used by the simulation.
         """
         if not node.order_control_eligible:
             return
@@ -3420,8 +3432,26 @@ class Vehicle:
             return
         if node.name in s.order_control_node_arrival_times:
             return
+        node_visit_number = _node_visit_number_from_link_entries(s, node)
+        if node_visit_number < 1:
+            raise ValueError(
+                f"Vehicle {s.name} at node {node.name}: node visit number is "
+                f"{node_visit_number}. Arrival tiebreaker is not recorded when "
+                "the sum of entries on links that end at this node is below 1. "
+                "The total is not corrected upward to 1."
+            )
+        arrival_key_parts = _arrival_tiebreaker_key_parts(
+            s.name,
+            node.name,
+            node_visit_number,
+        )
+        arrival_tiebreaker = _keyed_uniform_value(
+            s.W._common_seed_rng_internal_entropy,
+            _ARRIVAL_TIEBREAKER_DOMAIN,
+            arrival_key_parts,
+        )
         s.order_control_node_arrival_times[node.name] = s.W.T * s.W.DELTAT
-        s.order_control_node_arrival_tiebreakers[node.name] = s.W.rng.random()
+        s.order_control_node_arrival_tiebreakers[node.name] = arrival_tiebreaker
 
     def get_order_control_fcfs_rank_key(s, node):
         """
@@ -3643,14 +3673,22 @@ class Vehicle:
         ``arrival_time`` and ``arrival_tiebreaker`` are set once per visit and are not
         overwritten on re-registration within the same visit.
 
-        On a vehicle's first arrival at ``node``, the tiebreaker is drawn once from ``W.rng``
-        and stored in both the current visit and the legacy first-visit dictionaries
-        (``order_control_node_arrival_times`` / ``order_control_node_arrival_tiebreakers``).
-        On revisit, the tiebreaker is drawn once from ``W.order_control_rng`` and stored only
-        in the current visit; legacy first-visit dictionaries are not modified.
+        The tiebreaker is one keyed uniform. The key is the vehicle's formal
+        name, the node's formal name, and the node visit number. That number
+        is the sum of this vehicle's entries on links that end at the node.
+        The first visit and a later visit use the same domain and the same
+        key shape. A later visit has a larger visit number. ``W.rng`` and
+        ``W.order_control_rng`` are not used.
+
+        On the first arrival at ``node``, the value is stored in the current
+        visit and in the legacy first-visit dictionaries. On a later arrival,
+        it is stored only in the current visit. The legacy dictionaries are
+        not overwritten. A visit that already has both arrival fields returns
+        without a new value.
 
         Only nodes with ``order_control_eligible=True`` and ``order_control_type != "none"``
         are processed. Non-target nodes return immediately without side effects.
+        A visit-number total below 1 raises ``ValueError`` and stores nothing.
         """
         if not node.order_control_eligible:
             return
@@ -3681,17 +3719,33 @@ class Vehicle:
         if current_arrival_time is not None:
             return
 
+        # The vehicle is already on a link that ends here, so that entry
+        # is already in the link-entry counts. Sum every such link. Do not
+        # treat a missing total as visit 1.
+        node_visit_number = _node_visit_number_from_link_entries(s, node)
+        if node_visit_number < 1:
+            raise ValueError(
+                f"Vehicle {s.name} at node {node.name}: node visit number is "
+                f"{node_visit_number}. Arrival tiebreaker is not recorded when "
+                "the sum of entries on links that end at this node is below 1. "
+                "The total is not corrected upward to 1."
+            )
+        arrival_key_parts = _arrival_tiebreaker_key_parts(
+            s.name,
+            node.name,
+            node_visit_number,
+        )
+        arrival_tiebreaker = _keyed_uniform_value(
+            s.W._common_seed_rng_internal_entropy,
+            _ARRIVAL_TIEBREAKER_DOMAIN,
+            arrival_key_parts,
+        )
         arrival_time = s.W.T * s.W.DELTAT
+        current_visit["arrival_time"] = arrival_time
+        current_visit["arrival_tiebreaker"] = arrival_tiebreaker
         if node.name not in s.order_control_node_arrival_times:
-            arrival_tiebreaker = s.W.rng.random()
-            current_visit["arrival_time"] = arrival_time
-            current_visit["arrival_tiebreaker"] = arrival_tiebreaker
             s.order_control_node_arrival_times[node.name] = arrival_time
             s.order_control_node_arrival_tiebreakers[node.name] = arrival_tiebreaker
-        else:
-            arrival_tiebreaker = s.W.order_control_rng.random()
-            current_visit["arrival_time"] = arrival_time
-            current_visit["arrival_tiebreaker"] = arrival_tiebreaker
 
         baseline_collector = s.W._order_control_baseline_collector
         if baseline_collector is not None:
