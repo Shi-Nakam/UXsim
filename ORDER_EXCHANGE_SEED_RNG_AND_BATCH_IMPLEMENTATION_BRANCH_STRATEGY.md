@@ -3575,3 +3575,279 @@ push はその確認後の別指示である。push 後に status、最新 commi
 ### 19.24 検索語
 
 normal merge RNG、normal_merge_rng、通常merge用RNG、通常合流乱数、逐次RNG、sequential RNG、spawn_key=(1,)、ordinary_merge_seed_sequence、保存済みentropy、stream分離、W.rng分離、W.order_control_rng分離、shuffle、choice、merge priority、合計0、均等重み、候補0件、候補1件、複数候補、hard deterministic、World copy、baseline fork、generic baseline fork、apply_copied_tvt_confirmed_ranks、allowed_vehicles、order-control clearance、clearance未充足、Candidate非接続、Level 2非接続、専用test 18件、Common seed/RNG normal merge tests passed、keyed uniform回帰、Vehicle Link進入状態回帰、route choice回帰、arrival tiebreaker回帰、current-visit arrival回帰、blockingなし、highなし、主要production接続完了、N=1未実行、4方式統合回帰未実行、feature/common-seed-rng-foundation、a730e08、通常合流はどの乱数を使うか、合流乱数を分離した理由、W.rngを通常mergeで使うか、shuffleは何の乱数か、choiceは何の乱数か、候補1台でも乱数を使うか、候補0台でもshuffleするか、hard deterministicで乱数を使うか、merge priorityが0ならどうするか、signalで通れないとき乱数を使うか、capacity不足でchoiceするか、clearance未充足でも乱数を使うか、World copyで合流乱数はどうなるか、baselineで合流乱数を引き継ぐか、Candidateで通常mergeを使うか、Level 2で通常mergeを使うか、FCFSとBATCHでnormal merge RNGを使うか、time_valueのgeneric fork、merge eventの順序依存、共通seed実装の残り、主要production接続が揃ったか、統合回帰前の状態
+
+## 20. 共通seed／RNG改修後N=1統合回帰の実測完了と「4方式統合回帰」の工程訂正（2026-11-23）
+
+執筆日は2026-11-23である。本節は、共通 seed／RNG 改修後に実施した N=1 BATCH 対 FCFS 診断の実測結果を記録し、「4方式統合回帰」という表現が、合否基準付きの正式工程として確定していたと誤読され得ないよう、工程判断を訂正する最新正本である。
+
+関係:
+
+- **§14** は、4方式共通 seed／RNG 改修の具体実装前設計の正本である。**§14.18** は、N=1 BATCH 対 FCFS 回帰契約の正本である。試験条件、比較 field、合否基準は、そこと tracked の `diagnostics/order_control/grid_n1_level_2_vs_fcfs_check.py` に拘束される。
+- **§15** から **§19** は、各実装単位の実装・反証・受入れ結果の正本である。本文は削除も書換えもしない。
+- **§19.22**、**§19.23**、**§32.29**、**§21.9.30** に書かれた「残る単位に 4方式統合回帰がある」「その後 4方式統合回帰の実行計画へ進む」という文言は、当時の計画表記である。最新の工程判断は本 **§20** を優先する。
+- 研究契約の正本は `ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_5.md` **§32.21** である。全体設計上の追記は **§32.30** である。進捗の対応節は `ORDER_EXCHANGE_PROGRESS_4.md` **§21.9.31** である。
+
+Cursor は、本記録のために test、simulation、diagnostic script、Git、追加調査を行っていない。記載する N=1 結果は、利用者が Terminal で実行し提示した事実だけである。test 成功や diagnostic 成功だけを、production 全体の正しさや 4方式交通結果一致の証拠としては扱わない。
+
+### 20.1 「4方式統合回帰」の工程訂正
+
+責任関係は次である。利用者は「4方式統合回帰」を独立した正式工程として提案も承認もしていない。Copilot が **§15** の実装結果を文書化した際、試験条件・比較項目・合否基準・一括 script などの具体設計も利用者確認もないまま、未実装事項へ「4方式統合回帰」という表現を追加した。Copilot が後続の **§16** から **§19** の文書化でも、その記述を既定の残作業として自己参照的に転記した。記録の反復自体が、当初は未確定だった表現に独立根拠があるかのように扱われ、「残る単位」「具体的な実行計画」へ格上げされた。これは不適切だった。利用者が知らない間に正式工程として確定したものではない。今回の訂正は、責任主体を明確にし、同じ自己参照的な工程追加を再発させないためのものである。最新の工程判断は本 **§20** を優先する。
+
+「4方式統合回帰」という独立した正式工程は、研究契約 **§32.21** にも、具体実装前設計 **§14** にも、試験条件・比較項目・合否基準まで含めて定義されていなかった。
+
+最初の明示的な出現は、内部 entropy と pure keyed uniform helper の実装結果を記録した **§15** の未実装事項である。**§16** 以降の同語の反復は、上記のとおり Copilot が **§15** で追加した未確定の表現を、後続節の文書化で既定の残作業として自己参照的に転記した結果であり、新しい独立根拠や利用者承認を表さない。後続節で「残る単位」「具体的な実行計画」とまで書かれたが、実行対象 network、台数、seed、方式条件、比較 field、許容差、合否基準、一括実行 script は、その時点で確定していなかった。
+
+tracked file から、共通 seed／RNG 改修後の「4方式統合回帰」を一括実行する正式 script は確認されなかった。「4方式を対象に設計した共通 seed／RNG 基盤」と、「4方式を一括実行する正式回帰試験」は同じ意味ではない。
+
+本節以降の最新判断は次である。
+
+- 「4方式統合回帰」を、利用者が承認済みの必須工程として扱わない。
+- N=1 BATCH 対 FCFS 回帰と同列の、合否基準付きの確定済み試験として扱わない。
+- 自動的に次の実行工程へ進めない。
+- 将来、4方式横断確認が必要と判断する場合は、実行前に目的、対象方式、network、需要、台数、seed、方式固有設定、比較項目、許容差、合否基準、出力保存方針を明示し、利用者判断を得る。
+- 過去節の記述は歴史的記録として残すが、最新の工程判断は本 **§20**、**§32.30**、**§21.9.31** を優先する。
+
+この訂正は、4方式共通 seed／RNG 研究契約そのものを否定するものではない。問題は、未設計の検証工程を Copilot が文書上の必須工程として追加し、自己参照的な転記で格上げしたことである。production 実装、N=1 の実測、**§32.21** の研究契約を無効にするものではない。
+
+### 20.2 維持する研究契約
+
+維持する研究契約は次である。
+
+- route choice は、signalized UXsim、FCFS、BATCH、TVT-MP 実 World、および TVT-MP baseline で共通の keyed 契約を使う。
+- arrival tiebreaker は、FCFS、BATCH、TVT-MP 実 World、および TVT-MP baseline で共通化する。
+- signalized UXsim の通常 merge は、専用の逐次 RNG を使う。
+- Candidate と Level 2 の接続境界は、既存契約どおりである。
+- 各方式の制御差により、交通結果そのものを 4 方式間で完全一致させる契約ではない。
+
+N=1 で示したのは、新共通 seed 環境の横並びで FCFS と N=1 BATCH Level 2 が厳密一致することであり、FCFS、BATCH、TVT-MP、signalized UXsim の 4 方式を同一 network で一括比較し、交通結果が一致したことではない。
+
+### 20.3 N=1診断の正式位置づけ
+
+実行した正式診断 script は、tracked file の `diagnostics/order_control/grid_n1_level_2_vs_fcfs_check.py` である。これは N=1 BATCH Level 2 対 FCFS の既存正式診断であり、**§14.18** の契約に対応する。本記録はこの script を変更していない。
+
+条件は次である。
+
+- 6×6 grid
+- 内部 grid Node 36
+- 外部 OD Node 24
+- dynamic free routing
+- signal なし
+- internal Link length 400
+- OD connector length 300
+- free-flow speed 20
+- clearance 1 timestep
+- random seed 0
+- demand generation seed 42
+- BATCH `batch_size=1`
+- `order_control_batch_t_trigger_level=2`
+- virtual horizon 30
+- FCFS と N=1 BATCH で同じ Vehicle plan
+- N=1 専用 shortcut なし
+- Level 2 を実際に呼ぶ
+
+この診断は単なる平均値比較ではない。比較は丸めや tolerance なしの厳密一致であり、`comparison_class != "exact_match"` なら script 自身が `AssertionError` で失敗終了する。
+
+集計 11 項目:
+
+1. `total_vehicles`
+2. `completed_trips`
+3. `unfinished_trips`
+4. `completed_ratio`
+5. `total_travel_time`
+6. `average_travel_time`
+7. `average_delay`
+8. `delay_ratio`
+9. `total_distance_traveled`
+10. `last_completed_trip_time`
+11. `analyzer_reference_average_speed`
+
+Vehicle 別 7 項目:
+
+1. `state`
+2. `departure_time`
+3. `arrival_time`
+4. `travel_time`
+5. `destination_name`
+6. `traveled_route_link_names`
+7. `log_t_link_history`
+
+さらに Vehicle 名集合と completion order も比較する。
+
+### 20.4 200台の実測結果
+
+利用者の Terminal 実行:
+
+`python diagnostics/order_control/grid_n1_level_2_vs_fcfs_check.py --num-vehicles 200`
+
+結果:
+
+- diagnostic script は正常終了した。
+- `comparison_class: exact_match`
+- `aggregate_mismatch_count: 0`
+- `mismatched_vehicle_level_items: 0`
+- FCFS 200／200 完走
+- N1-L2 200／200 完走
+- Level 2 call count 1497
+- resolved 1497
+- unresolved 0
+- Level 1 fallback 0
+- input identity check PASS
+- assignment prefix violation なし
+- visit_id／batch_assignment／service unit mismatch なし
+
+FCFS と N1-L2 で一致した代表値:
+
+- total travel time 32029.0 秒
+- average travel time 160.1 秒
+- average delay 0.4 秒
+- total distance traveled 638800.0 m
+- last completed trip time 684.0 秒
+
+補助的な終了値確認コマンドでは、zsh 上の `PIPESTATUS` の扱いにより `test: unknown condition: -eq` が出た。これは diagnostic script の失敗ではない。script 本体は `comparison_class: exact_match`、不一致 0、正常終了メッセージがあり、script は不一致なら自ら失敗する。この補助コマンドの誤りを simulation 失敗として記録しない。
+
+### 20.5 1,000台の実測結果
+
+利用者の Terminal 実行:
+
+`python diagnostics/order_control/grid_n1_level_2_vs_fcfs_check.py --num-vehicles 1000`
+
+ログ: `/tmp/n1_batch_vs_fcfs_1000_after_common_seed_836b99f.log`
+
+結果:
+
+- exit status 0
+- `comparison_class: exact_match`
+- `aggregate_mismatch_count: 0`
+- `mismatched_vehicle_level_items: 0`
+- FCFS 全車完走
+- N1-L2 全車完走
+- Level 2 call count が 0 より大きい
+- script 正常終了
+
+### 20.6 5,000台の実測結果
+
+利用者の Terminal 実行:
+
+`python diagnostics/order_control/grid_n1_level_2_vs_fcfs_check.py --num-vehicles 5000`
+
+ログ: `/tmp/n1_batch_vs_fcfs_5000_after_common_seed_836b99f.log`
+
+結果:
+
+- exit status 0
+- `comparison_class: exact_match`
+- `aggregate_mismatch_count: 0`
+- `mismatched_vehicle_level_items: 0`
+- FCFS 全車完走
+- N1-L2 全車完走
+- script 正常終了
+
+Level 2 counters:
+
+- call count: 46266
+- resolved: 46229
+- unresolved: 37
+- Level 1 fallback: 37
+
+単純な全 resolved ケースだけではない。Level 2 unresolved 37 件と Level 1 fallback 37 件を含めても、FCFS と N=1 BATCH が完全一致した。
+
+### 20.7 seed改修前結果との関係
+
+seed 改修前の 5,000 台記録:
+
+- call count 46428
+- resolved 46390
+- unresolved 38
+- fallback 38
+- comparison class exact_match
+
+今回の新共通 seed 環境:
+
+- call count 46266
+- resolved 46229
+- unresolved 37
+- fallback 37
+- comparison class exact_match
+
+旧 seed 環境と新共通 seed 環境の counter 数値一致は合格条件ではない。共通 seed／RNG 改修は、具体的な route choice、arrival tiebreaker、通常 merge 選択、そこから波及する交通展開を意図的に変え得る。必要な契約は、同じ新共通 seed 環境の横並びで `FCFS = N=1 BATCH` となることである。fallback 38 から 37 への変化を回帰失敗と断定しない。
+
+### 20.8 N=1回帰の判定
+
+共通 seed／RNG 改修後の N=1 BATCH 対 FCFS 統合回帰を完了とする。
+
+合格した規模は 200 台、1,000 台、5,000 台である。10,000 台は今回実行していない。今回の正式合格範囲は 200、1,000、5,000 台である。
+
+全規模共通:
+
+- 全車完走
+- aggregate mismatch 0
+- Vehicle-level mismatch 0
+- `comparison_class: exact_match`
+- Level 2 が実際に作動した
+- N=1 shortcut なし
+
+5,000 台では unresolved と Level 1 fallback を含めて一致した。
+
+書かないこと:
+
+- 他 network、他 seed、他需要、他 parameter の一般的同値性を証明した、とは書かない。
+- 性能優位性を示した、とは書かない。
+- 4 方式の交通結果一致を示した、とは書かない。
+
+### 20.9 現在地の訂正
+
+最新の現在地は次とする。
+
+完了:
+
+1. 内部 entropy 保存と pure keyed uniform
+2. Vehicle Link 進入状態
+3. origin・in-trip route choice keyed 化
+4. arrival tiebreaker keyed 化と Node 訪問番号
+5. normal merge RNG 分離
+6. 共通 seed／RNG 改修後の N=1 BATCH 対 FCFS 統合回帰（200、1,000、5,000 台、exact_match）
+
+未確定または別判断:
+
+- 「4方式統合回帰」という名称の一括試験
+- 4方式横断確認の具体的な目的
+- network
+- 台数
+- seed
+- 比較項目
+- 合否基準
+- 一括 script
+- 実行要否
+
+未完了として残すもの:
+
+- 共通 seed／RNG 改修の最終正本整理
+- 全体受入れ判定
+- 10,000 台 N=1 診断を追加で行うかの判断
+- 他 network／他 seed での N=1 確認を追加するかの判断
+- Candidate selection RNG は今回の共通 seed 改修範囲外のまま
+- 新 BATCH は未実装・未採用
+- 性能測定は合否条件外
+
+「残りは 4方式統合回帰」とは書かない。
+
+### 20.10 次の直接作業
+
+次の直接作業は、今回の Markdown 差分を、利用者が Terminal で全文独立確認することである。
+
+その後の予定は、必要なら訂正文を修正し、Markdown 3 ファイルだけを明示して stage し、commit し、commit 結果、最新 commit、残存変更を確認することである。production、test、diagnostic script は今回 commit 対象にしない。push は別指示である。push 後に status、最新 commit、local と remote の一致を確認する。
+
+その次は、利用者判断なしに「4方式統合回帰」へ進まない。
+
+次の技術判断候補は、事実として列挙するだけにし、利用者の承認前に選択しない。
+
+- 現時点の証拠で共通 seed／RNG 改修を全体受入れできるか
+- 10,000 台 N=1 診断を追加するか
+- 別 seed または別 network の N=1 反証を追加するか
+- 方式横断の追加確認が必要なら、その目的と合否基準を新しく設計するか
+
+Git 操作は利用者が Terminal で行う。Cursor には行わせない。
+
+### 20.11 検索語
+
+4方式統合回帰、工程訂正、具体設計なし、合否基準未確定、正式scriptなし、利用者未承認、§15初出、後続節転記、N=1 BATCH対FCFS、exact_match、200台、1000台、5000台、10000台未実行、aggregate mismatch 0、Vehicle-level mismatch 0、全車完走、completion order、Level 2 call count 1497、Level 2 call count 46266、resolved 46229、unresolved 37、fallback 37、seed改修前fallback 38、新共通seed環境、旧seed結果非互換、grid_n1_level_2_vs_fcfs_check.py、batch_size=1、Level 2、virtual horizon 30、clearance 1、random seed 0、demand seed 42、6x6 grid、strict comparison、toleranceなし、N=1 shortcutなし、feature/common-seed-rng-foundation、836b99f、共通seed改修の全体受入れ、4方式横断確認の事前設計、Copilotによる工程追加、Copilotによる自己参照転記、利用者未提案、利用者未承認、具体設計なしの工程追加、正式工程への不適切な格上げ、責任主体、工程追加の再発防止
