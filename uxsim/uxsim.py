@@ -2360,6 +2360,11 @@ class Node:
         not satisfied, this helper returns normally and leaves the rest of the
         set for a later timestep. A successful move then updates clearance
         history. This helper does not clear incoming_vehicles.
+
+        When hard_deterministic_mode is False, outlink order is shuffled and
+        the vehicle is chosen with W.normal_merge_rng. That Generator is
+        sequential and is not a keyed uniform. Hard deterministic mode does
+        not shuffle or choose, so it does not consume the Generator.
         """
         outlinks = []
         seen_outlinks = {}
@@ -2383,7 +2388,7 @@ class Node:
                 lane_index += 1
 
         if s.W.hard_deterministic_mode == False:
-            s.W.rng.shuffle(outlinks)
+            s.W.normal_merge_rng.shuffle(outlinks)
 
         for outlink in outlinks:
             if (len(outlink.vehicles) < outlink.number_of_lanes or outlink.vehicles[-outlink.number_of_lanes].x > outlink.delta_per_lane*s.W.DELTAN) and outlink.capacity_in_remain >= s.W.DELTAN and s.flow_capacity_remain >= s.W.DELTAN:
@@ -2403,7 +2408,7 @@ class Node:
                 if sum(merge_priorities) == 0:
                     merge_priorities = np.ones(len(merge_priorities))
                 if s.W.hard_deterministic_mode == False:
-                    veh = s.W.rng.choice(vehs, p=merge_priorities/sum(merge_priorities))
+                    veh = s.W.normal_merge_rng.choice(vehs, p=merge_priorities/sum(merge_priorities))
                 else:
                     veh = max(zip(merge_priorities, vehs), key=lambda x:x[0])[1]
 
@@ -4392,6 +4397,20 @@ class World:
         W._common_seed_rng_internal_entropy = _normalize_seed_sequence_entropy(
             order_control_seed_sequence.entropy
         )
+        # Sequential Generator for ordinary merge only. This is not a keyed
+        # uniform. Route choice, arrival tiebreakers, and order control do
+        # not draw from it. The saved entropy is combined with a fixed
+        # spawn_key once, here. spawn_key (0,) is already the order-control
+        # child, and a SeedSequence of the entropy alone would repeat W.rng
+        # when that entropy is the original integer seed. World name, object
+        # identity, timestep, and node name are not part of this seed.
+        # World.copy pickles the Generator, so the copy keeps the current
+        # state as a different object. No extra copy step is added.
+        ordinary_merge_seed_sequence = np.random.SeedSequence(
+            W._common_seed_rng_internal_entropy,
+            spawn_key=(1,),
+        )
+        W.normal_merge_rng = np.random.default_rng(ordinary_merge_seed_sequence)
 
         W.TMAX = tmax   #simulation time (s)
 

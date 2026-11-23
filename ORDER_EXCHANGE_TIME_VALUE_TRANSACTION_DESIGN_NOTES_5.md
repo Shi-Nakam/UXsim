@@ -18615,3 +18615,67 @@ Cursor Grok 4.7、effort high の読取り専用反証は、編集、test、`py_
 次の直接作業は、今回の Markdown 差分を利用者が Terminal で全文独立確認することである。その後の予定は、必要なら文書修正、production 3 ファイルと test 2 ファイルと Markdown 3 ファイルだけを明示して stage、commit、commit 結果と最新 commit と残存変更の確認、push は別指示、push 後の status と最新 commit と local／remote 一致の確認、その後に通常 merge 用 RNG の分離へ進むことである。production 3 ファイルは `uxsim/uxsim.py`、`uxsim/common_seed_rng_arrival_tiebreaker.py`、`uxsim/order_control_tvt_mp_candidate_local_vehicle_advance.py` である。test 2 ファイルは `tests_common_seed_rng_arrival_tiebreaker.py` と `tests_order_control_current_visit_arrival.py` である。利用者への指示は、その時点で次に実行する内容だけを提示する。Git 操作は利用者が Terminal で行う。Cursor には行わせない。
 
 **検索語:** arrival tiebreaker keyed化、arrival_tiebreaker、ARRIVAL_TIEBREAKER_DOMAIN、Node訪問番号、node_visit_number_from_link_entries、arrival_tiebreaker_key_parts、Vehicle正式名、Node正式名、全inlink合計、累積進入回数、同一inlink再進入、別inlink再訪、parallel Link、missing 0、合計0、0を1へ補正しない、invalid count、bool拒否、float拒否、str拒否、pure keyed uniform、common seed RNG、current Visit、legacy first-arrival、初回台帳、再訪非上書き、同じVisit再生成なし、arrival成立前未生成、W.rng非消費、W.order_control_rng非消費、初回と再訪、明示key、World copy、baseline fork、baseline collector、Candidate局所前進、Candidate binding非接続、Level 2非接続、専用test 19件、既存test 13件、fixture不備、veh_repro_1、veh_repro_2、veh_repro、異なるVehicle名、same event key、blockingなし、highなし、one candidate RNG、keyed arrival value、Candidateコメント修正、Common seed/RNG arrival tiebreaker tests passed、Order-control current visit arrival tests passed、keyed uniform回帰、Vehicle Link進入状態回帰、route choice回帰、normal merge RNG未実装、N=1未実行、4方式統合回帰未実行、feature/common-seed-rng-foundation、58521aa、到着順の乱数、同着順位をどう決めるか、同じNodeへの何回目の訪問か、Node訪問回数の数え方、同じinlinkへ再進入した場合、別inlinkから同じNodeへ戻る場合、到着時にW.rngを消費するか、初回到着と再訪で別の乱数か、current Visitと初回台帳の違い、同じVisitでtiebreakerを作り直すか、Candidateでarrival tiebreakerを作るか、Level 2でarrival tiebreakerを作るか、baseline copyで同じtiebreakerになるか、Vehicle名が違うと別の値になるか、same seedなのに結果が違った、fixtureのVehicle名が違った、candidate RNGという古いコメント、arrival実装後の次作業、実装完了までの残り区分
+
+## 32.29 通常merge用RNG分離の実装・反証・受入れ（2026-11-23）
+
+執筆日は2026-11-23である。詳細正本は `ORDER_EXCHANGE_SEED_RNG_AND_BATCH_IMPLEMENTATION_BRANCH_STRATEGY.md` **§19** である。本節は **§32.21** の研究契約と **§32.24** の実装前設計を覆さない。**§32.21** から **§32.28** の本文は削除も書換えもしない。
+
+関係:
+
+- **§32.21** は、4方式共通 seed／RNG 改修の研究契約の正本である。
+- **§32.24** は、実装前の具体設計確定である。
+- **§32.25** は、内部 entropy と pure keyed helper の実装結果である。
+- **§32.26** は、Vehicle 状態と Link 進入 helper の実装結果である。
+- **§32.27** は、origin・in-trip route choice keyed 化の実装結果である。
+- **§32.28** は、arrival tiebreaker keyed 化と Node 訪問番号の production 利用の実装結果である。
+- **§32.29** は、通常 merge 用 RNG 分離の実装結果である。
+- 進捗の対応節は `ORDER_EXCHANGE_PROGRESS_4.md` **§21.9.30** である。**§21.9.29** は前の実装単位の進捗として残す。
+- **§14** は実装前設計の正本である。**§15** は内部 entropy と pure keyed helper の正本である。**§16** は Vehicle 状態と Link 物理進入追跡の正本である。**§17** は route choice keyed 化の正本である。**§18** は arrival tiebreaker と Node 訪問番号の正本である。**§19** は本節の詳細正本である。
+
+今回の単位により、4方式共通 seed／RNG 改修の主要 production 接続は揃った。ただし、改修全体の受入れ完了ではない。N=1 BATCH 対 FCFS 回帰と 4方式統合回帰は未実行である。最終正本記録と全体受入れも未完了である。新 BATCH は未実装・未採用である。test 成功だけを受入れ理由にはしない。Cursor の報告を無条件には正本化していない。Cursor は Git 操作を行っていない。
+
+production は `uxsim/uxsim.py` だけである。新規 module は作っていない。Generator 本体を World 属性として明示し、初期化は数行だけにし、状態を別 module へ隠さず、`World.copy()` の pickle で現在 state を継承するためである。専用 test は新規 `tests_common_seed_rng_normal_merge.py` の 18 件である。route choice、arrival、Link 進入、keyed uniform、current-visit arrival の既存 test は変更していない。
+
+World 属性は `normal_merge_rng` である。型は NumPy `Generator` である。World 初期化時に 1 回だけ作る。基礎は保存済み `_common_seed_rng_internal_entropy` である。局所変数 `ordinary_merge_seed_sequence` は `np.random.SeedSequence(..., spawn_key=(1,))` であり、そこから `np.random.default_rng(...)` する。これは逐次 RNG であり、pure keyed uniform ではない。merge event key は作らない。timestep や Node 名では再 seed しない。merge ごとに Generator を作り直さない。
+
+使わないものは、用途ごとの `SeedSequence(None)`、Python 組込み `hash()`、World 名、object identity、`W.rng` の現在 state、route choice の domain、arrival の domain である。`W.order_control_rng` の既存 `spawn(1)[0]` は変更していない。`W.rng` は spawn key なし、`W.order_control_rng` は既存 child 0、`normal_merge_rng` は `spawn_key=(1,)` である。現行 3 本は別 object であり、別の初期系列である。同じ明示 seed なら World 名が違っても normal merge の初期 state は同じである。異なる seed なら代表系列が異なる。**§14** は別 stream を要求したが、`spawn_key=(1,)` という番号自体は事前固定していなかった。現在の stream とは衝突しない。将来、同じ entropy と同じ spawn key を別用途で再利用してはならない。これは low であり、今回の受入れを妨げない。用語では局所変数が `ordinary_merge_seed_sequence`、属性が `normal_merge_rng` である。使用箇所は属性名で追跡できる。今回は変えていない。
+
+初期化は entropy 保存の直後、`World.__init__` の 1 回だけである。`finalize_scenario()` でも `exec_simulation()` でも作り直さない。`World.copy()` の復元では `__init__` を再実行しない。公開 `random_seed` を後から書き換えても再 seed しない。baseline 開始 timestep は seed に入らない。
+
+`_transfer_normal_merge()` の変更は乱数源だけである。変更前の `W.rng.shuffle(outlinks)` と `W.rng.choice(...)` が、`W.normal_merge_rng.shuffle(outlinks)` と `W.normal_merge_rng.choice(...)` になった。候補形成、outlink の重複除去、lane 数に応じた複製、shuffle の位置、downstream space、inflow capacity、Node flow、inlink 先頭、`route_next_link`、signal、inlink outflow、merge priority、合計 0 の均等重み、choice の位置、clearance、transfer、cleanup、return、continue、同一 timestep 内の反復は維持している。
+
+非 hard deterministic の消費条件も維持している。outlink が 0 件でも 1 件でも 2 件以上でも、lane 複製のあと shuffle を 1 回呼ぶ。space、capacity、Node flow が不足なら、その outlink では choice しない。signal などで通過可能車両が 0 件なら choice しない。1 件でも choice する。2 件以上でも、その回の choice は 1 回である。priority 合計 0 は均等重みである。clearance は choice のあとである。未充足でも choice は消費済みであり、failure 時に state は巻き戻さない。複数 outlink や lane では、条件を満たす各回に choice する。消費回数は整理も削減もしていない。
+
+hard deterministic では shuffle も choice も無い。`normal_merge_rng`、`W.rng`、`W.order_control_rng` は不変である。最大 merge priority を選ぶ。同点は既存の先に出た最大である。交通処理は維持している。
+
+`World.copy()` は World 全体の pickle であり、normal merge RNG の現在 state を別 Generator object として引き継ぐ。copy 直後の次 draw は同じである。一方だけ進めても他方は進まない。copy 前に消費済みでも、その現在地から継承する。実 merge 後の copy も同じ state である。baseline fork は同じ copy 機構である。開始時に初期 seed へ戻さない。baseline 内の消費は real World へ戻らない。baseline 専用 merge RNG は新設しない。same state かつ same merge 順なら same result である。merge event の順が違えば逐次 state が分かれる。これは設計どおりであり、event key による呼出し順独立性ではない。baseline full simulation の交通結果は今回実行していない。機構は copy test と同じであり、実行結果は統合回帰時に確認する。
+
+`Node.transfer()` では、FCFS は `transfer_fcfs_clearance()` で return し、BATCH は `transfer_batch()` で return し、time_value は TVT-MP 処理後に return する。それ以外が通常 merge である。`order_control_type="none"` の eligible Node も通常 merge である。signalized UXsim も通常 merge であり、信号の有無で乱数正本を分けない。FCFS、BATCH、確定順位 TVT は `normal_merge_rng` を使わない。
+
+generic baseline fork は隠さない。collector があり `apply_copied_tvt_confirmed_ranks is False` のときだけ、TVT 側が `_transfer_normal_merge()` を引数なしで呼ぶ。**§14.12** どおり `normal_merge_rng` を使う。production の TVT baseline は `True` で確定順位側である。専用 test の time_value fixture はこの generic fork を通っていない。test 名は確認範囲より少し広い。これは low であり、機能上の穴ではない。
+
+`allowed_vehicles` と clearance 付きの production caller は、今回確認した範囲には無い。使われた場合も同じ normal merge RNG であり、clearance は choice のあとである。helper 名と RNG 名を変える必要はない。N=1 の FCFS と BATCH はこの helper に入らない。
+
+Candidate 局所前進と Candidate binding は通常 merge を呼ばない。局所 World には copy された `normal_merge_rng` があるが未使用であり、real World へ戻さない。Candidate selection RNG とは混同しない。Level 2 は別 World なので属性自体はある。hard deterministic であり、自前の reference transfer を使い、`Node.transfer()` と `_transfer_normal_merge()` は呼ばない。normal merge RNG は未使用である。Level 2 固有 seed は変えていない。この非接続を将来の全 World 型 BATCH へ一般化しない。
+
+mutable RNG の境界は次である。`W.rng` は通常 merge に使わない。route search noise や Vehicle 色など、対象外の既存用途は残る。`W.order_control_rng` は通常 merge に使わず、作り方も変えていない。`W.normal_merge_rng` は通常 merge の shuffle と choice だけで、逐次であり keyed ではない。pure keyed uniform は route choice と arrival tiebreaker のままで、通常 merge には使わない。
+
+専用 18 件の名前と保証は **§19.15** と同じである。期待 RNG は production helper で作らない。test 側が整数 seed と `spawn_key=(1,)` を明示する。固定 float は書かない。state と実 draw、実 `Node.transfer()` または `_transfer_normal_merge()`、移動した Vehicle、3 stream の区別、copy の object 非共有、逐次の順序依存、hard deterministic の実関数を確認する。18 件すべてを `TESTS` から実行する。low として、time_value test は generic fork を通らない。BATCH の専用実動作 test、2 車線で choice が 2 回の fixture、downstream space 専用 fixture、clearance 未充足の専用 fixture、hard deterministic 同点の専用 test は無い。一部 test は 3 stream 全部をその 1 件では見ないが、他 test で横断確認している。受入れ前の追加 test は不要である。
+
+交差回帰は利用者の Terminal 確認である。`python -m py_compile uxsim/uxsim.py tests_common_seed_rng_normal_merge.py` は成功した。`python tests_common_seed_rng_normal_merge.py` は `Common seed/RNG normal merge tests passed.` である。keyed uniform は `Common seed/RNG keyed uniform tests passed.`、Link 進入状態は `Vehicle link-entry state tests passed.`、route choice は `Common seed/RNG route choice tests passed.`、arrival tiebreaker は `Common seed/RNG arrival tiebreaker tests passed.`、current-visit arrival は `Order-control current visit arrival tests passed.` である。`git diff --check` の出力は無かった。
+
+Cursor Grok 4.7、effort high の読取り専用反証は、編集、test、`py_compile`、simulation、Git を行っていない。総合判定は、このまま受入れ可能、である。blocking は無い。high は無い。受入れ前の修正も追加回帰も無い。成立したのは、seed 派生、stream 分離、初期化位置、shuffle と choice だけの置換、消費条件の維持、hard deterministic、copy と baseline、方式別分岐、Candidate と Level 2 の非接続、mutable RNG 境界、専用 18 件の独立性、である。low は、time_value test 名の広さ、BATCH 実動作 test の欠如、2 車線と downstream space と clearance 未充足の専用 fixture の欠如、`spawn_key=(1,)` が事前固定でなかったこと、`ordinary_merge_seed_sequence` と `normal_merge_rng` の用語差、docstring が choice を候補 1 件以上のときだけと簡略化していること、である。これらは受入れを止めない。
+
+意図した非互換は、通常 merge の shuffle 順、選ばれる具体 Vehicle または inlink、その後の `W.rng`、そこから波及する交通結果である。維持するのは、候補形成、shuffle 位置、merge priority、choice 確率、signal、inlink 先頭、`route_next_link`、capacity、downstream space、clearance、transfer、hard deterministic、trip end、order-control type である。旧 trial との具体的な通常 merge 結果の一致は要求しない。
+
+今回の単位だけを受入れ可能とした。受入れ範囲は、`normal_merge_rng`、seed 派生、World copy、通常 merge の shuffle と choice、stream 分離、hard deterministic の非消費、である。理由は、別 stream、保存済み entropy からの確定的派生、逐次 RNG、shuffle と choice だけへの接続、交通処理順の維持、既存消費条件の維持、hard deterministic の維持、copy と baseline の現在 state 継承、FCFS、BATCH、Candidate、Level 2 への誤接続が無いこと、route choice と arrival からの分離、専用 18 件、交差回帰、blocking と high が無いこと、test 成功だけにしないこと、である。
+
+主要 production 接続として完了したものは、内部 entropy と pure keyed uniform、Vehicle Link 進入状態、origin・in-trip route choice、arrival tiebreaker と Node 訪問番号、通常 merge 用 RNG 分離、の 5 単位である。予定した主要 production 接続は揃った。未完了は、N=1 BATCH 対 FCFS、4方式統合回帰、最終正本記録、全体受入れ、である。実装接続の完了と、研究上の全体受入れの完了は混同しない。
+
+未実装または未実行のまま残るものは、N=1 の完全一致、4方式統合回帰、signalized UXsim を含む交通結果確認、baseline fork の実 merge 交通結果、Candidate selection RNG、新 BATCH、最終正本記録、全体受入れ、性能測定、である。
+
+実装完了までの現在地は次である。完了は、内部 entropy と pure keyed uniform、Link 進入状態、route choice、arrival tiebreaker、normal merge RNG、の 5 単位である。残りは、N=1 BATCH 対 FCFS と 4方式統合回帰、最終正本記録と全体受入れ、である。
+
+次の直接作業は、今回の Markdown 差分を利用者が Terminal で全文独立確認することである。その後の予定は、必要なら文書修正、`uxsim/uxsim.py` と `tests_common_seed_rng_normal_merge.py` と Markdown 3 ファイルだけを明示して stage、commit、commit 結果と最新 commit と残存変更の確認、push は別指示、push 後の status と最新 commit と local／remote 一致の確認、その後に N=1 BATCH 対 FCFS と 4方式統合回帰の具体的な実行計画へ進むことである。利用者への指示は、その時点で次に実行する内容だけを提示する。Git 操作は利用者が Terminal で行う。Cursor には行わせない。
+
+**検索語:** normal merge RNG、normal_merge_rng、通常merge用RNG、通常合流乱数、逐次RNG、sequential RNG、spawn_key=(1,)、ordinary_merge_seed_sequence、保存済みentropy、stream分離、W.rng分離、W.order_control_rng分離、shuffle、choice、merge priority、合計0、均等重み、候補0件、候補1件、複数候補、hard deterministic、World copy、baseline fork、generic baseline fork、apply_copied_tvt_confirmed_ranks、allowed_vehicles、order-control clearance、clearance未充足、Candidate非接続、Level 2非接続、専用test 18件、Common seed/RNG normal merge tests passed、keyed uniform回帰、Vehicle Link進入状態回帰、route choice回帰、arrival tiebreaker回帰、current-visit arrival回帰、blockingなし、highなし、主要production接続完了、N=1未実行、4方式統合回帰未実行、feature/common-seed-rng-foundation、a730e08、通常合流はどの乱数を使うか、合流乱数を分離した理由、W.rngを通常mergeで使うか、shuffleは何の乱数か、choiceは何の乱数か、候補1台でも乱数を使うか、候補0台でもshuffleするか、hard deterministicで乱数を使うか、merge priorityが0ならどうするか、signalで通れないとき乱数を使うか、capacity不足でchoiceするか、clearance未充足でも乱数を使うか、World copyで合流乱数はどうなるか、baselineで合流乱数を引き継ぐか、Candidateで通常mergeを使うか、Level 2で通常mergeを使うか、FCFSとBATCHでnormal merge RNGを使うか、time_valueのgeneric fork、merge eventの順序依存、共通seed実装の残り、主要production接続が揃ったか、統合回帰前の状態
