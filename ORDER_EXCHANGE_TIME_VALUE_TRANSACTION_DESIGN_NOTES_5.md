@@ -18711,3 +18711,59 @@ seed 改修前 5,000 台は call 46428、resolved 46390、unresolved 38、fallba
 次の直接作業: 本 Markdown 差分の利用者による全文独立確認。その後 Markdown 3 ファイルのみ stage・commit（production・test・diagnostic は含めない）。利用者判断なしに「4方式統合回帰」へ進まない。判断候補は全体受入れ可否、10,000 台 N=1、別条件 N=1、方式横断確認の新設計のみ列挙する。
 
 **検索語:** 4方式統合回帰、工程訂正、具体設計なし、合否基準未確定、正式scriptなし、利用者未承認、§15初出、後続節転記、N=1 BATCH対FCFS、exact_match、200台、1000台、5000台、10000台未実行、aggregate mismatch 0、Vehicle-level mismatch 0、全車完走、completion order、Level 2 call count 1497、Level 2 call count 46266、resolved 46229、unresolved 37、fallback 37、seed改修前fallback 38、新共通seed環境、旧seed結果非互換、grid_n1_level_2_vs_fcfs_check.py、batch_size=1、Level 2、virtual horizon 30、clearance 1、random seed 0、demand seed 42、6x6 grid、strict comparison、toleranceなし、N=1 shortcutなし、feature/common-seed-rng-foundation、836b99f、共通seed改修の全体受入れ、4方式横断確認の事前設計、Copilotによる工程追加、Copilotによる自己参照転記、利用者未提案、利用者未承認、具体設計なしの工程追加、正式工程への不適切な格上げ、責任主体、工程追加の再発防止
+
+## 32.31 共通seed／RNG改修に対する利用者Terminal原典とCopilot独立監査（2026-11-24）
+
+執筆日は2026-11-24である。詳細正本は `ORDER_EXCHANGE_SEED_RNG_AND_BATCH_IMPLEMENTATION_BRANCH_STRATEGY.md` **§21** である。進捗は `ORDER_EXCHANGE_PROGRESS_4.md` **§21.9.32** である。**§32.21** から **§32.30** の本文は削除も書換えもしない。研究契約 **§32.21** 自体は維持する。N=1 の実測 **§32.30** は本節で置き換えない。
+
+本節は、Grok による既存反証だけで共通 seed／RNG 改修を受け入れず、利用者 Terminal の原典出力を使って Copilot が独立監査した結果の設計上の位置づけである。Grok の完了報告は、今回の独立監査の根拠として扱わない。
+
+### 32.31.1 production原典
+
+分岐元 `fde6865` から監査開始時 HEAD `87d10fd` までの実差分を Terminal で確認した。production 変更は 6 ファイル、合計 910 行追加・53 行削除だった。対象は `uxsim/common_seed_rng_arrival_tiebreaker.py`、`uxsim/common_seed_rng_keyed_uniform.py`、`uxsim/common_seed_rng_route_choice.py`、`uxsim/order_control_tvt_mp_candidate_binding_transfer.py`、`uxsim/order_control_tvt_mp_candidate_local_vehicle_advance.py`、`uxsim/uxsim.py` である。
+
+確認範囲は、既存 `W.rng` と `W.order_control_rng` の生成契約、既存 `SeedSequence` の entropy 保存、SHA-256 の pure keyed uniform、domain と key 部分の明示的直列化、origin route choice、in-trip route choice、Vehicle 別 Link 物理進入回数、origin attempt、current-Link 内 in-trip attempt、arrival tiebreaker、Node 訪問番号、normal merge 専用逐次 Generator、BATCH・FCFS・通常 transfer・Candidate binding の Link 進入接続、World copy、generic baseline fork、TVT rank 適用 baseline fork、Candidate local World、Level 2 mimic との境界、である。
+
+判断は次である。route choice と arrival tiebreaker に、旧 `W.rng` または `W.order_control_rng` の消費が残っている形跡は確認されなかった。normal merge の shuffle と choice は `W.normal_merge_rng` へ分離されていた。Link 物理進入記録は、origin、BATCH、FCFS no-clearance、FCFS clearance、共通 transfer、Candidate binding へ接続されていた。Level 2 mimic は局所時刻推定用の参照計算であり、新しい実 World の Link 進入 identity を作らない既存境界として非接続を維持していた。Candidate local advance も新しい物理 Link 進入を起こさないため、Link 進入記録へ接続しない。World copy は pickle copy により、内部 entropy、Vehicle 状態、normal merge Generator 状態を複製する。この原典確認の範囲では、production に重大または high 相当の欠陥は見つからなかった。原典確認で見つからなかったことと、すべての将来条件で正しいことが証明されたこととは、同一視しない。
+
+### 32.31.2 test独立性と再実行
+
+専用 test の構造も Terminal で確認した。keyed uniform test には固定直列化 byte 列、SHA-256 digest、53-bit 整数の固定 vector がある。route choice の候補選択期待値は test 側の独立実装であり、production の selection helper を期待値生成に使っていない。arrival の Node 訪問番号は test 側で Node の inlink を独立集計している。normal merge の期待 Generator は test 側で `SeedSequence` と `spawn_key=(1,)` から独立生成している。production の正式経路を実際に通す test がある。source 文字列検査だけで全体を合格させる構成ではない。確認されたのは、独立性を高める構造である。test と production が同じ誤りを共有する可能性を完全に排除したとは書かない。
+
+利用者 Terminal で専用 6 系統を再実行し、終了値 0 だった。表示は `Common seed/RNG keyed uniform tests passed.`、`Vehicle link-entry state tests passed.`、`Common seed/RNG route choice tests passed.`、`Common seed/RNG arrival tiebreaker tests passed.`、`Order-control current visit arrival tests passed.`、`Common seed/RNG normal merge tests passed.` である。直接関係する既存回帰 9 系統も `set -e` 付きで終了値 0 だった。対象は `tests_order_control_rng.py`、`tests/test_verification_route_choice.py`、`tests_fcfs_order_control_transfer.py`、`tests_order_control_batch_service_queue_transfer.py`、`tests_order_control_batch_t_trigger_level_2_reference.py`、`tests_order_control_batch_t_trigger_level_2_unarrived_reference.py`、`tests_order_control_batch_transfer.py`、`tests_order_control_tvt_mp_candidate_binding_transfer.py`、`tests_order_control_tvt_mp_candidate_unbound_fcfs_transfer.py` である。production 6 ファイルの `py_compile` も終了値 0 だった。`Traceback`、`AssertionError`、`FAILED`、`ERROR`、`failed:` の failure scan は該当なしだった。`grep` 終了値 1 は該当文字列なしであり、test 失敗ではない。
+
+### 32.31.3 baseline fixture不足
+
+`tests_order_control_tvt_baseline_fork_alignment.py` と `tests_order_control_tvt_mp_candidate_local_state.py` の最初の一括実行は、baseline fork alignment 側で終了値 1 となり、Candidate local state 側は `set -e` により未実行だった。失敗は `test_calls_alignment_once_per_node_in_target_node_order`、Vehicle `veh_b`、Node `junction_b`、node visit number 0 による arrival tiebreaker 記録の停止である。
+
+`veh_b` は通常走行で `in_a` へ到達した後、`_place_vehicle_on_inlink_with_new_order_control_visit()` により上流の time_value Node を通過せず人為的に `in_b` へ移されていた。helper は `vehicle.link = inlink` と `vehicle.begin_order_control_visit_on_link_entry()` の間に `vehicle.record_successful_physical_link_entry()` を呼んでいなかった。新しい Visit だけが始まり、`in_b` の物理進入回数は 0 のままだった。これは production の自然走行欠陥ではない。改修後の厳格な整合性確認が、既存 fixture の不完全な人為配置を検知した。node visit number 0 の検証は緩めない。0 を 1 へ補正しない。修正は `tests_order_control_tvt_baseline_fork_alignment.py` だけである。人為配置の後、Visit 開始前に正式 helper を 1 回追加し、進入回数 1 以上と in-trip attempt の 0 reset を assert した。同じ inlink の位置だけを戻す `_place_not_yet_arrived_vehicle_at_snapshot()` は変更せず、二重計上を防いだ。production は変更していない。修正後は baseline fork alignment 25 tests passed、Candidate local state 25 tests passed、いずれも exit status 0 である。
+
+### 32.31.4 旧診断の適用不能
+
+`research_scripts/run_route_choice_rng_diagnostic_invariance_two_route.py` と `research_scripts/run_route_choice_rng_diagnostic_invariance_12_vehicle_tvt_mp.py` の再利用を調べた。2 本目は `--help` 非対応のため、`--help` 指定でも実 simulation が起動した。12 台 scenario は診断なしと診断ありの両方で simulation 完了後、coverage validation で停止した。required origin draws 12、observed origin draws 0、`RuntimeError: Origin draws 0 < 12.` である。
+
+旧診断 `research_scripts/route_choice_rng_diagnostic.py` は `W.rng.choice` を一時 proxy で包み、呼出しと Generator state を記録する。本文にも、keyed randomization ではないこと、`W.rng.choice` を呼んだときだけ draw と数えること、改修前の逐次 RNG 経路選択を監視する設計であることが明記されていた。改修後の origin／in-trip route choice は `W.rng.choice` を使わない。origin draws 0 は、経路選択の不在も production 欠陥も示さない。新しい keyed 方式を旧診断が観測できないことを示す。旧診断 2 本は今回の改修後受入れ根拠から外す。過去用途まで無効だったとは判断しない。改修後の合否判定へ流用しない。旧診断 3 ファイルは今回変更していない。`research_scripts/route_choice_rng_diagnostic.py` の今回以前からの作業ツリー変更は、今回の成果へ含めない。
+
+### 32.31.5 新方式専用の実走行反証
+
+旧診断を大改造せず、`tests_common_seed_rng_full_simulation_invariance.py` を新設した。synthetic fixture であり、field network でも正式 3,000 台実験でもない。test は 3 件である。
+
+`test_two_route_full_simulation_matches_after_world_rng_advance` は、同じ network、同じ Vehicle plan、同じ明示 seed の control と perturbed を独立構築し、全車追加後・本実行前に perturbed 側の `W.rng.random()` だけを 4 回消費した。`_common_seed_rng_internal_entropy`、`normal_merge_rng`、network、Vehicle plan、Vehicle name、OD、departure time、route preference 条件は変えていない。origin と走行途中の双方に 2 本以上の選択肢があり、signal なし、order control なし、hard deterministic mode なし、specified route なし、低需要、全車完走である。origin と in-trip の probabilistic choice count は各 World で 0 より大きい。in-trip は test 側が `Vehicle.route_next_link_choice` を薄く包み、元 method を 1 回だけ呼び、正式 attempt の増分だけを記録し、選択結果は変えず、`finally` で復元した。Vehicle 名集合、state、departure time、arrival time、travel time、destination、traveled route、`log_t_link`、completion order、total vehicles、completed trips、unfinished trips、total travel time、average travel time、total distance traveled、last completed trip time を、tolerance・丸め・近似なしで完全一致させた。結果は完全一致、全 3 台完走、origin choice 実作動、in-trip choice 実作動である。
+
+`test_world_copy_preserves_route_choice_counts_and_normal_merge_state` は、実行途中の World を `W.copy()` した。World は別 object、entropy は同値、各 Vehicle の `link_entry_count_by_link_name` は同値かつ dict は別 object、origin attempt と current-Link attempt は同値、Link 進入記録が少なくとも 1 件実在、`normal_merge_rng` は別 Generator で copy 直後の state は同値、copy 側だけ進めると分離し、元 World の state は不変、である。
+
+`test_ordinary_merge_full_simulation_matches_after_world_rng_advance` は、同じ seed の小規模 merge を 2 つ作り、perturbed 側の `W.rng` だけを本実行前に進めた。実行前の `normal_merge_rng` と entropy は同一、`W.rng` は意図どおり異なる。2 台は同時刻に各 inlink へ進入し、outlink 通過順と Vehicle 別・全体交通結果は完全一致した。merge 後に `normal_merge_rng` は開始 state から進み、終了 state は両 World で一致した。全車完走である。実行結果は 3 tests passed、exit status 0 である。
+
+### 32.31.6 最終回帰、N=1、判定
+
+fixture 修正と full-simulation test 追加後、専用 6 系統、baseline fork alignment、Candidate local state、full-simulation invariance の 9 系統を `set -e` 付きで再実行した。exit status 0、全 9 系統合格、baseline fork alignment 25 tests passed、Candidate local state 25 tests passed、full-simulation invariance 3 tests passed である。最終ログの `Traceback`、`AssertionError`、`FAILED`、`ERROR`、`failed:` は該当なしだった。`grep` 終了値 1 は該当なしの意味である。上記 2 test ファイルの `py_compile` は終了値 0 だった。tracked fixture の `git diff --check` は出力なし、未追跡新規 test の `git diff --no-index --check /dev/null ...` は警告なしだった。後者の終了値 1 は新規ファイル全体が差分であるためであり、trailing whitespace 等の警告は無かった。
+
+**§32.30** の N=1 は維持する。200 台、1,000 台、5,000 台は exact_match である。5,000 台は Level 2 unresolved 37 件、fallback 37 件を含めて完全一致である。10,000 台は未実行である。N=1 は BATCH と FCFS の等価性であり、今回の full-simulation invariance は `W.rng` の余分な消費からの keyed route choice と normal merge の分離、および copy 状態である。両者は異なる証拠であり、相互補完する。
+
+現時点の判断は、監査した範囲に限る。Grok の反証だけではなく、利用者 Terminal の原典出力による Copilot 独立監査を実施した。production 原典、test 独立性、専用 test、既存回帰、baseline fork、Candidate copy、World copy、実走行不変性まで確認した。baseline fixture 不足 1 件は production を緩めず test 側だけで修正した。旧診断は新方式の合格根拠に使わず、新方式専用の実走行反証へ置き換えた。production に重大または high 相当の欠陥は見つかっていない。監査した範囲では、全体受入れを妨げる事象は確認されていない。これは全体受入れ完了の断定ではない。全 network、全 seed、全将来条件の完全証明ではない。10,000 台 N=1、別 network、別 seed、性能評価、Candidate selection RNG、新 BATCH は未確認である。「4方式統合回帰」は撤回済みであり、今回を理由に復活させない。将来の方式横断確認は、目的と合否基準を別に設計し、利用者判断を得る。利用者による最終受入れ判断はまだ必要である。
+
+今回の監査で新たに変更・追加したものは、`tests_order_control_tvt_baseline_fork_alignment.py` の修正と、`tests_common_seed_rng_full_simulation_invariance.py` の新規だけである。無関係な作業ツリー変更と未追跡ファイルには触れていない。今回以前から変更済みの `research_scripts/route_choice_rng_diagnostic.py` は今回の変更へ含めない。本節の文書化では production、test、diagnostic、research script、output を変更していない。
+
+次の直接作業は、Markdown 3 ファイルの差分を利用者が Terminal で独立確認することである。その後の判断候補は、文書訂正、独立監査範囲に基づく最終受入れ可否、test 2 ファイルと Markdown 3 ファイルの commit、commit 確認後の別指示としての push、である。10,000 台 N=1、別 network、別 seed、方式横断確認へ自動的に進まない。
+
+**検索語:** 共通seed RNG独立監査、Copilot独立確認、Terminal原典確認、Grok反証だけではない、production差分精読、test独立性、baseline fork fixture不足、veh_b、junction_b、node visit number 0、人為配置、record_successful_physical_link_entry、production非変更、baseline fork alignment 25 tests、Candidate local state 25 tests、旧route choice RNG診断、W.rng.choice監視、Origin draws 0、旧診断適用不能、keyed route choice、新方式専用実走行反証、full simulation invariance、W.rng余分消費、two-route、origin choice実作動、in-trip choice実作動、World copy、normal merge separation、完全一致、3 tests passed、最終9系統、exit status 0、failure scan該当なし、py_compile成功、N=1 BATCH FCFS equivalence、200台、1000台、5000台、unresolved 37、fallback 37、highなし、重大欠陥なし、全条件証明ではない、4方式統合回帰を復活させない、最終受入れ判断

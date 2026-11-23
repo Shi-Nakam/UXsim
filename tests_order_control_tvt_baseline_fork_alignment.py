@@ -215,8 +215,12 @@ def _place_vehicle_on_inlink_with_new_order_control_visit(
     x_position=180.0,
 ):
     # Move one vehicle onto a downstream inlink without transferring it
-    # through the upstream time_value node. The new Visit comes from the
-    # ordinary link-entry method, not a handwritten current-visit dict.
+    # through the upstream time_value node. For this fixture, that manual
+    # placement is a successful physical link entry on the target inlink.
+    # Record link-entry state with the same production helper used on a real
+    # transfer, then start a new order-control Visit. A later call to
+    # _place_not_yet_arrived_vehicle_at_snapshot() only restores position on
+    # the same inlink; it must not record another entry or start another Visit.
     inlink = W.get_link(inlink_name)
     outlink = W.get_link(outlink_name)
     old_link = vehicle.link
@@ -239,6 +243,7 @@ def _place_vehicle_on_inlink_with_new_order_control_visit(
     vehicle.follower = None
     if vehicle not in inlink.vehicles:
         inlink.vehicles.append(vehicle)
+    vehicle.record_successful_physical_link_entry()
     vehicle.begin_order_control_visit_on_link_entry()
     if old_link is not None and vehicle in old_link.end_node.incoming_vehicles:
         old_link.end_node.incoming_vehicles.remove(vehicle)
@@ -256,6 +261,8 @@ def _place_vehicle_on_inlink_with_new_order_control_visit(
     assert current_visit["arrival_tiebreaker"] is None
     assert vehicle not in inlink.end_node.incoming_vehicles
     assert vehicle.state == "run"
+    assert vehicle.link_entry_count_by_link_name[inlink.name] >= 1
+    assert vehicle.current_link_route_choice_attempt_count == 0
 
 
 def _build_two_node_snapshot_world_with_visits_on_both_nodes():
