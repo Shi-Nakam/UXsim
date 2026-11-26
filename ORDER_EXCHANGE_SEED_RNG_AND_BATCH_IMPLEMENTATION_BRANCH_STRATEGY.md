@@ -4298,3 +4298,61 @@ BUYER_ONLY の詳細は、356 台、observed buyer Visit = 1,197、local actual 
 ### 22.17 検索語
 
 共通seed RNG後clearance 1、6×6ネットワーク、3000台、FCFS対TVT-MP再実行、平均総旅行時間、97.575秒、participating 2400、nonparticipating 600、VOT Spearman、Q5−Q1、BUYER_ONLY、SELLER_ONLY、BUYER_DOMINANT、SELLER_DOMINANT、BALANCED、NO_TRANSACTION、相互排他的役割区分、Top 20%、Top 10%、Top 5%、Top 1%、Top 1%全車buyer側、Top 1%平均総旅行時間533.875秒、Top 1%局所実現短縮11.9167秒、Top 1%平均支払5.7789円、Top 1%平均正味受取マイナス5.1094円、FCFS単独VOT相関なし、nonparticipating VOT相関なし、bootstrap参考値、並べ替え検定参考値、OD未調整、車両間相互作用、同経路nonparticipating、異経路nonparticipating、経路JSON正規化、外部便益、公式支払、公式補償、収支均衡、3173.109890768508円、time benefit、total benefit、局所実現短縮、baseline_minus_actual_passage_seconds、BUYER_ONLY 4282秒、平均12.028秒、平均支払3.471円、SELLER_ONLY平均遅延7.989秒、平均補償0.841円、trade-scope外部効果0.717秒、フリーライダー、ネットワーク外部効果、参加資格介入、VOT介入、99パーセンタイル10.793873103649728、単一seed、因果効果ではない、4方式統合回帰を復活させない
+
+## 23. 共通seed／RNG後signalized UXsim再実行とFCFS・TVT-MP全体効率比較（2026-11-25）
+
+TVT-MP の全体効率を FCFS だけでなく signalized UXsim とも比較し、研究上の位置づけを明確にする。FCFS 対 TVT-MP は同一 Vehicle、VOT、buyer／seller、金銭移転、nonparticipating 外部便益までの詳細比較である。signalized UXsim との比較は同じ詳細分析ではなく、同一 network・需要・seed 条件の全体効率比較である。TVT-MP は FCFS より全体効率が高い。ただし今回の正式 signalized UXsim 条件より全体効率が低く、signalized UXsim に劣る。全体効率だけで signalized UXsim の代替とは位置づけない。TVT-MP 固有の価値は VOT選別、seller補償、金銭移転、参加・非参加車への便益配分、外部便益にある。この不利な比較を明示した上で、FCFS詳細比較を位置づける。将来の BATCH 改修では signalized UXsim を上回る全体効率を研究目標とする。将来的には FCFS ベースの BATCH を baseline として TVT-MP 取引を組み合わせる BATCHベースTVT-MP を検討する。BATCH が signalized UXsim を上回ることは現時点では未達・未確認であり、達成済みとは書かない。単一seed、特定信号設定であり、一般化しない。4方式統合回帰を復活させない。
+
+### 23.1 新規runnerと正式条件
+
+新規 runner は `research_scripts/run_signalized_uxsim_6x6_grid_3000_vehicle_common_seed_rng.py`。基準は `research_scripts/run_signalized_uxsim_6x6_grid_3000_vehicle_awt_awwt_od_reference_validation.py`。scenario は `signalized_uxsim_6x6_grid_3000_vehicle_common_seed_rng_departure_999_seed_0_demand_seed_42_vot_seed_1_cohort_seed_3_signal_59_0_59_0`。output は `research_outputs/trial/signalized_uxsim_6x6_grid_3000_vehicle_common_seed_rng_departure_999_seed_0_demand_seed_42_vot_seed_1_cohort_seed_3_signal_59_0_59_0`。既存 runner、旧 signalized output、FCFS、TVT-MP、production は変更しない。旧保存結果との完全一致は合格条件にしない。共通seed／RNG後の FCFS・TVT-MP・signalized UXsim全体比較用に別 directory へ保存した。新規 output はローカル出力であり文書 commit へ自動包含しない。`research_scripts/route_choice_rng_diagnostic.py` とその他の無関係な未追跡 script・CSV・output には触れない。
+
+条件は、6×6 network、3000台、departure T=0..999、traffic seed 0、demand seed 42、VOT seed 1、cohort seed 3、participating 比較用 cohort 2,400、nonparticipating 比較用 cohort 600。全車両の交通制御は signalized UXsim であり、cohort は比較用区分にすぎず、signalized UXsim に TVT 参加・非参加の制度差はない。`SIGNAL_SETTING = (59, 0, 59, 0)`（signal setting 59 0 59 0）、API cycle 118、effective phase durations `[60, 1, 60, 1]`、east-west signal group 0、north-south signal group 2、phase 1 と phase 3 は link 未割当の all-red equivalent、offset interval 29.5、offset 0 29.5 59 88.5（`[0.0, 29.5, 59.0, 88.5]`）、internal signalized Node 36、external unsignalized Node 24、order control used false、common-seed RNG production active true、saved-result equality comparison performed false。これは今回の正式な signalized UXsim 比較条件である。あらゆる信号条件、最適信号制御一般、他 network 一般を代表するとは断定しない。
+
+### 23.2 static validation 自己検出不具合
+
+初回 static validation は `RuntimeError: Static contract must not fix saved AWT values.` で停止した。source 全文に `REFERENCE_AWT`、`EXPECTED_AWT`、`EXPECTED_WORLD_T` を検索しており、検査コード自身の文字列を検出した。禁止定数が無くても失敗し得る。全文部分文字列検索を削除し、AST の module 直下 `ast.Assign` と `ast.AnnAssign` の代入先名だけを集め、禁止名への実在する module-level 代入があるときだけ停止するようにした。コメント、docstring、エラーメッセージ、検査用文字列による誤検出を防いだ。AWT／AWWT 恒等検査、simulation 本体、その他の static validation は変更していない。修正後は `py_compile` 成功、static validation 成功、新 output directory 未存在確認成功、`PRE_RUN_VALIDATION_STATUS=0`。
+
+### 23.3 完走結果
+
+signalized UXsim は正常完走した。exit status = 0、vehicles = 3,000、order control used = False、full completion = True、traffic clearance = True、final World.T = 2025、evaluation end timestep = 2024。signal setting = `[59, 0, 59, 0]`、API cycle length = 118、effective phase durations = `[60, 1, 60, 1]`、offset interval = 29.5、offset values = `[0, 29.5, 59, 88.5]`。AWT 353.473秒（353.473 s）、AWWT 348.7114914206239、Route-Conditional AWT 338.545秒（338.545 s）、Route-Conditional AWWT 333.62701197899923、平均detour 14.928秒（14.928 s）、VOT-weighted average detour = 15.084479441624135。participating cohort AWT = 353.46541666666667 s、AWWT = 351.3497355587132。nonparticipating cohort AWT = 353.50333333333333 s、AWWT = 338.15851486826585。exec_simulation seconds = 3.9692655000835657、network-wide evaluation seconds = 39.65598008292727、output write seconds = 0.08221795782446861、script total seconds = 58.38720687502064。formal output 生成成功。平均総旅行時間459.049秒（459.049000000000 s）。
+
+### 23.4 正式AWWT定義
+
+3 方式の Vehicle CSV から独立再集計した。正式AWWT定義は `AWWT = sum(weighted_od_based_waiting_time) / vehicle_count`、`Route-Conditional AWWT = sum(weighted_route_conditional_waiting_time) / vehicle_count`、`VOT-weighted average detour = sum(weighted_detour_time) / vehicle_count`。vehicle countで除算する。今回の vehicle_count は 3,000。`sum(VOT × waiting) / sum(VOT)` は正式定義ではない。VOT合計で除算しない。最初の独立集計で誤って VOT 合計を分母にした値を一度表示したが、直ちに訂正し、正式再集計で保存値と 1e-9 以内で一致した。誤正規化値不使用。研究結果・文書・比較に使わない。将来の再分析で同じ誤りを繰り返さない。
+
+### 23.5 3方式の正式全体比較
+
+全方式は 3000台、vehicle row 3,000、unique Vehicle 3,000、同じ平均 OD 最小自由流旅行時間 105.576 s、full completion、traffic clearance、共通seed／RNG後 production、Vehicle CSV から同一定義で独立再計算した。
+
+| 方式 | 平均総旅行時間 s | AWT s | AWWT | Route-Conditional AWT s | Route-Conditional AWWT | 平均detour s | VOT加重平均detour |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| FCFS | 680.497333333333 | 574.921333333333 | 570.605509688679 | 560.105333333333 | 556.215696107889 | 14.816 | 14.389813580790 |
+| TVT-MP | 582.922000000000 | 477.346000000000 | 454.090301201753 | 464.130000000000 | 441.492878234901 | 13.216 | 12.597422966852 |
+| signalized UXsim | 459.049000000000 | 353.473000000000 | 348.711491420623 | 338.545000000000 | 333.627011978999 | 14.928 | 15.084479441624 |
+
+恒等 `平均総旅行時間 = AWT + 平均OD最小自由流旅行時間` を 3 方式で確認した。
+
+### 23.6 方式間差、効率順位、detour
+
+TVT-MP versus FCFS は平均総旅行時間短縮 97.575333333333 s、FCFS 比改善率 14.338826701256%（TVT-MP対FCFS 97.575秒14.34%）。signalized UXsim versus FCFS は 221.448333333333 s、32.542130951285%。signalized UXsim versus TVT-MP は 123.873000000000 s、21.250355965292%（signalized対TVT-MP 123.873秒21.25%）。AWT 差は共通の平均 OD 最小自由流旅行時間のため平均総旅行時間差と一致する。AWT 改善率は TVT-MP versus FCFS = 16.971945147278%、signalized versus FCFS = 38.518023335366%、signalized versus TVT-MP = 25.950358859192%。
+
+旅行時間と waiting time は小さいほど高効率である。数値順位は `signalized UXsim < TVT-MP < FCFS`。効率順位は `signalized UXsim > TVT-MP > FCFS`（全体効率順位signalized UXsim TVT-MP FCFS）。今回の正式条件では signalized UXsim が TVT-MP を明確に上回り、TVT-MP が FCFS を上回った。次は断定しない。すべての信号設定が TVT-MP を上回ること、最適信号制御一般を測定したこと、他 network・他 seed・他需要でも同じ順位になること、単一seed の差が一般的な母平均であること。
+
+平均 detour は TVT-MP 13.216 s、FCFS 14.816 s、signalized UXsim 14.928 s。VOT 加重平均 detour は TVT-MP 12.597422966852、FCFS 14.389813580790、signalized UXsim 15.084479441624。detour 単独では TVT-MP が最小である。detour 差は signalized UXsim の AWT・平均総旅行時間の大きな優位を覆さない。detour が小さいことだけで全体効率が高いとは判断しない。
+
+### 23.7 役割分担、BATCH、判定
+
+FCFS詳細比較は、TVT-MP の作用機序、同一 Vehicle の旅行時間差、VOT 別便益、buyer／seller の局所実現時間変化、支払・補償、nonparticipating 外部便益、同経路・異経路、フリーライダーを扱う。signalized全体比較は全体的な交通効率の位置づけであり、個車・buyer／seller・金銭の詳細対応は行わない。signalized UXsim には TVT 取引、VOT選別、seller補償がないため同じ役割分析を要求しない。
+
+現時点の表現は次である。「TVT-MP は FCFS より全体効率が高いが、今回の正式 signalized UXsim 条件には劣る。したがって TVT-MP を全体効率だけで signalized UXsim の代替とは位置づけない。一方、TVT-MP は VOT による buyer 選別、seller への金銭補償、参加・非参加車への便益配分を扱う固有機能を持つ。signalized UXsim に劣る事実を明示した上で、FCFS との詳細比較によって TVT-MP の作用機序と分配効果を評価する。」
+
+BATCH 改修後は FCFS、TVT-MP、signalized UXsim、BATCH の全体比較を想定する。BATCH目標は signalized UXsim超過目標、すなわち signalized UXsim を上回る全体効率である。現時点では未達・未確認であり、結果を先取りしない。BATCHベースTVT-MP は、現 TVT-MP が FCFS baseline に VOT 取引を重ねるのに対し、将来方式が BATCH baseline に VOT 取引を重ねる構想である。BATCH が効率的な基本順位を作り、その順位を baseline とし、VOT 取引で限定範囲の再配分、buyer の時間価値と seller の必要補償、BATCH の効率を大きく損なわない取引だけを採用する。未採用、未実装、未検証である。
+
+総合判定は、共通seed／RNG後の 3 方式正式全体比較を完了したこと、全体効率順位が signalized UXsim > TVT-MP > FCFS であること、TVT-MP は FCFS より約 97.575 秒・14.34% 短いこと、signalized UXsim は TVT-MP より約 123.873 秒・21.25% 短いこと、TVT-MP は全体効率で signalized UXsim に劣ること、この不利な結果も明示すること、研究価値は全体効率だけでなく VOT選別・金銭補償・便益配分・外部効果にあること、FCFS とは詳細比較、signalized UXsim とは全体比較と役割を分けること、単一seed・特定信号設定・特定 network・需要であり一般化しないこと、BATCH 目標は未達・未確認、BATCHベースTVT-MP は将来構想であること、である。4方式統合回帰を復活させない。
+
+本節の文書化では runner、production、output、CSV、JSON、Git を変更していない。次の直接作業は、利用者 Terminal で固定見出し、重要数値、AWWT 正式定義、誤正規化値を使っていないこと、signalized UXsim に TVT-MP が劣ることの明記、FCFS 詳細比較と signalized 全体比較の区別、BATCH 目標と BATCHベースTVT-MP の未実装、差分と書式、signalized runner の既存正本との差分を独立確認することである。その後、必要なら文書訂正、signalized runner 1 本と Markdown 3 本の commit 可否、output の Git 包含は別判断、commit 後に最新 commit と残存変更を確認する。push は別指示である。新しい simulation、BATCH 改修、BATCHベースTVT-MP へ自動的に進まない。
+
+### 23.8 検索語
+
+共通seed RNG後signalized UXsim、FCFS・TVT-MP・signalized UXsim全体比較、signal setting 59 0 59 0、API cycle 118、offset 0 29.5 59 88.5、3000台、平均総旅行時間459.049秒、AWT 353.473秒、AWWT 348.7114914206239、Route-Conditional AWT 338.545秒、Route-Conditional AWWT 333.62701197899923、平均detour 14.928秒、全体効率順位signalized UXsim TVT-MP FCFS、TVT-MP対FCFS 97.575秒14.34%、signalized対TVT-MP 123.873秒21.25%、正式AWWT定義、vehicle countで除算、VOT合計で除算しない、誤正規化値不使用、signalized UXsimに劣る、FCFS詳細比較、signalized全体比較、VOT選別、seller補償、外部便益、BATCH目標、signalized UXsim超過目標、BATCHベースTVT-MP、未採用、未実装、未検証、単一seed、特定信号設定、一般化しない、4方式統合回帰を復活させない
