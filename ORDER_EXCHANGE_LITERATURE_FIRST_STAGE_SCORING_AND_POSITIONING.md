@@ -220,6 +220,8 @@ X合計とY合計は、事前定義した属性との対応を内部で確認す
 
 **境界事例。** 選好で並び替えた後に物理制約で大幅に書き換えられる場合は、系列内の実装を見て1または2を判断する。PEXIC系列のX2=1は、選好入力はあるが配分結合がauction型の直接割当てより弱い、という系列判定である。根拠箇所は要出典固定。
 
+**更新（2026-11-27）。** 直前のPEXICのX2=1は、全文確認前の旧判定である。Journal全文と博士論文全文により、VDSがphase allocationへ直接入ることを確認した。最新判定はX2=2である。詳細根拠は§24.3および§24.17である。本項の0、1、2の定義自体は変更していない。
+
 **誤って加点してはいけない事例。** 選好を評価指標に使うだけで配分規則と結合したとみなすこと。
 
 **他項目との違い。** X1は入力、X2は配分規則との結合、X5は戦略的申告への制度対応である。
@@ -328,7 +330,10 @@ FRAMEWORK §3.3の「交通評価のネットワークへの埋込み」は、�
 
 - **0：** 抽象資源配分。交差点物理がない。Karma系列のY1=0。
 - **1：** 簡略交差点、集計queue、限定movement。PEXIC系列のY1=1。
-- **2：** Vehicleまたはmovement単位の競合と実現可能性を明示。Schepperle・Böhm、Sayinら、Lin・Jabari、Vasirani・Ossowski、Carlino・Boyles・Stone、Collection Auctionsは2。
+
+**更新（2026-11-27）。** 直前のPEXIC系列のY1=1は、全文確認前の旧判定である。Complete 8-phase dual-ring NEMAとmovement単位のconflictを確認した。最新判定はY1=2である。詳細根拠は§24.7、§24.11、§24.17である。Network Lowは維持する。本項の0、1、2の定義自体は変更していない。
+
+- **2：** Vehicleまたはmovement単位の競合と実現可能性を明示。Schepperle・Böhm、Sayinら、Lin・Jabari、Vasirani・Ossowski、Carlino・Boyles・Stone、Collection Auctionsは2。PEXIC系列の最新判定もY1=2である（§24.17）。旧例のY1=1は直前の更新注記のとおり歴史的記録である。
 
 **誤って加点してはいけない事例。** 交差点という語があるだけで物理モデルがあるとすること。
 
@@ -445,6 +450,10 @@ FRAMEWORK §3.3の「交通評価のネットワークへの埋込み」は、�
 **第一段階後の役割。** 直接競合候補。第二段階で制度の数式、当事者集合、補償の対応関係を全文確認する。第二段階は未開始。
 
 **未確認事項。** 正式書誌、PEXICという名称の原論文対応、X2=1とした結合の弱い箇所のページ、Lloret-Batlle and Jayakrishnanとの包含。
+
+**歴史的注記（2026-11-26）。** 本§8.1は、PEXIC全文確認前の第一段階記録である。正式書誌、PEXICという名称、Lloret-Batlle・Jayakrishnan論文との包含関係は§24で固定する。第二段階の最新詳細正本は§24である。第一段階採点の変更要否は、§24完成後の別工程で判断する。本§8.1本文は当時の記録として維持し、削除しない。
+
+**更新（2026-11-27）。** 正式再採点は§24.17である。最新値はX2=2、Y1=2、X合計11、Y合計3、概念位置は制度High・network Lowである。直前の「採点の変更要否は別工程」は2026-11-26時点の記録である。§8.1本文のX2=1、Y1=1、X合計10、Y合計2は、全文確認前の歴史的記録として残す。最新値は本文の旧値より§24.17を優先する。
 
 ### 8.2 Schepperle・Böhm系列
 
@@ -749,7 +758,7 @@ FRAMEWORK §3.3の「交通評価のネットワークへの埋込み」は、�
 
 | 研究系列 | X1 | X2 | X3 | X4 | X5 | X6 | X合計 | Y1 | Y2 | Y3 | Y4 | Y5 | Y6 | Y合計 | 概念位置 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| PEXIC系列 | 2 | 1 | 2 | 2 | 1 | 2 | 10 | 1 | 1 | 0 | 0 | 0 | 0 | 2 | 制度High・network Low |
+| PEXIC系列 | 2 | 2 | 2 | 2 | 1 | 2 | 11 | 2 | 1 | 0 | 0 | 0 | 0 | 3 | 制度High・network Low |
 | Schepperle・Böhm系列 | 2 | 2 | 1 | 1 | 1 | 1 | 8 | 2 | 1 | 0 | 0 | 0 | 0 | 3 | 制度Medium-High・network Low |
 | Sayinら | 2 | 2 | 2 | 1 | 2 | 2 | 11 | 2 | 1 | 0 | 0 | 0 | 0 | 3 | 制度High・network Low |
 | Lin・Jabari系列 | 2 | 2 | 2 | 2 | 1 | 1 | 10 | 2 | 1 | 2 | 0 | 1 | 0 | 6 | 制度High・network Medium |
@@ -760,6 +769,8 @@ FRAMEWORK §3.3の「交通評価のネットワークへの埋込み」は、�
 | Karma系列 | 2 | 2 | 2 | 2 | 1 | 2 | 11 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 制度High・network Low |
 
 同点または近い点数でも、研究の強みは異なる。例えばSayinらとKarma系列はX合計がいずれも11だが、前者は交差点物理と条件付きstrategy-proofness、後者は交差点物理なしとNash equilibriumである。Lin・JabariとPEXICはX合計がいずれも10だが、Y合計とX2・Y3が異なる。Carlino・Boyles・StoneとSchepperle・Böhm系列はX合計がいずれも8だが、network深度が大きく異なる。合計点を研究品質の順位として読まない。
+
+**更新（2026-11-27）。** 直前の「Lin・JabariとPEXICはX合計がいずれも10」は、PEXICのX2再採点前の比較である。最新値ではPEXICはX合計11、Lin・JabariはX合計10である。この1点差を研究品質の順位として読まない。PEXICの強みは、VDS加重のphase allocation、budget balance、Paretoとenvyのformalな制度深度である。Lin・Jabariの強みは、複数payer・payee、controller compatibility、arterial評価である。強みは異なる。SayinらとKarma系列がいずれもX合計11である例は、そのまま維持する。PEXICも最新のX合計は11であるが、Sayinらの条件付きstrategy-proofnessやKarma系列の交差点物理なしとは別の11である。
 
 TVT-MPはこの表に配置しない。
 
@@ -811,6 +822,8 @@ Vasirani・OssowskiとCarlino・Boyles・Stoneはこれを満たす。Lin・Jaba
 
 - **Lin・Jabari系列。** 交差点priority、VOT、複数当事者、利用者間支払、実行可能順序、限定network。TVT-MPと同じ研究問題に最も近い候補の一つ。
 - **PEXIC系列。** 選好、媒体循環、直接補償、公平性制度化。交差点物理は限定的だが制度構造が近い。
+
+**更新（2026-11-27）。** 直前の「交差点物理は限定的」は、全文確認前の説明である。最新値はX2=2、Y1=2、X合計11、Y合計3、概念位置は制度High・network Lowである。直接競合分類は維持する。Formal economic depthは高い。Network integrationはLowである。最新詳細は§24、正式再採点は§24.17である。
 - **Schepperle・Böhm系列。** time slot配分と交換・補償。交差点物理がある。静的second-priceを系列全体のSPと混同しない前提で、slot取引の直接比較対象。
 
 ### 13.2 制度的反証候補
@@ -829,6 +842,8 @@ Vasirani・OssowskiとCarlino・Boyles・Stoneはこれを満たす。Lin・Jaba
 - **Collection Auctions。** social credit名称と静的係数のギャップ。名称依存加点の反例。
 
 Lloret-Batlle and Jayakrishnanの直接競合性は、FRAMEWORKでは全文確認後に判断するとされていた。PEXIC系列との関係を固定したうえで、第二段階で再確認する。第二段階未開始。
+
+**更新（2026-11-27）。** 「第二段階未開始」は本節執筆時点の記録である。第二段階の詳細正本は§24、正式再採点は§24.17である。直接競合分類は維持する。
 
 ---
 
@@ -2513,3 +2528,1026 @@ Schepperle・Böhm系列は、既存の交差点通過権を時間価値に基�
 - 未確認事項は、**資料未入手**、**本文の該当箇所を未取得**、**入手済み原文に記載なし**、**記載が曖昧**、**研究対象外**を区別して示す。
 - ページ・節・式を未確認の項目について、推測で出典位置を記載しない。
 - 完全版資料の追加入手で新事実が判明した場合だけ本節を更新し、既述内容を繰り返さない。
+
+**歴史的注記（2026-11-26）。** 本§22は、TSE原論文後半、TSE short paper、ITSA全文、Concurrent auction全文の追加確認前に作成した2026-11-02時点の記録である。追加原文による最新のSchepperle・Böhm系列評価は§23を参照する。本§22に残る「本文の該当箇所を未取得」等のうち、§23で解消された事項は§23を優先する。本§22本文は当時の記録として削除しない。
+
+## 23. Schepperle・Böhm系列の追加原文に基づく第二段階詳細更新（2026-11-26）
+
+本節は第一段階採点の再実施ではない。第二段階の詳細比較を、追加原文に基づいて更新する。第三段階へ送る構造的前提の判定材料も記録する。§23.1〜§23.7は、資料台帳、系列内の制度関係、TSR、TSEの詳細正本である。ITSAとConcurrent auctionの詳細は、後続する§23.8以降に追加予定であり、本工程では書かない。第一段階採点は本工程では変更しない。
+
+ファイル名には `FIRST_STAGE` が残る。§20以降は、第二段階の直接競合詳細比較と、第三段階へ送る構造的前提の暫定評価を収録する既存総合正本である。本節はその運用を維持する。チャット向け要約ではなく、後日に原論文を読み直さなくても、制度処理、主体、message、candidate集合、成立条件、支払、formal property、simulation、構造的前提、TVT-MPとの比較を再構成できる記録とする。
+
+記述は次を分離する。原文で確認した事実、著者の主張、formal property、simulation result、こちらの評価、未確認事項である。ページ、節、式、表、図の番号は、本工程で照合を終えていないものは推測しない。未確認理由は、資料未入手、本文の該当箇所を未取得、入手済み原文に記載なし、記載が曖昧、検証が不十分、研究対象外、のいずれかで書く。
+
+### 23.1 資料台帳と原文確認状態
+
+本小節は資料の同定と、各資料をどの判断に使うかだけを固定する。制度の中身は§23.2以降に置く。Supplementary materialは、本工程で実物を確認していない。各資料とも「未入手・存在未確認」とする。存在しないと断定しない。
+
+**SB-P1。** 正式題名は *Agent-Based Traffic Control Using Auctions*。著者は Heiko Schepperle、Klemens Böhm。年は2007。掲載は LNAI 4676、pp. 119–133。DOIは 10.1007/978-3-540-75119-9_9。本文は全文入手済み。役割は Initial Time-Slot Auction（ITSA）の原論文である。本工程では「全文が手元にあり、ITSAの詳細分析は後続§23.8以降で行う」という状態の記録に使う。ITSAのauction形式、payment、simulation、subsidyの中身は本小節でも§23.2〜§23.7でも展開しない。ページ・節・表・図・式の対応は、ITSA詳細を本工程で固定しないため未固定である。理由は、詳細分析を後続工程へ送るためである。Supplementary materialは未入手・存在未確認。
+
+**SB-P2。** 正式題名は *Traffic Management Based on Negotiations between Vehicles: A Feasibility Demonstration Using Agents*。著者は Heiko Schepperle、Klemens Böhm、Simone Forster。年は2008。掲載は LNBIP 13、pp. 90–104。DOIは 10.1007/978-3-540-88713-3_7。本文は全文入手済み。役割は TSEの詳細原論文である。Requirements、Mechanism、budget balance、incentive compatibility、starvation、simulation、conclusionの判断に使う。本節のTSE記述の主資料である。ページ・節・表・図・式の番号対応は、本工程では固定していない。理由は、全文は入手済みだが、頁・節・式番号の照合表を本工程で作っていないためである。数値や性質を頁番号つきで再引用するときは、再照合が必要である。Supplementary materialは未入手・存在未確認。
+
+**SB-P2S。** 正式題名は *Towards Valuation-Aware Agent-Based Traffic Control*。著者は Heiko Schepperle、Klemens Böhm、Simone Forster。掲載は AAMAS 2007、pp. 364–366。DOIは 10.1145/1329125.1329349。本文は全文入手済み。役割は TSEのshort paperである。FIFO／TSEの簡潔な制度手順、exchange requestの内容、candidate形成、前後Vehicleのslot-order制約、nonparty procedural protectionの判断に使う。詳細なformal propertyとsimulation数値の主資料はSB-P2であり、SB-P2Sは手順と非当事者のslot順序制約を短く確認する資料である。ページは掲載範囲 pp. 364–366として固定する。節・式・表・図の番号は未固定である。理由は、short paper内部の節番号対応表を本工程で作っていないためである。Supplementary materialは未入手・存在未確認。
+
+**SB-P3。** 正式題名は *Auction-Based Traffic Management: Towards Effective Concurrent Utilization of Road Intersections*。著者は Heiko Schepperle、Klemens Böhm。年は2008。掲載は IEEE、pp. 105–112。DOIは 10.1109/CECandEEE.2008.88 である。10.1109/CEC/EEE.2008.9 は誤記であり、本節では使わない。本文は全文入手済み。役割は Free Choice と Clocked による concurrent auction の正式資料である。本工程では書誌と「全文入手済み・詳細は§23.8以降」の記録に限る。IE、LE、CAE、Free Choice、Clocked、そのsimulationの中身は書かない。ページ・節・表・図・式の対応は未固定である。理由は、詳細分析を後続工程へ送るためである。Supplementary materialは未入手・存在未確認。
+
+**SB-P4。** 正式題名は *Valuation-Aware Traffic Control: The Notion and the Issues*。著者は Heiko Schepperle、Klemens Böhm。年は2009。掲載は *Multi-Agent Systems for Traffic and Transportation Engineering*、pp. 218–239。DOIは 10.4018/978-1-60566-226-8.ch010。正式書誌と publisher preview は確認済みである。全文は資料未入手である。A3C完全統合、liability、communication failure、driver acceptance、legacy Vehicle 等の確認に有用である。現在のメモ化を停止する必須資料ではない。ページ・節・式の対応は、全文未入手のため固定していない。Supplementary materialは未入手・存在未確認。
+
+### 23.2 系列内の制度関係
+
+時系列と処理段階を分ける。初期に slot を作る機構と、作られた slot を後から交換する機構と、交差点の同時利用へ auction を広げる機構は、同じ系列に並ぶが同一mechanismではない。
+
+原文上の役割は次である。ITSAは initial time-slot acquisition mechanism である。TSRも initial time-slot acquisition mechanism である。TSEは、initial allocation の後に置く subsequent time-slot acquisition mechanism である。TSEの simulation では、initial phase に TSR を使う。ITSAは TSE の必須前提ではない。TSEが前提にするのは、何らかの方法で既に割り当てられた slot であり、その生成器を ITSA に限定しない。Free Choice と Clocked は、auction-based initial allocation を concurrent usage へ拡張する方向である。Free Choice・Clocked は、TSEの bilateral exchange の後継ではない。これらの中身は§23.8以降に置き、本小節では関係の切り分けだけを固定する。
+
+処理段階の区別は次である。
+
+- **Initial allocation。** まだ持っていない通過 slot を最初に配る段階である。ITSAとTSRがここに入る。両者は同じ段階に立つが、valuation-aware auction と、valuationを使わない reservation であり、権利の作り方が違う。
+- **Post-allocation exchange。** 既に持っている slot を、後から Vehicle 間で交換する段階である。TSEがここである。交換前 slot が entitlement になる。
+- **Concurrent auction。** 初期配分の auction を、交差点の同時利用へ広げる方向である。TSEの交換規則の延長として読まない。
+- **Traffic feasibility。** 交換や予約が、既存 reservation と衝突しないこと、同一 lane の物理順を崩さないことである。経済的な同意とは別の制約である。
+- **Economic transfer。** 早い slot を得る側と譲る側の間の価格と支払である。Intersection agent や exchange agent の収入ではない。支払の中身は§23.5に置く。
+
+TVT-MPとの比較上、次を固定する。Schepperle・Böhm系列には、交換前 slot という、baseline entitlement に相当する対象が既にある。通過機会を取引し、譲る側へ対価を移すこと自体は、TVT-MP単独の独自性ではない。違うのは、initial slot の生成方法と、交換後に誰のどの順序を守るかである。系列内の ITSA、TSR、TSE、Free Choice、Clocked を、一つの strategy-proof mechanism として扱わない。ある変種の truthfulness を、別の変種へ延長しない。
+
+こちらの評価は次である。直接競合として残すのは、割当済み slot を交換し補償する TSE の取引構造である。系列全体を一つの誘因保証つき制度とは読まない。この評価は採点の変更ではない。第一段階の点数は本節で動かさない。
+
+### 23.3 Schepperle・Böhm系列におけるTSR
+
+Dresner・Stone の reservation 一般と、Schepperle・Böhm系列が TSE の前段および比較で使う TSR を分ける。前者は§22.7.2が出典にした 2004年・2005年の reservation 論文の処理である。本小節は、系列の原文で TSR として確認できる処理だけを書く。Dresner・Stone 方式をどこまで変えたかの差分表は、頁を固定していないため本小節では作らない。未確認理由は、本文の該当箇所を未取得、ではなく、差分の頁対応を本工程で固定していない、である。全文は SB-P2 と SB-P2S として入手済みである。
+
+**Request。** Vehicle agent は intersection agent へ time-slot request を送る。扱う項目は少なくとも、desired time-slot beginning、intersection lane、preceding Vehicle ID である。SB-P2S の FIFO 説明では、request を到着順に処理する。ただし request の到着順と、同一 lane 上の物理順は、必ずしも一致しない。通信が先に届いた Vehicle が、同じ lane で物理的に前にいるとは限らない。
+
+**Physical-order protection。** Preceding Vehicle がまだ slot を取得していない場合、後続 Vehicle の request を reject する。予約上も same-lane の物理順を維持する。追い越し禁止を、slot の前後関係へ反映する。これは、request が先に届いたことだけで後続が前の slot を取ることを許さない制約である。
+
+**Reservation feasibility。** Requested slot が空いていれば confirm する。空いていなければ、requested slot 以後で最早の実行可能 slot を提示する。既存の conflicting reservation と両立する必要がある。したがって TSR は、通信 request の先着順だけではない。先着処理、同一 lane の物理順、衝突する予約の回避が同時に要る。
+
+最新の要約は次の三要素である。
+
+TSR ＝ request arrival order ＋ same-lane physical-order protection ＋ conflicting-reservation avoidance。
+
+**Starvation。** SB-P2 の著者説明として、TSR は starvation を回避する性質を持つとされる。これは著者の主張である。TSR の waiting-time 上限の formal な式は、本工程では固定していない。原文の該当式は未固定である。Network spillback の下でもその上限が保たれるかは、入手済み原文に記載なし、としておく。記載がないことを、著者が否定したこととは読まない。
+
+**Fairness。** TSR は valuation-aware ではない。金銭 auction による initial allocation でもない。処理規則がある。ただし request の timing、lane、movement conflict、reject と retry が、誰がどの slot を持つかに影響する。処理規則があることと、その規則の公平性または正当性を証明したことは別である。公平性の証明は、本小節では確認済み事実として書かない。
+
+**Network limitation。** 確認できる適用の中心は single intersection である。Downstream blocking、spillback、adjacent-intersection queue、multiple OD、route choice について、入手済みの TSR／TSE 原文に対応または検証の記載はない。入手済み原文に記載なし、とする。研究対象外と著者が明示した、とは本小節では書かない。交差点間 cooperation を研究対象外とする明示は SB-P3 側の事項であり、concurrent auction の詳細は§23.8以降に送る。
+
+### 23.4 TSEの主体、message、candidate集合、交換処理
+
+主体は次の六つである。役割を混ぜない。
+
+**Initiating Vehicle agent。** 既に slot を持ち、それより早い slot を求める側である。Exchange request を出す。
+
+**Candidate Vehicle agent。** 交換の相手候補である。自分の slot を譲るかどうかを、提示された価格と自分の valuation で判断する。同意しない候補は当事者にならない。
+
+**Intersection agent。** 予約の台帳を持つ。Overbooking を防ぐ。Conflicting lane へ同時 slot を割り当てない。Exchange agent の求めに対し、交換可能な candidate の一覧を返す。一覧を作るとき、reservation feasibility を確認する。支払の当事者ではない。支払の有無は§23.5で繰り返さない。
+
+**Exchange agent。** Request を受け取る。Intersection agent へ candidate 一覧を要求する。Candidate を順に照会する。Exchange を broker する。できるだけ多くの exchange を成立させることを目的とする。支払の当事者ではない。
+
+**前方 Vehicle。** 同一列で initiator または交換対象の前にいる Vehicle である。交換後 slot が、この Vehicle の slot より前へ出ないことが、非当事者保護の一方の境界になる。保護の意味は§23.6に置く。
+
+**後方 Vehicle。** 同一列で直後にいる Vehicle である。直後が slot を持つ場合、交換後 slot がその slot より後ろへ出ないことが、もう一方の境界になる。
+
+**Initiating Vehicle の exchange request。** 含める情報は、現在保有する time slot、物理的に到達可能な最早 time slot、待ち時間1秒短縮当たりの提示価格、使用する intersection lane である。最早 time slot は、speed limit を破らずに intersection へ到達できる最早時刻である。希望の早さと、物理的に到達できる早さを分けている。
+
+**Candidate 集合。** 最低条件は二つである。第一に、candidate の slot が、initiator の最早到達可能 slot と現在 slot の間にある。第二に、交換後の slot が既存 reservation と conflict しない。この二条件は、経済的同意の前の実行可能性である。
+
+Candidate 一覧を早い slot 順に並べて照会する、という整列は、本工程では確定しない。SB-P2 でその順が書かれている可能性はあるが、頁と節を固定していない。早い slot 順と推測して確定しない。未確認理由は、本文の該当箇所の頁対応を未固定、である。全文未入手ではない。
+
+**Candidate への offer。** Exchange agent は candidate へ1件ずつ offer を通知する。Candidate は、提示された1秒当たり価格と、自身の valuation を比較する。Offer が candidate の valuation を上回る場合に同意する、と記録する。原文の不等号が strictly exceeds か以上かは、頁を固定していない。上回ると記述、にとどめる。「以上でも同意」とは書かない。
+
+**成立までの処理順。** 原文の手順として、次の順で再構成する。
+
+1. Initial mechanism が slot を配分する。TSE simulation ではこの initial mechanism は TSR である（§23.2）。
+2. Initiator が exchange request を送る。
+3. Exchange agent が、intersection agent から candidate 一覧を取得する。
+4. Exchange agent が candidate を順に照会する。順の整列キーは前項のとおり未固定である。
+5. Candidate が offer を評価する。
+6. Candidate が同意したあと、前後 slot の順序と reservation conflict を確認する。
+7. 実行可能な同意相手との交換は bilateral である。
+8. 成立する相手がいない場合、initiator は交換しない。
+
+7と8の明示範囲は次のとおり分ける。交換が initiator と一人の candidate の1対1であることは、bilateral exchange として確認する。複数 candidate を順に調べることと、成立する取引が同時の multi-party ではないことは別である。前者は探索、後者は成立単位である。「最初に同意した一人で探索を打ち切る」こと、および「誰も同意しなければ元の slot が不変である」ことを、頁番号つきの原文文で本工程は固定していない。制度の説明としてその動作を想定できるが、未固定の文を確定事実としては書かない。未確認理由は、該当文の頁・節を未固定、である。
+
+**Bilateral nature。** 一つの成立 exchange は、initiator と candidate の1対1である。Candidate 集合の探索は複数人を見うる。成立取引は bilateral である。Multi-party simultaneous exchange ではない。TVT-MP の multi-party Candidate は、同一 decision に複数当事者を束ねる。TSE の複数 candidate は、1対1の相手を順に探す集合である。この違いは取引単位の違いであり、物理制約の違いではない。
+
+### 23.5 TSEの支払、utility、budget balance、individual rationality、誘因性質、starvation
+
+本小節は、同意のあとで何が移るかと、著者がどの性質を主張するかを分ける。手順の繰り返しはしない。
+
+**Payment。** 確認できる範囲では、支払う側は、交換によってより早いslotを得るVehicleである。受け取る側は、自身の早いslotを譲り、より遅いslotを受け取るVehicleである。Initiating Vehicleがexchange requestで示す価格は、待ち時間を1秒短縮するために支払う提示単価である。総支払額について確認すべき関係は、この提示単価と、交換によって短縮されるslot時間差から総支払額を求める関係である。ただし、その正確な式、記号、丸め、時間単位、および原文上の式番号は本工程では固定していないため、推測で式を書かない。成立後の両Vehicleのbudget更新式、budget不足時にrequestを拒否するのか提示可能額を制限するのか、failed negotiation時にbudget更新が全く生じないことを原文がどのように規定するかも、本工程では該当式・頁を固定していない。確認済み事実は、早いslotを得るVehicleからslotを譲るVehicleへ支払うこと、requestに1秒当たりの提示価格が含まれること、および仲介agentが支払主体にならないことである。数値恒等式とbudget更新規則は、原文の該当式未固定として残す。
+
+**Utility。** 系列の評価で使う構成要素は、budget、1秒当たり valuation、waiting time、payment または receipt である。Waiting time が短くなることは valuation を通じて利得になり、支払は budget を減らし、受取は budget を増やす、という関係である。全 Driver が money を同じ尺度で評価する仮定が置かれる。この仮定は、同額の金銭移転を全 Driver で同じ utility 変化として読むためのものである。所得によって同じ支払の苦痛が違うことは、この仮定の外である。Utility の閉じた式は、原文の該当式未固定である。
+
+**Budget balance。** 著者の判定として、TSE は budget-balanced である。確認できる根拠の範囲は次である。Intersection agent は支払も受取もしない。Exchange agent も支払も受取もしない。Payment は Vehicle 間で移転する。Operator が収入として吸収する、とは書かない。
+
+次は分けて未確定を残す。取引ごとの支払額と受取額が数値として一致すること、全 Vehicle の budget 合計が保存すること、failed negotiation では transfer がゼロであること。これらは budget balance の自然な読みである。原文が各項目を明示したかは、頁を固定していない。明示されたと確認したのは、仲介主体が金銭を持たず、移転が Vehicle 間であること、および著者が budget-balanced と判定することである。それ以外は、原文でその文を固定していない、と記録する。
+
+**Individual rationality。** Candidate は、offer と自身の valuation を比較し、上回る場合だけ同意する。Participation は任意である。これは成立 exchange の相手方が、不利な提示を拒否できるという手続である。Formal な ex-post IR theorem として本工程で固定した証明はない。Voluntary acceptance を、formal IR theorem と呼ばない。Initiator 側の utility が必ず改善する条件、および budget 制約のもとでの IR は、原文の該当定理未固定である。
+
+**Incentive compatibility。** 著者の判定は、TSE の pricing は incentive compatible ではない、である。虚偽申告の方向は二つある。Slot を早めたい側は、支払を減らすために提示を低くする誘因を持つ。Slot を譲る側は、受取を増やすために valuation を高く申告する誘因を持つ。したがって truthful reporting は dominant strategy ではない。Strategy-proof ではない。DSIC ではない。Basic ITSA の second-price truthfulness を TSE へ拡張しない。ITSA 側の証明の中身は§23.8以降に送る。本小節で固定するのは、TSE の pricing がその性質を持たないという著者判定と、申告の方向である。
+
+Simulation が全 Driver の truthful valuation を仮定して効果を測る場合、非 IC と並ぶ。仮定のもとでの数値は、戦略的な過少提示・過大申告が起きたあとの数値ではない。仮定の有無を TSE simulation の表番号で本工程は固定していない。緊張関係だけを残す。非 IC であることと、実験が真の valuation を置いて指標を計算することは、両立しうるが同じ主張ではない。
+
+**Starvation。** TSE 自身が、独立の waiting-time 上限を作るわけではない。Exchange へ参加しない Vehicle は、initial allocation の slot を維持できる。Starvation の性質は initial-allocation mechanism に依存する。TSR と TSE の組合せについて、著者は TSR の starvation 回避を継承すると説明する。これは著者の主張である。Initial mechanism が starvation を防がなければ、TSE だけから starvation 防止は導けない。TSR の上限の formal 式が未固定であることは§23.3のとおりである。
+
+**Myerson–Satterthwaite 型の制約。** Efficient bilateral trade、incentive compatibility、individual rationality、budget balance を同時に満たすことの困難は、一般の双方向取引の理論として知られる。TSE 原文がその四条件をどの範囲で論じ、TSE 自身のどの性質に対応づけるかは、本工程で頁を固定していない。一般理論の引用と、TSE が実際に満たす性質を同一視しない。TSE について著者が判定したのは、budget-balanced であることと、pricing が incentive compatible ではないことである。Efficiency と formal IR を同時達成したとは書かない。
+
+### 23.6 TSEの非当事者保護とinitial-allocation fairness
+
+§22の本文は残す。本小節が最新評価である。
+
+**旧評価。** §22.3は、TSE が直接保護するのは、主に自分の slot を交換しない自由であると評価した。自分が合意しない交換の当事者にならないことと、他者間交換の交通結果から遮断されることは別だ、と書いた。Actual crossing time、utility、network 上の間接遅延は、当時「本文の該当箇所を未取得」とした。
+
+**新原文による更新。** SB-P2S は、exchange に関与していない Vehicle を害さないため、交換後の slot に次を要求する。直前 Vehicle の slot より後であること。直後 Vehicle が slot を持つ場合、その slot より前であること。これは拒否権とは別の制約である。拒否権は自分の slot を出さない自由である。Slot-order 制約は、交換が成立しても、同一列の前後の予約順を悪化させないことである。
+
+**最新評価。** TSE には、exchange 拒否権に加え、same-lane の前後 Vehicle に対する限定的な slot-order protection がある。§22の「拒否権中心」という評価は不十分だった。保護対象は、reservation 上の前後順序である。Actual crossing time が不変であることまでは保証しない。Utility が不変であることまでは保証しない。異なる lane や、conflicting movement の Vehicle 全体を保護するとは限らない。Spillback や network 外部効果を防ぐものではない。
+
+**TVT-MPとの比較。** TSE の保護は、same-lane の前後 slot 順序に限定される。TVT-MP は、trade scope 内の nonparticipating Visit について、他者間取引による直接的な baseline 順位の後退を防ぐ。共通点は、非当事者の手続的な位置を、取引によって悪化させない、という方向である。相違点は、保護の単位、baseline の定義、network 上の実行、actual の監査である。TSE の単位は同一列の予約 slot の前後である。TVT-MP の単位は、当該 decision の trade scope における局所順位である。TSE の保護を、TVT-MP の nonparticipating Visit 保護と同一とは呼ばない。
+
+**Initial-allocation fairness。** SB-P2 の著者自身の限定は次である。Voluntary participation によって差別の懸念に対応できるのは、subsequent exchange phase である。Initial time-slot acquisition phase では、差別が生じ得る。TSE の simulation は、initial allocation に TSR を使う。したがって、TSE の任意参加だけで、制度全体の fairness は保証されない。この限定は著者の主張の範囲である。こちらの評価は、§22.5が「拒否権だけで fairness を一般化しない」とした方向を維持し、保護の中身だけを slot-order 制約まで広げる、というものである。
+
+次を一つの fairness にまとめない。Initial allocation の手続規則。Exchange への参加の自由。Exchange の非当事者に対する slot-order protection。Actual traffic outcome。Long-run の分布的 fairness。最初の三つは手続である。あとの二つは結果である。手続があることは、結果の不変や長期の公平を意味しない。
+
+### 23.7 TSEのsimulation設計、結果、適用範囲
+
+本小節は、SB-P2のTSE simulationについて、原文から確認できた実験条件、比較対象、指標、結果、および適用範囲を記録する。数値は著者報告のsimulation resultである。ページ、表、図、節番号は本工程では対応を固定していないため、推測で付けない。ただし、原文から確認済みの実験条件と数値そのものは省略しない。
+
+**Intersection。** Simulation対象は、4方向の対称な単独交差点である。各方向には流入2 laneと流出2 laneがある。TSEの主要simulationはintersection-exclusive conditionを用い、同時にintersectionを通過できるVehicleを1台に制限する。Intersection capacityは900 veh/hである。これは、複数Vehicleのconcurrent crossingを扱うSB-P3のFree Choice・Clocked評価とは異なる条件である。TSE simulationの結果を、IE・LE・CAEのconcurrent auction結果と混同しない。
+
+**Demandとsimulation horizon。** 平均流入需要は800 veh/hである。Vehicleのinterarrival timeにはexponential distributionを用いる。1回のsimulation時間は40分であり、最初の10分をwarm-upとして評価から除外する。各treatmentについて25 runsを実施する。個々のseed番号は本工程では固定していないため記載しない。Capacity 900 veh/hに対して平均需要800 veh/hであり、高需要ではあるが、下流spillbackやnetwork gridlockを含む過飽和network実験ではない。
+
+**Driver、valuation、money、budget。** Driverのwaiting-time reduction valuationにはexponential distributionを用いる。各Vehicleについて、待ち時間1秒当たりのvaluationを一定とするlinear valuationを仮定する。また、全Driverがmoneyを同じ尺度で評価すると仮定する。このため、同額のpaymentまたはreceiptは、Driver間で同じ金銭utility変化として扱われる。所得差による同額支払の負担差はmodelに入らない。Simulationでは、全Vehicleが必要な支払を実行できる十分なbudgetを保有すると仮定する。TSEのpricingはincentive compatibleではないにもかかわらず、評価ではDriverがtruthful valuationを提示する条件を置く。したがって、以下の効果量はtruthful valuationと十分なbudgetの仮定下における結果であり、strategic underreportingまたはoverreportingが生じた場合の性能検証ではない。
+
+**Controlと比較対象。** Initial time-slot acquisition phaseにはTSRを用いる。その後、交換を認める条件ではTSEを適用する。比較の基準は、同じinitial allocation側の条件でTSEによるsubsequent exchangeを加えないTSRである。TSEは、TSRが割り当てたslotを交換する。No overtakingを前提とし、initiatorの最早到達可能slot、既存reservationとのconflict、same-lane前後Vehicleのslot-order制約を満たすexchangeだけを許す。したがって、経済的に合意できるだけでは成立せず、物理的reservation feasibilityも必要である。
+
+**Heterogeneity treatments。** Evaluationでは、Vehicleが取得可能なslotまたはarrival feasibilityの異質性と、Driver valuationの異質性を変化させる。通常条件に加え、arrival feasibilityの異質性、valuationの異質性、および両者が大きい条件を比較する。各treatmentの正式名称、分布parameter、および表内の列との対応は本工程では固定していないため、推測で補わない。ただし、異質性が大きい条件ほど、互いに利益を得られるexchange機会が増え、TSEの改善幅が大きくなるという著者報告を記録する。
+
+**Metrics。** 主な評価指標は、average waiting timeとaverage valuation-weighted waiting timeである。Waiting timeは、実際のtravel timeと、他Vehicleが存在せずspeed limit等の物理条件だけを守るminimal travel timeとの差として定義される。Valuation-weighted waiting timeは、Vehicleのwaiting timeへ1秒当たりvaluationを掛けた値である。全Driverがmoneyを同じ尺度で評価し、moneyがVehicle間だけで移転する条件では、average valuation-weighted waiting timeの低下はtotal utilityの増加と対応する。加えて、exchangeが成立したVehicleまたはexchangeへ関係したVehicleの割合を確認する。割合の分母、1件のexchangeで2台を数えるか、initiatorだけを数えるか、および原文での正式名称は、本工程では頁・定義文を固定していない。したがって、以下では「successful exchangeに関係したVehicle割合」と記録し、「参加率」と「成立率」を無条件に同一視しない。
+
+**通常条件のsimulation result。** TSEを加えないTSRと比較して、average waiting timeは4.0%削減され、average valuation-weighted waiting timeは7.3%削減された。Successful exchangeに関係したVehicle割合は約7.4%である。これは、全Vehicleがexchangeするのではなく、一部のbilateral exchangeによって全体指標が改善した結果である。
+
+**別のheterogeneity条件。** 原文で評価された別のheterogeneity条件では、successful exchangeに関係したVehicle割合が8.7%となる。8.7%がarrival feasibilityのみ、valuationのみ、または別の組合せのどのtreatmentへ対応するかは、本工程では表・列との対応を固定していない。対応関係を推測しない。原文表を再確認した際に更新する。
+
+**Arrival feasibilityとvaluationの異質性がともに大きい条件。** Average waiting timeは7.2%削減され、average valuation-weighted waiting timeは15.7%削減された。Successful exchangeに関係したVehicle割合は14.2%である。通常条件よりexchange機会が増え、waiting timeとvaluation-weighted waiting timeの改善幅も大きい。
+
+**著者の主張。** 著者は、TSEによってaverage waiting timeとaverage valuation-weighted waiting timeの双方を改善でき、Vehicle間のarrival feasibilityとvaluationの異質性が大きいほど効果が大きくなると報告する。TSEは、全Vehicleを取引へ参加させて改善するのではなく、互いに利益を得られる一部のVehicle間でslotを交換することで指標を改善する。
+
+**こちらの評価。** Simulationは、TSEのbilateral exchangeが局所的なslot再配分として機能し得ることを示す。一方、結果はtruthful valuation、十分なbudget、linear valuation、moneyの同一marginal utility、単独交差点、intersection-exclusive crossingという条件へ依存する。TSEが非incentive-compatibleであるにもかかわらずtruthful valuationを置くため、戦略的申告下でも同じ効果量が維持されるとは評価しない。また、capacity 900 veh/hに対するmean demand 800 veh/hという条件は高需要ではあるが、network spillbackを伴う過飽和状態の検証ではない。
+
+**Networkとactual-resultの限界。** Spillback、downstream blocking、adjacent-intersection interaction、multiple OD、route choice、network feedback、およびpredicted slotとactual passageの体系的比較について、入手済みのTSE原文には対応または検証の記載がない。「入手済み原文に記載なし」と記録する。著者が明示的に研究対象外としたと確認できる事項だけを「研究対象外」とする。単独交差点で得られたsimulation result自体は、その範囲の結果として維持するが、networkへ一般化しない。
+
+次工程では、ITSA と Concurrent auction を§23.8以降へ書く。第一段階の採点表は本節の追加によっては変更しない。
+
+### 23.8 ITSAの目的、主体、candidate形成、auction protocol
+
+本小節は、SB-P1の Initial Time-Slot Auction（ITSA）について、原文から確認できる目的、主体、auction対象、candidate形成、Basic ITSAのprotocol、物理制約を記録する。資料は全文入手済みである。ページ、節、式、表、図の番号は本工程では対応を固定していないため、推測で付けない。確認済みの制度関係そのものは、頁未固定を理由に省略しない。Basic ITSAと ITSA with subsidies は別制度として書く。Subsidyの会計と非incentive compatibilityの中身は§23.10に置く。Payment、budget、starvationの中身は§23.9に置く。Simulationの数値は§23.11に置く。
+
+**位置付け。** ITSAは Initial Time-Slot Auction であり、initial time-slot acquisition mechanism である。Vehicleがまだ保有していない交差点通過の time slot を、auctionで最初に配分する。TSEのような、割当済みslotの post-allocation exchange ではない。配分は valuation-aware である。通過機会の初期配分に、Driverの waiting-time reduction valuation を入札を通じて入れる。系列内の分担は§23.2のとおりであり、ITSAをTSEの必須前提にしない。TSRも初期配分であるが、TSRは金銭auctionではない。ITSAの中に二つのvariantがある。Basic ITSAは、candidate自身のbidだけを使う second-price auction である。ITSA with subsidies は、same-directionの後続Vehicleが前方candidateのbidへ上乗せできるvariantである。二つのvariantを一つのincentive-compatible mechanismとして扱わない。
+
+**主体。** 少なくとも次を分ける。
+
+Intersection agentは、time slotのauctionを実行し、winnerを決め、winnerからpaymentを受け取り、slotを割り当てる主体である。Intersection agentはVehicleの代わりに自分のvaluationを申告しない。支払の出所にはならない。Subsidy variantでも、subsidyの提供者にはならない。
+
+Candidate Vehicle agentは、そのauctionでbidを提出できるVehicleである。Basic ITSAでは、このcandidateのbidがwinner determinationとpaymentの入力になる。Candidateは、まだ自分のslotを持っていない段階で、これから配分されるslotを取得するために入札する。TSEの、既に持つslotを譲る当事者ではない。
+
+Same-directionの前方Vehicleは、candidate資格を左右する。同一queueで前方Vehicleがまだslotを取得していないとき、その前方Vehicleがcandidate側に立ち、後続はcandidateになれない。前方Vehicleが既に自分のslotを持っている場合に、直後のVehicleが次のcandidateへ進める、という順序依存がある。前方Vehicleは、後続の高valuationを自分のbidへ自動的に含める主体ではない。その取り込みはsubsidy variantの別ルールである。
+
+Same-directionの後続Vehicleは、Basic ITSAでは、前方未取得のあいだ当該auctionのcandidateにならない。したがって後続のvaluationは、そのauctionのwinner determinationへ直接入らない。後続は、自分がqueueの先頭側へ進んでから、別のslotのcandidateになり得る。Subsidy variantでは、この後続がsubsidizing Vehicleになり得る。
+
+Subsidizing Vehicleは、ITSA with subsidies にだけ現れる。Same-directionでcandidateの後方にいるVehicleが、自分のvaluationを前方candidateのauction力へ上乗せする。Subsidizing Vehicleは、その上乗せによって自分が直ちに当該slotのholderになるわけではない。Slotを取得するのは、auctionに勝ったcandidateである。Subsidyの集計と支払の会計は§23.10に書く。
+
+**Auction対象。** Auctionの対象は、intersectionを特定時刻に通過するための time slot である。Slotには開始時刻がある。Simulationで用いる slot duration は4秒である。この4秒と、slot開始の12秒前にauctionする、という時刻は、§23.11の確認済み実験条件である。Protocol定数としてあらゆる実装に固定された値か、評価設定のparameterかは、式・節番号を本工程では固定していない。数値自体は省略しない。
+
+一つのauctionが一つのslotを配分する、という関係で読む。Intersection-exclusive conditionでは、同時にintersectionを通過できるVehicleは1台である。したがって、同一時刻のslotをめぐり、互いにconflictするmovementが競う。どのmovement対がconflictするかのタイル単位の幾何、laneごとの独立auctionか方向ごとのauctionか、2本の流入laneの先頭が同一auctionに並ぶかは、本文の該当箇所を未取得である。理由は、laneとmovementの対応文を本工程で頁固定していないためである。確認済みなのは、排他的な通過slotをauctionし、no-overtakingのため同一queueの物理順を無視して後続だけにslotを渡さない、という制約である。
+
+**Candidate形成。** 原文で確認できる形成規則は次である。同一方向または同一queueでは、原則として前方Vehicleがcandidateになる。前方Vehicleがまだslotを取得していない場合、後続Vehicleはそのauctionのcandidateになれない。この制約は、no-overtakingとphysical queue orderを、slot allocationの参加資格へ写したものである。高bidを出したい後続が、前方を飛び越して当該slotのbidderになることはできない。
+
+Basic ITSAでは、candidateになれない後続Vehicleのvaluationは、そのauctionのbidに入らない。後続の高いvaluationは、前方の低いvaluationに置き換わらない。前方candidateが低いbidしか出さなければ、その方向はslotを落とし得る。後続は、前方の取得が終わるまで自分のvaluationを初期配分へ直接反映できない。このqueue externalityが、ITSA with subsidiesを導入する動機である。Subsidy側の処理は§23.10に書く。
+
+同一directionの複数Vehicleが、同一auctionへそれぞれ独立のbidderとして直接bidできるかは、本文の該当箇所を未取得である。理由は、2 laneの先頭を同一auctionの別candidateとするのか、方向あたり1 candidateにまとめるのかを、本工程で頁固定していないためである。推測で「方向ごとに1台だけ」とも「laneごとに1台」とも確定しない。確定して書くのは、同一queueの後続は前方未取得のあいだcandidateではない、という順序制約である。
+
+**Auction protocol（Basic ITSA）。** Basic ITSAは sealed-bid auction であり、second-price auction である。処理の骨格は次の順である。番号は、確認できた制度上の処理順である。Messageの正式名、フィールド名、失敗時の例外分岐は、本文の該当箇所を未取得である。理由は、message図の番号対応を本工程で固定していないためである。
+
+1. Intersection agentが、配分対象のtime slotについてauctionを開く。
+2. Candidate Vehicle agentが、そのslotに対するbidを封印入札で提出する。Basic ITSAのbidはcandidate自身のbidであり、後続のsubsidyを含まない。
+3. Highest bidderがwinnerになる。
+4. Winnerのpaymentは、winner自身のbid全額ではない。Second-highest bidである。First-priceではない。
+5. Winnerが当該slotを取得する。
+6. Paymentの受取主体はintersection agentである。他のVehicleが受け取るseller compensationではない。
+
+同額の最高bidが複数ある場合のtie-breakは、本文の該当箇所を未取得である。Auction failure、およびcandidate不在のときのslotの扱いも、本文の該当箇所を未取得である。Candidateが1台だけのときのpriceは§23.9で未確認として残す。これらを推測の規則で埋めない。
+
+**Physical feasibility。** Auctionで高いbidを出しただけでは、物理順を無視してslotを取れない。Candidate制約が、no-overtakingとphysical queue orderを参加資格の段階で掛けている。既存reservationとconflictするslot、およびconflicting movementが同時に使えないslotは、intersection-exclusiveの容量のもとで同時勝者にしない。Slot feasibilityは、最早にそのVehicleが到達できる時刻と、既に配分済みのslotとの両立を含む。到達前のslotを金銭だけで取得できる、とは書かない。到達時刻、既存reservation、conflict判定の式番号は未固定である。確認済みなのは、入札の高低と、queue順・排他的容量・既存予約とが別条件として両方要る、という関係である。
+
+**TVT-MPとの比較。** ITSAはinitial allocationである。まだ持っていないslotをauctionで作る。TVT-MPは、baseline allocationのあとで、局所順位の変更候補を作る。ITSAのwinner determinationを、TVT-MPのmulti-party Candidateと同一視しない。ITSAのwinnerは、一つのslotを取る1台のcandidateである。Subsidyがあっても、slot holderになるのは勝ったcandidateであり、後続subsidizerとの同時的な順位ベクトルの変換ではない。
+
+両方とも、個別のvaluationを通過機会の配分へ直接結合する。この結合自体はTVT-MPの単独の独自性ではない。Auction形式も、TVT-MPの独自性にしない。違うのは配分の単位である。Basic ITSAは、特定のtime slotをcandidate間で競売する。TVT-MPは、baseline順位列を、一つのdecisionの中で候補ごとに別の順位列へ変換する。ITSAのsecond-price truthfulnessを、TVT-MPの誘因性質の主張に流用しない。TSEの交換truthfulnessにも流用しない。
+
+### 23.9 Basic ITSAのpayment、誘因性質、budget、starvation
+
+本小節はBasic ITSAに限る。ITSA with subsidiesのpaymentと誘因は§23.10である。原文事実、著者判定、formal propertyの及ぶ範囲、simulationで置いた仮定、未確認の会計を分ける。
+
+**Payment rule。** Winnerはsecond-highest bidを支払う。Highest bidderが自分のbid全額を支払うfirst-priceではない。Paymentの受取主体はintersection agentである。Loserを支払主体とする規則は、確認できたpayment ruleの中にはない。Loserの支払が文言上ゼロと書かれている頁は未固定である。確認済みの支払主体はwinnerである。
+
+Candidateが1台だけの場合のpriceは、本文の該当箇所を未取得である。第二価格の相手がいないときの0、最小単位、または別の既定額を推測しない。Reserve priceの有無も、本文の該当箇所を未取得である。あるともないとも断定しない。
+
+Paymentはwinnerのbudgetを減らす側の移転である。成立後のbudget更新式、丸め、時間単位との積は、原文の該当式未固定である。式を推測で書かない。Budget不足のとき、bidを拒否するのか、支払可能額でbidを頭打ちにするのか、slotを取り消すのかは、本文の該当箇所を未取得である。Simulationが全Vehicleに十分なbudgetを仮定することは§23.11に書く。その仮定は、不足時規則が実験で発火しないことを意味し、不足時規則の条文が存在しないことの証明ではない。
+
+**Incentive compatibility。** 著者の判定では、Basic ITSAのpricingはincentive compatibleである。根拠の範囲は、sealed-bidのsecond-price auctionにおいて、candidateが自分のvaluationをそのままbidすることがtruthful biddingであり、その申告が静的な単発auctionのdominant strategyとして扱える、というものである。第一段階のX5=1は、この静的second-price truthfulnessを系列内に存在するものとして数えた結果である。Series全体をstrategy-proof（X5=2）にはしない。§8.2および§22.1の限定を維持する。
+
+及ぶ範囲を次のとおり切る。Formal propertyとして本工程で固定するのは、Basic ITSAの静的な単発auctionにおけるtruthful biddingである。Repeated intersection use、動的に減るbudget、将来auctionを見越した申告まで含めたdynamic mechanismとしてのdominant strategyは、本工程で定理として固定していない。該当定理番号は頁・式対応未固定である。Candidate形成制約を含めた制度全体、すなわち後続がcandidateになれないために自分のvaluationを出せないことまで含めてstrategy-proofである、とは書かない。後続が出せないのは戦略的虚偽の問題ではなく、参加資格の制約である。Basic ITSAのtruthfulnessは、candidateになったVehicleが、自分のbidをvaluationからずらす誘因を持たない、という範囲である。
+
+このtruthfulnessをTSEへ拡張しない。TSEのpricingはincentive compatibleではない（§23.5）。Subsidy variantへ拡張しない（§23.10）。Concurrent auction系列全体へ自動拡張しない。Concurrent auctionの誘因性質は§23.12以降で、SB-P3本文から別に記録する。本小節では書かない。
+
+Driverがvaluationを正しく報告する性質と、initial allocationのfairnessは別である。Truthful biddingは申告の誘因の性質である。誰の待ちが短くなるか、低valuationが繰り返し負けるか、支払能力がslotを左右するかは、別の評価である。
+
+**Auction revenueとzero-sum。** 次を分けて記録する。
+
+Paymentはwinnerからintersection agentへ移る。Intersection agentがこの収入を保持する場合、移転はDriver間のzero-sum transferではない。Operatorまたはintersection agentの側にauction revenueが残る。TSEで確認した、仲介agentが支払主体にならずVehicle間だけでbudgetが移る、というbudget balanceとは違う。TSEのVehicle間移転を、ITSAのauction revenueと同一の会計と呼ばない。
+
+RevenueをDriverへ戻せば、Driver集団の金銭をzero-sumに近づけ得る。その可能性は、収入の帰属を変える制度変更として記録する。Redistributionはbidding behaviorを変え得る。Second-priceのtruthfulnessは、支払がwinnerからauctioneerへ離れる標準の形に紐づく。返金規則が入ると、自分のbidが将来の返金や他者の返金に影響し得る。著者がredistribution後の誘因性質を、Basic ITSAのtruthfulnessと同じ強さで確立したとは記録しない。その分析は、本工程では検証が不十分とする。理由は、返金後のdominant strategyを述べた定理を頁固定していないためである。定理が薄いのか、原文に分析文がないのかは、頁対応未固定のまま残す。入手済み原文に記載なし、とまでは書かない。
+
+TVT-MPとの比較は次である。TVT-MPの金銭は、buyerからsellerまたはpayeeへの利用者間移転である。Basic ITSAの金銭は、winnerからintersection agentへのauction paymentである。ITSAのauction revenueを、TVT-MPのseller compensationと同一視しない。Budget balanceをTVT-MPだけの独自貢献とはしない。誰が収入を保持するかは、両制度の差として残す。ITSAはauctioneer留保であり、TVT-MPは利用者間移転である。
+
+**Budget assumption。** Driverは、自分のbidに対応するpaymentを支払うためのbudgetを持つ、という前提でauctionが書かれる。Simulationでは、全Vehicleが必要な支払を実行できる十分なbudgetを保有すると仮定する（§23.11）。Low-budget Driverだけがいるときの動作、budget exhaustion、repeated auctionsのあとでbudgetが偏る過程、長期のredistribution後のbudget分布は、本文の該当箇所を未取得である。理由は、初期予算額、枯渇時分岐、長期分布の表を本工程で固定していないためである。十分なbudgetの仮定を、予算差がない社会の実証結果と呼ばない。
+
+**Starvation。** Formal propertyとして、Basic ITSAはstarvation回避を保証しない。Waiting-timeの上限をITSA自身が課す、という規則は確認していない。Highest valuationを優先するwinner determinationのもとでは、valuationが低いVehicleは、競合するたびに負け得る。繰り返し負ける可能性は、この優先と上限不在からの帰結として記録する。それは制度上の可能性である。
+
+Simulationがstarvation Vehicleの件数、最大waiting time、または待ち時間上限の達成を測定したかは、頁・表対応未固定である。Formal guaranteeがないことと、simulationで特定のstarvation Vehicleが発生したことを混同しない。発生件数を推測で書かない。TSRがstarvation回避を継承する、というTSE側の著者説明（§23.5）を、ITSAへ移さない。ITSAはTSRではない。
+
+**Fairnessへの含意。** Truthfulnessとfairnessは別である。Second-price auctionがtruthfulであっても、low-valuation Vehicleのwaiting timeは悪化し得る。初期配分は、申告されたvaluationと、支払えるbudgetに依存する。Simulationは全Driverが十分なbudgetを持つと仮定する。所得差によって同額支払の負担が違うことは、この仮定の外である。全体のvaluation-weighted waiting timeが減ることと、各Vehicleのwaiting timeが減ることは同じ主張ではない。Fairnessの数値は§23.11で、平均指標と低valuation層を分けて書く。
+
+### 23.10 ITSA with subsidiesの制度構造と誘因上の限界
+
+本小節は ITSA with subsidies だけを扱う。Basic ITSAのsecond-price truthfulnessを、このvariantの性質として再掲しない。
+
+**導入目的。** Same-directionの後続に、高いwaiting-time reduction valuationを持つVehicleがいることがある。その後続は、前方の低valuation Vehicleがslotを取得しない限り、candidateになれない。No-overtakingのため、後続だけを前のslotへ出すことはできない。Basic ITSAでは、後続の高valuationはそのauctionのbidに入らない。前方candidateの低いbidだけで方向全体が競う。Queueの後方にいる高い時間価値が、初期配分へ十分に反映されない。このqueue externalityに対応するため、後続が前方candidateのbidを金銭的に上乗せするsubsidyを導入する。
+
+**Subsidy主体。** Subsidizing Vehicleは、candidateの後方にいるsame-direction queueのVehicleである。役割は、自分の支払意思をcandidateのbidへ上乗せし、そのcandidateがslotを取る力を上げることである。Subsidyの対象は、その時点の前方candidateである。後続自身が別slotのbidderになることではない。
+
+Subsidyを提供する条件の細目、対象candidateがlane先頭か方向先頭か、何台までをaccumulated bidへ集計するかは、本文の該当箇所を未取得である。理由は、集計台数と適格条件の定義文を本工程で頁固定していないためである。確認済みの関係は、後方Vehicleが前方candidateのauction力を高めるために上乗せする、という主体関係である。台数上限を推測で1台または全台と書かない。
+
+Candidate自身のbidとsubsidyは別の入力である。Candidateのbidはcandidateの申告である。Subsidyは後続の申告である。両者を一つの「候補者の真のvaluation」と呼ばない。
+
+**Accumulated bid。** 確認できた計算関係は次である。式番号と記号の定義文は頁・式対応未固定である。関係自体は省略しない。
+
+Candidate自身のbidがある。後続Vehicleのsubsidyがある。Accumulated bidは、candidate自身のbidに、適格な後続のsubsidyを合わせた額である。Winner determinationは、このaccumulated bidを方向またはcandidateの競争力として使う。Basic ITSAのようにcandidate自身のbidだけを比較するのではない。
+
+Winner paymentが、second-highestのどの額を指すか、すなわち相手方のaccumulated bidなのか相手方の生のbidなのかは、本文の該当箇所を未取得である。推測で式を書かない。Subsidizerの実際の支払が、自分の表明したsubsidy全額なのか、winner paymentの一部按分か、slot取得後に精算されるのかも、本文の該当箇所を未取得である。Winning candidateのbudget更新と、subsidizing Vehicleのbudget更新を分けた式も、原文の該当式未固定である。Losing directionが表明したsubsidyが、不成立なら予算から引かれないのか、一部でも引かれるのかは、記載が曖昧である。理由は、敗退側の会計文を本工程で固定していないためである。敗退側は支払わない、と推測で確定しない。
+
+したがって、本工程で固定する会計はここまでである。上乗せ後のaccumulated bidが競争に使われる。Slotを取得するのは勝ったcandidateである。上乗せしたVehicleは、そのslotのholderにはならない。誰のbudgetがいくら減るかの恒等式は未固定のまま残す。
+
+**Incentive compatibility。** 著者の判定は、ITSA with subsidiesはincentive compatibleではない、である。Basic ITSAのsecond-price truthfulnessは、このvariantでは維持されない。
+
+崩れる理由は次の範囲で記録する。Candidate自身のbidは、自分のvaluationだけではなく、後続subsidyと合算されたあとの勝敗と価格に影響する。Subsidizing Vehicleの申告は、前方candidateが勝つか、および支払水準に影響する。自分のsubsidyを真のvaluationからずらすと、他Vehicleのallocationとpaymentが変わり得る。そのとき、自分の申告が他者の行動と独立に常に最適とはならない。Truthful valuationはdominant strategyではない。Strategy-proofではない。DSICではない。
+
+静的second-priceが正直になるのは、自分のbidが自分の支払価格を決めず、かつ他者の申告と自分の真のvaluationだけで勝敗が決まる標準形においてである。Subsidyでは、複数人の申告が一つのaccumulated bidに入り、その合算が他方向の配分と価格を動かす。合算の中の一人が、自分の申告で価格と勝敗の両方に触れる。ここに、Basic ITSAのtruthfulnessをそのまま移せない理由がある。
+
+Simulationは、subsidy variantについてもDriverがtruthful valuationを提示する条件で効果を測る。この仮定はformal propertyではない。Subsidy variantは非incentive-compatibleである。以下の効果量を戦略的な過少申告または過大申告のあとの性能と読まない。数値は§23.11に書く。
+
+**制度上の意味。** Subsidyは、slotを譲ったVehicleへの金銭補償とは違う。後続が、前方candidateのauction上の競争力を高める仕組みである。後続Vehicle自身が直ちにslotを取得するわけではない。取得するのは前方candidateであり、queueが進めば後続は後続のslotを改めて取りにいく。Queue全体のvaluationを、初期配分へ部分的に反映するための上乗せである。
+
+TVT-MPのseller compensationと同一ではない。Seller compensationは、順位または通過機会を譲る側が受け取る対価である。ITSAのsubsidyは、まだslotを持たない後続が、前方の取得を助けるために出す上乗せである。譲ったslotの代金ではない。TVT-MPのmulti-buyer payment allocationとも同一ではない。複数buyerが一つの順位変更の支払を分け持つ処理ではない。複数の後続申告が一つのaccumulated bidに入ることは、支払分割の同一性を意味しない。支払分割の式は未固定である。
+
+**Fairnessとstarvation。** Subsidyは、valuation-weighted waiting timeをBasic ITSAよりさらに減らし得る。その改善は§23.11の著者報告である。改善は、低valuation Vehicleへのwaiting burdenの集中が消えることを意味しない。前方の低valuationが、後続のsubsidyによってslotを取りやすくなることはある。それは、低valuationの前方を、後続の金銭で勝たせる方向の補正である。Valuationが低く、かつsubsidyする後続もいないVehicleが、繰り返し負ける可能性は残る。Subsidyを導入しても、starvation回避のformal guaranteeはできない。低valuation層の負担増加が残るかは、simulationの分布として§23.11で分けて書く。制度上は、上限待ち時間を新設するmechanismではない。
+
+### 23.11 ITSAのsimulation設計、結果、fairness評価
+
+本小節は、SB-P1のITSA simulationについて、原文から確認できた実験条件、比較、指標、結果、低valuation層、適用範囲を記録する。数値は著者報告のsimulation resultである。ページ、表、図、節番号は本工程では対応を固定していないため、推測で付けない。確認済みの実験条件と数値そのものは省略しない。全文は入手済みである。未確認は資料未入手ではない。
+
+TSEの4.0%、7.3%、7.4%等（§23.7）と、本小節の百分率を混ぜない。TSEはTSR初期配分のあとの交換である。ITSAは初期配分のauctionである。Concurrent auctionの結果は本小節に書かない。次工程の§23.12以降である。
+
+**Intersection。** Simulation対象は、4方向の単独交差点である。各方向には流入2 laneと流出2 laneがある。Intersection-exclusive conditionを用い、同時にintersectionを通過できるVehicleは1台である。Intersection capacityは900 veh/hである。この物理設定は、TSE simulationで確認した単独交差点の枠と数値が並ぶ。並ぶことは、ITSAの結果をTSEの交換効果と読む理由にしない。ITSAは初期slotのauctionである。
+
+**Demand。** 平均流入需要は800 veh/hである。Vehicleのinterarrival timeにはexponential distributionを用いる。1回のsimulation時間は40分であり、最初の10分をwarm-upとして評価から除外する。各treatmentについて25 runsを実施する。個々のseed番号は本工程では固定していないため記載しない。Capacity 900 veh/hに対して平均需要800 veh/hであり、高需要ではある。下流spillbackやnetwork gridlockを含む過飽和network実験ではない。
+
+**Valuationとbudget。** Driverのwaiting-time reduction valuationにはexponential distributionを用いる。各Vehicleについて、待ち時間1秒当たりのvaluationを一定とするlinear valuationを仮定する。Simulationでは、全Vehicleが必要な支払を実行できる十分なbudgetを保有すると仮定する。
+
+全Driverがmoneyを同じ尺度で評価する、という文言がSB-P1のどの文にあるかは、頁対応未固定である。確認済みなのは、評価指標がvaluationで待ち時間を重み付けすることである。この重み付き指標の低下を、Driver間で比較可能な金銭utilityの増加と読むには、同額の金銭が全員に同じutility変化をもたらす仮定が要る。その仮定の頁を固定していないことを、指標の定義がないことと混同しない。所得差による同額支払の負担差は、確認できたsimulation仮定には入っていない。
+
+Basic ITSAでは、truthful biddingをformal propertyとして置ける（§23.9）。SimulationのBasic ITSAは、その性質と整合するtruthful biddingのもとでの結果である。ITSA with subsidiesはincentive compatibleではない。それにもかかわらず、subsidy variantのsimulationはtruthful valuationを提示する条件で指標を計算する。Subsidy側の効果量は、戦略的な虚偽申告が起きたあとの性能ではない。
+
+**Slotとauction timing。** 確認済みの時刻条件は次である。Slotは開始の12秒前にauctionする。Slot durationは4秒である。この二つの数値は実験条件として記録する。Auctionを何秒ごとに繰り返すか、将来の複数slotのauctionが重なるか、candidateが何台先のqueueまで見えるか、subsidyの集計が何台目までかは、本文の該当箇所を未取得である。理由は、timing節の残りのparameter対応を本工程で固定していないためである。12秒と4秒を、未確認のfrequencyで上書きしない。
+
+**Comparison。** 著者報告は二つのvariantを分けている。ITSA without subsidies、すなわちBasic ITSAである。ITSA with subsidiesである。各variantについて、average valuation-weighted waiting timeの削減率と、average waiting timeの増加率が報告されている。
+
+これらの百分率が、どの対照に対する変化かは、表の対照列の正式名称を本工程では固定していない。理由は頁・表対応未固定である。TSRという名称の列なのか、valuationを使わない別の既存mechanismなのか、両variantの相互差なのかを、推測で一つに確定しない。数値は対照ラベルと独立に記録する。対照ラベルが確定したら、この百分率の分母だけを更新する。百分率自体を空欄にしない。
+
+**Main results。** 著者報告のsimulation resultは次である。
+
+ITSA without subsidiesでは、average valuation-weighted waiting timeは30.6%削減された。Average waiting timeは0.5%増加した。
+
+ITSA with subsidiesでは、average valuation-weighted waiting timeは43.0%削減された。Average waiting timeは1.8%増加した。
+
+Weighted waiting timeの削減と、average waiting timeの増加は、同時に報告されている。加重指標が改善したから全Vehicleの待ちが減った、とは読まない。平均待ちは、報告された比較においてわずかに悪化している。Subsidy variantの方が、加重待ちの削減率は大きく、平均待ちの増加率も大きい。
+
+**Low-valuation Vehicle。** 平均の改善と、分布の端の負担を分ける。著者報告では、valuationが低いVehicleのwaiting timeは、auctionによる配分のもとで増加する側にある。全体のvaluation-weighted waiting timeが減るのは、高いvaluationの待ちの短縮が、重み付き平均を引くからである。低いvaluationの待ちの短縮を意味しない。
+
+群の正式定義を「最低10%」と固定できるか、その群のwaiting timeのexactな増加率、およびその増加の対照列名は、頁・表対応未固定である。Exact値を推測で書かない。記録する方向は次である。比較は、valuation-awareなITSA（subsidyなし、およびsubsidyあり）のもとでの低valuation層のwaiting timeが、加重平均の改善とは逆向きに悪化し得る、という分布である。Subsidy variantが加重待ちをさらに減らしても、低valuation層の負担集中が消えたとは記録しない。Subsidyありで低valuation層のexact値がどれだけ変化したかも、頁・表対応未固定である。群定義とexact値が未固定であることを、「影響の記載がない」ことと混同しない。方向と、平均指標からの分離は確認済みである。セルの数値だけが未固定である。
+
+**著者の主張。** 著者は、valuation-awareなauctionによってoverall driver satisfactionを改善できる、と報告する。Satisfactionの操作的な対応は、average valuation-weighted waiting timeの低下である。Subsidyにより、後続の高valuation Vehicleの効果が初期配分へ反映され、加重待ちの削減がBasic ITSAより大きくなる、と報告する。Basic variantについてはtruthfulnessを主張する。Subsidy variantについては、truthfulnessではなく、追加の効率、すなわち加重待ちのさらなる削減を主張する。Average waiting timeが微増することは、著者報告の数値の一部である。それを、全Vehicleが改善したという主張に読み替えない。
+
+**こちらの評価。** 次を分けて残す。
+
+Valuation-weighted waiting timeの改善は、著者報告のsimulation resultとして確認できる。Without subsidiesで30.6%削減、with subsidiesで43.0%削減である。Average waiting timeは改善していない。Without subsidiesで0.5%増加、with subsidiesで1.8%増加である。改善は平均待ちの短縮ではない。
+
+Low-valuation Vehicleへ待ち負担が集中する方向は、加重平均の改善と両立する。全体satisfactionの改善を、低valuation層の改善と呼ばない。
+
+結果は、十分なbudgetを持つDriverだけを仮定している。Budgetが足りないDriverが入札から落ちる場合の性能ではない。Moneyの同一marginal utilityを置かなければ、加重待ちの低下を全員共通の金銭utility増分とは読めない。その仮定の頁は未固定でも、評価上の読みの条件としては残す。
+
+Basic variantのtruthfulnessは、静的second-priceとしては強い。その強さはfairnessを保証しない。正直に入札しても、低いvaluationは負け得る。Subsidy variantは、より大きなweighted-waiting-time削減を示す。同時に非incentive-compatibleであり、simulationはtruthful valuation前提である。戦略的申告下で43.0%が維持されるとは評価しない。
+
+物理的には、単独交差点かつintersection-exclusiveである。Capacity 900 veh/hに対するmean demand 800 veh/hは高需要であるが、network spillbackを伴う過飽和の検証ではない。このsimulation resultをnetworkへ一般化しない。
+
+**構造的前提。** ITSAの主要結論は、次の前提と結ぶ。未来の通信速度やagent実装で解消し得る技術制約は、第三段階で大きな欠点として重視しない。重視するのは、低valuationへの負担集中、budget差、truthful reportingの範囲、単独交差点の結果をnetworkへ一般化しないことである。
+
+1. Linear valuation。1秒当たりのvaluationを一定とする。加重待ちと入札の両方に要る。非線形な待ちの苦痛は入らない。
+2. Moneyの同一marginal utility。加重待ちの低下をDriver間で同じ金銭尺度の満足増分と読むときに要る。所得差は入らない。頁上の一文は未固定でも、この読みの前提として残す。
+3. 十分なbudget。報告された効果量は、全員が支払を実行できる仮定のもとである。Budget差があるときの配分ではない。
+4. Truthful valuation。Basic ITSAでは静的second-priceのformal propertyとして置ける。Subsidy variantではformal propertyではなくsimulation仮定である。後者の数値を戦略的申告下へ広げない。
+5. No overtaking。後続をcandidateにしない。Subsidyを必要にする物理制約である。
+6. Single intersection。隣接交差点、複数OD、経路選択、network feedbackを含まない。
+7. Intersection-exclusive physical capacity。同時通過は1台、capacityは900 veh/hである。複数Vehicleの同時通過を前提にした結論に使わない。
+
+**未確認事項。** 資料は未入手ではない。SB-P1は全文入手済みである。本工程で固定していない項目と理由は次である。
+
+- Exactな表番号と図番号。理由は頁・表対応未固定である。
+- 低valuation群の正式な区切りと、その群のwaiting timeのexact値。理由は頁・表対応未固定である。方向は本小節に書いた。
+- Candidateが1台だけのときのpayment。理由は本文の該当箇所を未取得である。
+- Reserve priceの有無。理由は本文の該当箇所を未取得である。
+- Budget exhaustion時の処理。理由は本文の該当箇所を未取得である。Simulationの十分budget仮定とは別である。
+- Repeated auction後の長期budget分布。理由は本文の該当箇所を未取得である。
+- Revenue redistribution後の誘因性質。理由は検証が不十分である。返金が行動を変え得ることは§23.9に書いた。返金後もdominant strategyであるという定理は固定していない。
+- Starvationの実測件数と最大waiting time。理由は頁・表対応未固定である。Formalに上限がないこととは別である。
+- 同額最高bidのtie-break、candidate不在、auction failure。理由は本文の該当箇所を未取得である。
+- Subsidyの集計台数、winner paymentの按分、敗退側subsidyの予算処理。理由は該当式が未固定であり、敗退側は記載が曖昧である。
+- 削減率の対照列の正式名称。理由は頁・表対応未固定である。
+- Spillback、downstream blocking、adjacent-intersection interaction、multiple OD、route choice、network feedback、predicted slotとactual passageの体系的比較。入手済みのITSA原文について、本工程で対応または検証の記載を固定していない。研究対象外と著者が明示した事項だけを研究対象外と呼ぶ。単独交差点のsimulation result自体は、その範囲の結果として維持する。
+
+次工程では、SB-P3のConcurrent auctionを§23.12以降へ記録する。§23.1〜§23.7で資料、TSR、TSEを記録し、§23.8〜§23.11でITSAを記録した。第一段階採点はまだ変更しない。Concurrent auctionの記録のあとで、系列全体の構造的前提、TVT-MP比較、未確認事項、再開情報を統合する。
+
+### 23.12 Concurrent auctionの目的、前提、TSR実装
+
+本小節は、SB-P3の concurrent auction について、導入目的、前提、Schepperle・Böhm版TSRの request と応答を記録する。資料は IEEE 最終版の全文である。正式題名は *Auction-Based Traffic Management: Towards Effective Concurrent Utilization of Road Intersections*。DOIは 10.1109/CECandEEE.2008.88 である。IEEE Xplore document は 4785053 である。10.1109/CEC/EEE.2008.9 は誤記であり、使わない。ページ、節、式、表、図の番号は本工程では対応を固定していない。確認済みの制度関係は省略しない。Free Choice と Clocked の auction 処理は§23.13、IE・LE・CAEは§23.14、数値結果は§23.15に置く。
+
+**導入目的。** 先行する valuation-aware mechanism の中心は、intersection-exclusive であり、一度に1台だけを交差点へ通す条件だった。ITSAの主要 simulation もその条件である（§23.11）。現実の交差点では、互いに conflict しない movement を同時に通過させることが、容量の使い方として重要である。Vehicle ごとに、交差点内で消費する space と time は同じではない。速度、加速度、軌跡、車体の占有が違えば、同じ「1台分の通過」でも占有時間は違う。
+
+SB-P3の目的は、valuation-aware な配分と、concurrent utilization を同時に扱うことである。そのための auction mechanism が Free Choice と Clocked である。これは TSE の bilateral exchange を拡張した研究ではない。Auction-based initial allocation の側を、同時利用へ広げた研究である。TSEの交換手順、支払、budget balance を、本小節の protocol として再掲しない。
+
+**前提。** 原文が置く前提を、制度結論を左右するものと、将来の通信・装備で緩和し得るものに分ける。系列全体の最終的な構造的前提評価は§23.16以降であり、本小節では仕分けだけを固定する。
+
+制度結論を左右する前提は次である。Driver は waiting-time reduction の valuation を持つ。Auction はその valuation を offer として配分へ入れる。Travel budget は、支払を実行するための金銭的な前提として存在する。初期額、枯渇時の処理、simulation が全員に十分な budget を置いたかは、本文の該当箇所を未取得である。ITSA simulation の十分 budget 仮定（§23.11）を、SB-P3へ自動的に写さない。Truthful bidding を、Free Choice と Clocked の formal property としては固定しない。理由は§23.13に書く。Single intersection である。Different intersections 間の cooperation は、SB-P3が明示的に研究対象外とする。この明示は§22.7.2の確認と一致する。No overtaking は、same-lane の物理順を reservation にかける制約であり、通信が速くなれば消える前提ではない。
+
+将来技術で緩和し得る前提は、agent-equipped Vehicle と、Vehicle と intersection agent の communication である。これらは実装の担い手である。第三段階で、通信遅延や車載 agent の有無だけを大きな欠点として重視しない、というこれまでの扱いを、本小節でも維持する。最終判定は§23.16以降に送る。
+
+Vehicle ごとの速度、加速度、交差点占有時間は、通信の問題ではない。CAE の space-time feasibility の入力である。式番号は未固定である。歩行者と legacy vehicle を model に含むかは、本文の該当箇所を未取得である。含まないと推測しない。
+
+**Schepperle・Böhm版TSRの request。** §23.3は、TSE の前段として TSR を整理した。本小節はそれを繰り返さない。SB-P3から追加で固定するのは、request が次の項目を持つことである。
+
+Desired time-slot beginning は、Vehicle が望む slot の開始時刻である。Intersection agent は、この時刻を、空き、先行車の取得状況、既存 reservation との conflict と突き合わせる起点にする。
+
+Intersection lane は、その Vehicle が使う交差点内の lane である。Conflict の判定単位は、後の IE・LE・CAE で粗さが変わる。Request の時点で、どの lane を通るかを申告する。
+
+Preceding Vehicle ID は、same-lane で直前にいる Vehicle の識別子である。Intersection agent は、この ID の Vehicle が既に slot を取得しているかを見る。未取得なら、後続の request を受理しない。
+
+**Request arrival 順と physical order。** 通信上の request arrival 順と、same-lane の物理順は、必ずしも一致しない。後続 Vehicle の request が、前方 Vehicle の request より先に届くことがある。そのとき、届いた順だけで slot を与えると、物理的に後ろの車が前の slot を取る。Preceding Vehicle がまだ slot を取得していない場合、後続 Vehicle の request を reject する。予約上も same-lane の物理順を維持する。
+
+したがって、request FIFO だけでは no-overtaking を保証できない。TSR は三つの処理を同時に使う。Request arrival order、same-lane physical-order protection、conflicting-reservation avoidance である。この三要素は§23.3の要約と同じである。SB-P3は、preceding Vehicle ID を request field として持ち、先着通信が物理順を覆さない処理を、concurrent auction の比較基準側でも使う、という点で§23.3を補強する。Dresner・Stone 方式との差分表は、§23.3と同様、本工程では作らない。
+
+**Reservation response。** TSR の通常応答と、auction winner の failure を分ける。
+
+通常の TSR では、requested slot が実行可能で、先行車が既に slot を持ち、既存の conflicting reservation と両立するとき、その slot を受理する。先行未取得の reject は、conflict による拒否とは別の理由である。物理順を守るための拒否である。Conflict のため要求どおりの slot を受理しない場合に、最早の代替 slot を提示する規則は§23.3に記録済みである。SB-P3がその代替提示の文言を変えているかは、頁対応未固定である。本小節では代替 slot の規則を改稿しない。
+
+Failure は、通常の reject ではない。Auction で winner となり、いったん reservation を得たあとに、その予約条件を維持できない事象である。Intersection agent はその reservation を cancel できる。Cancel された slot は reauction の対象になり得る。処理順は§23.13に書く。TSR が request を最初から受理しないことと、受理済み reservation を維持できずに取り消すことを、一つの「拒否」と呼ばない。
+
+### 23.13 Free ChoiceとClockedのauction処理
+
+本小節は、SB-P3の二つの auction mechanism を分ける。Basic ITSA（§23.9）とも、ITSA with subsidies（§23.10）とも、TSE（§23.4〜§23.7）とも別である。
+
+**共通 auction protocol。** 原文で確認できる共通部分は次である。Sealed-bid auction である。Second-price である。Highest offer が winner になる。同率の最高 bid が複数あるときは、random selection で1台を選ぶ。Winner は slot reservation を取得する。Winner がその slot を維持できなければ failure である。Intersection agent は reservation を cancel できる。Cancel された slot は reauction できる。
+
+支払額の規則は second-price である。受取主体を、ITSAの intersection agent 留保と同一と本小節で断定しない。SB-P3本文の受取主体の文は、頁固定していない。理由は本文の該当箇所を未取得である。
+
+著者は bidding strategy を研究対象外とする。したがって、sealed-bid second-price という形式だけから、Free Choice 全体または Clocked 全体が strategy-proof であるとは書かない。動的な interval、concurrency、cancel、reauction を含む mechanism の dominant strategy は、本工程で定理として固定していない。Basic ITSA の静的 second-price truthfulness を、ここへ自動拡張しない。Formal property として固定するのは、winner 決定が highest offer、同率は random、支払規則の名前が second-price、という protocol 上の事実である。制度全体の誘因定理ではない。
+
+**Free Choice。** Auction interval は moving である。固定時計で区切った枠ではない。Interval には開始と終了がある。Winner は、その interval の内側の slot を取得する。Slot の長さ、または交差点内の space-time consumption は Vehicle ごとに異なり得る。全員が同じ duration の枠を買う auction ではない。
+
+Interval の端を動かす理由は、auction が one-participant auction へ退化することを防ぐためである。参加者が1台だけになると、第二価格の相手がいない。複数 candidate を interval の中に確保することが、端を動かす目的である。端の移動量、延長の計算式、終了時刻の更新規則は、原文の該当式未固定である。式を推測で書かない。
+
+Moving interval は、concurrency を使う自由度にもつながる。物理的に重なり得る Vehicle を、固定枠の外へ追い出す前に、同じ競争の中で slot を割り当て得る。Winner が interval 内のどの時刻の slot を選ぶか、候補を Vehicle が指定するのか intersection agent が実行可能集合から選ぶのかは、本文の該当箇所を未取得である。確認できる役割分担は、intersection agent が feasibility を判定する、ということである。高 offer だけでは、conflict する占有や same-lane の追い越しを無視できない。
+
+**Clocked。** Auction interval は fixed である。Interval length は、maximum slot duration と同じである。同じ interval で auction された slot だけが、時間的に overlap できる。異なる interval で落札した slot は、物理的に重なり得ても、この規則の上では overlap させない。Interval は clock のように進む。一つの枠が終わると、次の固定枠へ進む。
+
+Free Choice より、slot を置く自由度は低い。高い concurrency を、物理的には可能でも、枠が違うために使えないことがある。性能が悪化し得る理由は、この固定枠である。CAE のように占有判定を細かくしても、overlap を許す相手が「同じ interval の落札」に限られると、同時利用の候補が枠の外へ落ちる。物理容量の高さと、この interval 設計の下での配分の良さは別である。数値は§23.15に書く。
+
+**両方式の違い。**
+
+| 項目 | Free Choice | Clocked |
+|---|---|---|
+| Interval | Moving。端を動かして参加者を確保する | Fixed。長さは maximum slot duration と同じ |
+| Winner の slot 選択 | Interval 内の slot を取得する。時刻の選び方の式は未固定 | 同じ固定 interval の中でしか overlap を考えない |
+| Overlap できる範囲 | 移動する interval の中で、feasibility を満たす slot | 同じ interval で auction された slot だけ |
+| Concurrency の利用 | 枠を固定しないため、同時利用の自由度が高い | 枠が違うと、物理的に重なり得ても overlap させない |
+| Auction 参加者 | 退化を避けるため複数 candidate を確保する | 固定枠に入った Vehicle が参加者になる。人数を増やすための端の移動はない |
+| One-participant auction | Interval 端の移動で防ぐ | 対処の有無は本文の該当箇所を未取得 |
+| 運用の単純さ | Interval の更新が要る。更新式は未固定 | Clock のように枠を進める。規則は固定長で単純である |
+| 性能の感度 | 評価条件を通じて TSR より加重待ちが低い（§23.15） | Demand と concurrency degree で、TSR より悪い範囲がある（§23.15） |
+
+**Reservation failure、cancel、reauction。** 処理順は次である。
+
+1. Auction で winner を決める。Highest offer であり、同率なら random selection である。
+2. Winner へ slot を reserve する。
+3. Winner が、その予約条件を維持できるかを確認する。
+4. 維持できない場合は failure である。これは TSR が request を最初から reject することとは別である。
+5. Intersection agent が reservation を cancel する。
+6. Cancel された slot を、再び auction できる状態にする。
+
+Failure の具体的原因の一覧、Vehicle 側が通知するのか intersection agent が検出するのか、reauction を開く時刻、cancel 後に元の winner が再入札できるかは、本文の該当箇所を未取得である。発生件数は§23.15で未確認として残す。手順の存在と、件数の測定を混同しない。
+
+### 23.14 IE・LE・CAEと物理的実現可能性
+
+本小節は、SB-P3が使う三つの concurrency degree を分ける。同じ Free Choice でも、同じ Clocked でも、物理の排他単位が違えば同時に通せる集合が違う。Network 上の下流容量とは別の、交差点内部の資源表現である。
+
+**IE：Intersection Exclusive。** 同時に intersection を使用できる Vehicle は1台である。Intersection 全体を一つの排他的資源として扱う。Conflict しない movement であっても、同時通過させない。三つの degree のうち最も conservative である。ITSA と TSE の主要 simulation が使った「一度に1台」は、この IE に対応する物理条件である。それらの数値結果を、LE や CAE の結果と混ぜない。
+
+**LE：Lane Exclusive。** 排他の単位は intersection lane である。Conflict しない intersection lane なら、同時通過できる。同じ lane、または互いに conflict する lane は、同時に使用できない。IE より concurrency は高い。交差点内部を面の占有までは割らないので、CAE より粗い。Lane が空いていても、軌跡が交差する lane 同士は同時に使えない。
+
+**CAE：Conflict Area Exclusive。** Intersection 内部を conflict area に分ける。Vehicle の trajectory が、同じ conflict area を同じ時刻に占有しなければ、同時通過できる。Space-time occupancy を、lane 単位より細かく判定する。三つの degree のうち、concurrency の自由度が最も高い。Feasibility には、Vehicle ごとの trajectory、速度、加速度、寸法、slot duration が入る。細かい判定は、同時に通せる組が増え得るということである。Auction interval がそれを使えるかは、別問題である。Clocked が CAE で TSR より悪い、という§23.15の結果を、CAE の物理表現が悪いという意味に読まない。
+
+**実現可能性。** Winner determination は offer の比較である。それだけで、割り当てた slot が物理的に実行可能とは限らない。制約として次が入る。Reservation table 上の既存予約。Intersection lane。Conflict area。Vehicle がその時刻に到達できるか。Slot duration。Same-lane の no-overtaking。既存 reservation との両立。加速度または速度差による占有の違い。これらは auction の配分を制約する。Intersection agent が feasibility を見る、という役割は§23.13のとおりである。各制約の判定式の番号は未固定である。
+
+**既存評価の更新。** Schepperle・Böhm系列を、「交差点の物理がほとんどない」「一度に1台だけを通す単純な mechanism だけ」と評価するのは、SB-P3を読んだあとでは不正確である。系列は、movement conflict、IE、LE、CAE、conflict area、same-lane order、Vehicle ごとの space-time consumption、reservation failure、cancel と reauction を扱う。IE だけの論文群ではない。
+
+この物理は、single intersection の内部である。次とは別である。Spillback。Downstream blocking。Adjacent-intersection interaction。Multiple OD。Route choice。Network feedback。交差点内部で同時に通せる組を増やすことと、下流 link に受け入れる空間があることは、同じ容量ではない。
+
+こちらの評価は次である。TVT-MP との差別化を、「交差点物理を扱うかどうか」に置かない。SB-P3は交差点内部の物理を扱う。差別化として残すのは、network 交通への内生的な統合、downstream receiving capacity、spillback、candidate prediction と actual passage の監査、nonparticipating Vehicle の実交通への影響である。これらの統合評価は§23.16以降で系列全体にまとめる。本小節では、内部物理と network 統合を同一視しない、という更新だけを固定する。第一段階の network Low を、本小節で採点表から動かさない。
+
+### 23.15 Concurrent auctionのsimulation設計、結果、限界
+
+本小節は、SB-P3の simulation について、確認できた条件、指標、Free Choice の結果、Clocked の結果、読み、著者主張、こちらの評価、未確認を分ける。数値は著者報告の simulation result である。ページ、表、図の番号は推測で付けない。確認済みの数値は省略しない。未確認の数値を、ITSA や TSE の実験条件で埋めない。全文は入手済みである。
+
+**Simulation conditions。** 対象は single intersection である。Concurrency degree ごとに実験する。IE、LE、CAE の三つである。比較の基準には TSR を使う。Auction 側は Free Choice と Clocked を分ける。
+
+Traffic demand について、原文が報告する目盛りのうち、本工程で数値として固定できるのは Clocked の有効範囲に出てくる 50、75、100、225 である。単位が veh/h なのか、simulation の input rate なのかは、頁・表対応未固定である。単位を推測しない。Free Choice の最大削減が生じた demand の値も、頁・表対応未固定である。需要の範囲全体を一つの区間として断定しない。
+
+Valuation distribution の exact な分布族と parameter、arrival distribution の exact な分布、budget の初期値、replication 数、simulation horizon、warm-up の長さは、本文の該当箇所を未取得である。§23.7と§23.11の 800 veh/h、40分、10分、25 runs、exponential valuation を、SB-P3の条件として転記しない。
+
+Bidding strategy は研究対象外である（§23.13）。Simulation が全 bid を truthful valuation に固定したか、別の入札規則を置いたかは、頁対応未固定である。戦略的申告が起きたあとの性能は、検証が不十分である。
+
+**Metric。** 確認できる主指標は、average valuation-weighted waiting time である。削減率として報告されているのは、この指標の TSR に対する低下である。Average waiting time を同時に報告しているかは、頁・表対応未固定である。ITSA で見た「加重待ちは減り、平均待ちは微増」という組を、ここへ写さない。
+
+Overall driver satisfaction は、著者主張の側の語である。操作的には、average valuation-weighted waiting time の低下と対応づけて読む。その読みは著者の主張であり、全 Vehicle の waiting time が減ったという simulation result ではない。
+
+Concurrency degree と demand level は、結果を分ける軸である。Auction participation の人数や、one-participant auction の発生率の exact 値は、本文の該当箇所を未取得である。Free Choice が参加者確保を目的に interval を動かす、という制度事実は§23.13に書いた。件数は未固定である。
+
+**Free Choice の simulation result。** Free Choice は、評価した条件のすべてで、TSR より average valuation-weighted waiting time が低い。最大の削減率は concurrency degree ごとに次である。LE で最大 38.1% 削減。CAE で最大 27.8% 削減。IE で最大 34.5% 削減。各最大値に対応する demand は、頁・表対応未固定である。需要の値を推測で書かない。
+
+この三つの最大値は、いずれも TSR に対する Free Choice の削減である。Clocked の削減ではない。CAE の最大削減 27.8% は、LE の 38.1% より小さい。物理的な concurrency が最も細かい CAE が、加重待ちの最大削減でも最大になる、とは報告されていない。
+
+**Clocked の simulation result。** Clocked は、需要と concurrency degree に強く依存する。CAE では、TSR より常に悪い。LE では、需要の目盛り 100 から 225 の範囲で有効である。ここでの有効は、TSR より average valuation-weighted waiting time が良い、という意味で記録する。IE では、需要の目盛り 50 と 75 でのみ有効である。単位は上のとおり未固定である。
+
+CAE で常に TSR より悪いことは、conflict area による物理判定が失敗したことではない。Clocked の fixed interval が、高い concurrency を十分に使えない、という§23.13の機構と並べて読む。LE や IE の一部の需要で TSR を上回ることも、Clocked 一般が TSR より良いことの証明ではない。
+
+**Interpretation。** Auction と concurrency を組み合わせれば、常に TSR より良くなるわけではない。Free Choice は、moving interval によって評価条件を通じて加重待ちを下げている。Clocked は、固定 interval の制約で性能を失う範囲がある。Mechanism の設計と traffic demand の組合せが結果を分ける。CAE のように物理的 concurrency を高めても、auction interval の設計が悪いと性能は悪化し得る。Physical capacity の高さと、economic allocation の良さは別である。
+
+**著者の主張。** 著者は、valuation-aware な制御を、一度に1台の排他から、concurrent utilization へ広げる必要がある、と主張する。Free Choice は、報告された比較において TSR より overall driver satisfaction を改善する、という主張に接続する。Satisfaction の操作指標は valuation-weighted waiting time である。Clocked は、需要と concurrency degree に依存し、常には優位でない、という結果を著者報告として持つ。Future work を著者は残す。具体的な future work 項目の列挙は、頁対応未固定である。項目を推測で足さない。Different intersections 間の cooperation を本研究が対象外としたことは、著者の範囲設定として§23.12に書いた。それを future work の項目リストと同一視しない。
+
+**こちらの評価。** Schepperle・Böhm系列の交差点内部の物理は、IE だけの理解より強い。IE、LE、CAE、failure、cancel、reauction を持つ。Weighted waiting time の改善は、Free Choice については評価した条件のすべてで、TSR 比として確認できる。Clocked については確認できない。条件によっては TSR より悪い。
+
+Free Choice と Clocked の差は、auction design の細部が結果を左右することを示す。Second-price という共通の名前だけでは、性能も誘因性質も揃わない。Truthful bidding を formal property としては固定していない。十分な budget を simulation が置いたかも未固定である。報告された削減率を、戦略的申告と予算制約が効いたあとの性能とは評価しない。
+
+実験は single intersection である。Different intersections 間の cooperation は研究対象外である。Spillback、downstream blocking、multiple OD、route choice、network feedback について、入手済みの SB-P3 に対応または検証の記載を本工程で固定していない。これらを研究対象外と著者が明示した、とまでは書かない。明示されている研究対象外は、different intersections 間の cooperation である。Network applicability を、この simulation から上げる材料にはしない。第一段階の network Low は維持する。採点表は本小節では変更しない。
+
+TVT-MP との分離は、交差点内部の conflict を扱うかどうかではない。Network への内生的統合、下流の受け入れ容量、spillback、prediction と actual の監査、非参加車の実交通への影響が、分離の軸である。詳細な横断比較は§23.16以降に送る。
+
+**未確認事項。** 資料未入手ではない。理由は次のとおり分ける。
+
+- Exact な表番号と図番号。理由は頁・表対応未固定である。
+- Free Choice の最大削減 38.1%、27.8%、34.5% が生じた demand。理由は頁・表対応未固定である。削減率自体は上に記録した。
+- Clocked の需要の目盛り 50、75、100、225 の単位。理由は頁・表対応未固定である。veh/h とも input rate とも断定しない。
+- Replication 数、simulation horizon、warm-up。理由は本文の該当箇所を未取得である。
+- Valuation distribution と arrival distribution の exact な形と parameter。理由は本文の該当箇所を未取得である。
+- Budget の初期値、および不足時の処理。理由は本文の該当箇所を未取得である。
+- Strategic bidding 下の性能。理由は検証が不十分である。Bidding strategy は研究対象外であり、Basic ITSA の truthfulness は拡張していない。
+- Failure、cancel、reauction の発生数。理由は頁・表対応未固定である。手順は§23.13に書いた。
+- Average waiting time の exact な増減。理由は頁・表対応未固定である。
+- Spillback、downstream blocking、multiple OD、route choice、network feedback、actual passage と reservation の差。入手済み原文について、対応または検証の記載を本工程で固定していない。研究対象外とは書かない。
+- Multiple-intersection coordination。理由は研究対象外である。SB-P3が different intersections 間の cooperation を対象外とする、という明示に対応する。
+
+次工程では、系列全体の構造的前提、主要結論との依存関係、TVT-MPとの比較、解消した未確認事項と残る未確認事項、再開情報を§23.16以降へ統合する。§23.1〜§23.7で資料、TSR、TSEを記録し、§23.8〜§23.11でITSAを記録し、§23.12〜§23.15で Concurrent auction を記録した。第一段階採点はまだ変更しない。その後に PEXIC の第二段階正式適用へ進む。
+
+### 23.16 系列全体の主要結論
+
+本小節は、§23.1〜§23.15の詳細を6件の主要結論へ絞る。絞る理由は詳細の削除ではない。手順、式の未固定、実験条件は各小節に残す。ここは、後日の説明で使う統合である。各件で、原文事実、著者の主張、こちらの評価、参照先を分ける。新しい実験数値は足さない。
+
+**1. 系列内の制度分担。** 原文事実として、TSR と ITSA は initial allocation である。TSE は、割当済み slot のあとに置く bilateral exchange である。Free Choice と Clocked は concurrent auction であり、TSE の交換の後継ではない（§23.2、§23.8、§23.12）。著者は、これらを一つの論文系列の中で役割を分けて提示する。一つの mechanism として証明をまとめた、という主張は確認していない。こちらの評価は、誘因保証も simulation も mechanism ごとに読む、ということである。Basic ITSA の静的 second-price を、TSE、subsidy、Free Choice、Clocked へ延ばさない。TVT-MP との直接比較の中核は TSE である。ITSA と Concurrent auction は、系列が valuation-aware な初期配分と交差点内部の同時利用まで持つかを見る資料である。参照は§23.2、§23.3、§23.8、§23.12。
+
+**2. TSE の取引構造。** 原文事実として、交換の対象は既に割り当てられた slot である。成立単位は initiator と candidate の1対1である。Request の価格は、待ち時間を1秒短縮する提示単価である。支払は、早い slot を得る Vehicle から、slot を譲る Vehicle へ移る。仲介 agent は支払主体にならない（§23.4、§23.5）。著者は、TSE を budget-balanced と判定し、pricing は incentive compatible ではないと判定する。TSR と組むとき、TSR の starvation 回避を継承すると説明する。Same-lane の前後 Vehicle について、交換後も slot 順を悪化させない制約がある（§23.5、§23.6）。こちらの評価は、Vehicle 間移転と著者の budget-balance 判定を、取引ごとの金額恒等式や budget 更新式の固定と混ぜない、ということである。それらの式は未固定のままである。Slot-order 保護は、拒否権に加わる限定的な保護であり、actual crossing time の不変や network 外部効果の遮断ではない。参照は§23.4、§23.5、§23.6。
+
+**3. Initial allocation と fairness。** 原文事実として、TSR は valuation を使わない reservation である。ITSA は valuation-aware な初期 auction である。Basic ITSA は静的な second-price の truthful bidding を持つ。ITSA with subsidies は incentive compatible ではない。どちらの ITSA も、waiting-time 上限による starvation 回避を保証しない（§23.3、§23.9、§23.10）。Simulation では、加重待ちの改善と、低 valuation の待ち負担が悪化する方向が両立する（§23.11）。著者は、任意参加で差別の懸念に応えられるのは subsequent exchange であり、initial phase では差別が生じ得ると限定する（§23.6）。こちらの評価は、任意の交換参加が、初期配分の fairness を解消しない、ということである。Truthful bidding は申告の性質であり、低 valuation の待ちを保証しない。参照は§23.3、§23.6、§23.9、§23.10、§23.11。
+
+**4. 交差点内部の物理。** 原文事実として、系列は same-lane の物理順、no overtaking、movement conflict、IE、LE、CAE、conflict area、Vehicle ごとの space-time consumption、reservation failure、cancel と reauction を扱う（§23.3、§23.12、§23.13、§23.14）。著者は、valuation-aware な配分と concurrent utilization を同時に扱うことを SB-P3 の目的とする。こちらの評価は、従来の「交差点物理が浅い」を改める、ということである。正確な言い方は、single-intersection 内部の物理は具体的であり、network 結合は浅い、である。内部の同時利用を、下流容量や複数交差点の連結と同一視しない。参照は§23.12、§23.13、§23.14。
+
+**5. Efficiency result の条件依存。** Simulation result は mechanism で違う。TSE は、TSR に交換を加えない条件と比べ、average waiting time と valuation-weighted waiting time の両方を改善する（§23.7）。ITSA は、valuation-weighted waiting time を大きく減らす一方、average waiting time を増やす（§23.11）。Free Choice は、評価した条件のすべてで、TSR より weighted waiting time が低い。Clocked は、concurrency degree と需要の目盛りによって、TSR より悪い（§23.15）。著者は、valuation-aware な制御が overall driver satisfaction を改善し得る、と各論文で報告する。Clocked の条件依存も著者報告に含まれる。こちらの評価は、valuation-aware mechanism が一様に優越するわけではない、ということである。Heterogeneity、auction の interval 設計、concurrency degree、demand、truthful reporting の仮定、budget の仮定が、報告された効果量の読みを分ける。参照は§23.7、§23.11、§23.15。
+
+**6. Network 適用性。** 原文事実として、different intersections 間の cooperation は SB-P3 が研究対象外とする（§23.12、§23.15）。Spillback、downstream blocking、adjacent-intersection interaction、multiple OD、route choice、network feedback、predicted slot と actual passage の体系的比較は、入手済みの TSE、ITSA、SB-P3 について、対応または検証の記載を確認していない。これらを研究対象外と著者が明示した、とは書かない。明示された研究対象外は、交差点間 cooperation である。著者は、単独交差点の simulation の範囲で効果を報告する。こちらの評価は、その範囲の結果を維持し、network applicability へ一般化しない、ということである。Single-intersection 内部の物理的詳細は、network applicability ではない。参照は§23.7、§23.11、§23.14、§23.15。
+
+### 23.17 構造的前提と主要結論の依存関係
+
+本小節は、第三段階へ送る前提を、主要結論との依存で整理する。通信機器、車載 agent、計算速度だけで解消し得る前提は、大きな欠点として重視しない。重視するのは、技術が進んでも結論の読みが残る前提である。Low、Medium、High の正式閾値は未確定である。以下の重要度は候補ラベルである。系列全体の最終ラベルは§23.18と§23.20にまとめる。
+
+| 前提 | 対象 mechanism | 依存する主要結論 | 崩れた場合 | 技術進歩で解消するか | 暫定重要度 |
+|---|---|---|---|---|---|
+| 1. Linear valuation | TSE、ITSA、加重待ちを使う評価全般 | Offer、bid、weighted waiting time、overall satisfaction | 1秒価値が一定でなくなると、入札・交換判断と加重指標の対応が崩れる | 解消しない。選好の形である | MediumからHigh候補 |
+| 2. Money の同一 marginal utility | 金銭移転を utility と読む評価 | Total utility、overall satisfaction、補償の公平性、加重待ちの金銭解釈 | 同額支払の負担が所得で違うと、満足の移転として読めない | 解消しない。所得の扱いである | High候補 |
+| 3. 十分な travel budget | TSE と ITSA の simulation。Concurrent auction の初期額は未固定 | 配分、交換成立、報告された効果量、低 budget の公平性 | 支払不能が起きると、報告された効果量は再現しない | 解消しない。予算制約の有無である | High候補 |
+| 4. Truthful valuation | Basic ITSA は formal。TSE と subsidy は仮定。Concurrent auction は研究対象外 | TSE の効果、subsidy の43.0%削減、効率の読み、fairness の読み | 虚偽申告では、非 IC の mechanism の効果量は別問題になる | 解消しない。誘因の性質である | Basic ITSA は LowからMedium。それ以外の一般化は High候補 |
+| 5. Initial entitlement の正当性 | TSE。初期配分は TSR | Fairness、交換後配分の正当性、任意参加の意味 | 初期 slot が不公正だと、任意交換はその配分を所与にする | 解消しない。権利の出どころである | High候補 |
+| 6. No overtaking と same-lane order | TSR、ITSA の candidate、TSE の非当事者、subsidy の動機 | 参加資格、保護の範囲、subsidy の必要性 | 追越しや車線変更ができると、候補制約と保護の単位が変わる | 解消しない。交通の範囲である | Medium候補 |
+| 7. Single-intersection applicability | 系列の simulation 全体 | 待ち時間、加重待ち、concurrency、starvation、実行可能性の報告 | Network の下流閉塞では、予約 slot が実行できない | 通信の高速化では解消しない | Network へ一般化するときの重要度は High候補 |
+| 8. 分布負担の読み | ITSA を中心に、満足を全体指標で読む評価 | ITSA の fairness、subsidy の効果の読み、TSE の fairness、社会的望ましさ | 加重平均の改善を全員の改善と読むと、低 valuation の悪化を落とす | 解消しない。指標の解釈である | High候補 |
+
+**1. Linear valuation。** 待ち時間1秒当たりの価値を一定とする。Weighted waiting time、bid、offer、utility の読みに入る。Deadline、待ちの非線形な苦痛、schedule delay、reliability、行程全体の複数交差点の影響は入らない。TSE の offer 判断、ITSA の bid、加重待ちの改善、overall satisfaction がこの形に依存する。
+
+**2. Money の同一 marginal utility。** 同額の payment と receipt を、全 Driver で同じ utility 変化として扱う。所得差は入らない。SB-P1 の該当文の頁は§23.11のとおり未固定である。評価上は、加重待ちの低下を金銭 utility の増加と読むときにこの前提が要る。TSE の補償を同じ満足の移転と読むときも同様である（§22.5、§23.5）。
+
+**3. 十分な travel budget。** TSE と ITSA の simulation は、必要な支払を全員が実行できると仮定する（§23.7、§23.11）。Budget 不足、枯渇、長期分布は検証していない。SB-P3 の初期額は未固定であり（§23.15）、Concurrent auction の効果量までこの仮定で説明し切らない。仮定が確認できた TSE と ITSA については、報告された効率と、低 budget の Driver への公平性の両方が、この前提の上にある。
+
+**4. Truthful valuation。** Basic ITSA では、静的 second-price の formal property である（§23.9）。TSE の pricing は incentive compatible ではない。ITSA with subsidies も incentive compatible ではない。どちらも simulation は truthful valuation を置く（§23.5、§23.10、§23.11）。Concurrent auction は bidding strategy を研究対象外とし、制度全体の strategy-proofness は固定していない（§23.13）。Basic ITSA の正直入札に限る重要度は Low から Medium の候補である。TSE、subsidy、Concurrent auction の効果を戦略的申告の外へ一般化するときの重要度は High 候補である。Subsidy variant の 43.0% 削減は、この仮定の上の simulation result である。
+
+**5. Initial entitlement の正当性。** TSE は、初期配分で得た slot を交換前 entitlement にする。TSE の simulation の初期配分は TSR である（§23.7）。TSR は処理規則であり、その規則の公平性の証明ではない（§23.3）。著者自身が、任意参加で差別に応えられるのは交換段階であり、初期段階では差別が生じ得る、と限定する（§23.6）。任意の交換は、初期配分の差別を解消しない。
+
+**6. No overtaking と same-lane order。** Candidate になれる者、TSR の reject、TSE の前後 slot 保護、subsidy を導入する理由に入る（§23.8、§23.10、§23.12）。単車線、または追越しできない queue では、交通物理として妥当性が高い。複数車線、lane change、queue jumping へ一般化するときには制約になる。通信技術で消える前提ではない。
+
+**7. Single-intersection applicability。** 交差点内部の IE、LE、CAE は具体的である（§23.14）。Network congestion は扱わない。報告された待ち時間、加重待ち、concurrency、starvation の性質、予約の実行可能性は、この範囲の結論である。Network へ一般化するときの重要度は High 候補である。
+
+**8. Valuation-aware allocation と distributional burden。** これは model の式というより、評価の読みの限定である。Weighted average の改善は、low-valuation Vehicle の悪化と両立する（§23.11）。Overall satisfaction は、全 Vehicle の改善を意味しない。Truthfulness は fairness を意味しない。ITSA の fairness、subsidy の効果の読み、TSE の fairness、社会的望ましさの主張が、この限定に依存する。
+
+### 23.18 TVT-MPとの共通点、差異、最終ポジショニング
+
+比較は、既存の設計記録で確定している TVT-MP の制度構造との対比に限る。FCFS、TVT-MP、signalized UXsim の最新の実証数値は転載しない。実装仕様は変更しない。
+
+**単独の独自性にしないもの。** 次は、Schepperle・Böhm系列と重なるため、TVT-MP だけのものにしない。個別の VOT または valuation を使うこと。通過機会、time slot、priority を経済的に配分すること。交換前の allocation を entitlement にすること。早い通過を得る側から、譲る側へ金銭を移すこと。Budget balance。任意参加。交換の拒否権。No overtaking。Same-lane の順序保護。Movement conflict。交差点の同時利用。Physical feasibility。Reservation failure。Cancel と reauction。Weighted waiting time で効率を測ること。Fairness または分布上の負担を議論すること。
+
+重なりは、会計の同一性ではない。ITSA の支払は auction revenue であり、winner から auction 側へ移る（§23.9）。受取主体の SB-P3 での固定は未了である（§23.13）。TSE の支払は Vehicle 間である（§23.5）。ITSA の subsidy は、後続が前方 candidate の競争力を上げる上乗せであり、譲った slot の補償ではない（§23.10）。TVT-MP の seller compensation は、順位または通過機会を譲る側の必要補償である。四者を一つの移転と呼ばない。Budget balance という語の共有も、誰が収入を保持するかの差を消さない。
+
+**差別化の候補。** 次は、単独の要素ではなく組合せとして使う。こちらの評価であり、本節で実装仕様を変えない。
+
+Baseline 順位から multi-party Candidate を形成する。一つの decision で buyer と複数 seller を束ねる。各 seller の必要補償額 `R_s` を個別に充足する。Seller の必要補償の総額だけを buyer 側へ配分する。順位 seller と actual payee を分ける。参加状態を VOT から分ける。Nonparticipating Vehicle を実際に混在させる。Nonparticipating Visit の、直接的な baseline 順位の後退を防ぐ。Candidate prediction と actual passage を比較する。Nonparticipating への actual の外部効果を記録する。複数 Node、複数 OD、右左折、下流容量、spillback、network traffic simulation への統合を、同じ実行の中に置く。
+
+TSE の複数 candidate は、1対1の相手を順に探す集合である（§23.4）。ITSA の winner は、一つの slot を取る1台である（§23.8）。この差は、上の組合せの一部である。
+
+**系列が TVT-MP より強い点。** Valuation-aware な交差点制御の早期の提案である。Basic ITSA は、静的 second-price の truthfulness を formal property として持つ。TSE は、bilateral negotiation の手順を明示する。IE、LE、CAE と、conflict area の concurrency を、同じ auction 比較の中で分ける。Free Choice と Clocked を対比し、interval 設計で性能が分かれることを示す。TSR、ITSA、subsidy、TSE、concurrent auction を、系列として formal と simulation の両方で評価している。TSE と ITSA の効果量は、それぞれの仮定の下で著者報告として存在する。非当事者については、same-lane の slot-order protection がある。これらを、TVT-MP がすでに上回った実績として消さない。
+
+**TVT-MP 側の弱点と未確定。** 既存の設計記録の範囲で残っているものは次である。Strategy-proofness は未証明である。Formal な Pareto theorem は未確定である。Actual の監査をしても、全取引の ex-post IR が自動で保証されるわけではない。Baseline prediction には誤差がある。Network 実装は複雑である。Multi-party の構造は説明の負担が大きい。Money の utility 解釈は、同一 marginal utility の問題を TVT-MP 側にも残す。VOT 申告の戦略性は、未解決の誘因問題である。自研究を一方的に優位とは書かない。系列の truthfulness は Basic ITSA に限られ、TVT-MP の network 統合は、系列が持たない軸である。強い軸は互いに違う。
+
+**最終ポジショニング。** Schepperle・Böhm系列は、valuation-aware な time-slot allocation、bilateral exchange、補償、限定的な非当事者保護、交差点内部の concurrency を扱う。この組合せにより、TVT-MP の強い直接競合である。中心は、single intersection の reservation、auction、slot exchange である。複数交差点の network、downstream receiving capacity、spillback、actual passage の監査、nonparticipating Vehicle の実交通上の外部効果は扱わない。
+
+差別化は、取引があるかないか、物理制約があるかないか、には置かない。系列は両方を持つ。置く場所は次の組合せである。Multi-party の順位取引。非参加 Visit の baseline 順位の保護。Seller 単位の補償。Prediction と actual の分離。Network 交通への統合。
+
+暫定評価は次である。正式閾値は未確定であり、候補である。
+
+- 取引構造上の距離は近い。
+- 直接競合性は High。
+- Intersection-internal physics は、従来の理解より強い。
+- Network integration は Low。
+- 非当事者保護は、部分的に近い。同一ではない。
+- 誘因性質は mechanism ごとに違う。
+- 系列全体の構造的前提依存性は、Medium から High の候補。
+- Network applicability へ一般化する場合は High 候補。
+
+第一段階の概念位置は、本小節では変えない。採点表の更新は§23.20に書くとおり、別判断である。
+
+### 23.19 解消した未確認事項と残る未確認事項
+
+§22時点の「本文の該当箇所を未取得」のうち、§23.1〜§23.15で中身を固定したものを解消とする。頁・表・式の番号が未固定でも、制度関係や数値そのものを記録済みなら、その関係は解消に入れる。番号だけが残るものは残件とする。2009年 overview の全文未入手は、解消に入れない。
+
+**解消した未確認。**
+
+TSE について解消したのは次である。Initial phase に TSR を使うこと。Exchange request。Candidate 集合。Offer。Candidate の acceptance。Budget balance について、仲介が支払主体にならず著者は budget-balanced と判定すること。Pricing が incentive compatible ではないこと。Starvation 性質を TSR から継承するという著者説明。非当事者の slot-order protection。Simulation の交差点、需要、horizon、runs、valuation、budget の仮定。通常条件および異質性が大きい条件の主要効果量。参照は§23.4、§23.5、§23.6、§23.7。金額の恒等式と、8.7% の treatment 対応は残件である。
+
+ITSA について解消したのは次である。Basic の sealed-bid second-price。前方未取得の後続は candidate にならないこと。Highest bidder が winner になり、支払は second-highest bid であること。Basic variant の静的 truthfulness。Auction revenue が Driver 間の zero-sum ではないこと。Subsidy の導入理由。Subsidy variant が incentive compatible ではないこと。Starvation 回避を保証しないこと。Simulation の交差点、需要、horizon、runs、12秒前の auction、slot duration 4秒。Without subsidies の 30.6% と 0.5%、with subsidies の 43.0% と 1.8%。低 valuation の待ち負担が加重平均の改善と逆向きになり得ること。参照は§23.8、§23.9、§23.10、§23.11。
+
+Concurrent auction について解消したのは次である。正式題名、年、IEEE、pp. 105–112、DOI 10.1109/CECandEEE.2008.88、IEEE Xplore 4785053。誤記の DOI は使わない（§23.1、§23.12）。TSR の request field と preceding Vehicle の reject。Free Choice と Clocked の interval の違い。IE、LE、CAE。同率最高 bid の random selection。Failure、cancel、reauction の処理順。Free Choice の最大削減率 38.1%、27.8%、34.5%。Clocked が CAE では TSR より常に悪く、LE と IE では需要の目盛りに依存すること。Different intersections 間の cooperation は研究対象外であること。参照は§23.12、§23.13、§23.14、§23.15。
+
+**残る未確認。**
+
+2009年 overview chapter（SB-P4）の全文は、資料未入手である。A3C の完全統合、liability、communication failure、driver acceptance、legacy Vehicle の扱いは、この全文が資料未入手であるため、本節で確定しない。入手済みの SB-P1、SB-P2、SB-P2S、SB-P3 に記載がないこととは別である。
+
+TSE の残件は次である。総支払額の正確な式は、原文の該当式未固定である。Budget 更新式は、原文の該当式未固定である。Candidate の照会順は、頁・節対応未固定である。Formal な IR theorem は、本文の該当定理未取得である。Simulation の表番号と図番号は、頁・表対応未固定である。8.7% がどの heterogeneity treatment に対応するかは、頁・表対応未固定である。
+
+ITSA の残件は次である。Candidate が1台のときの price は、本文の該当箇所を未取得である。Reserve price の有無は、本文の該当箇所を未取得である。Subsidy の支払と按分は、原文の該当式未固定である。低 valuation 群の区切りと exact な waiting time は、頁・表対応未固定である。Revenue redistribution 後の誘因性質は、検証が不十分である。Starvation の件数と最大 waiting time は、頁・表対応未固定である。
+
+Concurrent auction の残件は次である。Exact な表番号と図番号は、頁・表対応未固定である。Free Choice の最大削減が生じた demand は、頁・表対応未固定である。需要の目盛りの単位は、頁・表対応未固定である。Replication、horizon、warm-up は、本文の該当箇所を未取得である。Valuation と arrival の exact な分布は、本文の該当箇所を未取得である。Strategic bidding 下の性能は、検証が不十分である。Failure の件数は、頁・表対応未固定である。Average waiting time の増減は、頁・表対応未固定である。
+
+Network の残件は次である。Spillback、downstream blocking、adjacent-intersection interaction、multiple OD、route choice、network feedback、predicted slot と actual passage の体系的比較は、入手済み原文に対応または検証の記載がない。Different intersections 間の cooperation は、研究対象外である。前者を資料未入手と呼ばない。後者を、単に記載を見落としたことと呼ばない。
+
+### 23.20 三段階評価への接続と再開情報
+
+**第一段階。** 既存採点は本節で変更しない。採点表の Schepperle・Böhm系列は、X合計8、Y合計3、概念位置は制度 Medium-High・network Low のままである。直接競合として維持する。SB-P3 により、交差点内部の物理は、IE だけの理解より具体的になった。現在の Y1=2 は、Vehicle または movement 単位の競合と実現可能性を明示する、というコードブック上の位置である。IE、LE、CAE の具体化が、この点数の変更を要するかは、コードブック Y1 等との横断整合で別途判断する。変更する場合は、旧値、新値、根拠、概念配置への影響を、その判断の記録に書く。本節では新旧の差し替えをしない。
+
+**第二段階。** §23.1〜§23.15が詳細比較の更新である。TSE、ITSA、Concurrent auction の役割は分離した。Formal property、simulation result、fairness、network の範囲は、mechanism ごとに確認した。TVT-MP との直接競合性は維持する。差別化の軸は、物理があるかないかから、network 統合と multi-party の補償の組合せへ更新した（§23.18）。
+
+**第三段階。** 送る材料は§23.17の8前提である。Low、Medium、High は候補ラベルであり、正式閾値は未確定である。系列全体の構造的前提依存性は Medium から High の候補である。Network へ一般化する場合は High 候補である。誘因性質は mechanism ごとに違う。Basic ITSA の静的 truthfulness と、TSE および subsidy の非 incentive compatibility と、Concurrent auction の対象外とした bidding strategy を、一つの誘因評価にまとめない。
+
+**文献調査の再開地点。** Schepperle・Böhm系列の詳細正本は本§23である。§22は、追加原文の確認前の歴史的記録として残す。§22本文は削除しない。次の文献対象は PEXIC 系列である。PEXIC については、journal 全文と博士論文全文を入手済みである。X2 と Y1 の再採点候補がある。次の直接作業は、PEXIC の第二段階の正式適用である。PEXIC の本文詳細は本節に書かない。Schepperle・Böhm系列の採点の再確認は、直接競合3系列の横断整合のときに行う。本節の完了だけでは採点を動かさない。
+
+**実装・実証との分離。** 本§23は先行研究の調査だけを記録する。TVT-MP の実装仕様は変更しない。FCFS、TVT-MP、signalized UXsim の最新の実証数値は、本節へ転載しない。実装と実証の正本は別文書である。本節を書いたことを理由に、runner、production、test、output を変更しない。文献調査の再開地点と、実装作業の再開地点は、別のままである。
+
+## 24. PEXIC系列への第二段階詳細適用と構造的前提評価（2026-11-26）
+
+本節は、PEXIC系列の第二段階詳細正本である。第一段階採点の再実施ではない。使う資料は、出版社版の journal 原論文全文と、博士論文全文である。記述は、journal 原論文の事実、博士論文の追加分析、formal property、simulation result、著者の主張、こちらの評価、未確認事項を分ける。第三段階へ送る構造的前提も、制度の読みに必要な範囲で仮登録する。正式な第三段階評価は後続小節である。
+
+§24.1〜§24.6は、資料、制度構造、phase allocation、pricing、Pareto と budget balance、誘因と参加の前提を扱う。Simulation の数値、CESEI、saturation、network 限界、TVT-MP との最終比較は、§24.7以降に追加する。本工程では書かない。第一段階採点は変更しない。X2 と Y1 も変更しない。
+
+**更新（2026-11-27）。** 直前の「採点は変更しない」は、§24.1以降を書く時点の作業範囲である。X2とY1の正式再採点は§24.17で完了した。最新値はX2=2、Y1=2、X合計11、Y合計3、概念位置は制度High・network Lowである。制度内容とsimulationの本文は、この採点更新では書き換えていない。
+
+§21〜§23の Schepperle・Böhm系列および Lin・Jabari系列の実験事実は、PEXIC の事実として転載しない。比較の水準だけを合わせる。
+
+### 24.1 資料台帳、書誌、原文確認状態
+
+本小節は資料の同定と、各資料をどの判断に使うかだけを固定する。Phase allocation と pricing の中身は§24.2以降に置く。
+
+**PEXIC-P1。** 資料IDは PEXIC-P1 である。正式題名は *Envy-minimizing Pareto Efficient Intersection Control with Brokered Utility Exchanges under User Heterogeneity*。著者は Roger Lloret-Batlle、R. Jayakrishnan。年は2016。掲載は *Transportation Research Part B: Methodological*、Vol. 94、pp. 22–42。DOIは 10.1016/j.trb.2016.08.014。本文は出版社版の journal 全文を入手済みである。今回の判断では、PEXIC の中核原論文として、phase allocation、Value of Delay Savings、envy-minimizing pricing、budget balance、Pareto efficiency、quasilinear utility、complete information の基本 model に使う。Simulation の数値と network 限界の展開は§24.7以降に送る。Supplementary material は未入手・存在未確認である。存在しないとは断定しない。ページ、節、式、表、図の番号対応は、本工程では固定していない。確認済みの制度関係は、番号未固定を理由に省略しない。
+
+**PEXIC-P2。** 資料IDは PEXIC-P2 である。正式題名は *Peer-to-peer and Collaborative Consumption of Supply in Transportation Systems*。著者表記は Roger Lloret Batlle である。Journal 版の Roger Lloret-Batlle と、ハイフンの有無が資料上で異なる。同一著者として扱う。年は2017。大学は University of California, Irvine。博士論文全文を入手済みである。DOIは、本工程では固定していない。理由は、学位論文の DOI を頁対応と別に照合していないためである。推測で付けない。
+
+主要箇所は Chapter 4、*Priced Exchanges in Traffic Intersection Control* である。使う節は、§4.3 Overview of the Method、§4.4 Phase allocation algorithm、§4.4.1 Value of Delay Savings、§4.4.2 Envy-minimizing Pricing Scheme for Fairness、§4.7 PEXIC and Incentive Compatibility である。§4.5 Simulation Results、§4.6 CESEI extension、§4.8 Conclusion は資料の所在として台帳に残す。§4.5、§4.6、saturation、network 限界の中身は本工程では書かない。§24.7以降である。Chapter 4 は、journal と同じ制度を収録し、incentive compatibility の追加分析と拡張を持つ補足資料である。Journal 版と Chapter 4 が文として完全一致するとは断定しない。完全な差分は差分未固定である。
+
+**名称と包含。** 系列名の PEXIC は、Priced Exchanges in Intersection Control である。中核原論文は PEXIC-P1、すなわち Lloret-Batlle・Jayakrishnan の2016年 journal 論文である。博士論文 Chapter 4 は、同じ制度を収録し拡張する資料であり、別系列の別制度ではない。FRAMEWORK が挙げた brokered utility exchange と、本系列を重複して二系列に数えない。§8.1が未確認として残していた正式題名、年、DOI、PEXIC という名称の原論文対応、Lloret-Batlle・Jayakrishnan との包含は、本小節で解消する。X2=1 の採点そのものは、本小節では解消もしないし変更もしない。再確認対象であることは§24.3に書く。
+
+**更新（2026-11-27）。** 直前の「X2=1のまま」は本小節執筆時点の記録である。最新値は§24.17のX2=2である。
+
+**未確認。** Supplementary material は未入手・存在未確認である。Journal と Chapter 4 の式・定理の一対一対応は差分未固定である。Journal の命題番号、式番号、表番号、図番号は頁対応未固定である。
+
+### 24.2 PEXICの目的、主体、全体処理
+
+**目的。** PEXIC は、利用者の異質性を signal control へ入れる。Vehicle ごとに Value of Delay Savings（VDS）を使う。評価の対象は、system delay の秒数だけではない。Delay を金銭化した cost、または utility として扱う。効率は phase allocation で扱う。Fairness の操作的な扱いは、配分後の price による envy の最小化である。移転は、budget-balanced な brokered utility exchange である。制御は一度限りではない。Rolling horizon で計画を作り、近い部分だけを実行し、先へ進んで再最適化する。
+
+著者の主張として、異質な時間価値のもとで、効率的な signal 配分と、利用者間の utility 移転による fairness を同時に扱う、という目的を記録する。Envy の最小化が、社会的な equity のすべての意味を満たすことまでは、著者主張として固定しない。こちらの評価も、envy の最小化を equity の完全な保証とは読まない。
+
+**主体。** 次を分ける。
+
+Individual Vehicle または user は、自分の VDS と、signal によって決まる delay を持つ。Price の支払または受取の相手になる。自分で相手の slot を選んで交換する当事者ではない。
+
+Intersection controller は、実行可能な signal plan の中から phase allocation を決める主体である。Rolling horizon の計画を持つ。
+
+Broker または pricing mechanism は、決まった delay allocation を所与にして、Vehicle 間の price を決める段階である。Budget balance のもとでは、この主体は収入を残さない。外部から subsidy を入れて envy を下げる主体でもない。Controller と broker を、別の営利事業者として二社に分けては書かない。役割の分離は、配分を決める段階と、価格を決める段階の分離である。
+
+Phase allocation algorithm は、VDS と予測 delay を入力し、phase order と phase duration を決める手続きである。
+
+Pricing stage は、その delay が固定されたあとで、envy を最小化する price を決める手続きである。
+
+**Exchange の意味。** PEXIC の exchange は、TSE のような、個別 Vehicle が time slot を1対1で直接交換する手続きではない。Signal phasing が、各 Vehicle に delay の割当を与える。Price が、Vehicle 間で utility を移す。Delay allocation と monetary transfer の組を、brokered exchange と呼ぶ。個別の buyer と seller の対応は、制度の中核ではない。誰が誰の slot を買ったか、という取引台帳は、PEXIC の基本単位ではない。
+
+**全体処理。** 確認できる処理順は次である。Message の正式名と、journal と博士論文で文言が違う箇所は、差分未固定である。順序の骨格は省略しない。
+
+1. Rolling horizon の中の Vehicle と、arrival の予測を取得する。
+2. Vehicle ごとの VDS を入力する。基本 model では、この VDS は controller に既知である。申告 game は§24.6に分ける。
+3. 実行可能な signal の phase order と phase duration を、列挙または探索の対象にする。
+4. VDS で重み付けした Vehicle cost を最小化する phase allocation を決める。
+5. そこで決まった delay allocation を、価格段階では所与にする。価格を変えて delay をやり直す段階ではない。
+6. Vehicle 間の envy を最小化する price を決める。
+7. Price の合計を 0 にする。
+8. 計画のうち、直近の実行部分だけを実施する。この実行単位を、最初の barrier group と呼ぶ資料がある。Journal 版と博士論文で、その単位の名称と長さが一致するかは差分未固定である。一致すると断定しない。両資料に共通して書くのは、horizon 全体を一度に固定実施しない、ということである。
+9. Horizon を進め、更新された到着と待ちを入れて再最適化する。
+
+Simulation がこのループをどの需要と何回で回したかは、本小節では書かない。
+
+### 24.3 Phase allocation problemとVDSの直接結合
+
+**VDS。** Value of Delay Savings は、Vehicle ごとの、待ち時間を短縮することの金銭価値である。時間当たり、または秒当たりの価値として delay に掛かる。Vehicle 間で異質である。Delay reduction の valuation であり、全員共通の一台あたり係数ではない。
+
+通常の VOT との関係は次である。VOT を、delay 1単位の短縮に対する金銭価値とし、その価値が delay の長さに対して一定であるとき、VDS はその VOT と同じ役割を delay cost の中で果たす。違いとして残すのは、行程全体の free-flow 時間を含む旅行時間全体の価値と、signal が生む delay の価値を、同じ語で呼ばないことである。PEXIC が phase allocation に入れるのは、後者の delay 側である。Linear valuation との関係は、delay 1秒の価値を Vehicle 内では一定とすることである。Delay が長くなるほど1秒の苦痛が増える非線形は、この目的関数には入らない。VDS の分布族と simulation の抽出方法は§24.7以降である。
+
+**Allocation object。** 配分の対象は、個々の time slot の売買ではない。Signal の phase order、phase duration、そこから決まる Vehicle delay である。Barrier は、dual-ring の phase 列を区切る制約である。Barrier group は、その区切りの間で同時にサービスし得る phase のまとまりとして実行単位に現れる。実行単位の資料間差は§24.2のとおり差分未固定である。Movement service は、どの movement がどの phase で青を得るかである。Feasibility は、両立しない movement を同時に青にしないことを含む。枠組みは、complete 8-phase dual-ring の NEMA である。8 phase の番号と ring の図番号は、本工程では固定していない。
+
+**Objective。** 確認できる計算関係は次である。式番号と記号の定義文の頁は未固定である。関係自体は省略しない。
+
+Vehicle i の delay を d_i、その VDS を v_i とする。Vehicle i の金銭化した delay cost は、v_i と d_i の積である。Phase allocation の目的は、実行可能な signal plan について、この積の全 Vehicle 合計を最小化することである。合計は total Vehicle cost である。Cost minimization が、この段階の allocative efficiency である。Phase order と phase duration は、この目的を通じて d_i を変える決定変数である。Price はこの目的関数に入らない。Price は delay が決まったあとである。
+
+**X2への含意。** 原文事実として、VDS は事後の評価重みだけではない。VDS は、phase order、phase duration、したがって delay allocation を直接変える。個別選好は、交通資源の配分へ直接結合する。コードブック§6.2の X2=2 は、選好が対象資源の配分結果を直接決める、という位置である。今回確認した結合は、その文言との整合が強い。
+
+既存の X2=1 は再確認対象である。§6.2は、PEXIC の X2=1 を、auction 型の直接割当より結合が弱いという系列判定とし、根拠頁は要出典固定としていた。本小節はその頁を、弱い結合の根拠としては固定しない。正式な採点変更は別工程である。本工程では X2 を 1 のまま動かす。2 へ書き換えない。
+
+**更新（2026-11-27）。** 直前の「別工程」「1のまま」は本小節執筆時点の記録である。正式再採点は§24.17で完了し、最新値はX2=2である。本小節のVDSとphase allocationの説明は変更していない。
+
+**Physical feasibility。** 原文から確認できる制約の種類は次である。NEMA の phase compatibility。同時に青へできない conflicting movement。Minimum green。Maximum green。Phase sequence。Barrier。予測された arrival。Queue。それらを通じて計算される Vehicle delay。各制約の秒数、式番号、queue の更新式は未固定である。未確認の秒数を推測で書かない。確認済みなのは、選好の最適化が、これらの signal 制約の内側で行われることである。制約の外の phase を、VDS が高いという理由だけで実行可能にはしない。
+
+Y1 の採点は変更しない。物理制約の中身を記録することと、Y1 を 1 から動かすことは別である。再採点は§24完成後の別工程である。
+
+**TVT-MPとの違い。** ここでの比較は制度構造に限る。実証数値は転載しない。PEXIC は、horizon 上の phase allocation を、VDS 加重 cost の全体最適化で決める。TVT-MP は、baseline の Visit 順位から candidate を作る。PEXIC の Vehicle は、buyer と seller として明示されない。Delay の結果に price を付ける。TVT-MP は、候補ごとの順位変化と、seller ごとの必要補償を明示する。両方とも、異質な時間価値を配分へ直接結合する。この結合自体は、どちらか一方の独自性ではない。配分の単位が違う。PEXIC の単位は signal plan と delay である。TVT-MP の単位は、baseline 順位列の候補ごとの変換である。
+
+### 24.4 Envy-minimizing pricingとbudget balance
+
+**Pricing stage。** Pricing は phase allocation のあとである。Delay allocation は所与である。決めるのは Vehicle ごとの price である。Price が正の Vehicle は支払う側である。Price が負の Vehicle は受け取る側である。正を payment、負を compensation と呼んで分ける。どちらも brokered transfer の成分である。Delay が大きい Vehicle が必ず負の price を受け取る、という対応は、本工程では式として固定しない。Envy の最小化が、その一対一を定義するわけではない。
+
+**Envy。** 式番号は未固定である。確認できる比較は次である。
+
+Vehicle i は、自分の delay、自分の VDS、自分の price から、自分の bundle の utility を評価する。同じ VDS で、Vehicle j の delay と Vehicle j の price を自分に当てはめた utility も評価する。j の bundle の方が i にとって高いとき、その差が i の j に対する envy である。差が負なら、その対の envy は 0 として数える。Aggregate envy は、この対ごとの envy を集めたものである。Minimum-envy objective は、delay を固定したまま price を動かし、aggregate envy を最小化する。相手の VDS を自分の VDS と取り違えて比較する、という定義にはしない。i が使う価値は i の VDS である。
+
+Quasilinear な形では、bundle (d, p) の i にとっての utility は、VDS と delay の積による不効用と、price の加減である。Price の符号は、正が支払である。したがって i が j を羨む差は、delay の差を i の VDS で金銭化したものと、price の差との比較になる。記号を v_i、d_i、p_i とすると、j の bundle を i が評価した値と、i 自身の bundle の値の差は、−v_i (d_j − d_i) − (p_j − p_i) である。この差が正の部分が、その対の envy である。式番号は付けない。
+
+**Budget balance。** 全 Vehicle の price の合計は 0 である。正の price の総額と、負の price の総額は、符号を除いて一致する。Operator の revenue は 0 である。外部 subsidy は、この制約を満たすために不要である。移転は Vehicle 間の utility transfer である。
+
+用語の強さは次のとおり分ける。本工程で原文の語として固定するのは、price の合計が 0 であることである。Weak budget balance、strong budget balance、ex-post budget balance のどれを著者の用語として使っているかは、頁対応未固定である。確認できない強さを、強い方の用語で補わない。各 optimization step で合計 0 を課すことと、simulation の全期間を通じた残高の合計が 0 であることは別である。前者は pricing 制約として記録する。後者は simulation の集計であり、§24.7以降まで数値も判定も書かない。
+
+**Arbitrage と price の正規化。** 全 Vehicle の price に同じ定数を足しても、各 Vehicle から見た bundle 間の utility 差は変わらない。全員の utility が同じ定数だけずれ、差は残るからである。したがって envy は、price の絶対水準に対して不定である。合計を 0 にする制約は、この不定な水準を一つに正規化する。全員の price を同じだけ下げて envy の見た目を操作することは、合計 0 のもとではできない。外部からその定数分を補給することも、この制約の外である。この性質を、各 Vehicle の IR や、equity の完全な保証とは呼ばない。
+
+**TVT-MPとの比較。** PEXIC にも、合計が 0 の移転がある。Budget balance は TVT-MP だけの独自性ではない。PEXIC は、Vehicle 別の price を、envy の目的で最適化する。TVT-MP は、seller の必要補償の総額を buyer 側へ配分する。PEXIC では、順位 seller と actual payee は中核の概念ではない。負の price を、TVT-MP の seller compensation と機械的に同一視しない。負の price は、envy を下げるための受取であり、特定の順位を売った対価として定義されていない。
+
+### 24.5 Pareto efficiency、quasilinear utility、individual rationality
+
+**Utility。** Journal の基本 model で使う utility は quasilinear である。Delay の不効用は、VDS と delay の積である。Price は金銭項として加減する。正の price は utility を減らし、負の price は utility を増やす。Money と delay は、この線形の形で同じ utility 単位に載る。Vehicle 間の比較は、この共通の金銭単位を前提にする。
+
+全 Vehicle は、money の1単位を同じ marginal utility で評価する。異質なのは delay の金銭価値であり、金銭そのものの限界効用ではない。所得によって同額の支払の苦痛が違うことは、この utility には入らない。これは構造的前提として仮登録する。正式な第三段階の重要度は後続小節で付ける。
+
+**Allocative efficiency。** Phase allocation が、実行可能な signal plan の中で total Vehicle cost を最小化するとき、その delay allocation は allocative efficient である。Cost は VDS と delay の積の合計である。Feasible signal plan の外の配分は、この効率の候補に入らない。Price はこの最小化の中にない。効率は配分段階の性質である。
+
+**Pareto property。** Formal に分けて記録する。命題番号は未固定である。
+
+Allocative efficiency は、VDS 加重 delay cost の最小化である。Budget balance は、price 合計が 0 であることである。Quasilinear preferences のもとでは、利用者間の金銭移転は、全 Vehicle の utility 合計を変えない。合計 utility は、符号を除いて total delay cost に対応する。したがって、cost を最小化する delay allocation は、実行可能集合の中で合計 utility を最大にする。誰かの utility をさらに上げるには、別の Vehicle の utility を下げるか、実行不可能な signal に出る必要がある。この意味で、その allocation は Pareto optimal である。Price は、この optimality を配分のあとで分配し直す。Price 段階が、別の delay を選んで Pareto optimal を作り直すわけではない。
+
+Pareto optimality と、全 Vehicle が baseline より改善することは、別の主張である。Pareto improvement は、特定の baseline と比べて、誰の utility も下がらず、誰かは上がる、という比較である。その baseline が delay 最小の信号なのか、現行の制御なのかは、本小節では simulation の比較設計として書かない。§24.7以降である。Baseline を特定しないまま、Pareto optimal を全員の改善と呼ばない。
+
+**Individual rationality。** Formal な IR theorem を、本工程では確認していない。理由は、該当定理の頁を固定していないためである。定理が無いと断定するのではなく、未固定として残す。Pricing の制約は、envy の最小化と price 合計 0 である。各 Vehicle の utility gain を非負にする participation constraint ではない。Baseline utility を下回らないことと、envy が小さいことは別である。
+
+Simulation で、ある category の平均 utility が baseline より高い、という結果が出ても、それは group average である。全 Vehicle の ex-post IR ではない。平均の数値自体は本小節に書かない。呼び方の区別だけを先に固定する。Budget balance から IR は出ない。合計が 0 でも、個別の Vehicle は支払によって baseline より下がり得る。
+
+**構造的前提の仮登録。** 後続の第三段階評価へ送るため、次を仮登録する。重要度の候補ラベルはまだ付けない。
+
+1. Quasilinear utility。Delay の金銭不効用と price が線形に足される。
+2. Money の同一 marginal utility。所得差は入らない。
+3. Correct VDS。配分に使う VDS は、その Vehicle の delay 価値として正しい、という入力仮定である。申告の誘因は§24.6である。
+4. Feasible allocation。効率と Pareto の主張は、signal 制約の内側である。
+5. Price transfer の可能性。正負の price を Vehicle 間で合計 0 のまま付けられる。
+
+### 24.6 Incentive compatibility、complete information、full participation
+
+**Complete information。** Journal の基本 model では、Vehicle の VDS は controller への既知入力である。Preference elicitation の手続きは、この基本 model の配分段階に入っていない。Correct VDS を利用できる、という仮定で phase allocation と pricing を書く。戦略的な実装の問題を基本 model で扱わない理由は、VDS を私的情報の申告 game の結果として導いていないからである。Complete information が意味するのは、この既知入力である。正直な申告が支配戦略である、という意味ではない。
+
+**Truthful reporting。** Basic PEXIC を strategy-proof とは書かない。Complete information の仮定は、truthfulness の証明ではない。正しい VDS が使えると置いているだけである。Private-information setting では、Vehicle は申告によって phase と price の両方に影響し得る。その setting の支配戦略は、基本 model の仮定からは出ない。第一段階の X5=1 は、本工程で変更しない。2 へ上げる記録にはしない。
+
+**博士論文の追加分析。** ここは PEXIC-P2 Chapter 4、§4.7 の追加であり、journal の基本 model の定理ではない。
+
+博士論文は、minimum-envy price と、Bayesian incentive compatible な price の関係を追加で扱う。主張の範囲は、asymptotic な BIC への approximation である。比較は simulation 上の価格差を含む。著者報告として、PEXIC の price と BIC price の平均差は、一般に 0.01 ドル未満である。この報告は、DSIC の証明ではない。Ex-post IC の証明でもない。あらゆる分布とあらゆる人数に対する formal な普遍保証でもない。Approximation と比較の報告である。Journal 原論文の complete information モデルと、この博士論文の追加を、一つの strategy-proofness にまとめない。
+
+比較に使った事前分布、人数、誤申告の幅の全 parameter は、本工程では固定していない。0.01 ドル未満という平均差の報告自体は、parameter 一覧が未固定でも省略しない。
+
+**Full participation。** 基本 model は、horizon 内の全 Vehicle が配分と price に参加する、と仮定する。Strategic participation、参加しない選択、進化的な任意参加は、基本制度の処理に入っていない。VDS を出さない Vehicle、支払に同意しない Vehicle、nonparticipating Vehicle を混在させる制度ではない。
+
+TSE の voluntary exchange と混同しない。TSE は、自分の slot を交換しない選択を持つ。PEXIC の基本処理は、全員の VDS と全員の price を、一つの signal plan と一つの価格ベクトルに載せる。参加の拒否権は、この基本処理の中核ではない。
+
+**TVT-MPとの比較。** TVT-MP は、参加状態を VOT から分ける。Nonparticipating Vehicle を混在させる。PEXIC の基本 model は full participation である。TVT-MP も、truthful な VOT 申告の誘因保証は未確定である。どちらも、戦略的申告には未解決の課題が残る。PEXIC は、quasilinear utility、allocative efficiency、budget balance、envy の価格を一つの枠で書く点で、formal な経済の枠組みが強い。その強さは、strategy-proofness の強さではない。TVT-MP は、不参加と actual outcome を制度の対象として明示する。PEXIC の基本 model はそこを対象にしていない。この対比は最終ポジショニングではない。最終比較は§24.7以降である。
+
+**未確認事項。** 資料は未入手ではない。Journal 全文と博士論文全文は入手済みである。
+
+- Journal 版の正確な定理番号と式番号。理由は頁・式対応未固定である。
+- 博士論文 Chapter 4 と journal の式の一対一対応。理由は差分未固定である。
+- BIC 比較の全 parameter と、misreporting の分布。理由は本文の該当箇所を、本工程では固定していないためである。平均差が一般に 0.01 ドル未満という報告は、上に記録した。
+- 任意参加のもとでの equilibrium。理由は、基本 model が full participation であり、この equilibrium の検証は不十分である。
+- Nonparticipating Vehicle を混在させた simulation。理由は、基本制度が混在を前提にせず、simulation の展開は§24.7以降であるためである。本工程で「実施した」とも「実施していないと論文が明言した」とも、simulation 節の確認としては固定しない。
+- Field data の使用。理由は頁対応未固定である。
+- Supplementary material。理由は未入手・存在未確認である。
+- 実行単位が journal と博士論文で同一の barrier group か。理由は差分未固定である。
+- Weak、strong、ex-post のどの budget balance 用語を原文が使うか。理由は頁対応未固定である。合計 0 という制約自体は§24.4に記録した。
+- Formal IR theorem。理由は、該当定理を本工程で確認していないためである。
+
+次工程では、simulation、CESEI、saturation、network 限界、構造的前提の重要度、TVT-MP との比較を§24.7以降へ記録する。§24.1〜§24.6で、資料、制度構造、phase allocation、pricing、formal property、誘因と参加の前提を記録した。第一段階採点はまだ変更しない。X2 と Y1 の再採点は、§24完成後の別工程である。Schepperle・Böhm系列の§23は変更しない。
+
+### 24.7 Simulation設計、交通条件、比較対象
+
+本小節は、PEXIC の simulation の条件と比較対象を記録する。数値は著者報告の実験条件である。ページ、表、図の番号は推測で付けない。確認済みの条件は省略しない。Schepperle・Böhm系列の交差点容量、需要、runs は転記しない。Journal と博士論文 Chapter 4 §4.5 のセルが完全に一致するかは差分未固定である。食い違う二つの数値を並べてはいない。以下は、入手済み資料で確認した simulation 報告である。CESEI の中身は§24.9に置く。
+
+**Intersection と signal。** 対象は isolated signalized intersection である。複数交差点の連動は、この実験の対象ではない。Signal は complete 8-phase dual-ring の NEMA control である。Phase は movement ごとに対応する。Barrier group は、dual-ring の区切りの内側で同時にサービスし得る phase のまとまりである。Rolling horizon で計画し、直近の実行部分だけを実施してから再最適化する。実行単位の名称が journal と博士論文で同一の barrier group か、長さが同じかは、§24.2のとおり差分未固定である。Simulator は PARAMICS の microsimulation である。
+
+Approach 数、各 approach の lane 数、左折・直進・右折の本数は、本工程では固定していない。理由は頁対応未固定である。8-phase NEMA から、左折を含む標準的な四枝だと推測して書かない。
+
+**Time。** 次を分ける。
+
+Optimization horizon は 80秒である。Rolling horizon の長さとして記録する。Simulation timestep は 1秒である。Signal の minimum green と maximum green の秒数は、§24.3のとおり未固定である。Arrival prediction を、80秒とは別の独自の先読み長として持つかは、頁対応未固定である。予測そのものは、検出後の approach speed から arrival を出す、という§24.11の前提である。1回の simulation 全体の長さは、本文の該当箇所を本工程では固定していない。80秒を全体の実験時間と呼ばない。
+
+**Traffic demand。** 需要の軸として報告されているのは critical volume である。値は 150 veh/h、450 veh/h、750 veh/h、1050 veh/h、1350 veh/h である。これは total intersection demand でも、単一 approach の需要でも、その二つと同一の名前では記録しない。Critical volume が critical lane volume の和なのか、別の集計なのか、定義式は頁対応未固定である。五つの数値自体は省略しない。単位は veh/h として報告されている。
+
+**VDS heterogeneity。** Late vehicle の割合を PLV とする。条件は 0%、7.5%、15% である。Late vehicle は、通常の vehicle より高い VDS を持つ category である。遅れている利用者の時間価値が高い、という異質性を、この割合で入れる。通常 vehicle との倍率、分布族、金銭単価の具体値は頁対応未固定である。推測で時給や対数正規の parameter を書かない。PLV 0% は late category を入れない側の条件である。全員の VDS が厳密に同一であるとまでは断定しない。
+
+**Vehicle movement と trajectory。** 四つを分ける。
+
+Simulation 内の実移動は PARAMICS 上の vehicle である。Lane は entry 時に random assignment である。Lane change はない。Queue の表現は vertical queue である。Control delay の測定位置は、intersection の下流 600 ft である。
+
+Controller が使う予測 arrival は、approach speed からの予測である。検出後の predicted arrival time は固定する。実移動の軌跡を、毎 timestep の予測へ置き換える、という意味ではない。
+
+Delay の計測位置は下流 600 ft である。Controller 内部の予測 delay と、この計測 delay を同じ変数と呼ばない。
+
+Queue representation は vertical queue である。物理的な車列長が下流リンクを塞ぐ表現を、この queue がすでに持つとは書かない。Spillback の検証ではない。
+
+**Replication。** 各条件について 6 seeds である。Seed 番号そのものは記録しない。未確認だからである。
+
+**Comparison controller。** 比較対象は Min-Delay controller である。最小化する対象は delay である。VDS で重み付けしない。Vehicle を anonymous に扱う delay minimization である。Price を付けない。Signal の feasibility は PEXIC と同じ NEMA の実行可能集合を使う。違いは目的関数である。PEXIC は VDS と delay の積の合計を最小化し、そのあと price を付ける（§24.3、§24.4）。Min-Delay はこの重みも price も使わない。
+
+**Metrics。** Average cost は、VDS と delay の積を vehicle について平均した金銭化 cost である。§24.3の total Vehicle cost を、vehicle あたりに読んだ指標である。単位は金銭であり、秒ではない。Average delay は秒の delay であり、VDS を掛けない。Utility は§24.5の quasilinear utility であり、delay の金銭不効用と price の加減である。Envy は§24.4の bundle 比較である。VDS category 別の結果は、high-VDS と low-VDS、および late の有無に対応する集計である。CESEI は envy の集計を変える拡張であり、§24.9で博士論文側として書く。Phase allocation performance は、cost と delay の側の結果である。Price の公平性指標とは分ける。
+
+### 24.8 Cost、delay、utilityのsimulation結果
+
+本小節の百分率は、Min-Delay に対する PEXIC の simulation result である。表番号と図番号は頁・表対応未固定である。数値は省略しない。
+
+**Average cost reduction。** PLV 15% のとき、critical volume 450 veh/h では average cost が 20.21% 削減された。750 veh/h では 14.28% 削減された。1350 veh/h では 4.74% 削減された。最大約 20% という記述は、別実験の別の最大値ではない。450 veh/h、PLV 15% の 20.21% に対応する。Critical volume が上がるほど、この cost の優位は小さくなる。150 veh/h と 1050 veh/h の exact な削減率、および PLV 0% と 7.5% の exact な cost 削減率は、頁・表対応未固定である。方向として、PLV が高いほど cost 改善が大きい、ということは著者報告に含める。セルを埋めるための補間はしない。
+
+**Average delay。** PEXIC では average delay は増加する。PLV 15% では、おおむね 13.6% から 17.9% の増加である。PLV 7.5% では、おおむね 10.6% から 14.0% の増加である。PLV 0% では、おおむね 2.6% から 9.7% の増加である。この幅は、条件をまたいだおおむねの範囲である。各 critical volume への一対一の対応は、頁・表対応未固定である。
+
+Cost の削減と delay の増加は同時に起きる。Delay を低 VDS の vehicle へ移し、高 VDS の vehicle の delay を減らすからである。金銭化した cost は下がっても、秒の平均 delay は増える。PEXIC の phase allocation の目的は total delay の最小化ではない。Min-Delay がその目的である。PEXIC が改善するのは monetized cost、およびそれに対応する utility の合計側である。
+
+**Utility。** High-VDS の vehicle は、delay が短くなる側にあり、正の price を支払い得る。Low-VDS の vehicle は、delay が長くなる側にあり、負の price による compensation を受け得る。Baseline は Min-Delay であり、price のない delay 配分である。Category average は、その category の utility を均した比較である。
+
+Category ごとの utility の exact な増減率は、頁・表対応未固定である。確認できる関係は、delay の再配分と payment・compensation が utility の中で同時に動く、ということである。Category 平均が改善しても、その category の全 vehicle が baseline より改善したことにはならない。Ex-post IR と呼ばない（§24.5）。Saturation 付近で low-VDS を十分に補償できない場合がある、という限界は§24.9と§24.10に書く。
+
+**PLV と heterogeneity。** 著者報告は次である。PLV が高いほど cost の改善は大きい。Heterogeneity が小さいと、PEXIC が Min-Delay に加える cost 上の価値は小さい。Critical volume が高いほど、cost advantage は縮小する。
+
+こちらの評価は次である。この三つの方向は、VDS 加重の目的関数から読める。異質性がなければ、VDS 加重の最小化は anonymous な delay 最小化に近づく。需要が高く、signal の余裕が小さいと、delay を VDS 順に動かす余地が減り、cost の差も縮む。これは simulation の方向であり、全需要で PEXIC が無効だという主張ではない。比較した需要水準のうち低い側の 450 veh/h、PLV 15% の 20.21% と、1350 veh/h の 4.74% を一つの効果量に潰さない。
+
+**Interpretation。** PEXIC は delay の総量を減らすことを主目的としない。Delay を VDS に応じて再配分する。Price で utility の分布を調整する。Average delay だけで PEXIC を評価すると、制度目的から外れる。同時に、delay の増加は queue を延ばし、spillback の危険を高め得る。その危険は著者の指摘として§24.10に書く。Cost が減ったことから、network 性能が良いとは評価しない。Isolated intersection の金銭化 cost の結果である。
+
+### 24.9 Envy、dynamic envy、CESEIによるfairness評価
+
+**Static envy。** 一時点の vehicle 集合について、envy は§24.4の bundle 比較である。Vehicle i は自分の VDS で、自分の delay と price、相手の delay と price を比べる。すべての対で envy が 0 のとき、その配分と価格は envy-free である。Envy-free は、所得の平等でも、全員の utility が baseline より高いことでもない。
+
+Swap-monotonicity は、VDS の順と delay の順の関係である。VDS が高い vehicle の delay が、VDS が低い vehicle の delay を上回らない、という整列である。Quasilinear utility のもとで、この整列が付く delay allocation に対して price を選べば、envy を消せる、という関係が完全な envy-free の条件側にある。整列できない delay に対しては、price だけでは全対の envy を 0 にできない。式番号は未固定である。関係は省略しない。
+
+**完全な envy-freeness が難しい理由。** Signal phase、movement conflict、queue obstruction、arrival constraint、その他の physical feasibility が、delay を VDS の逆順に完全には並べさせない。高い VDS の車が、低い VDS の車の後ろにいて、同じ movement の queue にいるとき、前者だけを先に出すことは no overtaking と phase の制約に触れる。したがって完全な envy-free allocation は、一般の到着と queue のもとでは保証されない。PEXIC が行うのは、残余の envy の最小化である。最小化の達成を、envy が消えたことと呼ばない。
+
+**Dynamic envy。** Rolling horizon では、vehicle が検出されて現れ、交差点を出て消える。Static な一集合の envy だけでは、時間方向の比較が残る。Dynamic envy は、この出現と退出のもとでの envy である。関係するのは、過去の allocation、現在の allocation、price、検出後に固定した arrival prediction、horizon の更新である。予測到着を検出後に固定すると、その後の実速度の変化は、次の最適化まで price と delay の計画に入り直さない。Dynamic envy の正式な式番号は未固定である。確認済みなのは、envy を一回の静的配分だけで閉じない、という問題設定である。
+
+**CESEI。** Constant Elasticity of Substitution Envy Intensity は、博士論文 Chapter 4 §4.6 の拡張である。Journal の基本の minimum-envy と同一の目的関数ではない。
+
+目的は、envy の集計に elasticity と weight を入れることである。標準の minimum-envy は、対ごとの envy を集めて最小化する（§24.4）。CESEI は、その集計を constant elasticity of substitution の形にする。Elasticity parameter は、大きい envy と小さい envy をどれだけ代替しにくくするかを決める。Weight は、どの vehicle の envy を目的の中で重くするかを決める。Low-VDS の envy を重くする拡張が、この weight の役割である。Low-VDS は delay を受けやすい側であり、補償が足りない envy を、単純合計より強く罰し得る。
+
+Elasticity と weight の具体的な数値は頁対応未固定である。推測で 0.5 や 2 を書かない。式の骨格は、envy を vehicle または対について、weight 付きで elasticity を通してまとめたものを最小化する、ということである。記号の頁は未固定である。Journal の simulation 結果を、すべて CESEI のもとだと読まない。
+
+**Fairness result。** 著者報告として、多くの critical volume と PLV の条件で、PEXIC は Min-Delay より envy を下げる。Saturation 付近では、この fairness の優位が消える場合がある。Low-VDS の vehicle を十分に補償できない場合がある。CESEI の weight の設定によって、結果は変わる。Envy の exact な削減率は、頁・表対応未固定である。方向と、消える場合があるという留保は省略しない。
+
+**限界。** Envy の最小化は income equity ではない。金銭の限界効用は全員同じであり、所得差は入っていない（§24.5）。Envy が減ることは、全 vehicle の utility が改善することではない。Weight の選択には、誰の envy を重く見るかという規範判断が入る。Full participation と correct VDS は前提のままである。Social equity の完全な保証とは書かない。
+
+### 24.10 Saturation付近の限界と制御切替
+
+**High volume の simulation result。** Critical volume が高いほど、Min-Delay に対する cost advantage は縮小する。1350 veh/h、PLV 15% では average cost の削減は 4.74% である。Saturation 付近では、efficiency gain がほぼ消える。Fairness の優位も消える場合がある。Low-VDS の vehicle を十分に補償できない場合がある。Average delay は、この高需要でも増加側である。比較した需要水準のうち低い側の 450 veh/h、PLV 15% で cost が 20.21% 減ったことから、saturation でも同じ優位があるとは読まない。逆に、saturation で優位が薄いことから、450 veh/h、PLV 15% の結果を無効とも読まない。
+
+**著者の提案。** 著者は、sustained saturation では PEXIC を止める可能性を示す。Min-Delay へ切り替える可能性を示す。Hybrid control として、状態によって両者を使い分ける方向が挙がる。これは著者の提案である。Switching criterion の閾値、持続時間の定義、どの検出量で飽和と判定するかは、頁対応未固定である。閾値を推測で veh/h に書かない。提案があることと、formal な switching rule が証明または実装仕様として固定されていることは別である。本小節では後者を固定しない。
+
+**Spillback と gridlock。** 著者が可能性として指摘するのは次である。交差点が近接しているとき、PEXIC の追加 delay が queue を延ばし、spillback になり、gridlock になり得る。これは著者が危険を指摘した範囲である。Isolated intersection の PARAMICS 実験が、近接交差点の spillback を測定した結果ではない。指摘を、network simulation の実施済み結果と呼ばない。Vertical queue と下流 600 ft の delay 計測は、単独交差点の計測である。
+
+**こちらの評価。** Saturation で停止が必要なら、PEXIC は常時適用できる万能の controller ではない。Min-Delay との切替設計が、運用に追加で要る。Switching criterion と、network 状態の推定は、その切替を実際に行うときの追加前提である。閾値が未固定であることは、切替が不要だという意味ではない。Isolated intersection の cost improvement を、混雑した network へ一般化しない。Average delay の増加は、単独交差点では金銭化 cost の裏側であるが、network では queue の延長として構造的に重要である。
+
+### 24.11 Arrival prediction、単独交差点、network適用限界
+
+**Arrival prediction。** 確認済みの前提は次である。Vehicle を検出したあと、predicted arrival time を固定する。Arrival は approach speed から予測する。Lane change はない。Queue は vertical queue である。
+
+この前提は、phase allocation が使う delay、その delay に対する envy、その envy を下げる price、および次の horizon での再最適化に入る。予測を固定したあとで実速度が変わっても、その vehicle の到着予定は、固定した値のまま計画に残る。再最適化は horizon を進めたときの新しい検出と新しい集合に対して行われる。固定済みの予測を、毎秒の実位置で置き換える監査ではない。
+
+**Prediction error。** 検出後の predicted arrival を固定する、ということは原文の前提として確認できる。次は、その前提とは別に、体系的な誤差分析として本工程で固定していない。
+
+Acceleration のばらつき、上流信号、queue の伝播、route change、downstream blocking、actual crossing time と predicted arrival の体系的比較は、入手済み原文について対応または検証の記載を本工程で固定していない。検証が不十分、とする。Lane change は、simulation 条件として無い。記載を見落としたのではなく、lane change なし、と確認した条件である。Updated arrival prediction を、検出後も連続して更新する、とは書かない。確認したのは固定である。Predicted-vs-actual の監査を、予測を使っているから実施済みとはしない。
+
+**Single intersection。** Journal の simulation が検証した範囲は、isolated signalized intersection である。複数交差点の同時制御は、その実験に無い。Network-level coordination は、その実験に無い。博士論文では、multiple operators と network-level control を future work とする。Future work は、実施済みの検証ではない。Journal の実験範囲と、博士論文の future work を一つの「network を扱った」にまとめない。
+
+**Network applicability。** 四つに分ける。
+
+論文が検証した範囲は、単独の信号交差点、PARAMICS、critical volume と PLV の組合せ、Min-Delay との比較、cost、delay、envy である。著者が危険として指摘した範囲は、近接交差点での追加 delay、queue extension、spillback、gridlock である。Future work は、複数 operator と network-level control である。こちらの評価は、検証範囲の cost 改善を維持し、指摘された危険を未検証の危険として残し、future work を成果と呼ばない、ということである。
+
+確認状態は次である。Spillback と gridlock は、著者の指摘であり、network 実験の結果ではない。Downstream blocking、adjacent-intersection interaction、multiple OD、route choice、network feedback は、入手済みの simulation では検証していない。Actual passage を、下流 600 ft の control delay 計測と同一視しない。その計測は delay の測定位置である。Predicted arrival と actual passage の監査は、検証が不十分である。
+
+**Y1への含意。** 原文事実として、complete 8-phase dual-ring NEMA、movement 単位の signal conflict、phase feasibility、vehicle 単位の arrival と delay、PARAMICS の microsimulation がある。コードブック§7.1の Y1=2 は、Vehicle または movement 単位の競合と実現可能性を明示する、という位置である。今回の事実は、その文言との整合が強い。
+
+既存の Y1=1 は再確認対象である。本小節では Y1 を変更しない。1 のままである。Network の項目は、検証範囲が単独交差点であるため、network Low を維持する。採点表は動かさない。再採点は§24完成後の別工程である。
+
+**更新（2026-11-27）。** 直前の「Y1=1のまま」は本小節執筆時点の記録である。正式再採点は§24.17で完了し、最新値はY1=2である。Network Lowは維持する。本小節のnetwork限界の説明は変更していない。
+
+**TVT-MPとの予備比較。** 最終ポジショニングは書かない。構造の対比だけを残す。PEXIC は signalized control である。TVT-MP は Visit の順位制御である。PEXIC の検証は isolated intersection である。TVT-MP は network simulation への統合を設計の対象にする。PEXIC の基本 model は full participation である。TVT-MP は nonparticipating vehicle を混在させる。PEXIC は prediction を allocation に使う。TVT-MP は candidate prediction と actual passage を比較する。PEXIC の quasilinear utility、allocative efficiency、budget balance、envy の価格は、formal な経済の枠として強い。その強さは network 検証の強さではない。TVT-MP の差別化候補は、network と actual の監査の軸に残る。実証数値は転載しない。
+
+次工程では、主要結論、構造的前提の依存関係、TVT-MP との比較、未確認事項、三段階評価への接続を§24.12以降へ統合する。§24.1〜§24.6で資料、制度構造、formal property、誘因と参加の前提を記録し、§24.7〜§24.11で simulation、fairness、saturation、network 限界を記録した。第一段階採点はまだ変更しない。X2 と Y1 の再採点は、§24完成後の別工程である。§23は変更しない。
+
+### 24.12 PEXIC系列の主要結論
+
+本小節は、§24.1〜§24.11を6件へ絞る。詳細の削除ではない。論文説明用の統合である。各件で、原文事実、著者の主張、こちらの評価、参照先を分ける。
+
+**1. 二段階の制度構造。** 原文事実として、効率は phase allocation、envy は pricing である。Delay allocation を決めたあとで price を付ける。Price で delay を再計算しない。Rolling horizon で再最適化する（§24.2、§24.3、§24.4）。Exchange は TSE 型の bilateral slot exchange ではない。制度単位は signal plan と Vehicle の price vector である。著者は、異質な時間価値のもとで効率と fairness を段階に分けて扱う、と目的を置く。こちらの評価は、二つの段階を一つの slot 売買と呼ばない、ということである。参照は§24.2、§24.3、§24.4。
+
+**2. VDS と配分の直接結合。** 原文事実として、Vehicle 別の VDS と delay の積が total Vehicle cost であり、phase order と phase duration がその合計を最小化する。枠は complete 8-phase dual-ring の NEMA と physical feasibility である（§24.3、§24.7）。VDS は事後評価の重みだけではない。Allocation を直接変える。著者は、この結合を user heterogeneity の制御への入力とする。こちらの評価は、既存の X2=1 が再確認対象であり、コードブック X2=2 との整合が強い、ということである。採点は本小節で変えない。参照は§24.3、§24.7。最新値は§24.17のX2=2であり、直前の「変えない」は本小節執筆時点の記録である。
+
+**3. Formal economic properties。** Journal の基本 model では、utility は quasilinear である。Allocative efficiency は cost 最小化である。Price の合計は 0 であり、これが budget balance として固定した制約である。その delay allocation は、実行可能集合の中で Pareto optimal である。Envy minimization は価格段階の目的である。一様な定数を全 price に足しても envy の差は変わらず、合計 0 が水準を正規化する（§24.4、§24.5）。著者は、これらを一つの brokered exchange の性質として提示する。こちらの評価は三つに分ける。Pareto optimality は、全 Vehicle が baseline より改善することではない。Budget balance は IR ではない。Envy minimization は income equity ではない。参照は§24.4、§24.5。
+
+**4. 誘因と参加。** Journal の基本 model は complete information であり、correct VDS を既知入力とする。Strategy-proof ではない（§24.6）。博士論文 §4.7 の追加は、asymptotic な BIC approximation である。PEXIC の price と BIC price の平均差は、一般に 0.01 ドル未満である。DSIC でも ex-post IC でもない。Full participation であり、nonparticipating Vehicle の混在はない。著者の基本 model は申告 game を配分の中に置かない。こちらの評価は、complete information を truthfulness の証明と読まない、ということである。X5=1 は変更しない。参照は§24.6。
+
+**5. Efficiency と fairness の trade-off。** Simulation result として、Min-Delay 比の average cost は、比較した需要水準のうち低い側の 450 veh/h、PLV 15% で 20.21% 削減される。750 veh/h、PLV 15% では 14.28%、1350 veh/h、PLV 15% では 4.74% である。Average delay は増加する。High-VDS へ delay 短縮が寄り、low-VDS へ delay 増加と compensation が寄る。Envy は多くの条件で低下する。Saturation 付近では cost と fairness の優位が縮小し、または消える。結果は PLV と critical volume に依存する（§24.8、§24.9、§24.10）。著者は、金銭化 cost と envy の改善を報告し、秒の delay の増加も結果に含む。こちらの評価は、cost 削減を全員の改善や delay 総量の削減と呼ばない、ということである。参照は§24.8、§24.9、§24.10。
+
+**6. Network 適用性。** 検証した範囲は isolated signalized intersection である。Predicted arrival は検出後に固定する。Lane change はない。Queue は vertical queue である。Saturation では Min-Delay への切替を著者は示唆する。Spillback と gridlock は、近接交差点での危険の指摘であり、測定済みの network 結果ではない。Network-level control は future work である。Predicted-vs-actual の監査は確認していない（§24.10、§24.11）。著者は、単独交差点の結果と、network への危険と、将来課題を分けて書ける範囲を持つ。こちらの評価は、network Low を維持する、ということである。内部の NEMA と microsimulation は、Y1=2 の文言との整合が強いが、Y1 は本小節で変えない。参照は§24.7、§24.10、§24.11。最新値は§24.17のY1=2であり、Network Lowは維持する。直前の「変えない」は本小節執筆時点の記録である。
+
+### 24.13 構造的前提と主要結論の依存関係
+
+第三段階へ送る前提である。Low、Medium、High の正式閾値は未確定であり、重要度は候補ラベルである。通信、計算、検出機器だけで解消し得る制約は、大きな欠点として重視しない。所得差、私的な VDS、非参加、予測誤差、network congestion、fairness の weight は、技術が進んでも自動には解消しない。
+
+| 前提 | 依存する結論 | 崩れた場合 | 技術進歩で解消するか | 暫定重要度 |
+|---|---|---|---|---|
+| 1. Quasilinear utility | Pareto、utility 比較、envy、price transfer | Delay と金銭が線形に足せないと、効率と移転の分離が崩れる | 解消しない。選好の形である | High候補 |
+| 2. Money の同一 marginal utility | 補償の公平性、Vehicle 間 utility、overall welfare、envy | 同額の支払の苦痛が所得で違うと、移転を同じ満足と読めない | 解消しない。所得の扱いである | High候補 |
+| 3. Complete information と correct VDS | Phase allocation、pricing、cost 削減、envy 削減、Pareto の入力 | 誤った VDS では、報告された配分と価格は別問題になる | 解消しない。私的情報の誘因である | High候補 |
+| 4. Full participation | Price 合計 0、envy、signal allocation、simulation、非参加の fairness | 不参加がいると、価格ベクトルと全員参加の結果は維持されない | 解消しない。参加の制度である | High候補 |
+| 5. Predicted arrival の固定 | Delay 予測、phase、price、dynamic envy、rolling horizon の性能 | 実到着が予測からずれると、計画した delay と envy は実行とずれる | センサーの更新だけでは、固定する設計選択は消えない | High候補 |
+| 6. Isolated intersection | Cost 削減、delay 増加、envy、saturation 切替、物理的な実行 | 近接交差点では、追加 delay が下流を塞ぎ得る | 通信の高速化では解消しない | Network へ一般化するときは High候補 |
+| 7. PLV と VDS heterogeneity | 追加価値、450 veh/h・PLV 15% の 20.21%、高低 VDS の再配分、envy | 異質性が小さいと、Min-Delay との差は縮む | 解消しない。需要構成である | Medium候補 |
+| 8. Price transfer の実行可能性 | Budget balance、compensation、envy 最小化、Pareto の分配 | 移転できなければ、効率的な delay に公平性の価格が付かない | 決済技術だけでは、移転を許す制度は置換されない | MediumからHigh候補 |
+| 9. Min-Delay への切替 | Saturation 時の運用、delay 増加、spillback の危険、hybrid | 切替がないと、飽和時も delay を増やし続ける | 計算速度では解消しない。運用規則である | Network 運用では High候補 |
+| 10. Distributional fairness の解釈 | Envy の低下、CESEI、low-VDS の補償、social equity | Envy の低下を所得の公平と読むと、結論が強くなる | 解消しない。規範の読みである | High候補 |
+
+仮登録は§24.5にある。本表がその依存関係である。正式な閾値判定は、この表を候補のまま第三段階へ送ることで足り、本小節では確定値にしない。
+
+### 24.14 TVT-MPとの共通点、差異、最終ポジショニング
+
+比較は確定済みの制度構造に限る。実装・実証の最新数値は転載しない。
+
+**単独の独自性にしないもの。** 異質な VOT または VDS。時間価値を交通の配分へ直接結合すること。Delay allocation の経済的な最適化。金銭移転。負の price と compensation。Budget balance。Pareto efficiency を目指す枠。Rolling horizon。Fairness の明示的な制度化。Signal control との統合。利用者間の utility transfer。これらは PEXIC がすでに持つ。TVT-MP だけのものにしない。
+
+重なりは会計の同一性ではない。PEXIC の負の price は、envy を下げるための受取である（§24.4）。TVT-MP の seller compensation は、順位または通過機会を譲る側の必要補償である。二つを同一視しない。
+
+**本質的な違い。** PEXIC の単位は signal phase、vehicle delay、price vector、horizon 上の全体最適化である。前提は full participation、complete information、isolated intersection、検出後に固定した predicted arrival である。TVT-MP の単位は、baseline の Visit 順位、multi-party Candidate、buyer と複数 seller、seller 別の必要補償である。参加状態は VOT から分かれる。Nonparticipating Vehicle を混在させる。Candidate prediction と actual passage を比較する。Network simulation、下流容量、spillback を設計の対象にする。
+
+**PEXIC が強い点。** Formal な経済の枠である。Allocative efficiency、budget balance、Pareto property、envy の定式化を一つの制度に置く。博士論文は CESEI で envy の集計を拡張する。Complete NEMA の信号制御のもとで、Min-Delay と cost、delay、envy を系統比較する。Saturation で優位が薄れることを、著者自身が認識し、切替の可能性を示す。これらの強みを、TVT-MP がすでに上回った実績として消さない。
+
+**TVT-MP が差別化できる点。** 組合せとして使う。Multi-party の順位取引。Seller 別の補償。順位 seller と actual payee の分離。Nonparticipating Visit の保護。Nonparticipating Vehicle の混在。Prediction と actual の監査。Actual の外部効果。複数 Node、複数 OD、右左折、下流容量、spillback、network integration。PEXIC の基本 model は、この組合せを持たない。
+
+**TVT-MP 側の弱点。** Strategy-proofness は未証明である。Formal な Pareto theorem は未確定である。Money の utility 解釈は、同一 marginal utility の問題をこちらにも残す。VOT 申告の戦略性は未解決である。Baseline prediction には誤差がある。Network 実装は複雑である。Multi-party の説明負担は大きい。加えて、今後の比較上の注意として、signalized benchmark に対して全体効率で劣る可能性を残す。これは未検証の注意であり、実証数値の転載ではない。PEXIC が常に効率的だとも、TVT-MP が常に効率的だとも書かない。
+
+**最終ポジショニング。** PEXIC は、VDS に基づく signal phase allocation、budget-balanced な utility transfer、Pareto と envy の formal framework を統合する。このため、TVT-MP の最も強い直接競合候補の一つである。差別化は、取引があるかないかではない。両方とも時間価値と金銭移転を持つ。置く場所は、multi-party の順位取引、非参加者保護、seller 別補償、prediction と actual の分離、network 交通への統合の組合せである。PEXIC は formal properties で強い。TVT-MP は network と actual evaluation で強い。
+
+暫定評価は次である。正式閾値は未確定であり、候補である。
+
+- 取引と補償の構造上の距離は近い。
+- Direct competitor は High。
+- Formal economic depth は High。
+- Nonparticipant protection は Low。
+- Network integration は Low。
+- Prediction-vs-actual は Low。
+- 系列全体の構造的前提依存性は Medium から High の候補。
+- Network applicability へ一般化する場合は High 候補。
+
+第一段階の採点は、本小節では変えない。
+
+### 24.15 解消した未確認事項と残る未確認事項
+
+§8.1が全文確認前に未確認としていた事項のうち、§24.1〜§24.11で中身を固定したものを解消とする。番号や parameter だけが残るものは残件とする。資料は journal 全文と博士論文全文が入手済みである。残件を資料未入手と呼ばない。
+
+**解消した未確認。** 正式書誌、DOI、PEXIC という名称、Lloret-Batlle・Jayakrishnan との包含（§24.1）。Phase allocation、VDS、配分への直接結合と X2 の再確認対象であること（§24.3）。NEMA（§24.3、§24.7）。Pricing、envy、budget balance としての合計 0、price の正規化（§24.4）。Pareto property と quasilinear utility（§24.5）。Complete information と full participation（§24.6）。博士論文の BIC 近似と、平均差が一般に 0.01 ドル未満であること（§24.6）。Simulation の horizon、timestep、critical volume、PLV、lane、queue、delay の測定、6 seeds、Min-Delay（§24.7）。Cost と delay の主要結果（§24.8）。Envy の方向と、完全な envy-free が物理制約で保証されないこと（§24.9）。CESEI が博士論文側の集計拡張であること（§24.9）。Saturation で優位が縮むこと、Min-Delay 切替の示唆、spillback と gridlock が危険の指摘であること、network-level control が future work であること（§24.10、§24.11）。Y1=2 の文言との整合が強く、Y1=1 が再確認対象であること（§24.11）。採点の変更自体は解消に含めない。まだ行っていない。
+
+**更新（2026-11-27）。** 「まだ行っていない」は本小節執筆時点の記録である。正式再採点は§24.17で完了した。最新値はX2=2、Y1=2、X合計11、Y合計3である。
+
+**残る未確認。**
+
+Journal の定理番号と式番号は、頁・式対応未固定である。Journal と博士論文 Chapter 4 の完全な差分は、差分未固定である。Formal な IR theorem は、本文の該当定理未取得である。Budget balance を weak、strong、ex-post のどれと呼ぶかは、頁対応未固定である。合計 0 という制約自体は解消済みである。BIC 比較の全 parameter は、本文の該当箇所を未取得である。0.01 ドル未満の平均差は記録済みである。
+
+Nonparticipating Vehicle を混在させた simulation は、simulation の確認範囲では固定していない。基本制度は full participation である。混在実験の記載を確認できない。資料未入手ではない。任意参加のもとでの equilibrium は、検証が不十分である。Field data は、頁対応未固定である。PARAMICS の simulation を、野外観測の検証とは呼ばない。野外データの有無を、未入手の別論文の問題にはしない。
+
+Simulation 全体の長さは、本文の該当箇所を未取得である。Approach と lane の本数は、頁対応未固定である。Critical volume の定義式は、頁対応未固定である。五つの veh/h は記録済みであり、total demand とは同一視していない。VDS 分布の exact な parameter は、頁対応未固定である。Cost、delay、utility、envy の全セルは、頁・表対応未固定である。主要セルの 20.21%、14.28%、4.74% と、delay のおおむねの幅は記録済みである。CESEI の parameter は、頁・式対応未固定である。Switching threshold は、入手済み原文に formal rule の記載を確認できない。著者の示唆は§24.10にある。
+
+Predicted arrival と actual passage の監査は、入手済み原文に対応または検証の記載がない。予測を使うことと、監査を実施したことは別である。複数交差点は、検証がなく、future work である。Spillback と gridlock は、著者の危険指摘のみであり、simulation は未実施である。Downstream blocking、multiple OD、route choice、network feedback は、入手済み原文に対応または検証の記載がない。
+
+### 24.16 三段階評価への接続と再開情報
+
+**第一段階。** 最新の採点は、X2=2、Y1=2、X合計11、Y合計3、概念位置は制度High・network Lowである。直接競合分類は維持する。X5=1、Y2=1、Y3からY6は0のままである。旧値はX2=1、Y1=1、X合計10、Y合計2であり、その再確認対象としての記録は§24.3と§24.11に残す。正式な旧値、新値、根拠、合計、概念配置、比較文への影響は§24.17に書く。
+
+**第二段階。** §24.1〜§24.11で詳細適用は記録した。PEXIC は強い直接競合である。Formal properties と、simulation の限界、著者の危険指摘、future work は分離した。TVT-MP との差別化は、network、nonparticipation、actual の軸に置く（§24.14）。
+
+**第三段階。** 送る材料は§24.13の10前提である。正式閾値は未確定である。系列全体の構造的前提依存性は Medium から High の候補である。Network へ一般化する場合は High 候補である。重視するのは、quasilinear utility、complete information、full participation、predicted arrival の固定である。通信と計算速度は、相対的に軽く扱う。
+
+**再開情報。** PEXIC の詳細正本は本§24である。§8.1は、全文確認前の歴史的記録として残す。Schepperle・Böhm系列の正本は§23であり、本節では変更しない。次の直接作業は、FRAMEWORK と PROGRESS_4 への要約反映である。その後に、直接競合3系列の横断整合へ進む。X2とY1の正式再採点は§24.17で完了しており、次作業には含めない。実装・実証の正本は変更しない。文献調査の再開地点と、実装作業の再開地点は、別のままである。
+
+### 24.17 PEXICのX2・Y1正式再採点（2026-11-27）
+
+本小節は、§24の全文確認結果へ、既存のコードブック§6.2と§7.1を再適用した採点修正の記録である。コードブックの0、1、2の定義は変更していない。新しい基準を作っていない。Journal全文と博士論文全文から確認した制度事実に、既存の文言を当てた結果である。§24.1〜§24.16の制度説明、simulation、構造的前提、ポジショニングの本文は、この再採点のために書き換えていない。途中工程の「採点はまだ変更しない」は、各小節執筆時点の記録として残し、現在値は本小節を優先する。
+
+**変更履歴。**
+
+| 項目 | 旧値 | 新値 | 合計への影響 | 概念ラベル |
+|---|---|---|---|---|
+| X2 | 1 | 2 | X合計 10 → 11 | 制度Highのまま |
+| Y1 | 1 | 2 | Y合計 2 → 3 | network Lowのまま |
+| X1、X3、X4、X5、X6 | 2, 2, 2, 1, 2 | 同じ | 変更なし | |
+| Y2、Y3、Y4、Y5、Y6 | 1, 0, 0, 0, 0 | 同じ | 変更なし | |
+
+修正後の正式採点は、Xが 2, 2, 2, 2, 1, 2、X合計11、Yが 2, 1, 0, 0, 0, 0、Y合計3である。概念位置は制度High・network Lowである。直接競合分類は維持する。
+
+**X2を1から2へ変更する根拠。** コードブック§6.2の2は、選好、bid、utility、VOT加重等が、対象資源の配分結果を直接決める、という位置である。1は、選好が重み、tie-break、二次的補正に使われるが、主配分規則は別、という位置である。
+
+PEXICで確認済みの事実は次である（§24.3）。Vehicle別のVDSを入力する。Vehicle iのcostはVDSとdelayの積である。全VehicleのVDS加重delay costを最小化する。その最小化がphase order、phase duration、Vehicle別のdelay allocationを変える。VDSは事後評価だけに使われない。Priceによる二次的補正だけでもない。Signal phase allocationの主目的関数へ直接入る。
+
+したがってX2=2である。Auction形式でないことは、1に留める理由にならない。旧判定は、auction型の直接割当より結合が弱い、という説明だった（§6.2、§8.1）。全文確認のあとでは、その説明は維持できない。弱い結合の根拠頁は固定されず、確認されたのは主目的関数への直接入力である。
+
+**Y1を1から2へ変更する根拠。** コードブック§7.1の2は、Vehicleまたはmovement単位の競合と実現可能性を明示する、という位置である。1は、簡略交差点、集計queue、限定movement、という位置である。
+
+PEXICで確認済みの事実は次である（§24.3、§24.7、§24.11）。Complete 8-phase dual-ring NEMAである。Movement別のsignal phaseがある。Conflicting movement、phase compatibility、minimum green、maximum green、phase sequence、barrierがある。Vehicle別のpredicted arrivalとVehicle別delayを扱う。PARAMICSのmicrosimulationとrolling-horizon controlである。
+
+したがってY1=2である。Isolated intersection、vertical queue、lane changeなし、predicted arrivalの固定、spillback未検証、downstream blocking未検証、複数交差点のcoordination未実装は、そのまま残す。これらは主としてY2以降とnetwork適用性の限界である（§24.11）。Network統合が弱いことを理由に、交差点内部のmovement-level physicsをY1=1へ下げない。
+
+**維持する項目。** X5=1は維持する。Complete informationはstrategy-proofnessではなく、博士論文の追加は漸近的なBIC近似である（§24.6）。Y2=1は維持する。局所の到着とqueueへの反応はある。下流容量が配分可能性を直接変えることは、検証していない。Y3からY6は0のままである。複数交差点の流、ODの多様性、制御連携、network帰還は、検証範囲にない。Network Lowを維持する理由は、このY3からY6であり、Y1を2にしたことと矛盾しない。Formal economic depthとnetwork integrationは別の軸である。前者は高い。後者はLowである（§24.14）。
+
+**概念ラベルと比較説明。** X合計が10から11へ増えても、制度Highの閾値の内側に留まる。Y合計が2から3へ増えても、network Lowの内側に留まる。概念ラベルの閾値は変更していない。§11の比較文のうち、Lin・JabariとPEXICがいずれもX合計10だとした箇所は、再採点前の比較として残し、最新ではPEXICが11、Lin・Jabariが10であると注記した。この差を研究品質の順位として読まない。採点の変更は、研究の優劣の並べ替えではない。既存コードブックへの再適用である。
+
+**比較説明への影響。** 直接競合であることは変わらない。変わるのは、選好の結合を「auctionより弱い」と説明しないこと、交差点物理を「簡略」と説明しないことである。TVT-MPとの差は、なおnetwork、非参加、actualの監査に置く（§24.14）。FRAMEWORKとPROGRESS_4への要約反映は、本小節の次の直接作業であり、本小節ではそれらのファイルを変更しない。

@@ -278,6 +278,8 @@ Carlino・Boyles・Stoneを制度Highとしない。Collection Auctionsのsocial
 - Collection Auctions：制度Medium・network Low（X合計5、Y合計3）
 - Karma：制度High・network Low（X合計11、Y合計0）
 
+> 2026-11-27更新：上のPEXICのX合計10、Y合計2は、2026-10-02の正式採用時点の値である。本リストは書き換えない。PEXICの第二段階正本は詳細正本§24、正式再採点は§24.17、FRAMEWORK上の要約は§5Eである。最新値はX合計11、Y合計3である。制度High・network Lowは維持する。正式書誌と、Lloret-Batlle and Jayakrishnanとの包含は解消した。第二段階の詳細適用は完了した。次作業は、`ORDER_EXCHANGE_PROGRESS_4.md` への反映と、直接競合3系列の横断整合である。下記「具体的な論文比較作業はまだ開始していない」は、2026-10-02時点の記録である。
+
 第二段階候補の役割別分類も正式採用した。
 
 - 直接競合候補：Lin・Jabari系列、PEXIC系列、Schepperle・Böhm系列
@@ -377,6 +379,8 @@ TVT-MPは、まだ第一段階の最終配置対象にしない。未実装・�
 - 同論文は、複数payer・payee、利用者間side payment、admissible discharge permutationの比較、物理的に不可能な追越しの除外、left-turn、4交差点arterialを扱う。
 - SchepperleらのTime-Slot Exchangeも、割当て済みslotの交換と補償という点で直接競合候補である。
 - Lloret-Batlle and Jayakrishnanのbrokered utility exchangeは、全文確認後に直接競合性を判断する。
+
+> 2026-11-27更新：直前の「全文確認後に判断する」は、本項執筆時点の記録である。全文確認後の位置は§5Eである。直接競合として維持する。
 - 多者間取引、直接補償または複数候補比較のいずれか一要素だけで、TVT-MP固有と判断しない。
 
 **Lin and Jabariについて、現時点で確認済みとして扱ってよい事項。**
@@ -763,6 +767,8 @@ baseline処理順位の維持率は、制度性能の優劣を測る主要な結
 
 第二段階の具体的な論文比較作業は未開始である。最初の詳細比較候補は、Lin・Jabari、PEXIC、Schepperle・Böhmである。
 
+> 2026-11-27更新：直前の「未開始」は、本節を確定した時点の記録である。直接競合3系列の第二段階適用の現在位置は§5Eである。
+
 ## 5B. 第二段階台帳の構造と第三段階への接続（2026-10-03）
 
 本節は、2026-10-03に具体化した第二段階の比較方法と記録様式の要約である。詳細正本は `ORDER_EXCHANGE_LITERATURE_FIRST_STAGE_SCORING_AND_POSITIONING.md` の§20である。既存§4、§5、§5Aの旧構想・確定原則は削除または確定仕様へ書き換えない。第一段階採点は変更しない。新しい原論文事実を追加認定しない。
@@ -783,11 +789,15 @@ baseline処理順位の維持率は、制度性能の優劣を測る主要な結
 
 直接競合3系列の作業順は、Lin・Jabari系列、Schepperle・Böhm系列、PEXIC系列である。これは研究品質の順位ではなく、台帳構築のための作業順である。PEXICの書誌同定は、詳細比較の順番とは別に並行して先に実施してよい。
 
+> 2026-11-27更新：直前の「書誌同定は先に実施してよい」は、2026-10-03時点の作業計画である。書誌同定と第二段階の詳細適用は完了した。現在位置は§5Eである。
+
 出版年、誌名、DOI、定理番号、ページ、節、式を推測で記入しない。TVT-MP固有語を他研究の原論文用語として扱わない。budget balanceから strategy-proofness、individual rationality、公平性、非参加者保護を自動的に導かない。TVT-MPの strategy-proofness は未証明である。
 
 第三段階では、これらの台帳を横断比較する。第三段階の評価原則は§5Aおよび詳細正本§19.5を維持する。「結論の構造的前提依存性」の正式名称と Low、Medium、High の閾値は未確定のままである。
 
 第二段階の具体的な論文比較、全文確認、書誌固定、台帳記入は未開始である。次の文献作業は、必要な原論文、全文資料、書誌、出典箇所の固定と、Lin・Jabari系列への台帳初回適用である。文献調査の再開地点は詳細正本§20である。TVT-MP実装作業の再開地点は本節で変更しない。
+
+> 2026-11-27更新：直前の「未開始」と「次はLin・Jabari系列」は、2026-10-03時点の記録である。その後の適用結果は§5C、§5D、§5Eにある。文献調査の最新再開地点は§10の2026-11-27注記である。
 
 ## 5C. Lin・Jabari系列への第二段階初回適用結果（2026-10-19）
 
@@ -952,6 +962,142 @@ Lin・Jabariにも存在するため、TVT-MPの単独独自貢献としない�
 
 次の文献対象は**PEXIC系列**である。TSE完全PDFまたは2009年overview chapter全文を別経路で入手した場合は、価格式、budget balance、IR、誘因性質、非参加者外部効果を再確認する。
 
+> 2026-11-27更新：本§5Dは、2026-11-02時点の初回適用結果である。追加原文による最新詳細は、詳細正本 `ORDER_EXCHANGE_LITERATURE_FIRST_STAGE_SCORING_AND_POSITIONING.md` の§23である。TSE、ITSA、Concurrent auctionの最新評価は、新設§5Eを優先する。§5D本文は当時の記録として維持する。PEXICの詳細は、同じ§5Eで別項目として要約する。直前の「次の文献対象はPEXIC系列」は、2026-11-02時点の次作業である。
+
+## 5E. Schepperle・Böhm系列の追加原文更新とPEXIC系列の第二段階適用結果（2026-11-27）
+
+本節は、詳細正本§23と§24の要約である。制度手順、式、実験条件の全件、数値の全件、未確認事項の全件台帳は転載しない。
+
+### 5E.1 今回の更新範囲と詳細正本
+
+今回の更新対象は次である。
+
+- Schepperle・Böhm系列の追加原文4点
+- PEXICの出版社版journal原論文
+- PEXIC博士論文全文
+- PEXICのX2・Y1正式再採点
+
+詳細正本は `ORDER_EXCHANGE_LITERATURE_FIRST_STAGE_SCORING_AND_POSITIONING.md` である。
+
+- Schepperle・Böhm系列は§23
+- PEXIC系列は§24
+- PEXICの正式再採点は§24.17
+
+本FRAMEWORKの更新は要約である。詳細な制度、式、実験条件、全数値は§23と§24を参照する。実装・実証側の最新数値は転載していない。
+
+### 5E.2 Schepperle・Böhm系列の最新ポジショニング
+
+§5Dは初回適用の歴史的記録である。追加原文後の位置は次の6点に絞る。
+
+**1. 系列内の役割分担。** TSRとITSAはinitial allocationである。TSEはpost-allocationのbilateral exchangeである。Free ChoiceとClockedはConcurrent auctionである。Mechanismごとに誘因性質を分ける。TVT-MPとの直接比較の中核はTSEである。
+
+**2. TSE。** 割当済みslotをentitlementとする。成立は1対1の交換である。支払はVehicle間である。著者はbudget-balancedと判定する。Pricingはincentive-compatibleではない。TSRからstarvation性質を継承する。Same-laneの前後Vehicleには、限定的なslot-order protectionがある。
+
+**3. ITSA。** Basic ITSAはsealed-bid second-priceであり、静的truthfulnessを持つ。Auction revenueはVehicle間のzero-sumではない。Subsidy variantはincentive-compatibleではない。Starvation回避の保証はない。Low-valuation Vehicleへのwaiting burdenがある。
+
+**4. Concurrent auction。** IE、LE、CAEがある。Free ChoiceとClockedがある。Conflict area、reservation failure、cancel、reauctionを扱う。Schepperle・Böhm系列のintersection-internal physicsは、従来理解より強い。
+
+**5. Efficiency resultの条件依存。** 次はsimulation resultである。TSEはTSR比でaverage waiting timeとweighted waiting timeを改善する。ITSAはweighted waiting timeを改善し、average waiting timeを増加させる。Free ChoiceはTSRよりweighted waiting timeを改善する。Clockedは条件によりTSRより悪い。こちらの評価は、valuation-aware mechanismが常に優越するとはしない、ということである。
+
+FRAMEWORKに残す代表数値は次だけである。他の詳細数値は§23を参照する。
+
+- TSE：通常条件で、average waiting time 4.0%、weighted waiting time 7.3%
+- ITSA：weighted waiting timeについて、subsidyなし30.6%、subsidyあり43.0%
+- Free Choice：weighted waiting timeのTSR比最大削減38.1%
+
+**6. 最新ポジショニング。** 強い直接競合である。取引構造は近い。Intersection-internal physicsは具体的である。Network integrationはLowである。Nonparty protectionは部分的に近いが、TVT-MPと同一ではない。差別化は物理の有無に置かない。Network統合、multi-party補償、nonparticipation、actual監査に置く。
+
+2009年overview chapter全文だけは、資料未入手である。
+
+### 5E.3 PEXIC系列の制度構造とformal properties
+
+**1. 二段階構造。** 第一段階はphase allocationである。第二段階はenvy-minimizing pricingである。Delay allocationの後にpriceを決める。制御はrolling horizonである。TSE型のbilateral slot exchangeではない。
+
+**2. VDSの直接結合。** Vehicle別VDSを使う。Vehicle costはVDSとdelayの積である。目的はtotal Vehicle costの最小化である。Phase order、phase duration、Vehicle delay allocationが変わる。VDSは事後評価ではない。配分を直接変える。
+
+**3. Formal economic properties。** Journalの基本modelは、quasilinear utility、allocative efficiency、price合計0、budget balance、Pareto optimality、envy minimization、price normalizationを持つ。こちらの評価は三つに分ける。Pareto optimalityは、全Vehicleのbaseline改善ではない。Budget balanceはIRではない。Envy minimizationはincome equityではない。
+
+**4. 誘因性質。** 基本modelはcomplete informationであり、correct VDSを既知入力とする。Strategy-proofnessは示されていない。博士論文はasymptotic BIC approximationを追加する。PEXIC priceとBIC priceの平均差は、一般に0.01ドル未満である。DSICでもex-post ICでもない。
+
+**5. 参加。** 基本modelはfull participationである。Nonparticipating Vehicleの混在はない。Voluntary participationの均衡は未検証である。TSEのvoluntary exchangeと混同しない。
+
+**6. 最新ポジショニング。** TVT-MPの最も強い直接競合候補の一つである。Formal economic depthはHighである。Nonparticipant protectionはLowである。Network integrationはLowである。Prediction-vs-actualはLowである。
+
+### 5E.4 PEXICのsimulation結果とnetwork限界
+
+Simulation resultの範囲は次である。Isolated signalized intersectionである。Complete 8-phase dual-ring NEMAである。SimulatorはPARAMICSである。Rolling horizonは80秒、timestepは1秒である。Critical volumeは150、450、750、1050、1350 veh/hである。PLVは0%、7.5%、15%である。各条件6 seedsである。比較対象はMin-Delayである。
+
+主なsimulation resultは次である。比較した需要水準のうち低い側の450 veh/h、PLV 15%では、average costが20.21%削減された。750 veh/h、PLV 15%では14.28%削減された。1350 veh/h、PLV 15%では4.74%削減された。Average delayは増加する。Envyは多くの条件で低下する。Saturation付近では、costとfairnessの優位が縮小し、または消失する。著者は、Min-Delayへの切替を示唆する。この示唆は著者の主張であり、切替規則のformal propertyではない。
+
+Network限界は次である。Predicted arrivalは検出後に固定する。Lane changeはない。Queueはvertical queueである。Spillbackとgridlockは、著者による危険の指摘である。Network simulationの結果ではない。Network-level controlはfuture workである。Predicted-vs-actual auditはない。こちらの評価は、network Lowを維持する、ということである。
+
+### 5E.5 PEXICの第一段階正式再採点
+
+§24.17の結果である。コードブックの変更ではない。全文確認による既存基準の再適用である。
+
+変更前は、Xが2, 1, 2, 2, 1, 2、X合計10、Yが1, 1, 0, 0, 0, 0、Y合計2である。
+
+変更後は、Xが2, 2, 2, 2, 1, 2、X合計11、Yが2, 1, 0, 0, 0, 0、Y合計3である。
+
+変更した項目は二つである。X2は1から2である。Vehicle別VDSが、phase order、phase duration、Vehicle別delay allocationを直接決める。Y1は1から2である。Complete 8-phase dual-ring NEMA、movement-level conflict、phase feasibility、Vehicle-level arrivalとdelayを明示する。
+
+維持する項目は、X5=1、Y2=1、Y3からY6は0、制度High・network Low、直接競合分類である。点数差を研究品質の順位として読まない。
+
+### 5E.6 直接競合3系列の現在位置
+
+三系列はいずれも強い直接競合である。並べ方はランキングではない。強みは異なる。合計点は研究品質の順位ではない。
+
+**Lin・Jabari。** 複数payer・payee、利用者間side payment、admissible discharge permutation、controller compatibility、4交差点arterialを持つ。NetworkはMediumである。詳細正本は§21である。
+
+**Schepperle・Böhm。** Time-slotのinitial allocation、bilateral exchange、auction、限定的なnonparty slot-order protection、IE・LE・CAEを持つ。NetworkはLowである。詳細正本は§23である。
+
+**PEXIC。** VDS加重のphase allocation、budget-balancedなprice vector、Paretoとenvy、complete NEMA、full participationを持つ。NetworkはLowである。詳細正本は§24である。
+
+TVT-MPの差別化候補は、multi-party順位取引、seller別補償、nonparticipation、prediction-vs-actual、network integrationの組合せである。Networkとactual evaluationは、この比較軸の特徴である。全体効率の優越を意味しない。TVT-MPが三系列を全面的に上回るとは書かない。TVT-MPのstrategy-proofnessとformal Pareto theoremは未確定である。Signalized benchmarkに対する全体効率の比較は、今後必要な注意であり、先行研究の発見でも確定結果でもない。
+
+### 5E.7 第三段階へ送る構造的前提
+
+詳細正本の全前提は転載しない。差別化力の高いものを、系列別に5件以内で残す。重要度は候補ラベルのままである。正式なLow、Medium、Highの閾値は確定しない。
+
+Schepperle・Böhm系列は次である。
+
+- Moneyの同一marginal utility
+- 十分なtravel budget
+- Non-IC mechanismでのtruthful valuation
+- Initial entitlementの正当性
+- Single-intersection applicability
+
+PEXIC系列は次である。
+
+- Quasilinear utility
+- Complete informationとcorrect VDS
+- Full participation
+- Predicted arrivalの固定
+- Isolated intersection
+
+横断的な評価原則は次である。通信、agent装備、計算速度だけで解消可能な前提は重視しすぎない。技術進歩でも残る制度的・構造的前提を重視する。多くの研究に共通する前提より、系列固有で主要結論へ不可欠な前提を優先する。Weighted averageの改善を、全利用者の改善と読まない。Fairness指標とincome equityを同一視しない。Network一般化は独立して評価する。
+
+### 5E.8 未確認事項と次の直接作業
+
+未確認は主要残件だけを残す。全件台帳は§23と§24にある。
+
+Schepperle・Böhm系列は次である。
+
+- 2009年overview chapter全文は、資料未入手である。
+- TSEの支払式、ITSAのsubsidy会計、Concurrent auctionの一部実験表は、原文箇所と表の対応が未固定である。
+- Spillback、複数交差点、route choiceは、入手済み原文に対応または検証の記載がない。
+
+PEXIC系列は次である。
+
+- Formal IR theoremは、本文の該当定理を未取得である。
+- Journalと博士論文の完全差分は、差分未固定である。
+- BIC比較の全parameterは、本文の該当箇所を未取得である。
+- Nonparticipating Vehicleの混在は、基本modelがfull participationであり、混在simulationを確認できない。
+- Predicted-vs-actual auditは、入手済み原文に対応または検証の記載がない。
+- Network controlは、検証がなく、future workである。
+
+次の直接作業は、本FRAMEWORKへの要約反映の後、`ORDER_EXCHANGE_PROGRESS_4.md` へ今回の文献調査進捗を記録することである。その後、直接競合3系列の横断整合へ進む。Schepperle・Böhm系列の採点再確認の要否は、その横断整合で判断する。PEXICの採点再確認は§24.17で完了済みである。実装・実証正本は変更しない。
+
 ## 6. 図における点数の扱い
 
 - 点数化は内部分析として使用する。
@@ -1021,6 +1167,8 @@ TVT-MPの非参加者保護は、Lin and Jabariとの差別化候補である。
 
 > 2026-10-02更新：上記2026-09-25注記は当時の状態として残す。その後、§3Bで第一段階最終案を正式採用した。第二段階へ進める状態になったが、第二段階の具体的作業は未開始である。第三段階の前提評価原則は§5Aで確定した。第三段階の詳細コードブック、第二段階コードブック、比較表の正式様式は未作成である。引き続き未確定の事項の詳細は、詳細正本§19.6を参照する。
 
+> 2026-11-27更新：下記リストのうち、Lloret-Batlle and Jayakrishnanの直接競合性と、SchepperleらのTime-Slot Exchangeの詳細は、当時の未確定事項として残す。全文確認後の位置は§5Eである。直接競合分類は維持する。詳細正本は§23と§24である。リスト自体は削除しない。
+
 - 第一段階の正式な評価項目
 - 第一段階から第二段階へ進める文献の基準
 - 第二段階の正式な評価項目
@@ -1063,6 +1211,8 @@ TVT-MPの非参加者保護は、Lin and Jabariとの差別化候補である。
 > 2026-10-02更新：上記2026-09-25注記は当時の状態として残す。第一段階最終案は§3Bで正式採用済みである。文献調査の現在の次作業は、第二段階の比較方法と記録様式の具体化、直接競合3系列の比較順の決定、主要結論と前提条件を同じ台帳へ記録する様式の作成、原論文と出典箇所の確認、第一対象の取引構造と前提条件の抽出である。第二段階の具体的論文比較は未開始である。新しいチャットでの読み順は、詳細正本、本FRAMEWORKの§3Bと§5A、`ORDER_EXCHANGE_PROGRESS.md` の2026-09-25および2026-10-02文献節である。TVT-MP実装作業の再開地点は変更しない。実装側の最新再開地点は `ORDER_EXCHANGE_PROGRESS_3.md` の「最新の再開地点（2026-10-02・実装項目3完了後）」である。
 
 > 2026-10-03更新：上記2026-10-02注記は当時の次作業として残す。その後、第二段階の比較方法と記録様式は§5Bおよび詳細正本§20で具体化した。文献調査の現在の次作業は、必要な原論文、全文資料、書誌、出典箇所の固定と、Lin・Jabari系列への台帳初回適用である。第二段階の具体的論文比較は未開始である。新しいチャットでの読み順は、詳細正本§19と§20、本FRAMEWORKの§3B、§5A、§5B、`ORDER_EXCHANGE_PROGRESS_3.md` の2026-10-03文献参照注記である。必要に応じて、歴史的経緯として `ORDER_EXCHANGE_PROGRESS.md` の2026-09-25および2026-10-02文献節を参照する。TVT-MP実装作業の再開地点は変更しない。
+
+> 2026-11-27更新：上記2026-10-03注記は当時の次作業として残す。その後、Lin・Jabari系列は§5C、Schepperle・Böhm系列の初回適用は§5D、追加原文とPEXICの第二段階適用および正式再採点の要約は§5Eである。詳細正本は§21、§23、§24、§24.17である。PEXICの最新値はX合計11、Y合計3であり、制度High・network Lowは維持する。文献調査の現在の次作業は、`ORDER_EXCHANGE_PROGRESS_4.md` への今回の進捗記録と、その後の直接競合3系列の横断整合である。Schepperle・Böhm系列の採点再確認の要否は横断整合で判断する。PEXICの採点再確認は完了済みである。新しいチャットでの読み順は、詳細正本§23と§24、本FRAMEWORKの§5E、次いで§10の本注記である。下記箇条書きは起草時点の開始点であり、現在の次作業ではない。TVT-MP実装作業の再開地点は変更しない。実装・実証正本は変更しない。
 
 - 第一段階、第二段階、第三段階の暫定コードブックを別々に作る。
 - 第一段階の候補文献群へ試行適用する。

@@ -3045,3 +3045,159 @@ Git操作は利用者がTerminalで行う。CursorにはGit操作をさせない
 **次の作業:** 利用者 Terminal で見出し、数値、正式 AWWT、誤正規化不使用、signalized に劣ること、FCFS 詳細と比較の役割、BATCH 未実装、差分、runner 差分を独立確認する。その後、必要なら文書訂正。signalized runner 1 本と Markdown 3 本の commit 可否、output の Git 包含は別判断。push は別指示。新しい simulation、BATCH 改修、BATCHベースTVT-MP へ進まない。
 
 **検索語:** 共通seed RNG後signalized UXsim、FCFS・TVT-MP・signalized UXsim全体比較、signal setting 59 0 59 0、API cycle 118、offset 0 29.5 59 88.5、3000台、平均総旅行時間459.049秒、AWT 353.473秒、AWWT 348.7114914206239、Route-Conditional AWT 338.545秒、Route-Conditional AWWT 333.62701197899923、平均detour 14.928秒、全体効率順位signalized UXsim TVT-MP FCFS、TVT-MP対FCFS 97.575秒14.34%、signalized対TVT-MP 123.873秒21.25%、正式AWWT定義、vehicle countで除算、VOT合計で除算しない、誤正規化値不使用、signalized UXsimに劣る、FCFS詳細比較、signalized全体比較、VOT選別、seller補償、外部便益、BATCH目標、signalized UXsim超過目標、BATCHベースTVT-MP、未採用、未実装、未検証、単一seed、特定信号設定、一般化しない、4方式統合回帰を復活させない
+
+## 22. Schepperle・Böhm追加原文・PEXIC第二段階適用・正式再採点の完了（2026-11-27）
+
+本§22は、2026-11-27時点の**先行研究調査**の進捗だけを記録する。既存**§20**は2026-11-02のSchepperle・Böhm初回適用として残す。既存**§21**は実装・実証側の進捗であり、文献節番号と混同しない。自研究側の最新実装・実証結果は別の実装・実証正本に記録済みであり、本節へ転載しない。
+
+詳細正本は `ORDER_EXCHANGE_LITERATURE_FIRST_STAGE_SCORING_AND_POSITIONING.md` である。本節で書く詳細正本§21、§23、§24、§24.17は、そのファイルの節である。進捗正本の§21ではない。FRAMEWORKは `ORDER_EXCHANGE_LITERATURE_POSITIONING_FRAMEWORK.md` である。
+
+文献調査の現在の再開地点は本§22である。§20本文が文献調査の最新再開地点を§20としている記述は、2026-11-02および2026-11-03時点の記録である。実装・実証側の再開地点は§21のままである。
+
+### 22.1 今回の文献調査範囲
+
+**Schepperle・Böhm系列。** 追加で全文を確認した資料は次である。
+
+- Traffic Management Based on Negotiations between Vehicles: A Feasibility Demonstration Using Agents
+- Towards Valuation-Aware Agent-Based Traffic Control
+- Agent-Based Traffic Control Using Auctions
+- Auction-Based Traffic Management: Towards Effective Concurrent Utilization of Road Intersections
+
+新たに固定した範囲は、TSR、TSE、Basic ITSA、ITSA with subsidies、Free Choice、Clocked、IE・LE・CAE、formal property、simulation result、fairness、network限界である。
+
+**PEXIC系列。** 確認した資料は、出版社版journal原論文全文と、博士論文全文である。
+
+新たに固定した範囲は、正式書誌、PEXIC名称、Lloret-Batlle・Jayakrishnan論文との包含、phase allocation、VDS、envy-minimizing pricing、budget balance、Pareto property、complete information、full participation、BIC近似、simulation、saturation限界、network限界、X2・Y1の正式再採点である。
+
+詳細は詳細正本§23と§24に置く。FRAMEWORK上の要約は§5Eである。初回適用の歴史的記録は、詳細正本§22、FRAMEWORK§5D、進捗§20である。
+
+### 22.2 Schepperle・Böhm系列の追加原文と詳細更新
+
+詳細手順と全数値は詳細正本§23にある。ここでは今回固定した位置だけを残す。
+
+**系列内の役割。** 原文事実として、TSRとITSAはinitial allocationである。TSEはpost-allocationのbilateral exchangeである。Free ChoiceとClockedはConcurrent auctionである。こちらの評価は、誘因性質をmechanismごとに分ける、ということである。TVT-MPとの直接比較の中核はTSEである。
+
+**TSE。** 原文事実として、割当済みslotをentitlementとする。成立はinitiatorとcandidateの1対1交換である。支払はVehicle間である。Same-laneの前後Vehicleには、限定的なslot-order protectionがある。Formal propertyとして、著者はbudget-balancedと判定し、pricingはincentive-compatibleではない。TSRのstarvation性質を継承する。こちらの評価は、initial allocationのfairness問題は残り、voluntary participationだけでは制度全体のfairnessを保証しない、ということである。
+
+**ITSA。** Formal propertyとして、Basic ITSAはsealed-bid second-priceであり、静的なtruthful biddingを持つ。Auction revenueはVehicle間のzero-sumではない。ITSA with subsidiesはincentive-compatibleではない。Starvation回避の保証はない。Simulation resultとあわせて、low-valuation Vehicleへのwaiting burdenがある。
+
+**Concurrent auction。** 原文事実として、IE、LE、CAE、Free Choice、Clocked、conflict area、same-lane physical order、reservation failure、cancel、reauctionを扱う。こちらの評価は、intersection-internal physicsが、追加原文確認前の理解より具体的である、ということである。Network integrationの強さとは別である。
+
+**代表simulation result。** 詳細条件と他の数値は§23を参照する。
+
+- TSEは、通常条件のTSR比で、average waiting timeを4.0%、valuation-weighted waiting timeを7.3%削減する。
+- ITSA without subsidiesは、valuation-weighted waiting timeを30.6%削減し、average waiting timeを0.5%増加させる。ITSA with subsidiesは、valuation-weighted waiting timeを43.0%削減し、average waiting timeを1.8%増加させる。
+- Free Choiceは、TSR比のvaluation-weighted waiting timeを最大38.1%削減する。
+
+こちらの評価は、valuation-aware mechanismが常に優越するとはしない、ということである。Clockedは条件によりTSRより悪い。その条件分けは§23にある。
+
+**最新ポジショニング。** 強い直接競合である。取引構造はTVT-MPに近い。Intersection-internal physicsは具体的である。Network integrationはLowである。Nonparty protectionは部分的に近いが、TVT-MPと同一ではない。差別化は、network統合、multi-party補償、nonparticipation、prediction-vs-actual、actual外部効果に置く。Networkとactualの軸は比較上の特徴であり、全体効率の優越を意味しない。第一段階採点は現時点では既存値を維持する。X合計8、Y合計3、制度Medium-High・network Lowである。追加原文後に変更する必要があるかは、§22.7の横断整合で判断する。
+
+2009年overview chapter全文だけは、資料未入手のままである。
+
+### 22.3 PEXIC系列の第二段階詳細適用
+
+**資料。** Journal原論文は、Envy-minimizing Pareto Efficient Intersection Control with Brokered Utility Exchanges under User Heterogeneityである。Transportation Research Part B、Vol. 94、pp. 22–42、2016、DOI 10.1016/j.trb.2016.08.014である。博士論文は、Peer-to-peer and Collaborative Consumption of Supply in Transportation Systems、2017である。該当章はChapter 4、Priced Exchanges in Traffic Intersection Controlである。
+
+**制度構造。** 原文事実として、phase allocationとpricingの二段階である。Vehicle別VDSを使い、costはVDSとdelayの積である。Total Vehicle costを最小化する。Phase order、phase duration、Vehicle delay allocationが変わる。Delayを決めたあとでenvy-minimizing priceを付ける。Price合計は0である。制御はrolling horizonである。TSE型のbilateral exchangeではない。
+
+**Formal property。** Quasilinear utility、allocative efficiency、budget balance、Pareto optimality、envy minimization、price normalizationを持つ。こちらの評価は次のとおり分ける。Pareto optimalityは、全Vehicleのbaseline改善ではない。Budget balanceはIRではない。Envy minimizationはincome equityではない。Formal IR theoremは未固定である。
+
+**誘因と参加。** 基本modelはcomplete informationであり、correct VDSを既知入力とする。Strategy-proofnessは示されていない。博士論文はasymptotic BIC approximationを追加する。PEXIC priceとBIC priceの平均差は、一般に0.01ドル未満である。DSICでもex-post ICでもない。参加はfull participationであり、nonparticipating Vehicleの混在はない。
+
+**Simulation result。** Isolated signalized intersection、complete 8-phase dual-ring NEMA、PARAMICSである。Rolling horizonは80秒、timestepは1秒である。Critical volumeは150、450、750、1050、1350 veh/hである。PLVは0%、7.5%、15%である。各条件6 seedsである。比較対象はMin-Delayである。
+
+比較した需要水準のうち低い側の450 veh/h、PLV 15%では、average costが20.21%削減された。750 veh/h、PLV 15%では14.28%、1350 veh/h、PLV 15%では4.74%削減された。Average delayは増加する。Envyは多くの条件で低下する。Saturation付近では優位が縮小し、または消失する。著者の主張として、Min-Delayへの切替が示唆されている。この示唆はformalな切替規則ではない。
+
+**Network限界。** Predicted arrivalは検出後に固定する。Lane changeはない。Queueはvertical queueである。Spillbackとgridlockは著者による危険の指摘であり、network simulationの結果ではない。Network-level controlはfuture workである。Predicted-vs-actual auditはない。こちらの評価は、network Lowを維持する、ということである。
+
+**最新ポジショニング。** TVT-MPの最も強い直接競合候補の一つである。Formal economic depthはHighである。Nonparticipant protectionはLowである。Network integrationはLowである。Prediction-vs-actualはLowである。Networkとactualの比較軸は、TVT-MPの全体効率の優越を意味しない。
+
+### 22.4 PEXICのX2・Y1正式再採点
+
+詳細正本§24.17の結果である。コードブック定義は変更していない。全文確認による既存基準の再適用である。
+
+変更前は、Xが2, 1, 2, 2, 1, 2、X合計10、Yが1, 1, 0, 0, 0, 0、Y合計2である。
+
+変更後は、Xが2, 2, 2, 2, 1, 2、X合計11、Yが2, 1, 0, 0, 0, 0、Y合計3である。
+
+X2は1から2である。Vehicle別VDSが、phase order、phase duration、Vehicle別delay allocationを直接決める。Y1は1から2である。Complete 8-phase dual-ring NEMA、movement-level conflict、phase feasibility、Vehicle-level arrivalとdelayを明示する。
+
+維持した項目は、X5=1、Y2=1、Y3からY6は0、制度High・network Low、直接競合分類である。点数差は研究品質の順位ではない。Formal economic depthとnetwork integrationは別軸である。
+
+Schepperle・Böhm系列の第一段階採点は、この再採点では変更していない。
+
+### 22.5 FRAMEWORKへの要約反映
+
+FRAMEWORKでは、§5D末尾へ歴史的注記を追加し、§5Eを新設した。小節は§5E.1から§5E.8である。内容は、Schepperle・Böhm系列の最新要約、PEXICのformal properties、PEXICのsimulationとnetwork限界、PEXICの正式再採点、直接競合3系列の現在位置、第三段階へ送る前提、未確認事項、次の作業である。
+
+古いPEXIC記述は削除していない。更新注記で、最新参照先を詳細正本§24、§24.17、FRAMEWORK§5Eへ示した。
+
+役割は分ける。詳細正本が制度、式、実験、全未確認事項を保持する。FRAMEWORKは横断的な最新要約と再開地点を保持する。本§22は、その作業が完了したことと、次に読む節を保持する。
+
+### 22.6 解消した未確認事項と残る主要未確認事項
+
+**Schepperle・Böhm系列で解消した主要未確認。** TSEのinitial phase、exchange request・candidate・acceptance、budget balance、non-incentive compatibility、starvation、nonparty slot-order protection、TSE simulationと主要効果量を固定した。Basic ITSA、ITSA subsidy、truthfulnessと非ICの区別、auction revenue、starvation保証の欠如を固定した。IE、LE、CAE、Free Choice、Clocked、failure・cancel・reauction、Concurrent auctionの主要結果を固定した。
+
+**Schepperle・Böhm系列の主要残件。**
+
+- 2009年overview chapter全文は、資料未入手である。
+- TSEの正確な支払式は、原文の該当式が未固定である。
+- ITSA subsidyの支払と按分は、原文の該当式が未固定である。
+- Concurrent auctionの一部実験表は、頁と表の対応が未固定である。
+- Spillback、複数交差点、route choiceは、入手済み原文に対応または検証の記載がない。
+
+**PEXICで解消した主要未確認。** 正式書誌、PEXIC名称、原論文との包含、phase allocation、VDS、pricing、budget balance、Pareto、envy、complete information、full participation、BIC近似、simulation条件、costとdelay、saturation限界、Min-Delay切替の示唆、spillback警告、network-levelのfuture work、X2・Y1の再採点を固定した。Spillback警告は、検証済みのnetwork結果として解消したわけではない。指摘であることまでを固定した。
+
+**PEXICの主要残件。**
+
+- Formal IR theoremは、本文の該当定理が未取得である。
+- Journalと博士論文の完全差分は、差分未固定である。
+- BIC比較の全parameterは、本文の該当箇所が未取得である。
+- Nonparticipating Vehicleの混在simulationは、基本modelがfull participationであり、混在simulationを確認できない。
+- Predicted-vs-actual auditは、入手済み原文に対応または検証の記載がない。
+- Network controlは、検証がなく、future workである。
+
+### 22.7 文献調査の現在地と次の直接作業
+
+完了済みは次である。
+
+- Lin・Jabari系列の第二段階詳細適用は、詳細正本§21、FRAMEWORK§5Cである。
+- Schepperle・Böhm系列の追加原文後の詳細適用は、詳細正本§23、FRAMEWORK§5E.2である。初回適用は詳細正本§22、FRAMEWORK§5D、進捗§20に残る。
+- PEXIC系列の第二段階詳細適用は、詳細正本§24、FRAMEWORK§5E.3から§5E.5である。
+- PEXICの正式再採点は、詳細正本§24.17、FRAMEWORK§5E.5である。最新値はX合計11、Y合計3、制度High・network Lowである。
+
+次の直接作業は、直接競合3系列の横断整合だけである。確認項目は次である。
+
+1. 三系列の共通比較項目
+2. Buyer・sellerまたはpayer・payeeの対応
+3. Payment、compensation、budget balance
+4. Individual rationality、Pareto、envy
+5. Incentive compatibility
+6. Participationとnonparticipation
+7. Physical feasibility
+8. Network integration
+9. Predictionとactual
+10. 構造的前提
+11. TVT-MPとの差別化
+12. 採点と概念ラベルの横断整合
+
+Schepperle・Böhm系列の第一段階採点を、追加原文のあとで変更する必要があるかも、この横断整合で判断する。現時点の採点は、X合計8、Y合計3、制度Medium-High・network Lowのままである。PEXICのX2・Y1再採点は完了済みであり、次作業に含めない。
+
+その後の作業候補は、第三段階の正式閾値設計、直接競合3系列の比較表、論文本文用のポジショニング記述、図の概念ラベル化である。これらは今回の次の直接作業ではない。
+
+### 22.8 変更文書・非変更範囲・Git現在地
+
+今回の先行研究メモ作業で変更した文書は次である。
+
+- `ORDER_EXCHANGE_LITERATURE_FIRST_STAGE_SCORING_AND_POSITIONING.md` は、詳細正本§23、§24、§24.17を保持する。
+- `ORDER_EXCHANGE_LITERATURE_POSITIONING_FRAMEWORK.md` は、要約§5Eを保持する。
+- `ORDER_EXCHANGE_PROGRESS_4.md` は、進捗§22を保持する。
+
+変更していないものは、`ORDER_EXCHANGE_TIME_VALUE_TRANSACTION_DESIGN_NOTES_5.md`、`ORDER_EXCHANGE_SEED_RNG_AND_BATCH_IMPLEMENTATION_BRANCH_STRATEGY.md`、production、tests、runner、analysis script、research_outputs、CSV、`diagnostics/order_control.zip` である。
+
+作業開始前から存在するtracked変更は `research_scripts/route_choice_rng_diagnostic.py` である。この既存変更は、今回の先行研究作業ではない。
+
+Git現在地は、branch `feature/common-seed-rng-foundation`、基準HEAD `aea2a95e91613ee7eef285bfc99d1a7fc86f38dc`、originも同じcommitである。今回の先行研究メモは未commitである。Git add、commit、pushは未実施である。
+
+実装・実証側の正本と、文献側の正本は別である。文献調査を再開するときは、本§22、詳細正本§23と§24、FRAMEWORK§5Eを読む。実装・実証へ戻るときは§21と、対応する実装・実証正本を読む。自研究側の最新数値は本節にない。
